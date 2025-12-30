@@ -1,0 +1,388 @@
+// ============================================
+// NEOSPACE - MAIN STYLESHEET
+// ============================================
+// Dual-Mode Theme System: Mom Mode & Chaos Mode
+
+@use 'sass:color';
+
+// ============================================
+// CSS CUSTOM PROPERTIES (Runtime Theming)
+// ============================================
+
+:root {
+  // === MOM MODE (Default) ===
+  // Clean, accessible, professional vibes
+  
+  // Background Colors
+  --neo-bg-primary: #f8f9fa;
+  --neo-bg-secondary: #ffffff;
+  --neo-bg-tertiary: #e9ecef;
+  --neo-bg-card: #ffffff;
+  
+  // Text Colors
+  --neo-text-primary: #212529;
+  --neo-text-secondary: #495057;
+  --neo-text-muted: #6c757d;
+  --neo-text-inverse: #ffffff;
+  
+  // Accent Colors
+  --neo-accent: #0d6efd;
+  --neo-accent-hover: #0b5ed7;
+  --neo-accent-soft: rgba(13, 110, 253, 0.1);
+  
+  // Status Colors
+  --neo-success: #198754;
+  --neo-warning: #ffc107;
+  --neo-danger: #dc3545;
+  --neo-info: #0dcaf0;
+  
+  // Borders & Shadows
+  --neo-border-color: #dee2e6;
+  --neo-border-width: 1px;
+  --neo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --neo-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --neo-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  
+  // Typography
+  --neo-font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --neo-font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  --neo-font-size-base: 16px;
+  --neo-line-height: 1.6;
+  
+  // Spacing
+  --neo-spacing-unit: 1rem;
+  --neo-content-width: 680px;
+  --neo-sidebar-width: 280px;
+  
+  // Border Radius
+  --neo-radius-sm: 4px;
+  --neo-radius-md: 8px;
+  --neo-radius-lg: 12px;
+  --neo-radius-full: 9999px;
+  
+  // Transitions
+  --neo-transition: 250ms ease;
+  
+  // Decorative (Mom Mode = clean, no decorations)
+  --neo-bg-image: none;
+  --neo-cursor: default;
+  --neo-border-style: solid;
+  --neo-glow: none;
+}
+
+// ============================================
+// CHAOS MODE OVERRIDE CLASS
+// ============================================
+// When .chaos-active is applied, user's custom
+// CSS variables will override these defaults
+
+.chaos-active {
+  // Base chaos overrides (can be further customized by user CSS)
+  --neo-transition: 100ms ease-in-out;
+  
+  // Enable potential animations/effects
+  animation: chaos-pulse 3s ease-in-out infinite alternate;
+}
+
+@keyframes chaos-pulse {
+  0% {
+    filter: hue-rotate(0deg);
+  }
+  100% {
+    filter: hue-rotate(5deg);
+  }
+}
+
+// ============================================
+// CSS RESET & BASE STYLES
+// ============================================
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: var(--neo-font-size-base);
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--neo-font-family);
+  line-height: var(--neo-line-height);
+  color: var(--neo-text-primary);
+  background-color: var(--neo-bg-primary);
+  background-image: var(--neo-bg-image);
+  background-attachment: fixed;
+  background-size: cover;
+  cursor: var(--neo-cursor);
+  min-height: 100vh;
+  transition: background-color var(--neo-transition), color var(--neo-transition);
+}
+
+a {
+  color: var(--neo-accent);
+  text-decoration: none;
+  transition: color var(--neo-transition);
+  
+  &:hover {
+    color: var(--neo-accent-hover);
+  }
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+ul, ol {
+  list-style: none;
+}
+
+// ============================================
+// LAYOUT UTILITIES
+// ============================================
+
+.neo-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--neo-spacing-unit);
+}
+
+.neo-grid {
+  display: grid;
+  gap: var(--neo-spacing-unit);
+}
+
+.neo-flex {
+  display: flex;
+}
+
+.neo-flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.neo-flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+// ============================================
+// COMPONENT STYLES
+// ============================================
+
+// Card Component
+.neo-card {
+  background-color: var(--neo-bg-card);
+  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
+  box-shadow: var(--neo-shadow-sm);
+  padding: calc(var(--neo-spacing-unit) * 1.5);
+  transition: box-shadow var(--neo-transition), transform var(--neo-transition);
+  
+  &:hover {
+    box-shadow: var(--neo-shadow-md);
+  }
+}
+
+// Button Component
+.neo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  border-radius: var(--neo-radius-md);
+  transition: all var(--neo-transition);
+  
+  &--primary {
+    background-color: var(--neo-accent);
+    color: var(--neo-text-inverse);
+    
+    &:hover {
+      background-color: var(--neo-accent-hover);
+      transform: translateY(-1px);
+    }
+  }
+  
+  &--secondary {
+    background-color: var(--neo-bg-tertiary);
+    color: var(--neo-text-primary);
+    
+    &:hover {
+      background-color: var(--neo-border-color);
+    }
+  }
+  
+  &--ghost {
+    background-color: transparent;
+    color: var(--neo-text-secondary);
+    
+    &:hover {
+      background-color: var(--neo-accent-soft);
+      color: var(--neo-accent);
+    }
+  }
+  
+  &--chaos {
+    background: linear-gradient(135deg, #ff006e, #8338ec, #3a86ff);
+    background-size: 200% 200%;
+    color: white;
+    animation: gradient-shift 3s ease infinite;
+    box-shadow: var(--neo-glow);
+    
+    &:hover {
+      transform: scale(1.05);
+    }
+  }
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+// Avatar Component
+.neo-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--neo-radius-full);
+  object-fit: cover;
+  border: 2px solid var(--neo-border-color);
+  
+  &--sm { width: 32px; height: 32px; }
+  &--lg { width: 64px; height: 64px; }
+  &--xl { width: 96px; height: 96px; }
+}
+
+// Input Component
+.neo-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  background-color: var(--neo-bg-secondary);
+  color: var(--neo-text-primary);
+  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
+  border-radius: var(--neo-radius-md);
+  transition: border-color var(--neo-transition), box-shadow var(--neo-transition);
+  
+  &:focus {
+    outline: none;
+    border-color: var(--neo-accent);
+    box-shadow: 0 0 0 3px var(--neo-accent-soft);
+  }
+  
+  &::placeholder {
+    color: var(--neo-text-muted);
+  }
+}
+
+// ============================================
+// TYPOGRAPHY UTILITIES
+// ============================================
+
+.neo-heading {
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--neo-text-primary);
+  
+  &--1 { font-size: 2.5rem; }
+  &--2 { font-size: 2rem; }
+  &--3 { font-size: 1.5rem; }
+  &--4 { font-size: 1.25rem; }
+}
+
+.neo-text {
+  &--muted { color: var(--neo-text-muted); }
+  &--secondary { color: var(--neo-text-secondary); }
+  &--accent { color: var(--neo-accent); }
+  &--sm { font-size: 0.875rem; }
+  &--lg { font-size: 1.125rem; }
+  &--mono { font-family: var(--neo-font-mono); }
+}
+
+// ============================================
+// SPACING UTILITIES
+// ============================================
+
+@for $i from 1 through 8 {
+  .neo-mt-#{$i} { margin-top: calc(var(--neo-spacing-unit) * #{$i * 0.5}); }
+  .neo-mb-#{$i} { margin-bottom: calc(var(--neo-spacing-unit) * #{$i * 0.5}); }
+  .neo-my-#{$i} { 
+    margin-top: calc(var(--neo-spacing-unit) * #{$i * 0.5}); 
+    margin-bottom: calc(var(--neo-spacing-unit) * #{$i * 0.5}); 
+  }
+  .neo-p-#{$i} { padding: calc(var(--neo-spacing-unit) * #{$i * 0.5}); }
+}
+
+// ============================================
+// CHAOS MODE SPECIAL EFFECTS
+// ============================================
+
+.chaos-active {
+  // Scanlines effect (optional enhancement)
+  &::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.03) 0px,
+      rgba(0, 0, 0, 0.03) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+    opacity: 0.3;
+  }
+}
+
+// ============================================
+// SCROLLBAR STYLING
+// ============================================
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--neo-bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neo-text-muted);
+  border-radius: var(--neo-radius-full);
+  
+  &:hover {
+    background: var(--neo-text-secondary);
+  }
+}
+

@@ -1,0 +1,20 @@
+{
+  "name": "neoSpace",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "^0.11.3",
+    "masto": "^7.10.0",
+    "nuxt": "^4.2.2",
+    "sass": "^1.97.1",
+    "vue": "^3.5.26",
+    "vue-router": "^4.6.4"
+  }
+}
