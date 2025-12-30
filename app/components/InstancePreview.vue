@@ -174,8 +174,8 @@ const stripHtml = (html: string) => {
 .preview-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -186,7 +186,7 @@ const stripHtml = (html: string) => {
 .preview-modal {
   --accent: #6364ff;
   
-  background: var(--bg-color);
+  background: #ffffff;
   border-radius: 24px;
   width: 100%;
   max-width: 640px;
@@ -194,7 +194,8 @@ const stripHtml = (html: string) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .preview-header {
@@ -255,10 +256,11 @@ const stripHtml = (html: string) => {
 
 .instance-info {
   padding: 1.5rem 2rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
 
   .description {
-    color: var(--text-muted);
+    color: #4b5563;
     line-height: 1.6;
     margin-bottom: 1.25rem;
   }
@@ -275,7 +277,7 @@ const stripHtml = (html: string) => {
   .label {
     display: block;
     font-size: 0.75rem;
-    color: var(--text-muted);
+    color: #6b7280;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 0.25rem;
@@ -283,21 +285,23 @@ const stripHtml = (html: string) => {
 
   .value {
     font-weight: 600;
-    color: var(--text-color);
+    color: #111827;
+    font-size: 1.1rem;
   }
 }
 
 .rules {
-  background: var(--card-bg);
+  background: #f3f4f6;
   border-radius: 12px;
   padding: 1rem 1.25rem;
+  border: 1px solid #e5e7eb;
 
   h4 {
     margin: 0 0 0.75rem;
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-muted);
+    color: #6b7280;
   }
 
   ol {
@@ -306,7 +310,7 @@ const stripHtml = (html: string) => {
     
     li {
       font-size: 0.9rem;
-      color: var(--text-color);
+      color: #374151;
       margin-bottom: 0.5rem;
       line-height: 1.4;
 
@@ -321,6 +325,7 @@ const stripHtml = (html: string) => {
   flex: 1;
   overflow-y: auto;
   padding: 1.5rem 2rem;
+  background: #fafafa;
 
   h3 {
     display: flex;
@@ -328,7 +333,8 @@ const stripHtml = (html: string) => {
     gap: 0.5rem;
     margin: 0 0 1rem;
     font-size: 1rem;
-    color: var(--text-color);
+    color: #111827;
+    font-weight: 600;
   }
 }
 
@@ -338,13 +344,13 @@ const stripHtml = (html: string) => {
   align-items: center;
   justify-content: center;
   padding: 3rem;
-  color: var(--text-muted);
+  color: #6b7280;
 }
 
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid var(--border-color);
+  border: 3px solid #e5e7eb;
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -365,9 +371,10 @@ const stripHtml = (html: string) => {
   display: flex;
   gap: 0.75rem;
   padding: 1rem;
-  background: var(--card-bg);
+  background: #ffffff;
   border-radius: 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .avatar {
@@ -390,17 +397,17 @@ const stripHtml = (html: string) => {
   margin-bottom: 0.25rem;
 
   strong {
-    color: var(--text-color);
+    color: #111827;
     font-size: 0.9rem;
   }
 
   .handle {
-    color: var(--text-muted);
+    color: #6b7280;
     font-size: 0.85rem;
   }
 
   .time {
-    color: var(--text-muted);
+    color: #9ca3af;
     font-size: 0.8rem;
     margin-left: auto;
   }
@@ -408,7 +415,7 @@ const stripHtml = (html: string) => {
 
 .post-text {
   margin: 0;
-  color: var(--text-color);
+  color: #374151;
   font-size: 0.9rem;
   line-height: 1.5;
   overflow: hidden;
@@ -433,13 +440,14 @@ const stripHtml = (html: string) => {
 
 .no-posts {
   text-align: center;
-  color: var(--text-muted);
+  color: #6b7280;
   padding: 2rem;
 }
 
 .preview-footer {
   padding: 1.25rem 2rem;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
   display: flex;
   justify-content: center;
 }
