@@ -109,9 +109,10 @@ useHead({
   text-align: center;
   padding: 4rem 2rem;
   margin-bottom: 3rem;
-  background: linear-gradient(135deg, var(--primary-color) 0%, #4f46e5 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
   border-radius: 24px;
   overflow: hidden;
+  box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);
 }
 
 .hero-content {
@@ -124,6 +125,7 @@ useHead({
   display: block;
   margin-bottom: 1rem;
   animation: float 3s ease-in-out infinite;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
 }
 
 @keyframes float {
@@ -134,17 +136,19 @@ useHead({
 .explore-hero h1 {
   font-size: 3rem;
   font-weight: 800;
-  color: white;
+  color: #ffffff;
   margin: 0 0 1rem;
   letter-spacing: -0.02em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
 .hero-subtitle {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.95);
   font-size: 1.15rem;
   line-height: 1.6;
   max-width: 600px;
   margin: 0 auto;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .hero-decoration {
@@ -155,14 +159,16 @@ useHead({
 
 .orbit {
   position: absolute;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.25);
   border-radius: 50%;
+  animation: pulse 4s ease-in-out infinite;
 
   &.orbit-1 {
     width: 300px;
     height: 300px;
     top: -100px;
     right: -100px;
+    animation-delay: 0s;
   }
 
   &.orbit-2 {
@@ -170,6 +176,7 @@ useHead({
     height: 200px;
     bottom: -50px;
     left: -50px;
+    animation-delay: 1s;
   }
 
   &.orbit-3 {
@@ -177,8 +184,13 @@ useHead({
     height: 150px;
     top: 50%;
     left: 10%;
-    opacity: 0.5;
+    animation-delay: 2s;
   }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.05); }
 }
 
 // Category Navigation
