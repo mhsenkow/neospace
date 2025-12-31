@@ -3,16 +3,19 @@
  * OAuth Callback Handler
  * 
  * Receives the OAuth code from the instance and exchanges it
- * for an access token.
+ * for an access token. Supports both single-instance auth (legacy)
+ * and multi-instance auth.
  */
 
 import { useAuthStore } from '~/stores/auth'
 import { useThemeStore } from '~/stores/theme'
+import { useInstancesStore } from '~/stores/instances'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
+const instancesStore = useInstancesStore()
 
 const error = ref<string | null>(null)
 const status = ref('Authenticating...')
@@ -32,7 +35,24 @@ onMounted(async () => {
   }
   
   try {
-    // Load stored credentials (clientId, clientSecret, instanceUrl)
+    // Check if this is a multi-instance auth flow
+    const pendingInstanceId = typeof window !== 'undefined' 
+      ? sessionStorage.getItem('neospace_auth_instance_id')
+      : null
+    
+    if (pendingInstanceId) {
+      // Multi-instance auth flow
+      status.value = 'Completing multi-instance login...'
+      instancesStore.loadFromStorage()
+      
+      await instancesStore.completeAuth(code)
+      
+      status.value = 'Success! Redirecting...'
+      await router.push('/')
+      return
+    }
+    
+    // Legacy single-instance auth flow
     authStore.loadFromStorage()
     
     if (!authStore.clientId || !authStore.clientSecret) {

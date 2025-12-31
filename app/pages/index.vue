@@ -2,19 +2,30 @@
 /**
  * Home Page - Threads-inspired minimal feed
  * 
+ * Multi-instance support with merged timelines
  * Clean, focused design with seamless infinite scroll
  */
 
 import { useTimelineStore } from '~/stores/timeline'
 import { useAuthStore } from '~/stores/auth'
 import { useThemeStore } from '~/stores/theme'
+import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 
 const timelineStore = useTimelineStore()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
+const instancesStore = useInstancesStore()
+
+// Instance manager modal ref
+const instanceManagerRef = ref<{ open: () => void } | null>(null)
 
 type TabType = 'home' | 'local' | 'federated'
-const activeTab = ref<TabType>('home')
+const activeTab = ref<TabType>('local')
+
+// Multi-instance merged statuses
+const mergedStatuses = ref<ExtendedStatus[]>([])
+const isLoadingMerged = ref(false)
+const mergedError = ref<string | null>(null)
 
 // Scroll-based compose collapse
 const isComposeCollapsed = ref(false)
@@ -83,15 +94,94 @@ const loadMorePosts = async () => {
   await timelineStore.loadMore()
 }
 
+// Fetch merged timeline from all connected instances
+const fetchMergedTimeline = async (type: 'local' | 'federated' = 'local') => {
+  isLoadingMerged.value = true
+  mergedError.value = null
+  
+  try {
+    const statuses = await instancesStore.fetchMergedTimeline(type, 20)
+    
+    // Filter by active instance if set
+    if (instancesStore.activeInstanceFilter) {
+      mergedStatuses.value = statuses.filter(s => 
+        s._instanceId === instancesStore.activeInstanceFilter
+      )
+    } else {
+      mergedStatuses.value = statuses
+    }
+  } catch (e: any) {
+    mergedError.value = e.message || 'Failed to fetch timeline'
+  } finally {
+    isLoadingMerged.value = false
+  }
+}
+
+// Fetch merged home timeline (from authenticated instances only)
+const fetchMergedHomeTimeline = async () => {
+  isLoadingMerged.value = true
+  mergedError.value = null
+  
+  try {
+    const statuses = await instancesStore.fetchMergedHomeTimeline(20)
+    
+    // Filter by active instance if set
+    if (instancesStore.activeInstanceFilter) {
+      mergedStatuses.value = statuses.filter(s => 
+        s._instanceId === instancesStore.activeInstanceFilter
+      )
+    } else {
+      mergedStatuses.value = statuses
+    }
+  } catch (e: any) {
+    mergedError.value = e.message || 'Failed to fetch home timeline'
+  } finally {
+    isLoadingMerged.value = false
+  }
+}
+
+// Computed for displayed statuses (merged or single)
+const displayedStatuses = computed(() => {
+  // If we have multi-instance, use merged statuses
+  if (instancesStore.instances.length > 0) {
+    return mergedStatuses.value
+  }
+  // Fallback to legacy single-instance
+  return timelineStore.statuses
+})
+
+const isTimelineLoading = computed(() => {
+  return isLoadingMerged.value || timelineStore.isLoading
+})
+
+const timelineError = computed(() => {
+  return mergedError.value || timelineStore.error
+})
+
 // Initialize stores and setup infinite scroll
 onMounted(async () => {
-  await authStore.initialize()
+  // Initialize both stores
+  await Promise.all([
+    authStore.initialize(),
+    instancesStore.initialize()
+  ])
   
   if (authStore.userCustomCSS) {
     themeStore.setUserCustomCSS(authStore.userCustomCSS)
   }
   
-  if (authStore.isAuthenticated) {
+  // Use multi-instance if available
+  if (instancesStore.instances.length > 0) {
+    // Check if we have any authenticated instances for home timeline
+    if (instancesStore.hasAuthenticatedInstance) {
+      activeTab.value = 'home'
+      await fetchMergedHomeTimeline()
+    } else {
+      activeTab.value = 'local'
+      await fetchMergedTimeline('local')
+    }
+  } else if (authStore.isAuthenticated) {
+    // Legacy single-instance fallback
     await timelineStore.fetchHomeTimeline(true)
   } else {
     activeTab.value = 'local'
@@ -127,7 +217,23 @@ const switchTab = async (tab: TabType) => {
   if (tab === activeTab.value) return
   
   activeTab.value = tab
+  mergedStatuses.value = []
   
+  // Use multi-instance if available
+  if (instancesStore.instances.length > 0) {
+    switch (tab) {
+      case 'home':
+        await fetchMergedHomeTimeline()
+        break
+      case 'local':
+        await fetchMergedTimeline('local')
+        break
+      case 'federated':
+        await fetchMergedTimeline('federated')
+        break
+    }
+  } else {
+    // Legacy single-instance fallback
   switch (tab) {
     case 'home':
       if (authStore.isAuthenticated) {
@@ -144,8 +250,22 @@ const switchTab = async (tab: TabType) => {
       break
   }
 }
+}
 
 const handleRefresh = async () => {
+  if (instancesStore.instances.length > 0) {
+    switch (activeTab.value) {
+      case 'home':
+        await fetchMergedHomeTimeline()
+        break
+      case 'local':
+        await fetchMergedTimeline('local')
+        break
+      case 'federated':
+        await fetchMergedTimeline('federated')
+        break
+    }
+  } else {
   switch (activeTab.value) {
     case 'home':
       await timelineStore.fetchHomeTimeline(true)
@@ -157,6 +277,19 @@ const handleRefresh = async () => {
       await timelineStore.fetchFederatedTimeline(authStore.instanceUrl || 'https://mastodon.social', true)
       break
   }
+  }
+}
+
+// Set instance filter
+const setInstanceFilter = (instanceId: string | null) => {
+  instancesStore.setFilter(instanceId)
+  // Re-apply filter to current statuses
+  handleRefresh()
+}
+
+// Open instance manager
+const openInstanceManager = () => {
+  instanceManagerRef.value?.open()
 }
 
 useHead({
@@ -166,6 +299,9 @@ useHead({
 
 <template>
   <div class="feed-page" ref="feedContainer">
+    <!-- Instance Manager Modal -->
+    <InstanceManager ref="instanceManagerRef" />
+    
     <!-- Main Feed - Single column, centered -->
     <section class="feed-main">
       <!-- Minimal Header with Tabs -->
@@ -174,7 +310,7 @@ useHead({
           <button 
             class="feed-header__tab"
             :class="{ 'feed-header__tab--active': activeTab === 'home' }"
-            :disabled="!authStore.isAuthenticated"
+            :disabled="!instancesStore.hasAuthenticatedInstance && !authStore.isAuthenticated"
             @click="switchTab('home')"
           >
             For You
@@ -196,6 +332,46 @@ useHead({
         </div>
       </div>
 
+      <!-- Instance Filter Pills (when multiple instances) -->
+      <div v-if="instancesStore.instances.length > 1" class="instance-filters">
+        <button 
+          class="instance-pill"
+          :class="{ 'instance-pill--active': !instancesStore.activeInstanceFilter }"
+          @click="setInstanceFilter(null)"
+        >
+          All Servers
+        </button>
+        <button 
+          v-for="instance in instancesStore.instances" 
+          :key="instance.id"
+          class="instance-pill"
+          :class="{ 
+            'instance-pill--active': instancesStore.activeInstanceFilter === instance.id,
+            'instance-pill--authenticated': !!instance.user 
+          }"
+          @click="setInstanceFilter(instance.id)"
+        >
+          <img 
+            v-if="instance.instanceInfo?.thumbnail" 
+            :src="instance.instanceInfo.thumbnail" 
+            :alt="instance.name"
+            class="instance-pill__icon"
+          />
+          <span>{{ instance.name.length > 20 ? instance.name.substring(0, 17) + '...' : instance.name }}</span>
+        </button>
+        <button class="instance-pill instance-pill--add" @click="openInstanceManager">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      </div>
+      
+      <!-- Single instance hint -->
+      <div v-else-if="instancesStore.instances.length === 1" class="single-instance-hint">
+        <span>📡 {{ instancesStore.instances[0].name }}</span>
+        <button class="add-server-link" @click="openInstanceManager">+ Add more servers</button>
+      </div>
+
       <!-- Compose Box (authenticated only) - Collapsible -->
       <Transition name="compose-collapse">
         <div v-if="authStore.isAuthenticated && !isComposeCollapsed" class="compose-wrapper">
@@ -204,20 +380,20 @@ useHead({
       </Transition>
 
       <!-- Loading State -->
-      <div v-if="timelineStore.isLoading" class="feed-loading">
+      <div v-if="isTimelineLoading" class="feed-loading">
         <span class="feed-loading__spinner">🌀</span>
         <p>Loading timeline...</p>
       </div>
 
       <!-- Error State -->
-      <div v-else-if="timelineStore.error" class="feed-error">
+      <div v-else-if="timelineError" class="feed-error">
         <span>⚠️</span>
-        <p>{{ timelineStore.error }}</p>
+        <p>{{ timelineError }}</p>
         <button class="neo-btn neo-btn--secondary" @click="handleRefresh">Try Again</button>
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="timelineStore.isEmpty" class="feed-empty">
+      <div v-else-if="displayedStatuses.length === 0" class="feed-empty">
         <span>📭</span>
         <p>No posts yet. Follow some people or check back later!</p>
       </div>
@@ -225,13 +401,13 @@ useHead({
       <!-- Posts Feed - Seamless infinite scroll -->
       <div v-else class="feed-posts">
         <div class="posts-container">
-          <TransitionGroup name="post-list">
-            <RealPostCard 
-              v-for="status in timelineStore.statuses" 
-              :key="status.id" 
-              :status="status" 
-            />
-          </TransitionGroup>
+        <TransitionGroup name="post-list">
+          <RealPostCard 
+              v-for="status in displayedStatuses" 
+            :key="status.id" 
+            :status="status" 
+          />
+        </TransitionGroup>
         </div>
 
         <!-- Invisible trigger for infinite scroll - loads before visible -->
@@ -258,13 +434,47 @@ useHead({
       </div>
     </section>
 
-    <!-- Right Sidebar - Ultra minimal info -->
+    <!-- Right Sidebar - Connected Instances -->
     <aside class="feed-sidebar">
-      <div class="sidebar-info">
-        <div v-if="authStore.instanceUrl" class="info-item">
-          <span class="info-label">📡</span>
-          <span class="info-value">{{ authStore.instanceUrl.replace('https://', '') }}</span>
+      <div class="sidebar-section">
+        <div class="sidebar-section__header">
+          <span>🌐 Connected Servers</span>
+          <button class="sidebar-section__action" @click="openInstanceManager">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+      </div>
+
+        <div class="connected-instances">
+          <div 
+            v-for="instance in instancesStore.instances" 
+            :key="instance.id"
+            class="connected-instance"
+            :class="{ 'connected-instance--authenticated': !!instance.user }"
+          >
+            <img 
+              v-if="instance.instanceInfo?.thumbnail" 
+              :src="instance.instanceInfo.thumbnail" 
+              :alt="instance.name"
+              class="connected-instance__icon"
+            />
+            <span v-else class="connected-instance__icon connected-instance__icon--emoji">🌐</span>
+            
+            <div class="connected-instance__info">
+              <span class="connected-instance__name">{{ instance.name }}</span>
+              <span v-if="instance.user" class="connected-instance__user">@{{ instance.user.acct }}</span>
+              <span v-else class="connected-instance__watching">watching</span>
+            </div>
+      </div>
+
+          <div v-if="instancesStore.instances.length === 0" class="no-instances">
+            <span>No servers connected</span>
+          </div>
         </div>
+      </div>
+
+      <div class="sidebar-info">
         <div class="info-item">
           <span class="info-label">{{ themeStore.isChaosMode ? '🌀' : '👩' }}</span>
           <span class="info-value">{{ themeStore.isChaosMode ? 'Chaos Mode' : 'Mom Mode' }}</span>
@@ -332,7 +542,7 @@ useHead({
   }
 
   &__tabs {
-    display: flex;
+      display: flex;
     justify-content: center;
   }
 
@@ -362,6 +572,111 @@ useHead({
       color: var(--neo-text-primary);
       border-bottom-color: var(--neo-text-primary);
     }
+  }
+}
+
+// Instance filter pills
+.instance-filters {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  
+  @media (max-width: 1023px) {
+    margin: 0 -0.5rem;
+    padding: 0.75rem 0.5rem;
+  }
+}
+
+.instance-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 20px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--neo-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  
+  &:hover {
+    background: var(--neo-bg-secondary);
+    border-color: var(--neo-text-muted);
+  }
+  
+  &--active {
+    background: var(--neo-text-primary);
+    color: var(--neo-bg-primary);
+    border-color: var(--neo-text-primary);
+    
+    &:hover {
+      background: var(--neo-text-secondary);
+      border-color: var(--neo-text-secondary);
+    }
+  }
+  
+  &--authenticated {
+    border-color: var(--neo-accent);
+    
+    &.instance-pill--active {
+      background: var(--neo-accent);
+      border-color: var(--neo-accent);
+    }
+  }
+  
+  &--add {
+    padding: 0.375rem 0.5rem;
+    
+    svg {
+      opacity: 0.7;
+    }
+    
+    &:hover svg {
+      opacity: 1;
+    }
+  }
+
+  &__icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    object-fit: cover;
+  }
+}
+
+.single-instance-hint {
+    display: flex;
+    align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+  
+  @media (max-width: 1023px) {
+    padding: 0.5rem;
+  }
+}
+
+.add-server-link {
+  background: none;
+  border: none;
+  color: var(--neo-accent);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  
+  &:hover {
+    text-decoration: underline;
   }
 }
 
@@ -401,8 +716,8 @@ useHead({
   right: 1rem;
   width: 56px;
   height: 56px;
-  display: flex;
-  align-items: center;
+    display: flex;
+    align-items: center;
   justify-content: center;
   background: var(--neo-text-primary);
   color: var(--neo-bg-primary);
@@ -443,8 +758,8 @@ useHead({
 .feed-loading,
 .feed-empty,
 .feed-error {
-  display: flex;
-  flex-direction: column;
+    display: flex;
+    flex-direction: column;
   align-items: center;
   gap: 0.75rem;
   padding: 3rem 1rem;
@@ -491,12 +806,12 @@ useHead({
   padding: 0.5rem;
   
   @media (min-width: 1024px) {
-    gap: 0.75rem;
+  gap: 0.75rem;
     padding: 0.75rem;
     // Subtle tint that works in both modes
-    background: var(--neo-bg-secondary);
+  background: var(--neo-bg-secondary);
     opacity: 1;
-    border: 1px solid var(--neo-border-color);
+  border: 1px solid var(--neo-border-color);
     border-radius: 16px;
   }
 }
@@ -509,7 +824,7 @@ useHead({
 
 // Subtle loading indicator
 .loading-more {
-  display: flex;
+    display: flex;
   justify-content: center;
   padding: 1.5rem 0;
   
@@ -550,11 +865,11 @@ useHead({
   gap: 0.5rem;
   padding: 2rem 1rem;
   text-align: center;
-  
+
   span {
     font-size: 1.5rem;
   }
-  
+
   p {
     color: var(--neo-text-muted);
     font-size: 0.875rem;
@@ -572,7 +887,7 @@ useHead({
   opacity: 0;
 }
 
-// Right sidebar - Ultra minimal
+// Right sidebar - Connected instances
 .feed-sidebar {
   display: none;
   width: 280px;
@@ -580,13 +895,122 @@ useHead({
   padding-top: 1rem;
   
   @media (min-width: 1100px) {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
   }
 }
 
-.sidebar-info {
+.sidebar-section {
   position: sticky;
   top: 1rem;
+  background: var(--neo-bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--neo-border-color);
+  overflow: hidden;
+  
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-secondary);
+    border-bottom: 1px solid var(--neo-border-color);
+  }
+  
+  &__action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--neo-text-muted);
+    transition: all 0.15s ease;
+    
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
+    }
+  }
+}
+
+.connected-instances {
+  display: flex;
+  flex-direction: column;
+}
+
+.connected-instance {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 1rem;
+  transition: background 0.15s ease;
+  
+  &:hover {
+    background: var(--neo-bg-tertiary);
+  }
+  
+  &--authenticated {
+    .connected-instance__name {
+      color: var(--neo-text-primary);
+    }
+  }
+  
+  &__icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    
+    &--emoji {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--neo-bg-tertiary);
+      font-size: 0.875rem;
+    }
+  }
+  
+  &__info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  
+  &__name {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--neo-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  &__user {
+    font-size: 0.75rem;
+    color: var(--neo-accent);
+  }
+  
+  &__watching {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+    font-style: italic;
+  }
+}
+
+.no-instances {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+}
+
+.sidebar-info {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -600,7 +1024,7 @@ useHead({
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.8125rem;
+    font-size: 0.8125rem;
   color: var(--neo-text-muted);
   
   .info-label {

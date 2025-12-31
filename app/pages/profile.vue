@@ -4,18 +4,24 @@
  * 
  * Your digital home on the internet. A focused, beautiful
  * representation of who you are in the Fediverse.
+ * Now supports multi-instance - view all your connected accounts!
  */
 
 import { useProfileStore } from '~/stores/profile'
 import { useAuthStore } from '~/stores/auth'
 import { useThemeStore } from '~/stores/theme'
+import { useInstancesStore } from '~/stores/instances'
 import type { mastodon } from 'masto'
 
 const profileStore = useProfileStore()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
+const instancesStore = useInstancesStore()
 const route = useRoute()
 const router = useRouter()
+
+// Instance manager ref
+const instanceManagerRef = ref<{ open: () => void } | null>(null)
 
 // Relationship state
 const relationship = ref<mastodon.v1.Relationship | null>(null)
@@ -27,7 +33,13 @@ const headerInput = ref<HTMLInputElement | null>(null)
 
 // Initialize
 onMounted(async () => {
-  if (!authStore.isAuthenticated) {
+  // Initialize instances store for multi-account view
+  await instancesStore.initialize()
+  
+  // For profile viewing, we still need auth for the main profile
+  const hasAnyAuth = authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+  
+  if (!hasAnyAuth) {
     router.push('/login')
     return
   }
@@ -125,6 +137,57 @@ useHead({
 
 <template>
   <div class="profile-page">
+    <!-- Instance Manager Modal -->
+    <InstanceManager ref="instanceManagerRef" />
+    
+    <!-- Connected Accounts Overview (when viewing own profile with multi-instance) -->
+    <section 
+      v-if="instancesStore.authenticatedInstances.length > 0 && !route.query.user" 
+      class="connected-accounts neo-card"
+    >
+      <div class="connected-accounts__header">
+        <h2>🌐 Your Fediverse Accounts</h2>
+        <button class="connected-accounts__add" @click="instanceManagerRef?.open()">
+          + Add Account
+        </button>
+      </div>
+      
+      <div class="connected-accounts__list">
+        <div 
+          v-for="instance in instancesStore.authenticatedInstances" 
+          :key="instance.id"
+          class="account-card"
+          :class="{ 'account-card--active': instance.url === authStore.instanceUrl }"
+        >
+          <img 
+            :src="instance.user?.avatar" 
+            :alt="instance.user?.displayName || instance.user?.username"
+            class="account-card__avatar"
+          />
+          <div class="account-card__info">
+            <span class="account-card__name">{{ instance.user?.displayName || instance.user?.username }}</span>
+            <span class="account-card__handle">@{{ instance.user?.acct }}</span>
+            <span class="account-card__instance">{{ instance.name }}</span>
+          </div>
+          <div class="account-card__stats">
+            <span>{{ instance.user?.statusesCount }} posts</span>
+            <span>{{ instance.user?.followersCount }} followers</span>
+          </div>
+        </div>
+      </div>
+      
+      <div v-if="instancesStore.watchingInstances.length > 0" class="watching-instances">
+        <span class="watching-label">Also watching:</span>
+        <span 
+          v-for="instance in instancesStore.watchingInstances" 
+          :key="instance.id"
+          class="watching-badge"
+        >
+          {{ instance.name }}
+        </span>
+      </div>
+    </section>
+    
     <!-- Loading State -->
     <div v-if="profileStore.isLoading" class="profile-loading">
       <span class="profile-loading__spinner">🌀</span>
@@ -443,6 +506,133 @@ useHead({
 
 .hidden-input {
   display: none;
+}
+
+// Connected Accounts Section
+.connected-accounts {
+  margin-bottom: 1.5rem;
+  
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    
+    h2 {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: var(--neo-text-primary);
+    }
+  }
+  
+  &__add {
+    background: transparent;
+    border: 1px dashed var(--neo-border-color);
+    color: var(--neo-accent);
+    padding: 0.375rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    
+    &:hover {
+      border-color: var(--neo-accent);
+      background: var(--neo-accent-soft);
+    }
+  }
+  
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  background: var(--neo-bg-tertiary);
+  border-radius: 12px;
+  border: 1px solid var(--neo-border-color);
+  transition: all 0.15s ease;
+  
+  &:hover {
+    border-color: var(--neo-text-muted);
+  }
+  
+  &--active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+  
+  &__avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  
+  &__info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  
+  &__name {
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    font-size: 0.9375rem;
+  }
+  
+  &__handle {
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+  }
+  
+  &__instance {
+    font-size: 0.75rem;
+    color: var(--neo-accent);
+    font-weight: 500;
+  }
+  
+  &__stats {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.125rem;
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+}
+
+.watching-instances {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--neo-border-color);
+  flex-wrap: wrap;
+}
+
+.watching-label {
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+}
+
+.watching-badge {
+  padding: 0.25rem 0.5rem;
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: var(--neo-text-secondary);
 }
 
 // Loading & Error States
