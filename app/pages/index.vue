@@ -1,9 +1,8 @@
 <script setup lang="ts">
 /**
- * Home Page - The Feed
+ * Home Page - Threads-inspired minimal feed
  * 
- * Shows real Fediverse content! Falls back to public timeline
- * if not authenticated.
+ * Clean, focused design with collapsible compose box
  */
 
 import { useTimelineStore } from '~/stores/timeline'
@@ -17,23 +16,56 @@ const themeStore = useThemeStore()
 type TabType = 'home' | 'local' | 'federated'
 const activeTab = ref<TabType>('home')
 
+// Scroll-based compose collapse
+const isComposeCollapsed = ref(false)
+const lastScrollY = ref(0)
+const feedContainer = ref<HTMLElement | null>(null)
+
+const handleScroll = () => {
+  if (typeof window === 'undefined') return
+  
+  const currentScrollY = window.scrollY
+  
+  // Collapse after scrolling down 100px
+  if (currentScrollY > 100 && currentScrollY > lastScrollY.value) {
+    isComposeCollapsed.value = true
+  }
+  // Expand when scrolling back to top
+  if (currentScrollY < 50) {
+    isComposeCollapsed.value = false
+  }
+  
+  lastScrollY.value = currentScrollY
+}
+
+const expandCompose = () => {
+  isComposeCollapsed.value = false
+  // Scroll to top smoothly
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 // Initialize stores
 onMounted(async () => {
   await authStore.initialize()
   
-  // Load user's custom CSS if available
   if (authStore.userCustomCSS) {
     themeStore.setUserCustomCSS(authStore.userCustomCSS)
   }
   
-  // Fetch initial timeline
   if (authStore.isAuthenticated) {
     await timelineStore.fetchHomeTimeline(true)
   } else {
-    // Show public timeline for unauthenticated users
     activeTab.value = 'local'
-    // Fetch from mastodon.social as default public instance
     await timelineStore.fetchLocalTimeline('https://mastodon.social', true)
+  }
+  
+  // Add scroll listener
+  window.addEventListener('scroll', handleScroll, { passive: true })
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('scroll', handleScroll)
   }
 })
 
@@ -49,7 +81,6 @@ const switchTab = async (tab: TabType) => {
       }
       break
     case 'local':
-      // Use a default instance for demo if not logged in
       const localUrl = authStore.instanceUrl || 'https://mastodon.social'
       await timelineStore.fetchLocalTimeline(localUrl, true)
       break
@@ -84,83 +115,11 @@ useHead({
 </script>
 
 <template>
-  <div class="feed-page">
-    <!-- Left Sidebar -->
-    <aside class="feed-sidebar feed-sidebar--left">
-      <!-- Profile Card (authenticated) -->
-      <NuxtLink v-if="authStore.isAuthenticated && authStore.currentUser" to="/profile" class="profile-card-link">
-        <div class="profile-card neo-card">
-          <div class="profile-card__header">
-            <img 
-              :src="authStore.currentUser.avatar" 
-              :alt="authStore.currentUser.displayName"
-              class="profile-card__avatar neo-avatar neo-avatar--xl"
-            />
-          </div>
-          <div class="profile-card__body">
-            <h2 class="profile-card__name" v-html="authStore.currentUser.displayName || authStore.currentUser.username" />
-            <p class="profile-card__username">@{{ authStore.currentUser.acct }}</p>
-            <p 
-              v-if="authStore.currentUser.note" 
-              class="profile-card__bio" 
-              v-html="authStore.currentUser.note" 
-            />
-          </div>
-          <div class="profile-card__stats">
-            <div class="profile-card__stat">
-              <span class="profile-card__stat-value">{{ authStore.currentUser.statusesCount?.toLocaleString() }}</span>
-              <span class="profile-card__stat-label">Posts</span>
-            </div>
-            <div class="profile-card__stat">
-              <span class="profile-card__stat-value">{{ authStore.currentUser.followingCount?.toLocaleString() }}</span>
-              <span class="profile-card__stat-label">Following</span>
-            </div>
-            <div class="profile-card__stat">
-              <span class="profile-card__stat-value">{{ authStore.currentUser.followersCount?.toLocaleString() }}</span>
-              <span class="profile-card__stat-label">Followers</span>
-            </div>
-          </div>
-          <span class="profile-card__view-link">View Profile →</span>
-        </div>
-      </NuxtLink>
-
-      <!-- Login prompt for unauthenticated -->
-      <div v-else class="login-prompt neo-card">
-        <span class="login-prompt__icon">🌌</span>
-        <h2 class="login-prompt__title">Welcome to NeoSpace</h2>
-        <p class="login-prompt__text">Connect to your Fediverse instance to see your home timeline.</p>
-        <NuxtLink to="/login" class="neo-btn neo-btn--primary login-prompt__btn">
-          Log In
-        </NuxtLink>
-      </div>
-
-      <!-- Quick Links -->
-      <nav v-if="authStore.isAuthenticated" class="quick-links neo-card">
-        <h3 class="quick-links__title">Quick Links</h3>
-        <ul class="quick-links__list">
-          <li><a href="#" class="quick-links__link">📌 Bookmarks</a></li>
-          <li><a href="#" class="quick-links__link">📋 Lists</a></li>
-          <li><a href="#" class="quick-links__link">⚙️ Settings</a></li>
-          <li><a href="#" class="quick-links__link">❓ Help</a></li>
-        </ul>
-      </nav>
-    </aside>
-
-    <!-- Main Feed -->
+  <div class="feed-page" ref="feedContainer">
+    <!-- Main Feed - Single column, centered -->
     <section class="feed-main">
+      <!-- Minimal Header with Tabs -->
       <div class="feed-header">
-        <div class="feed-header__top">
-          <h1 class="feed-header__title">
-            {{ activeTab === 'home' ? 'Home' : activeTab === 'local' ? 'Local' : 'Federated' }}
-          </h1>
-          <button 
-            class="feed-header__refresh neo-btn neo-btn--ghost"
-            :disabled="timelineStore.isLoading"
-            @click="handleRefresh"
-          >
-            🔄 Refresh
-          </button>
-        </div>
         <div class="feed-header__tabs">
           <button 
             class="feed-header__tab"
@@ -187,8 +146,12 @@ useHead({
         </div>
       </div>
 
-      <!-- Compose Box (authenticated only) -->
-      <RealComposeBox v-if="authStore.isAuthenticated" />
+      <!-- Compose Box (authenticated only) - Collapsible -->
+      <Transition name="compose-collapse">
+        <div v-if="authStore.isAuthenticated && !isComposeCollapsed" class="compose-wrapper">
+          <RealComposeBox />
+        </div>
+      </Transition>
 
       <!-- Loading State -->
       <div v-if="timelineStore.isLoading" class="feed-loading">
@@ -197,14 +160,14 @@ useHead({
       </div>
 
       <!-- Error State -->
-      <div v-else-if="timelineStore.error" class="feed-error neo-card">
+      <div v-else-if="timelineStore.error" class="feed-error">
         <span>⚠️</span>
         <p>{{ timelineStore.error }}</p>
         <button class="neo-btn neo-btn--secondary" @click="handleRefresh">Try Again</button>
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="timelineStore.isEmpty" class="feed-empty neo-card">
+      <div v-else-if="timelineStore.isEmpty" class="feed-empty">
         <span>📭</span>
         <p>No posts yet. Follow some people or check back later!</p>
       </div>
@@ -222,7 +185,7 @@ useHead({
         <!-- Load More -->
         <button 
           v-if="timelineStore.hasMore"
-          class="feed-load-more neo-btn neo-btn--secondary"
+          class="feed-load-more neo-btn neo-btn--ghost"
           :disabled="timelineStore.isLoadingMore"
           @click="handleLoadMore"
         >
@@ -231,341 +194,98 @@ useHead({
       </div>
     </section>
 
-    <!-- Right Sidebar -->
-    <aside class="feed-sidebar feed-sidebar--right">
-      <!-- Instance Info -->
-      <div v-if="authStore.instanceUrl" class="instance-info neo-card">
-        <h3 class="instance-info__title">📡 Connected to</h3>
-        <p class="instance-info__url">{{ authStore.instanceUrl.replace('https://', '') }}</p>
-      </div>
-
-      <!-- Mode Info -->
-      <div class="mode-info neo-card">
-        <h3 class="mode-info__title">
-          {{ themeStore.isChaosMode ? '🌀 Chaos Mode Active' : '👩 Mom Mode Active' }}
-        </h3>
-        <p class="mode-info__description">
-          {{ themeStore.isChaosMode 
-            ? 'Custom CSS is being applied. Your eyes may never be the same.' 
-            : 'Clean, accessible design. Your mom would approve.' 
-          }}
-        </p>
-        <p v-if="authStore.userCustomCSS" class="mode-info__hint">
-          💡 Custom CSS detected in your profile!
-        </p>
-      </div>
-
-      <!-- Instructions -->
-      <div class="instructions neo-card">
-        <h3 class="instructions__title">🎨 Custom CSS Guide</h3>
-        <p class="instructions__text">
-          Add a profile field named <code>css</code> or <code>custom_css</code> with your CSS variables to customize Chaos Mode!
-        </p>
-        <details class="instructions__example">
-          <summary>See example</summary>
-          <pre>:root {
-  --neo-bg-primary: #000;
-  --neo-text-primary: #0f0;
-  --neo-accent: #f0f;
-}</pre>
-        </details>
+    <!-- Right Sidebar - Ultra minimal info -->
+    <aside class="feed-sidebar">
+      <div class="sidebar-info">
+        <div v-if="authStore.instanceUrl" class="info-item">
+          <span class="info-label">📡</span>
+          <span class="info-value">{{ authStore.instanceUrl.replace('https://', '') }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">{{ themeStore.isChaosMode ? '🌀' : '👩' }}</span>
+          <span class="info-value">{{ themeStore.isChaosMode ? 'Chaos Mode' : 'Mom Mode' }}</span>
+        </div>
       </div>
     </aside>
+
+    <!-- Floating Compose Button (when collapsed) -->
+    <Transition name="fab-pop">
+      <button 
+        v-if="authStore.isAuthenticated && isComposeCollapsed" 
+        class="floating-compose"
+        @click="expandCompose"
+        aria-label="New Post"
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
+    </Transition>
   </div>
 </template>
 
 <style lang="scss" scoped>
 .feed-page {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
   gap: 2rem;
+  max-width: 680px;
+  margin: 0 auto;
   
-  @media (min-width: 900px) {
-    grid-template-columns: 1fr 320px;
-  }
-  
-  @media (min-width: 1300px) {
-    grid-template-columns: 260px 1fr 300px;
+  @media (min-width: 1100px) {
+    max-width: 920px;
   }
 }
 
-// Sidebar
-.feed-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-
-  &--left {
-    display: none;
-    
-    @media (min-width: 1300px) {
-      display: flex;
-    }
-  }
-
-  &--right {
-    display: none;
-    
-    @media (min-width: 900px) {
-      display: flex;
-    }
-  }
-}
-
-// Profile Card Link
-.profile-card-link {
-  text-decoration: none;
-  display: block;
-
-  .profile-card {
-    transition: transform var(--neo-transition), box-shadow var(--neo-transition);
-  }
-
-  &:hover .profile-card {
-    transform: translateY(-2px);
-    box-shadow: var(--neo-shadow-lg);
-  }
-}
-
-// Profile Card - Compact
-.profile-card {
-  text-align: center;
-  padding: 1rem;
-
-  &__header {
-    margin-bottom: 0.75rem;
-  }
-
-  &__avatar {
-    margin: 0 auto;
-    width: 56px !important;
-    height: 56px !important;
-  }
-
-  &__name {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--neo-text-primary);
-    margin-bottom: 0.125rem;
-
-    :deep(img.emoji) {
-      height: 1em;
-      vertical-align: middle;
-    }
-  }
-
-  &__username {
-    font-size: 0.8125rem;
-    color: var(--neo-text-muted);
-    margin-bottom: 0.5rem;
-  }
-
-  &__bio {
-    font-size: 0.8125rem;
-    color: var(--neo-text-secondary);
-    line-height: 1.4;
-    margin-bottom: 0.75rem;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-
-    :deep(a) {
-      color: var(--neo-accent);
-    }
-  }
-
-  &__stats {
-    display: flex;
-    justify-content: center;
-    gap: 1rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--neo-border-color);
-  }
-
-  &__stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-
-    &-value {
-      font-size: 1rem;
-      font-weight: 700;
-      color: var(--neo-text-primary);
-    }
-
-    &-label {
-      font-size: 0.6875rem;
-      color: var(--neo-text-muted);
-    }
-  }
-
-  &__view-link {
-    display: block;
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--neo-border-color);
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--neo-accent);
-    transition: color var(--neo-transition);
-
-    .profile-card-link:hover & {
-      color: var(--neo-accent-hover);
-    }
-  }
-}
-
-// Login Prompt
-.login-prompt {
-  text-align: center;
-  padding: 1.5rem 1rem;
-
-  &__icon {
-    font-size: 2rem;
-    display: block;
-    margin-bottom: 0.75rem;
-  }
-
-  &__title {
-    font-size: 1.125rem;
-    font-weight: 700;
-    color: var(--neo-text-primary);
-    margin-bottom: 0.375rem;
-  }
-
-  &__text {
-    font-size: 0.8125rem;
-    color: var(--neo-text-muted);
-    margin-bottom: 1rem;
-    line-height: 1.5;
-  }
-
-  &__btn {
-    width: 100%;
-    padding: 0.625rem;
-    font-size: 0.875rem;
-  }
-}
-
-// Quick Links - Compact
-.quick-links {
-  padding: 0.875rem;
-
-  &__title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--neo-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.5rem;
-  }
-
-  &__list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-  }
-
-  &__link {
-    display: block;
-    padding: 0.375rem 0.625rem;
-    font-size: 0.8125rem;
-    color: var(--neo-text-secondary);
-    border-radius: 4px;
-    transition: all var(--neo-transition);
-
-    &:hover {
-      background-color: var(--neo-accent-soft);
-      color: var(--neo-accent);
-    }
-  }
-}
-
-// Main Feed - Full width utilization
+// Main Feed - Full focus
 .feed-main {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 100%;
-  min-width: 0; // Prevent overflow
+  flex: 1;
+  min-width: 0;
+  max-width: 600px;
+  
+  @media (min-width: 1100px) {
+    max-width: 600px;
+  }
 }
 
+// Minimal tabs header
 .feed-header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  background: var(--neo-bg-secondary);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  border: 1px solid var(--neo-border-color);
-
-  // Cleaner on mobile
-  @media (max-width: 1023px) {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--neo-border-color);
-  }
-
-  &__top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    @media (max-width: 1023px) {
-      display: none; // Hide title on mobile (header has it)
-    }
-  }
-
-  &__title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: var(--neo-text-primary);
-  }
-
-  &__refresh {
-    font-size: 0.8125rem;
-    padding: 0.5rem 0.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--neo-bg-primary);
+  border-bottom: 1px solid var(--neo-border-color);
+  margin: 0 -0.5rem;
+  padding: 0 0.5rem;
+  
+  @media (min-width: 1024px) {
+    position: static;
+    border-bottom: none;
+    margin: 0;
+    padding: 0;
+    margin-bottom: 0.5rem;
   }
 
   &__tabs {
     display: flex;
-    gap: 0.5rem;
-    
-    @media (max-width: 1023px) {
-      justify-content: center;
-      gap: 0;
-    }
+    justify-content: center;
   }
 
   &__tab {
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-    font-weight: 500;
+    flex: 1;
+    max-width: 140px;
+    padding: 0.875rem 1rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
     color: var(--neo-text-muted);
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-bottom: 2px solid transparent;
     cursor: pointer;
-    transition: all var(--neo-transition);
-    
-    @media (max-width: 1023px) {
-      flex: 1;
-      border-radius: 0;
-      padding: 0.75rem 1rem;
-      font-weight: 600;
-      border-bottom: 2px solid transparent;
-    }
+    transition: all 0.15s ease;
 
     &:hover:not(:disabled) {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
-      
-      @media (max-width: 1023px) {
-        background: transparent;
-      }
+      color: var(--neo-text-secondary);
     }
 
     &:disabled {
@@ -574,34 +294,104 @@ useHead({
     }
 
     &--active {
-      background: var(--neo-accent);
-      color: white;
-      
-      @media (max-width: 1023px) {
-        background: transparent;
-        color: var(--neo-text-primary);
-        border-bottom-color: var(--neo-text-primary);
-      }
+      color: var(--neo-text-primary);
+      border-bottom-color: var(--neo-text-primary);
     }
   }
 }
 
+// Compose wrapper with collapse animation
+.compose-wrapper {
+  margin-bottom: 1rem;
+  
+  @media (max-width: 1023px) {
+    margin: 0 -0.5rem 1rem;
+    
+    :deep(.compose) {
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+    }
+  }
+}
+
+.compose-collapse-enter-active,
+.compose-collapse-leave-active {
+  transition: all 0.25s ease;
+  transform-origin: top center;
+}
+
+.compose-collapse-enter-from,
+.compose-collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+  transform: scaleY(0.8);
+  margin-bottom: 0;
+}
+
+// Floating compose button
+.floating-compose {
+  position: fixed;
+  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  right: 1rem;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--neo-text-primary);
+  color: var(--neo-bg-primary);
+  border: none;
+  border-radius: 50%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  z-index: 80;
+  transition: all 0.2s ease;
+  
+  @media (min-width: 1024px) {
+    bottom: 2rem;
+    right: 2rem;
+  }
+
+  &:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.3);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.fab-pop-enter-active,
+.fab-pop-leave-active {
+  transition: all 0.2s ease;
+}
+
+.fab-pop-enter-from,
+.fab-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+// Feed states
 .feed-loading,
 .feed-empty,
 .feed-error {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1rem;
-  padding: 3rem;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
   text-align: center;
 
   span {
-    font-size: 2.5rem;
+    font-size: 2rem;
   }
 
   p {
     color: var(--neo-text-muted);
+    font-size: 0.9375rem;
   }
 }
 
@@ -614,31 +404,60 @@ useHead({
   to { transform: rotate(360deg); }
 }
 
+// Posts list
 .feed-posts {
   display: flex;
   flex-direction: column;
-  gap: 0;
   
-  // Single column like Threads on mobile
   @media (max-width: 1023px) {
-    margin: 0 -0.5rem; // Full bleed
-  }
-  
-  @media (min-width: 1024px) {
-    gap: 1rem;
-  }
-  
-  @media (min-width: 1200px) {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.25rem;
+    margin: 0 -0.5rem;
   }
 }
 
 .feed-load-more {
-  grid-column: 1 / -1;
-  max-width: 300px;
-  margin: 0.5rem auto 0;
+  margin: 1rem auto;
+  padding: 0.625rem 1.5rem;
+  font-size: 0.875rem;
+}
+
+// Right sidebar - Ultra minimal
+.feed-sidebar {
+  display: none;
+  width: 280px;
+  flex-shrink: 0;
+  padding-top: 1rem;
+  
+  @media (min-width: 1100px) {
+    display: block;
+  }
+}
+
+.sidebar-info {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--neo-bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--neo-border-color);
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+  
+  .info-label {
+    font-size: 0.875rem;
+  }
+  
+  .info-value {
+    color: var(--neo-text-secondary);
+  }
 }
 
 // Post list animations
@@ -649,98 +468,11 @@ useHead({
 
 .post-list-enter-from {
   opacity: 0;
-  transform: translateY(-20px);
+  transform: translateY(-10px);
 }
 
 .post-list-leave-to {
   opacity: 0;
-  transform: translateX(-20px);
-}
-
-// Right Sidebar - Compact cards
-.instance-info {
-  padding: 0.875rem;
-
-  &__title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--neo-text-muted);
-    margin-bottom: 0.375rem;
-  }
-
-  &__url {
-    font-family: var(--neo-font-mono);
-    font-size: 0.8125rem;
-    color: var(--neo-accent);
-  }
-}
-
-.mode-info {
-  padding: 0.875rem;
-  background: linear-gradient(135deg, var(--neo-accent-soft), var(--neo-bg-secondary));
-
-  &__title {
-    font-size: 0.8125rem;
-    font-weight: 700;
-    color: var(--neo-accent);
-    margin-bottom: 0.375rem;
-  }
-
-  &__description {
-    font-size: 0.75rem;
-    color: var(--neo-text-secondary);
-    line-height: 1.4;
-  }
-
-  &__hint {
-    margin-top: 0.5rem;
-    font-size: 0.6875rem;
-    color: var(--neo-success);
-  }
-}
-
-.instructions {
-  padding: 0.875rem;
-
-  &__title {
-    font-size: 0.8125rem;
-    font-weight: 700;
-    color: var(--neo-text-primary);
-    margin-bottom: 0.375rem;
-  }
-
-  &__text {
-    font-size: 0.75rem;
-    color: var(--neo-text-secondary);
-    line-height: 1.4;
-
-    code {
-      font-family: var(--neo-font-mono);
-      background-color: var(--neo-bg-tertiary);
-      padding: 0.0625rem 0.25rem;
-      border-radius: 3px;
-      font-size: 0.6875rem;
-    }
-  }
-
-  &__example {
-    margin-top: 0.5rem;
-
-    summary {
-      font-size: 0.75rem;
-      color: var(--neo-accent);
-      cursor: pointer;
-    }
-
-    pre {
-      margin-top: 0.375rem;
-      padding: 0.5rem;
-      background-color: var(--neo-bg-tertiary);
-      border-radius: 4px;
-      font-size: 0.625rem;
-      font-family: var(--neo-font-mono);
-      overflow-x: auto;
-    }
-  }
+  transform: translateX(-10px);
 }
 </style>
