@@ -89,7 +89,8 @@ export const useTimelineStore = defineStore('timeline', {
           this.minId = statuses[0].id
         }
         
-        this.hasMore = statuses.length === 20
+        // Timelines always have more history unless empty
+        this.hasMore = statuses.length > 0
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch timeline'
         console.error('Timeline fetch error:', e)
@@ -139,7 +140,7 @@ export const useTimelineStore = defineStore('timeline', {
           this.minId = statuses[0].id
         }
         
-        this.hasMore = statuses.length === 20
+        this.hasMore = statuses.length > 0
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch local timeline'
         console.error('Local timeline fetch error:', e)
@@ -189,7 +190,7 @@ export const useTimelineStore = defineStore('timeline', {
           this.minId = statuses[0].id
         }
         
-        this.hasMore = statuses.length === 20
+        this.hasMore = statuses.length > 0
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch federated timeline'
         console.error('Federated timeline fetch error:', e)
@@ -245,7 +246,8 @@ export const useTimelineStore = defineStore('timeline', {
           this.maxId = statuses[statuses.length - 1].id
         }
         
-        this.hasMore = statuses.length === 20
+        // Only stop if we got zero results - timelines always have more history
+        this.hasMore = statuses.length > 0
       } catch (e: any) {
         console.error('Load more error:', e)
       } finally {
