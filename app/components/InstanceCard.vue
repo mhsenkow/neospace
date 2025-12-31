@@ -15,6 +15,14 @@ const instancesStore = useInstancesStore()
 // Fetch live data on mount
 const liveData = ref<any>(null)
 const loading = ref(true)
+const isAdding = ref(false)
+
+// Check if this instance is already connected
+const isWatching = computed(() => {
+  return instancesStore.instances.some(i => 
+    i.url.toLowerCase().includes(props.instance.domain.toLowerCase())
+  )
+})
 
 onMounted(async () => {
   try {
@@ -26,6 +34,19 @@ onMounted(async () => {
 
 const handleVisit = () => {
   emit('visit', props.instance.domain)
+}
+
+const handleWatch = async () => {
+  if (isWatching.value) return
+  
+  isAdding.value = true
+  try {
+    await instancesStore.addInstance(`https://${props.instance.domain}`)
+  } catch (e) {
+    console.error('Failed to add instance:', e)
+  } finally {
+    isAdding.value = false
+  }
 }
 </script>
 
@@ -57,8 +78,29 @@ const handleVisit = () => {
     </div>
 
     <div class="card-actions">
+      <!-- Watch/Watching button -->
+      <button 
+        v-if="!isWatching"
+        class="watch-btn" 
+        :disabled="isAdding"
+        @click.stop="handleWatch"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        {{ isAdding ? '...' : 'Watch' }}
+      </button>
+      <span v-else class="watching-badge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Watching
+      </span>
+      
+      <!-- Preview button -->
       <button class="visit-btn" @click="handleVisit">
-        <span>Visit</span>
+        <span>Preview</span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M5 12h14M12 5l7 7-7 7"/>
         </svg>
@@ -163,6 +205,46 @@ const handleVisit = () => {
 .card-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.watch-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: transparent;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  padding: 0.625rem 1rem;
+  border-radius: 100px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--accent);
+    color: white;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.watching-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 100px;
+  font-weight: 600;
+  font-size: 0.75rem;
 }
 
 .visit-btn {
@@ -172,10 +254,10 @@ const handleVisit = () => {
   background: var(--accent);
   color: white;
   border: none;
-  padding: 0.75rem 1.25rem;
+  padding: 0.625rem 1rem;
   border-radius: 100px;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease;
 

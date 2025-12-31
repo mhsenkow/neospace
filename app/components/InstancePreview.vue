@@ -10,8 +10,68 @@ const domain = computed(() => instancesStore.previewingInstance)
 const instanceInfo = computed(() => domain.value ? instancesStore.getInstance(domain.value) : null)
 const curatedInfo = computed(() => instances.find(i => i.domain === domain.value))
 
+// Check if this instance is already connected
+const isWatching = computed(() => {
+  if (!domain.value) return false
+  return instancesStore.instances.some(i => 
+    i.url.toLowerCase().includes(domain.value!.toLowerCase())
+  )
+})
+
+// Check if user is logged into this instance
+const isLoggedIn = computed(() => {
+  if (!domain.value) return false
+  const instance = instancesStore.instances.find(i => 
+    i.url.toLowerCase().includes(domain.value!.toLowerCase())
+  )
+  return instance?.user !== null
+})
+
+const isAdding = ref(false)
+const addError = ref<string | null>(null)
+
 const close = () => {
   instancesStore.closePreview()
+}
+
+// Add instance to watch list
+const handleWatch = async () => {
+  if (!domain.value || isWatching.value) return
+  
+  isAdding.value = true
+  addError.value = null
+  
+  try {
+    await instancesStore.addInstance(`https://${domain.value}`)
+  } catch (e: any) {
+    addError.value = e.message || 'Failed to add instance'
+  } finally {
+    isAdding.value = false
+  }
+}
+
+// Start login flow for this instance
+const handleLogin = async () => {
+  if (!domain.value) return
+  
+  // First make sure it's in our list
+  if (!isWatching.value) {
+    await handleWatch()
+  }
+  
+  // Find the instance and start auth
+  const instance = instancesStore.instances.find(i => 
+    i.url.toLowerCase().includes(domain.value!.toLowerCase())
+  )
+  
+  if (instance) {
+    try {
+      const authUrl = await instancesStore.startAuth(instance.id)
+      window.location.href = authUrl
+    } catch (e: any) {
+      addError.value = e.message || 'Failed to start login'
+    }
+  }
 }
 
 // Close on escape
@@ -151,15 +211,66 @@ const stripHtml = (html: string) => {
             </div>
           </div>
 
-          <!-- Join CTA -->
+          <!-- Error message -->
+          <div v-if="addError" class="preview-error">
+            {{ addError }}
+          </div>
+
+          <!-- Action Buttons -->
           <footer class="preview-footer">
+            <!-- Watch Button -->
+            <button 
+              v-if="!isWatching"
+              class="action-btn action-btn--watch"
+              :disabled="isAdding"
+              @click="handleWatch"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              {{ isAdding ? 'Adding...' : 'Watch' }}
+            </button>
+            
+            <!-- Already Watching Badge -->
+            <div v-else class="watching-badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              Watching
+            </div>
+
+            <!-- Login Button (if watching but not logged in) -->
+            <button 
+              v-if="isWatching && !isLoggedIn"
+              class="action-btn action-btn--login"
+              @click="handleLogin"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+                <polyline points="10 17 15 12 10 7"/>
+                <line x1="15" y1="12" x2="3" y2="12"/>
+              </svg>
+              Login
+            </button>
+            
+            <!-- Logged In Badge -->
+            <div v-if="isLoggedIn" class="logged-in-badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              Logged In
+            </div>
+
+            <!-- External Join Link (always show) -->
             <a 
               :href="`https://${domain}/auth/sign_up`" 
               target="_blank" 
-              class="join-btn"
+              class="action-btn action-btn--join"
             >
-              Join {{ instanceInfo?.title || domain }}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              Create Account
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
               </svg>
             </a>
@@ -444,30 +555,97 @@ const stripHtml = (html: string) => {
   padding: 2rem;
 }
 
+.preview-error {
+  padding: 0.75rem 2rem;
+  background: #fef2f2;
+  color: #dc2626;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
 .preview-footer {
   padding: 1.25rem 2rem;
   border-top: 1px solid #e5e7eb;
   background: #ffffff;
   display: flex;
   justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
-.join-btn {
+.action-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: var(--accent);
-  color: white;
-  padding: 0.875rem 2rem;
+  padding: 0.75rem 1.5rem;
   border-radius: 100px;
   font-weight: 600;
+  font-size: 0.9rem;
   text-decoration: none;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+  border: none;
+  cursor: pointer;
 
   &:hover {
-    opacity: 0.9;
     transform: scale(1.02);
   }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+}
+
+.action-btn--watch {
+  background: var(--accent);
+  color: white;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+}
+
+.action-btn--login {
+  background: #10b981;
+  color: white;
+
+  &:hover {
+    background: #059669;
+  }
+}
+
+.action-btn--join {
+  background: transparent;
+  border: 2px solid var(--accent);
+  color: var(--accent);
+
+  &:hover {
+    background: rgba(99, 100, 255, 0.1);
+  }
+}
+
+.watching-badge,
+.logged-in-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 100px;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.watching-badge {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.logged-in-badge {
+  background: #f0f9ff;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
 }
 
 // Transition
