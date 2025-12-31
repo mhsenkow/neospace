@@ -166,6 +166,10 @@ const toggleCW = () => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .compose-header {
@@ -197,6 +201,9 @@ const toggleCW = () => {
   resize: vertical;
   min-height: 100px;
   max-height: 400px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .compose-error {

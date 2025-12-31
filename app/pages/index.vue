@@ -758,14 +758,14 @@ useHead({
 // Compose wrapper with collapse animation
 .compose-wrapper {
   margin-bottom: 1rem;
-  
+  width: 100%;
+  max-width: 100%;
+    overflow: hidden;
+
   @media (max-width: 1023px) {
-    margin: 0 -0.5rem 1rem;
-    
     :deep(.compose) {
-      border-radius: 0;
-      border-left: none;
-      border-right: none;
+      border-radius: 8px;
+      margin: 0 0.5rem;
     }
   }
 }
@@ -880,7 +880,7 @@ useHead({
       flex: 1;
       
       strong {
-        display: block;
+    display: block;
         font-size: 0.9375rem;
     color: var(--neo-text-primary);
   }
@@ -940,10 +940,10 @@ useHead({
   
   // Desktop - full styling
   @media (min-width: 1024px) {
-    gap: 0.75rem;
+  gap: 0.75rem;
     padding: 0.75rem;
-    background: var(--neo-bg-secondary);
-    border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
     border-radius: 16px;
   }
 }
