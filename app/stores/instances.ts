@@ -35,10 +35,30 @@ export interface ExtendedStatus extends mastodon.v1.Status {
   _instanceUrl: string
 }
 
+// Instance info for preview (fetched from API)
+export interface InstanceApiInfo {
+  title: string
+  description: string
+  stats?: {
+    userCount?: number
+    statusCount?: number
+    domainCount?: number
+  }
+  registrations?: boolean
+  languages?: string[]
+  rules?: Array<{ id: string; text: string }>
+}
+
 interface MultiInstanceState {
   instances: ConnectedInstance[]
   activeInstanceFilter: string | null // null = show all, or instance ID
   isLoading: boolean
+  // Preview modal state (for explore page)
+  previewingInstance: string | null
+  previewLoading: boolean
+  previewError: string | null
+  previewTimeline: mastodon.v1.Status[]
+  previewInstanceInfo: Record<string, InstanceApiInfo>
 }
 
 const STORAGE_KEY = 'neospace_instances'
@@ -59,6 +79,12 @@ export const useInstancesStore = defineStore('instances', {
     instances: [],
     activeInstanceFilter: null,
     isLoading: false,
+    // Preview modal state
+    previewingInstance: null,
+    previewLoading: false,
+    previewError: null,
+    previewTimeline: [],
+    previewInstanceInfo: {},
   }),
 
   getters: {
@@ -82,7 +108,7 @@ export const useInstancesStore = defineStore('instances', {
       state.instances.find(i => i.accessToken && i.user) || null,
     
     // Get instance by ID
-    getInstance: (state) => (id: string): ConnectedInstance | undefined =>
+    getInstanceById: (state) => (id: string): ConnectedInstance | undefined =>
       state.instances.find(i => i.id === id),
     
     // Get instance by URL
@@ -91,6 +117,11 @@ export const useInstancesStore = defineStore('instances', {
       return state.instances.find(i => 
         i.url.toLowerCase() === normalizedUrl
       )
+    },
+    
+    // Get instance API info by domain (for preview modal)
+    getInstance: (state) => (domain: string): InstanceApiInfo | null => {
+      return state.previewInstanceInfo[domain] || null
     },
   },
 
@@ -357,8 +388,8 @@ export const useInstancesStore = defineStore('instances', {
       const promises = this.instances
         .filter(i => i.accessToken)
         .map(async (instance) => {
-          try {
-            const client = createRestAPIClient({
+      try {
+        const client = createRestAPIClient({
               url: instance.url,
               accessToken: instance.accessToken!,
             })
@@ -431,11 +462,11 @@ export const useInstancesStore = defineStore('instances', {
           const client = createRestAPIClient({
             url: instance.url,
             accessToken: instance.accessToken || undefined,
-          })
-          
-          const statuses = await client.v1.timelines.public.list({
+        })
+
+        const statuses = await client.v1.timelines.public.list({
             local: type === 'local',
-            limit,
+          limit,
           })
           
           // Add instance metadata to each status
@@ -487,8 +518,8 @@ export const useInstancesStore = defineStore('instances', {
           }))
         } catch (e) {
           console.warn(`Failed to fetch home from ${instance.url}:`, e)
-          return []
-        }
+        return []
+      }
       })
       
       const results = await Promise.all(fetchPromises)
@@ -500,6 +531,89 @@ export const useInstancesStore = defineStore('instances', {
       )
       
       return allStatuses
+    },
+
+    /**
+     * Fetch instance info for a domain (used by InstanceCard)
+     */
+    async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {
+      // Return cached if available
+      if (this.previewInstanceInfo[domain]) {
+        return this.previewInstanceInfo[domain]
+      }
+      
+      try {
+        const url = `https://${domain}`
+        const client = createRestAPIClient({ url })
+        
+        const info = await client.v2.instance.fetch()
+        const apiInfo: InstanceApiInfo = {
+          title: info.title,
+          description: info.description || '',
+          stats: {
+            userCount: info.usage?.users?.activeMonth,
+          },
+          registrations: info.registrations?.enabled,
+          languages: info.languages,
+          rules: info.rules?.map(r => ({ id: r.id, text: r.text })),
+        }
+        
+        // Cache it
+        this.previewInstanceInfo[domain] = apiInfo
+        return apiInfo
+      } catch (e) {
+        console.warn(`Failed to fetch instance info for ${domain}:`, e)
+        return null
+      }
+    },
+
+    /**
+     * Open preview modal for an instance (explore page)
+     */
+    async openPreview(domain: string) {
+      this.previewingInstance = domain
+      this.previewLoading = true
+      this.previewError = null
+      this.previewTimeline = []
+
+      try {
+        const url = `https://${domain}`
+        const client = createRestAPIClient({ url })
+        
+        // Fetch instance info
+        const info = await client.v2.instance.fetch()
+        this.previewInstanceInfo[domain] = {
+          title: info.title,
+          description: info.description || '',
+          stats: {
+            userCount: info.usage?.users?.activeMonth,
+          },
+          registrations: info.registrations?.enabled,
+          languages: info.languages,
+          rules: info.rules?.map(r => ({ id: r.id, text: r.text })),
+        }
+        
+        // Fetch local timeline
+        const statuses = await client.v1.timelines.public.list({
+          local: true,
+          limit: 10,
+        })
+        
+        this.previewTimeline = statuses
+      } catch (e: any) {
+        this.previewError = e.message || 'Failed to load instance'
+      } finally {
+        this.previewLoading = false
+      }
+    },
+
+    /**
+     * Close preview modal
+     */
+    closePreview() {
+      this.previewingInstance = null
+      this.previewTimeline = []
+      this.previewError = null
     },
   },
 })
