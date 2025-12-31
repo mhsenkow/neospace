@@ -278,14 +278,14 @@ useHead({
 .feed-page {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.5rem;
+  gap: 2rem;
   
-  @media (min-width: 768px) {
-    grid-template-columns: 280px 1fr;
+  @media (min-width: 900px) {
+    grid-template-columns: 1fr 320px;
   }
   
-  @media (min-width: 1200px) {
-    grid-template-columns: 280px 1fr 320px;
+  @media (min-width: 1300px) {
+    grid-template-columns: 260px 1fr 300px;
   }
 }
 
@@ -296,14 +296,18 @@ useHead({
   gap: 1rem;
 
   &--left {
-    @media (max-width: 767px) {
-      display: none;
+    display: none;
+    
+    @media (min-width: 1300px) {
+      display: flex;
     }
   }
 
   &--right {
-    @media (max-width: 1199px) {
-      display: none;
+    display: none;
+    
+    @media (min-width: 900px) {
+      display: flex;
     }
   }
 }
@@ -323,23 +327,26 @@ useHead({
   }
 }
 
-// Profile Card
+// Profile Card - Compact
 .profile-card {
   text-align: center;
+  padding: 1rem;
 
   &__header {
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
   }
 
   &__avatar {
     margin: 0 auto;
+    width: 56px !important;
+    height: 56px !important;
   }
 
   &__name {
-    font-size: 1.125rem;
+    font-size: 1rem;
     font-weight: 700;
     color: var(--neo-text-primary);
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.125rem;
 
     :deep(img.emoji) {
       height: 1em;
@@ -348,16 +355,20 @@ useHead({
   }
 
   &__username {
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     color: var(--neo-text-muted);
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
   }
 
   &__bio {
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     color: var(--neo-text-secondary);
-    line-height: 1.5;
-    margin-bottom: 1rem;
+    line-height: 1.4;
+    margin-bottom: 0.75rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 
     :deep(a) {
       color: var(--neo-accent);
@@ -367,8 +378,8 @@ useHead({
   &__stats {
     display: flex;
     justify-content: center;
-    gap: 1.5rem;
-    padding-top: 1rem;
+    gap: 1rem;
+    padding-top: 0.75rem;
     border-top: 1px solid var(--neo-border-color);
   }
 
@@ -378,23 +389,23 @@ useHead({
     align-items: center;
 
     &-value {
-      font-size: 1.125rem;
+      font-size: 1rem;
       font-weight: 700;
       color: var(--neo-text-primary);
     }
 
     &-label {
-      font-size: 0.75rem;
+      font-size: 0.6875rem;
       color: var(--neo-text-muted);
     }
   }
 
   &__view-link {
     display: block;
-    margin-top: 1rem;
-    padding-top: 1rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
     border-top: 1px solid var(--neo-border-color);
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     font-weight: 600;
     color: var(--neo-accent);
     transition: color var(--neo-transition);
@@ -408,22 +419,23 @@ useHead({
 // Login Prompt
 .login-prompt {
   text-align: center;
+  padding: 1.5rem 1rem;
 
   &__icon {
-    font-size: 2.5rem;
+    font-size: 2rem;
     display: block;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
   }
 
   &__title {
-    font-size: 1.25rem;
+    font-size: 1.125rem;
     font-weight: 700;
     color: var(--neo-text-primary);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
 
   &__text {
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     color: var(--neo-text-muted);
     margin-bottom: 1rem;
     line-height: 1.5;
@@ -431,32 +443,36 @@ useHead({
 
   &__btn {
     width: 100%;
+    padding: 0.625rem;
+    font-size: 0.875rem;
   }
 }
 
-// Quick Links
+// Quick Links - Compact
 .quick-links {
+  padding: 0.875rem;
+
   &__title {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--neo-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
   }
 
   &__list {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.125rem;
   }
 
   &__link {
     display: block;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.9375rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.8125rem;
     color: var(--neo-text-secondary);
-    border-radius: var(--neo-radius-md);
+    border-radius: 4px;
     transition: all var(--neo-transition);
 
     &:hover {
@@ -466,23 +482,23 @@ useHead({
   }
 }
 
-// Main Feed
+// Main Feed - Full width utilization
 .feed-main {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-width: 680px;
   width: 100%;
-
-  @media (min-width: 768px) {
-    margin: 0 auto;
-  }
+  min-width: 0; // Prevent overflow
 }
 
 .feed-header {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
+  background: var(--neo-bg-secondary);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--neo-border-color);
 
   &__top {
     display: flex;
@@ -491,45 +507,45 @@ useHead({
   }
 
   &__title {
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     font-weight: 700;
     color: var(--neo-text-primary);
   }
 
   &__refresh {
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
+    padding: 0.5rem 0.75rem;
   }
 
   &__tabs {
     display: flex;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--neo-border-color);
+    gap: 0.5rem;
   }
 
   &__tab {
-    padding: 0.75rem 1.25rem;
-    font-size: 0.9375rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--neo-text-muted);
     background: transparent;
     border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
+    border-radius: 6px;
     cursor: pointer;
     transition: all var(--neo-transition);
 
     &:hover:not(:disabled) {
+      background: var(--neo-bg-tertiary);
       color: var(--neo-text-primary);
     }
 
     &:disabled {
-      opacity: 0.5;
+      opacity: 0.4;
       cursor: not-allowed;
     }
 
     &--active {
-      color: var(--neo-accent);
-      border-bottom-color: var(--neo-accent);
+      background: var(--neo-accent);
+      color: white;
     }
   }
 }
@@ -563,13 +579,24 @@ useHead({
 }
 
 .feed-posts {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 1rem;
+  
+  @media (min-width: 700px) {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.25rem;
+  }
+  
+  @media (min-width: 1100px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .feed-load-more {
-  width: 100%;
+  grid-column: 1 / -1;
+  max-width: 300px;
+  margin: 0.5rem auto 0;
 }
 
 // Post list animations
@@ -588,81 +615,87 @@ useHead({
   transform: translateX(-20px);
 }
 
-// Right Sidebar
+// Right Sidebar - Compact cards
 .instance-info {
+  padding: 0.875rem;
+
   &__title {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--neo-text-muted);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
 
   &__url {
     font-family: var(--neo-font-mono);
-    font-size: 0.9375rem;
+    font-size: 0.8125rem;
     color: var(--neo-accent);
   }
 }
 
 .mode-info {
+  padding: 0.875rem;
   background: linear-gradient(135deg, var(--neo-accent-soft), var(--neo-bg-secondary));
 
   &__title {
-    font-size: 0.9375rem;
+    font-size: 0.8125rem;
     font-weight: 700;
     color: var(--neo-accent);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
 
   &__description {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     color: var(--neo-text-secondary);
-    line-height: 1.5;
+    line-height: 1.4;
   }
 
   &__hint {
-    margin-top: 0.75rem;
-    font-size: 0.75rem;
+    margin-top: 0.5rem;
+    font-size: 0.6875rem;
     color: var(--neo-success);
   }
 }
 
 .instructions {
+  padding: 0.875rem;
+
   &__title {
-    font-size: 0.9375rem;
+    font-size: 0.8125rem;
     font-weight: 700;
     color: var(--neo-text-primary);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
 
   &__text {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     color: var(--neo-text-secondary);
-    line-height: 1.5;
+    line-height: 1.4;
 
     code {
       font-family: var(--neo-font-mono);
       background-color: var(--neo-bg-tertiary);
-      padding: 0.125rem 0.375rem;
-      border-radius: var(--neo-radius-sm);
+      padding: 0.0625rem 0.25rem;
+      border-radius: 3px;
+      font-size: 0.6875rem;
     }
   }
 
   &__example {
-    margin-top: 0.75rem;
+    margin-top: 0.5rem;
 
     summary {
-      font-size: 0.8125rem;
+      font-size: 0.75rem;
       color: var(--neo-accent);
       cursor: pointer;
     }
 
     pre {
-      margin-top: 0.5rem;
-      padding: 0.75rem;
+      margin-top: 0.375rem;
+      padding: 0.5rem;
       background-color: var(--neo-bg-tertiary);
-      border-radius: var(--neo-radius-md);
-      font-size: 0.75rem;
+      border-radius: 4px;
+      font-size: 0.625rem;
       font-family: var(--neo-font-mono);
       overflow-x: auto;
     }

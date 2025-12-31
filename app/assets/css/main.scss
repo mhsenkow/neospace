@@ -80,17 +80,8 @@
   // Base chaos overrides (can be further customized by user CSS)
   --neo-transition: 100ms ease-in-out;
   
-  // Enable potential animations/effects
-  animation: chaos-pulse 3s ease-in-out infinite alternate;
-}
-
-@keyframes chaos-pulse {
-  0% {
-    filter: hue-rotate(0deg);
-  }
-  100% {
-    filter: hue-rotate(5deg);
-  }
+  // NOTE: Don't use filter/transform on root element as it breaks position:fixed
+  // The visual effects are applied to child elements instead
 }
 
 // ============================================
@@ -342,26 +333,24 @@ ul, ol {
 // CHAOS MODE SPECIAL EFFECTS
 // ============================================
 
-.chaos-active {
-  // Scanlines effect (optional enhancement)
-  &::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 9999;
-    background: repeating-linear-gradient(
-      0deg,
-      rgba(0, 0, 0, 0.03) 0px,
-      rgba(0, 0, 0, 0.03) 1px,
-      transparent 1px,
-      transparent 2px
-    );
-    opacity: 0.3;
-  }
+// Chaos mode scanlines overlay - applied to body instead to avoid layout issues
+body.chaos-active::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.02) 0px,
+    rgba(0, 0, 0, 0.02) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  opacity: 0.2;
 }
 
 // ============================================
