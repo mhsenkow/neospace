@@ -395,7 +395,7 @@ useHead({
 
       <!-- Empty State -->
       <div v-else-if="displayedStatuses.length === 0" class="feed-empty">
-        <template v-if="activeTab === 'home' && !instancesStore.hasAuthenticatedInstance">
+        <template v-if="activeTab === 'home' && !instancesStore.hasAuthenticatedInstance && !authStore.isAuthenticated">
           <span>🔑</span>
           <p><strong>Log in to see your For You feed</strong></p>
           <p class="feed-empty__sub">This shows posts from people you follow on your connected servers.</p>
@@ -409,8 +409,8 @@ useHead({
 
       <!-- Posts Feed - Seamless infinite scroll -->
       <div v-else class="feed-posts">
-        <!-- Login Prompt for For You (when viewing local/federated but not logged in) -->
-        <div v-if="!instancesStore.hasAuthenticatedInstance" class="login-prompt">
+        <!-- Login Prompt for For You (when not logged in via either method) -->
+        <div v-if="!instancesStore.hasAuthenticatedInstance && !authStore.isAuthenticated" class="login-prompt">
           <div class="login-prompt__content">
             <span>💡</span>
             <div>
