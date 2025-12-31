@@ -577,7 +577,6 @@ useHead({
   flex: 1;
   min-width: 0;
   width: 100%;
-  overflow: hidden;
   
   // On mobile, take full width
   @media (max-width: 767px) {
@@ -650,19 +649,31 @@ useHead({
   }
 }
 
-// Instance filter pills
+// Instance filter pills - horizontally scrollable
 .instance-filters {
   display: flex;
   flex-wrap: nowrap;
   gap: 0.5rem;
-  padding: 0.75rem 0.5rem;
-  overflow-x: auto;
+  padding: 0.75rem 0;
+  overflow-x: scroll;
   overflow-y: hidden;
-  max-width: 100%;
-  width: 100%;
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
+  
+  // Constrain width to viewport on mobile
+  @media (max-width: 767px) {
+    width: calc(100vw - 1rem);
+    max-width: calc(100vw - 1rem);
+    margin-left: -0.5rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  
+  @media (min-width: 768px) {
+    width: 100%;
+    max-width: 100%;
+  }
   
   &::-webkit-scrollbar {
     display: none;
