@@ -554,24 +554,44 @@ useHead({
 .feed-page {
   display: flex;
   gap: 2rem;
-  max-width: 680px;
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 0 0.5rem;
+  padding: 0;
   
+  // Tablet and up - add some breathing room
+  @media (min-width: 768px) {
+    padding: 0 1rem;
+    max-width: 720px;
+  }
+  
+  // Desktop with sidebar
   @media (min-width: 1100px) {
-    max-width: 920px;
+    max-width: 960px;
+    padding: 0 1.5rem;
   }
 }
 
-// Main Feed - Full focus
+// Main Feed - Responsive width
 .feed-main {
   flex: 1;
   min-width: 0;
-  max-width: 600px;
+  width: 100%;
   overflow: hidden;
   
+  // On mobile, take full width
+  @media (max-width: 767px) {
+    max-width: 100%;
+  }
+  
+  // Tablet - grow but cap for readability
+  @media (min-width: 768px) {
+    max-width: 100%;
+  }
+  
+  // Desktop - cap at comfortable reading width
   @media (min-width: 1100px) {
-    max-width: 600px;
+    max-width: 620px;
   }
 }
 
@@ -582,14 +602,17 @@ useHead({
   z-index: 50;
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
-  margin: 0 -0.5rem;
-  padding: 0 0.5rem;
+  margin: 0;
+  padding: 0 0.75rem;
+  width: 100%;
+  
+  @media (min-width: 768px) {
+    padding: 0;
+  }
   
   @media (min-width: 1024px) {
     position: static;
     border-bottom: none;
-    margin: 0;
-    padding: 0;
     margin-bottom: 0.5rem;
   }
 
@@ -887,32 +910,40 @@ useHead({
 
 // Posts list - Subtle background container
 .feed-posts {
-    display: flex;
-    flex-direction: column;
-  
-  @media (max-width: 1023px) {
-    margin: 0 -0.5rem;
-  }
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 // Subtle container wrapping posts
 .posts-container {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
   
-  // Very subtle background for light mode
+  // Mobile - edge to edge
   background: transparent;
-  border-radius: 16px;
-  padding: 0.5rem;
+  border-radius: 0;
+  padding: 0;
   
+  // Tablet - slight padding
+  @media (min-width: 768px) {
+    gap: 0.625rem;
+    padding: 0.5rem;
+    border-radius: 12px;
+  }
+  
+  // Desktop - full styling
   @media (min-width: 1024px) {
-  gap: 0.75rem;
+    gap: 0.75rem;
     padding: 0.75rem;
-    // Subtle tint that works in both modes
-  background: var(--neo-bg-secondary);
-    opacity: 1;
-  border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-secondary);
+    border: 1px solid var(--neo-border-color);
     border-radius: 16px;
   }
 }
