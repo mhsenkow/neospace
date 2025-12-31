@@ -667,7 +667,6 @@ useHead({
     max-width: calc(100vw - 1rem);
     margin-left: -0.5rem;
     padding-left: 0.5rem;
-    padding-right: 0.5rem;
   }
   
   @media (min-width: 768px) {
@@ -677,6 +676,13 @@ useHead({
   
   &::-webkit-scrollbar {
     display: none;
+  }
+  
+  // Add padding at the end so last pill is fully visible
+  &::after {
+    content: '';
+    flex-shrink: 0;
+    width: 0.5rem;
   }
 }
 
