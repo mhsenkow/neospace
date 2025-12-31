@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * Default Layout - ChatGPT-inspired Minimal Sidebar
+ * Default Layout - Threads-inspired Mobile + Minimal Sidebar Desktop
  * 
- * Clean, focused design with navigation on the left
- * and content taking center stage.
+ * Clean, focused design with:
+ * - Threads-style bottom navigation on mobile
+ * - Minimal sidebar on desktop
  */
 
 import { useThemeStore } from '~/stores/theme'
@@ -14,18 +15,40 @@ const themeStore = useThemeStore()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 const router = useRouter()
+const route = useRoute()
 
 const sidebarCollapsed = ref(true) // Default collapsed for minimal look
 const mobileMenuOpen = ref(false)
 
-// Initialize auth on mount
+// Apply theme from settings
+const applyTheme = () => {
+  if (typeof document === 'undefined') return
+  
+  const theme = settingsStore.localPreferences.theme
+  if (theme === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark')
+  } else if (theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light')
+  } else {
+    document.documentElement.removeAttribute('data-theme')
+  }
+}
+
+// Initialize auth and theme on mount
 onMounted(async () => {
   await authStore.initialize()
+  settingsStore.loadLocalPreferences()
+  applyTheme()
   
   // Load user's custom CSS if available
   if (authStore.userCustomCSS) {
     themeStore.setUserCustomCSS(authStore.userCustomCSS)
   }
+})
+
+// Watch for theme changes
+watch(() => settingsStore.localPreferences.theme, () => {
+  applyTheme()
 })
 
 const handleLogout = async () => {
@@ -150,18 +173,21 @@ const closeMobileMenu = () => {
       </div>
     </aside>
 
-    <!-- Mobile Header - Clean ChatGPT style -->
+    <!-- Mobile Header - Threads style (minimal) -->
     <header class="mobile-header">
       <button class="mobile-header__menu-btn" @click="mobileMenuOpen = !mobileMenuOpen" aria-label="Menu">
-        <span>☰</span>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
       </button>
-      <div class="mobile-header__spacer"></div>
-      <NuxtLink to="/" class="mobile-header__logo">
-        <span>🌌</span>
-      </NuxtLink>
-      <div class="mobile-header__spacer"></div>
+      <div class="mobile-header__logo">NeoSpace</div>
       <button class="mobile-header__action-btn" @click="settingsStore.open()" aria-label="Settings">
-        <span>⚙️</span>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
       </button>
     </header>
 
@@ -238,6 +264,52 @@ const closeMobileMenu = () => {
         <slot />
       </div>
     </main>
+
+    <!-- Mobile Bottom Navigation - Threads Style -->
+    <nav class="mobile-nav">
+      <NuxtLink to="/" class="mobile-nav__item" :class="{ active: route.path === '/' }">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" :stroke="route.path === '/' ? 'currentColor' : 'currentColor'" :stroke-width="route.path === '/' ? 2.5 : 1.5">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" :fill="route.path === '/' ? 'currentColor' : 'none'" />
+        </svg>
+      </NuxtLink>
+      <NuxtLink to="/explore" class="mobile-nav__item" :class="{ active: route.path === '/explore' }">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/explore' ? 2.5 : 1.5">
+          <circle cx="11" cy="11" r="8" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
+      </NuxtLink>
+      <button class="mobile-nav__compose" @click="router.push('/')" aria-label="Compose">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
+      <NuxtLink to="/groups" class="mobile-nav__item" :class="{ active: route.path.startsWith('/groups') }">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" :stroke="route.path.startsWith('/groups') ? 'currentColor' : 'currentColor'" :stroke-width="route.path.startsWith('/groups') ? 2.5 : 1.5">
+          <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" :fill="route.path.startsWith('/groups') ? 'currentColor' : 'none'" />
+        </svg>
+      </NuxtLink>
+      <NuxtLink v-if="authStore.isAuthenticated" to="/profile" class="mobile-nav__item mobile-nav__item--avatar" :class="{ active: route.path === '/profile' }">
+        <img 
+          v-if="authStore.userAvatar"
+          :src="authStore.userAvatar" 
+          :alt="authStore.userDisplayName || 'Profile'"
+          class="mobile-nav__avatar"
+        />
+        <div v-else class="mobile-nav__avatar mobile-nav__avatar--placeholder">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+        </div>
+      </NuxtLink>
+      <NuxtLink v-else to="/login" class="mobile-nav__item" :class="{ active: route.path === '/login' }">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      </NuxtLink>
+    </nav>
 
     <!-- Settings Modal -->
     <SettingsModal />
@@ -518,20 +590,19 @@ const closeMobileMenu = () => {
 }
 
 // ========================================
-// MOBILE HEADER - ChatGPT Style
+// MOBILE HEADER - Threads Style
 // ========================================
 .mobile-header {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 48px;
+  height: 56px;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0 0.75rem;
+  justify-content: space-between;
+  padding: 0 1rem;
   background: var(--neo-bg-primary);
-  border-bottom: 1px solid var(--neo-border-color);
   z-index: 90;
 
   @media (min-width: 1024px) {
@@ -540,41 +611,148 @@ const closeMobileMenu = () => {
 
   &__menu-btn,
   &__action-btn {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: transparent;
     border: none;
-    color: var(--neo-text-secondary);
-    font-size: 1.25rem;
+    color: var(--neo-text-primary);
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: 50%;
     transition: all 0.15s ease;
     flex-shrink: 0;
 
+    svg {
+      width: 24px;
+      height: 24px;
+    }
+
     &:hover {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
+      background: var(--neo-accent-soft);
     }
 
     &:active {
-      transform: scale(0.95);
+      transform: scale(0.92);
     }
   }
 
   &__logo {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--neo-text-primary);
+    letter-spacing: -0.02em;
+  }
+}
+
+// ========================================
+// MOBILE BOTTOM NAVIGATION - Threads Style
+// ========================================
+.mobile-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 0.5rem;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  background: var(--neo-bg-primary);
+  border-top: 1px solid var(--neo-border-color);
+  z-index: 90;
+
+  @media (min-width: 1024px) {
+    display: none;
+  }
+
+  &__item {
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 48px;
+    height: 48px;
+    color: var(--neo-text-muted);
     text-decoration: none;
-    color: var(--neo-text-primary);
-    font-size: 1.5rem;
+    border-radius: 12px;
+    transition: all 0.15s ease;
+
+    &:hover {
+      background: var(--neo-accent-soft);
+    }
+
+    &:active {
+      transform: scale(0.9);
+    }
+
+    &.active {
+      color: var(--neo-text-primary);
+    }
+
+    svg {
+      width: 26px;
+      height: 26px;
+    }
+
+    &--avatar {
+      padding: 4px;
+    }
   }
 
-  &__spacer {
-    flex: 1;
+  &__compose {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    background: var(--neo-bg-tertiary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: 12px;
+    color: var(--neo-text-primary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover {
+      background: var(--neo-accent-soft);
+      border-color: var(--neo-text-muted);
+    }
+
+    &:active {
+      transform: scale(0.92);
+    }
+
+    svg {
+      width: 24px;
+      height: 24px;
+    }
+  }
+
+  &__avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid transparent;
+    transition: border-color 0.15s ease;
+
+    .mobile-nav__item.active & {
+      border-color: var(--neo-text-primary);
+    }
+
+    &--placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-muted);
+
+      svg {
+        width: 18px;
+        height: 18px;
+      }
+    }
   }
 }
 
@@ -788,10 +966,12 @@ const closeMobileMenu = () => {
 .main-content {
   flex: 1;
   min-height: 100vh;
-  padding-top: 48px; // Mobile header height
+  padding-top: 56px; // Mobile header height
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0)); // Mobile nav height
 
   @media (min-width: 1024px) {
     padding-top: 0;
+    padding-bottom: 0;
     margin-left: 52px; // Default to collapsed sidebar width
     transition: margin-left 0.2s ease;
   }
@@ -806,10 +986,10 @@ const closeMobileMenu = () => {
   &__inner {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 1rem;
+    padding: 0.5rem;
 
     @media (min-width: 600px) {
-      padding: 1.25rem 1.5rem;
+      padding: 1rem;
     }
 
     @media (min-width: 1024px) {

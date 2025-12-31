@@ -345,6 +345,92 @@ export const useTimelineStore = defineStore('timeline', {
     },
 
     /**
+     * Bookmark a status (Save)
+     */
+    async bookmarkStatus(statusId: string) {
+      const client = this.getClient()
+      const updated = await client.v1.statuses.$select(statusId).bookmark()
+      
+      const index = this.statuses.findIndex(s => s.id === statusId)
+      if (index !== -1) {
+        this.statuses[index] = updated
+      }
+      
+      return updated
+    },
+
+    /**
+     * Unbookmark a status
+     */
+    async unbookmarkStatus(statusId: string) {
+      const client = this.getClient()
+      const updated = await client.v1.statuses.$select(statusId).unbookmark()
+      
+      const index = this.statuses.findIndex(s => s.id === statusId)
+      if (index !== -1) {
+        this.statuses[index] = updated
+      }
+      
+      return updated
+    },
+
+    /**
+     * Mute an account
+     */
+    async muteAccount(accountId: string) {
+      const client = this.getClient()
+      await client.v1.accounts.$select(accountId).mute()
+      
+      // Remove their posts from timeline
+      this.statuses = this.statuses.filter(s => 
+        s.account.id !== accountId && 
+        (!s.reblog || s.reblog.account.id !== accountId)
+      )
+    },
+
+    /**
+     * Unmute an account
+     */
+    async unmuteAccount(accountId: string) {
+      const client = this.getClient()
+      await client.v1.accounts.$select(accountId).unmute()
+    },
+
+    /**
+     * Block an account
+     */
+    async blockAccount(accountId: string) {
+      const client = this.getClient()
+      await client.v1.accounts.$select(accountId).block()
+      
+      // Remove their posts from timeline
+      this.statuses = this.statuses.filter(s => 
+        s.account.id !== accountId && 
+        (!s.reblog || s.reblog.account.id !== accountId)
+      )
+    },
+
+    /**
+     * Unblock an account
+     */
+    async unblockAccount(accountId: string) {
+      const client = this.getClient()
+      await client.v1.accounts.$select(accountId).unblock()
+    },
+
+    /**
+     * Report a status
+     */
+    async reportStatus(statusId: string, accountId: string, comment?: string) {
+      const client = this.getClient()
+      await client.v1.reports.create({
+        accountId,
+        statusIds: [statusId],
+        comment: comment || '',
+      })
+    },
+
+    /**
      * Clear the timeline
      */
     clear() {

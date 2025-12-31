@@ -10,7 +10,7 @@
 // ============================================
 
 :root {
-  // === MOM MODE (Default) ===
+  // === LIGHT MODE (Default) ===
   // Clean, accessible, professional vibes
   
   // Background Colors
@@ -68,6 +68,81 @@
   --neo-cursor: default;
   --neo-border-style: solid;
   --neo-glow: none;
+}
+
+// ============================================
+// DARK MODE
+// ============================================
+// Threads-inspired dark theme with deep blacks
+
+[data-theme="dark"] {
+  // Background Colors - Deep blacks like Threads
+  --neo-bg-primary: #000000;
+  --neo-bg-secondary: #101010;
+  --neo-bg-tertiary: #1a1a1a;
+  --neo-bg-card: #101010;
+  
+  // Text Colors
+  --neo-text-primary: #f5f5f5;
+  --neo-text-secondary: #a8a8a8;
+  --neo-text-muted: #737373;
+  --neo-text-inverse: #000000;
+  
+  // Accent Colors
+  --neo-accent: #ffffff;
+  --neo-accent-hover: #e5e5e5;
+  --neo-accent-soft: rgba(255, 255, 255, 0.08);
+  
+  // Status Colors
+  --neo-success: #22c55e;
+  --neo-warning: #facc15;
+  --neo-danger: #ef4444;
+  --neo-info: #38bdf8;
+  
+  // Borders & Shadows
+  --neo-border-color: #262626;
+  --neo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --neo-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+  --neo-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+  
+  // Scrollbar
+  color-scheme: dark;
+}
+
+// Auto theme - respects system preference
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    // Background Colors - Deep blacks like Threads
+    --neo-bg-primary: #000000;
+    --neo-bg-secondary: #101010;
+    --neo-bg-tertiary: #1a1a1a;
+    --neo-bg-card: #101010;
+    
+    // Text Colors
+    --neo-text-primary: #f5f5f5;
+    --neo-text-secondary: #a8a8a8;
+    --neo-text-muted: #737373;
+    --neo-text-inverse: #000000;
+    
+    // Accent Colors
+    --neo-accent: #ffffff;
+    --neo-accent-hover: #e5e5e5;
+    --neo-accent-soft: rgba(255, 255, 255, 0.08);
+    
+    // Status Colors
+    --neo-success: #22c55e;
+    --neo-warning: #facc15;
+    --neo-danger: #ef4444;
+    --neo-info: #38bdf8;
+    
+    // Borders & Shadows
+    --neo-border-color: #262626;
+    --neo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --neo-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+    --neo-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+    
+    color-scheme: dark;
+  }
 }
 
 // ============================================
@@ -372,6 +447,31 @@ body.chaos-active::after {
   
   &:hover {
     background: var(--neo-text-secondary);
+  }
+}
+
+// ============================================
+// MOBILE OPTIMIZATIONS
+// ============================================
+
+// Safe area insets for notched devices
+@supports (padding: max(0px)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+// Disable pull-to-refresh and overscroll effects
+html {
+  overscroll-behavior: none;
+}
+
+// Better tap targets on mobile
+@media (max-width: 1023px) {
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 

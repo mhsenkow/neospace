@@ -30,12 +30,24 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: 'NeoSpace',
+      htmlAttrs: {
+        lang: 'en'
+      },
       meta: [
         { name: 'description', content: 'Dual-Mode Social Media - Mom Mode or Chaos Mode, you decide.' },
-        { name: 'viewport', content: 'width=device-width, initial-scale=1' }
+        { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
+        { name: 'theme-color', content: '#000000', media: '(prefers-color-scheme: dark)' },
+        { name: 'theme-color', content: '#f8f9fa', media: '(prefers-color-scheme: light)' }
       ],
       link: [
         { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }
+      ],
+      script: [
+        {
+          // Prevent flash of unstyled content by applying theme before render
+          innerHTML: `(function(){try{var t=localStorage.getItem('neospace_local_prefs');if(t){var p=JSON.parse(t);if(p.theme==='dark'){document.documentElement.setAttribute('data-theme','dark')}else if(p.theme==='light'){document.documentElement.setAttribute('data-theme','light')}}}catch(e){}})()`,
+          type: 'text/javascript'
+        }
       ]
     }
   }

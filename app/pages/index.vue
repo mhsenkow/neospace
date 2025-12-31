@@ -500,10 +500,23 @@ useHead({
   padding: 1rem 1.25rem;
   border: 1px solid var(--neo-border-color);
 
+  // Cleaner on mobile
+  @media (max-width: 1023px) {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--neo-border-color);
+  }
+
   &__top {
     display: flex;
     align-items: center;
     justify-content: space-between;
+
+    @media (max-width: 1023px) {
+      display: none; // Hide title on mobile (header has it)
+    }
   }
 
   &__title {
@@ -520,6 +533,11 @@ useHead({
   &__tabs {
     display: flex;
     gap: 0.5rem;
+    
+    @media (max-width: 1023px) {
+      justify-content: center;
+      gap: 0;
+    }
   }
 
   &__tab {
@@ -532,10 +550,22 @@ useHead({
     border-radius: 6px;
     cursor: pointer;
     transition: all var(--neo-transition);
+    
+    @media (max-width: 1023px) {
+      flex: 1;
+      border-radius: 0;
+      padding: 0.75rem 1rem;
+      font-weight: 600;
+      border-bottom: 2px solid transparent;
+    }
 
     &:hover:not(:disabled) {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-primary);
+      
+      @media (max-width: 1023px) {
+        background: transparent;
+      }
     }
 
     &:disabled {
@@ -546,6 +576,12 @@ useHead({
     &--active {
       background: var(--neo-accent);
       color: white;
+      
+      @media (max-width: 1023px) {
+        background: transparent;
+        color: var(--neo-text-primary);
+        border-bottom-color: var(--neo-text-primary);
+      }
     }
   }
 }
@@ -579,17 +615,23 @@ useHead({
 }
 
 .feed-posts {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   
-  @media (min-width: 700px) {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.25rem;
+  // Single column like Threads on mobile
+  @media (max-width: 1023px) {
+    margin: 0 -0.5rem; // Full bleed
   }
   
-  @media (min-width: 1100px) {
+  @media (min-width: 1024px) {
+    gap: 1rem;
+  }
+  
+  @media (min-width: 1200px) {
+    display: grid;
     grid-template-columns: repeat(2, 1fr);
+    gap: 1.25rem;
   }
 }
 

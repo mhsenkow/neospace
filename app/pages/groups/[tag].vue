@@ -185,6 +185,14 @@ useHead({
       <p>You're a member! Posts from this group will appear in your home timeline.</p>
     </div>
 
+    <!-- Compose Box (for authenticated users) -->
+    <GroupComposeBox
+      v-if="authStore.isAuthenticated"
+      :tag="tag"
+      :group-name="displayGroup.name"
+      :group-icon="displayGroup.icon"
+    />
+
     <!-- Timeline -->
     <section class="group-timeline">
       <!-- Loading State -->
@@ -235,9 +243,10 @@ useHead({
       </div>
     </section>
 
-    <!-- Floating Post Hint -->
-    <div v-if="authStore.isAuthenticated" class="post-hint">
-      <p>To post in this group, include <code>#{{ tag }}</code> in your post!</p>
+    <!-- Floating Post Hint (for non-authenticated users) -->
+    <div v-if="!authStore.isAuthenticated" class="post-hint">
+      <p>Log in to post in this group using <code>#{{ tag }}</code></p>
+      <NuxtLink to="/login" class="post-hint__login">Log In</NuxtLink>
     </div>
   </div>
 </template>
@@ -246,10 +255,14 @@ useHead({
 .group-detail {
   max-width: 700px;
   margin: 0 auto;
-  padding: 0 0.5rem 2rem;
+  padding: 0 0.5rem 5rem; // Extra bottom padding for mobile nav
 
   @media (min-width: 480px) {
-    padding: 0 1rem 3rem;
+    padding: 0 1rem 5rem;
+  }
+
+  @media (min-width: 1024px) {
+    padding: 0 1rem 3rem; // Less padding on desktop (no bottom nav)
   }
 }
 
@@ -727,7 +740,7 @@ useHead({
   }
 }
 
-// Post Hint
+// Post Hint (for non-authenticated users)
 .post-hint {
   position: fixed;
   bottom: 0.75rem;
@@ -739,7 +752,11 @@ useHead({
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   z-index: 50;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 
   @media (min-width: 480px) {
     bottom: 1rem;
@@ -747,6 +764,7 @@ useHead({
     right: 1rem;
     padding: 0.875rem 1.25rem;
     border-radius: 100px;
+    gap: 1rem;
   }
 
   @media (min-width: 600px) {
@@ -755,12 +773,14 @@ useHead({
     transform: translateX(-50%);
     bottom: 1.5rem;
     padding: 0.875rem 1.5rem;
+    flex-wrap: nowrap;
   }
 
   p {
     margin: 0;
     font-size: 0.8125rem;
     color: var(--neo-text-secondary);
+    text-align: center;
 
     @media (min-width: 480px) {
       font-size: 0.875rem;
@@ -778,6 +798,28 @@ useHead({
 
     @media (min-width: 480px) {
       font-size: 0.8125rem;
+    }
+  }
+
+  &__login {
+    padding: 0.5rem 1rem;
+    background: var(--neo-accent);
+    color: white;
+    text-decoration: none;
+    border-radius: 100px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+
+    @media (min-width: 480px) {
+      padding: 0.5rem 1.25rem;
+      font-size: 0.875rem;
+    }
+
+    &:hover {
+      filter: brightness(1.1);
+      transform: scale(1.02);
     }
   }
 }
