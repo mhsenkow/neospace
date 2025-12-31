@@ -190,12 +190,12 @@ useHead({
 
 <style lang="scss" scoped>
 .groups-page {
-  max-width: 1200px;
+  max-width: var(--neo-container-xl);
   margin: 0 auto;
-  padding: 0 0.5rem 1.5rem;
+  padding: 0 var(--neo-spacing-2) var(--neo-spacing-6);
 
   @media (min-width: 480px) {
-    padding: 0 1rem 2rem;
+    padding: 0 var(--neo-spacing-4) var(--neo-spacing-8);
   }
 }
 
@@ -203,24 +203,24 @@ useHead({
 .groups-hero {
   position: relative;
   text-align: center;
-  padding: 1.75rem 1rem;
-  margin-bottom: 1.25rem;
-  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%);
-  border-radius: 16px;
+  padding: var(--neo-spacing-7) var(--neo-spacing-4);
+  margin-bottom: var(--neo-spacing-5);
+  background: linear-gradient(135deg, var(--neo-success-dark) 0%, var(--neo-success) 50%, var(--neo-success-light) 100%);
+  border-radius: var(--neo-radius-xl);
   overflow: hidden;
-  box-shadow: 0 12px 40px rgba(16, 185, 129, 0.2);
+  box-shadow: var(--neo-shadow-lg);
 
   @media (min-width: 480px) {
-    padding: 2.5rem 1.5rem;
-    margin-bottom: 1.5rem;
-    border-radius: 20px;
+    padding: var(--neo-spacing-10) var(--neo-spacing-6);
+    margin-bottom: var(--neo-spacing-6);
+    border-radius: var(--neo-radius-2xl);
   }
 
   @media (min-width: 768px) {
-    padding: 3rem 2rem;
-    margin-bottom: 2rem;
-    border-radius: 24px;
-    box-shadow: 0 20px 60px rgba(16, 185, 129, 0.25);
+    padding: var(--neo-spacing-12) var(--neo-spacing-8);
+    margin-bottom: var(--neo-spacing-8);
+    border-radius: var(--neo-radius-3xl);
+    box-shadow: var(--neo-shadow-xl);
   }
 }
 
@@ -251,37 +251,37 @@ useHead({
 }
 
 .groups-hero h1 {
-  font-size: 1.75rem;
-  font-weight: 800;
-  color: #ffffff;
-  margin: 0 0 0.5rem;
-  letter-spacing: -0.02em;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  font-size: var(--neo-font-size-3xl);
+  font-weight: var(--neo-font-weight-extrabold);
+  color: var(--neo-text-inverse);
+  margin: 0 0 var(--neo-spacing-2);
+  letter-spacing: var(--neo-letter-spacing-tight);
+  text-shadow: var(--neo-shadow-md);
 
   @media (min-width: 480px) {
-    font-size: 2rem;
-    margin-bottom: 0.75rem;
+    font-size: var(--neo-font-size-4xl);
+    margin-bottom: var(--neo-spacing-3);
   }
 
   @media (min-width: 768px) {
-    font-size: 2.5rem;
+    font-size: var(--neo-font-size-5xl);
   }
 }
 
 .hero-subtitle {
   color: rgba(255, 255, 255, 0.95);
-  font-size: 0.9375rem;
-  line-height: 1.5;
+  font-size: var(--neo-font-size-sm);
+  line-height: var(--neo-line-height-normal);
   max-width: 400px;
   margin: 0 auto;
 
   @media (min-width: 480px) {
-    font-size: 1rem;
+    font-size: var(--neo-font-size-base);
     max-width: 450px;
   }
 
   @media (min-width: 768px) {
-    font-size: 1.1rem;
+    font-size: var(--neo-font-size-lg);
     max-width: 500px;
   }
 }
@@ -342,15 +342,15 @@ useHead({
 // Layout
 .groups-layout {
   display: grid;
-  gap: 1.25rem;
+  gap: var(--neo-spacing-5);
 
   @media (min-width: 768px) {
-    gap: 1.5rem;
+    gap: var(--neo-spacing-6);
   }
 
   @media (min-width: 900px) {
     grid-template-columns: 260px 1fr;
-    gap: 2rem;
+    gap: var(--neo-spacing-8);
   }
 }
 
@@ -364,28 +364,28 @@ useHead({
 .sidebar-title {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-  font-weight: 700;
+  gap: var(--neo-spacing-2);
+  font-size: var(--neo-font-size-sm);
+  font-weight: var(--neo-font-weight-bold);
   color: var(--neo-text-secondary);
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--neo-spacing-3);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--neo-letter-spacing-wide);
 
   @media (min-width: 768px) {
-    font-size: 1rem;
-    margin-bottom: 1rem;
+    font-size: var(--neo-font-size-base);
+    margin-bottom: var(--neo-spacing-4);
   }
 
   span {
-    font-size: 1.125rem;
+    font-size: var(--neo-font-size-lg);
   }
 }
 
 .joined-groups {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--neo-spacing-3);
 }
 
 // Main Content
@@ -395,14 +395,14 @@ useHead({
 
 // Search
 .groups-search {
-  margin-bottom: 1rem;
+  margin-bottom: var(--neo-spacing-4);
 
   @media (min-width: 480px) {
-    margin-bottom: 1.25rem;
+    margin-bottom: var(--neo-spacing-5);
   }
 
   @media (min-width: 768px) {
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--neo-spacing-6);
   }
 }
 
@@ -426,17 +426,17 @@ useHead({
 
 .search-input {
   width: 100%;
-  padding: 0.875rem 0.875rem 0.875rem 2.5rem;
-  font-size: 0.9375rem;
+  padding: var(--neo-spacing-3) var(--neo-spacing-3) var(--neo-spacing-3) calc(var(--neo-spacing-10) + var(--neo-spacing-2));
+  font-size: var(--neo-font-size-sm);
   background: var(--neo-bg-secondary);
-  border: 2px solid var(--neo-border-color);
-  border-radius: 100px;
+  border: var(--neo-border-width-thick) var(--neo-border-style) var(--neo-border-color);
+  border-radius: var(--neo-radius-full);
   color: var(--neo-text-primary);
-  transition: all 0.2s ease;
+  transition: all var(--neo-transition);
 
   @media (min-width: 480px) {
-    padding: 1rem 1rem 1rem 3rem;
-    font-size: 1rem;
+    padding: var(--neo-spacing-4) var(--neo-spacing-4) var(--neo-spacing-4) var(--neo-spacing-12);
+    font-size: var(--neo-font-size-base);
   }
 
   &:focus {
@@ -471,10 +471,10 @@ useHead({
 }
 
 .section-title {
-  font-size: 1.125rem;
-  font-weight: 700;
+  font-size: var(--neo-font-size-lg);
+  font-weight: var(--neo-font-weight-bold);
   color: var(--neo-text-primary);
-  margin: 0 0 1rem;
+  margin: 0 0 var(--neo-spacing-4);
 }
 
 // Category Navigation
@@ -511,21 +511,21 @@ useHead({
 .category-btn {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.5rem 0.75rem;
+  gap: var(--neo-spacing-1);
+  padding: var(--neo-spacing-2) var(--neo-spacing-3);
   background: var(--neo-bg-secondary);
-  border: 2px solid var(--neo-border-color);
-  border-radius: 100px;
+  border: var(--neo-border-width-thick) var(--neo-border-style) var(--neo-border-color);
+  border-radius: var(--neo-radius-full);
   cursor: pointer;
-  transition: all 0.15s ease;
-  font-size: 0.8125rem;
+  transition: all var(--neo-transition-fast);
+  font-size: var(--neo-font-size-xs);
   flex-shrink: 0;
   white-space: nowrap;
 
   @media (min-width: 480px) {
-    gap: 0.4rem;
-    padding: 0.625rem 1rem;
-    font-size: 0.875rem;
+    gap: var(--neo-spacing-2);
+    padding: var(--neo-spacing-2) var(--neo-spacing-4);
+    font-size: var(--neo-font-size-sm);
   }
 
   .cat-emoji {
@@ -538,7 +538,7 @@ useHead({
 
   .cat-label {
     color: var(--neo-text-primary);
-    font-weight: 500;
+    font-weight: var(--neo-font-weight-medium);
   }
 
   &:hover {
@@ -550,7 +550,7 @@ useHead({
     border-color: var(--neo-accent);
 
     .cat-label {
-      color: white;
+      color: var(--neo-text-inverse);
     }
   }
 }
@@ -559,10 +559,10 @@ useHead({
 .groups-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.75rem;
+  gap: var(--neo-spacing-3);
 
   @media (min-width: 480px) {
-    gap: 1rem;
+    gap: var(--neo-spacing-4);
   }
 
   @media (min-width: 600px) {
@@ -633,21 +633,21 @@ useHead({
 
 // Login Notice
 .login-notice {
-  margin-top: 1.5rem;
-  padding: 1rem;
+  margin-top: var(--neo-spacing-6);
+  padding: var(--neo-spacing-4);
   background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
+  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
 
   @media (min-width: 480px) {
-    margin-top: 2rem;
-    padding: 1.25rem;
-    border-radius: 14px;
+    margin-top: var(--neo-spacing-8);
+    padding: var(--neo-spacing-5);
+    border-radius: var(--neo-radius-xl);
   }
 
   @media (min-width: 768px) {
-    padding: 1.5rem;
-    border-radius: 16px;
+    padding: var(--neo-spacing-6);
+    border-radius: var(--neo-radius-xl);
   }
 }
 
@@ -706,19 +706,19 @@ useHead({
 .notice-btn {
   flex-shrink: 0;
   width: 100%;
-  padding: 0.625rem 1.25rem;
+  padding: var(--neo-spacing-2) var(--neo-spacing-5);
   background: var(--neo-accent);
-  color: white;
+  color: var(--neo-text-inverse);
   text-decoration: none;
-  border-radius: 100px;
-  font-weight: 600;
-  font-size: 0.875rem;
-  transition: all 0.15s ease;
+  border-radius: var(--neo-radius-full);
+  font-weight: var(--neo-font-weight-semibold);
+  font-size: var(--neo-font-size-sm);
+  transition: all var(--neo-transition-fast);
   text-align: center;
 
   @media (min-width: 480px) {
     width: auto;
-    padding: 0.75rem 1.5rem;
+    padding: var(--neo-spacing-3) var(--neo-spacing-6);
   }
 
   &:hover {

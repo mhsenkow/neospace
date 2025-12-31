@@ -134,13 +134,13 @@ const getCategoryColor = (category: string) => {
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1rem;
-  background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
+  gap: var(--neo-spacing-3);
+  padding: var(--neo-spacing-4);
+  background: var(--neo-bg-card);
+  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--neo-transition);
 
   @media (min-width: 480px) {
     gap: 1rem;
@@ -151,7 +151,7 @@ const getCategoryColor = (category: string) => {
   &:hover {
     border-color: var(--neo-accent);
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--neo-shadow-md);
   }
 
   // Disable hover transform on touch devices
@@ -163,16 +163,16 @@ const getCategoryColor = (category: string) => {
 
   &--member {
     border-color: var(--neo-accent);
-    background: linear-gradient(135deg, var(--neo-bg-secondary), var(--neo-accent-soft));
+    background: linear-gradient(135deg, var(--neo-bg-card), var(--neo-accent-soft));
   }
 
   &--compact {
-    padding: 0.75rem;
-    gap: 0.625rem;
+    padding: var(--neo-spacing-3);
+    gap: var(--neo-spacing-2);
 
     @media (min-width: 480px) {
-      padding: 1rem;
-      gap: 0.75rem;
+      padding: var(--neo-spacing-4);
+      gap: var(--neo-spacing-3);
     }
 
     .group-card__icon {
@@ -213,13 +213,13 @@ const getCategoryColor = (category: string) => {
     justify-content: center;
     width: 44px;
     height: 44px;
-    border-radius: 12px;
-    transition: transform 0.2s ease;
+    border-radius: var(--neo-radius-md);
+    transition: transform var(--neo-transition);
 
     @media (min-width: 480px) {
       width: 56px;
       height: 56px;
-      border-radius: 14px;
+      border-radius: var(--neo-radius-lg);
     }
   }
 
@@ -244,60 +244,60 @@ const getCategoryColor = (category: string) => {
   }
 
   &__name {
-    margin: 0 0 0.125rem;
-    font-size: 1rem;
-    font-weight: 700;
+    margin: 0 0 var(--neo-spacing-1);
+    font-size: var(--neo-font-size-base);
+    font-weight: var(--neo-font-weight-bold);
     color: var(--neo-text-primary);
-    line-height: 1.3;
+    line-height: var(--neo-line-height-tight);
 
     @media (min-width: 480px) {
-      margin-bottom: 0.25rem;
-      font-size: 1.125rem;
+      margin-bottom: var(--neo-spacing-2);
+      font-size: var(--neo-font-size-lg);
     }
   }
 
   &__description {
-    margin: 0 0 0.375rem;
-    font-size: 0.8125rem;
+    margin: 0 0 var(--neo-spacing-2);
+    font-size: var(--neo-font-size-sm);
     color: var(--neo-text-secondary);
-    line-height: 1.45;
+    line-height: var(--neo-line-height-relaxed);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 
     @media (min-width: 480px) {
-      margin-bottom: 0.5rem;
-      font-size: 0.875rem;
-      line-height: 1.5;
+      margin-bottom: var(--neo-spacing-3);
+      font-size: var(--neo-font-size-sm);
+      line-height: var(--neo-line-height-normal);
     }
   }
 
   &__meta {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.75rem;
+    gap: var(--neo-spacing-2);
+    font-size: var(--neo-font-size-xs);
 
     @media (min-width: 480px) {
-      gap: 0.75rem;
-      font-size: 0.8125rem;
+      gap: var(--neo-spacing-3);
+      font-size: var(--neo-font-size-sm);
     }
   }
 
   &__tag {
     color: var(--neo-text-muted);
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: var(--neo-font-family-mono);
   }
 
   &__category {
-    font-weight: 600;
+    font-weight: var(--neo-font-weight-semibold);
     text-transform: uppercase;
-    font-size: 0.625rem;
-    letter-spacing: 0.05em;
+    font-size: var(--neo-font-size-xs);
+    letter-spacing: var(--neo-letter-spacing-wide);
 
     @media (min-width: 480px) {
-      font-size: 0.6875rem;
+      font-size: var(--neo-font-size-xs);
     }
   }
 
@@ -307,30 +307,31 @@ const getCategoryColor = (category: string) => {
   }
 
   &__btn {
-    padding: 0.4375rem 0.875rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
+    padding: var(--neo-spacing-2) var(--neo-spacing-4);
+    font-size: var(--neo-font-size-sm);
+    font-weight: var(--neo-font-weight-semibold);
     border: none;
-    border-radius: 100px;
+    border-radius: var(--neo-radius-full);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all var(--neo-transition-fast);
 
     @media (min-width: 480px) {
-      padding: 0.5rem 1rem;
-      font-size: 0.875rem;
+      padding: var(--neo-spacing-2) var(--neo-spacing-4);
+      font-size: var(--neo-font-size-sm);
     }
 
     &--join {
       background: var(--neo-accent);
-      color: white;
+      color: var(--neo-text-inverse);
 
       &:hover:not(:disabled) {
-        filter: brightness(1.1);
+        background: var(--neo-accent-hover);
         transform: scale(1.02);
+        box-shadow: var(--neo-shadow-sm);
       }
 
       &:disabled {
-        opacity: 0.5;
+        opacity: var(--neo-opacity-50);
         cursor: not-allowed;
       }
     }
@@ -338,53 +339,42 @@ const getCategoryColor = (category: string) => {
     &--leave {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-secondary);
-      border: 1px solid var(--neo-border-color);
+      border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
 
       &:hover:not(:disabled) {
-        background: #fee2e2;
-        color: #dc2626;
-        border-color: #fca5a5;
+        background: var(--neo-danger-soft);
+        color: var(--neo-danger);
+        border-color: var(--neo-danger-light);
       }
 
       &:disabled {
-        opacity: 0.5;
+        opacity: var(--neo-opacity-50);
       }
     }
   }
 
   &__badge {
     position: absolute;
-    top: -4px;
-    right: -4px;
+    top: calc(var(--neo-spacing-1) * -1);
+    right: calc(var(--neo-spacing-1) * -1);
     width: 18px;
     height: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--neo-accent);
-    color: white;
-    font-size: 0.625rem;
-    font-weight: bold;
-    border-radius: 50%;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    color: var(--neo-text-inverse);
+    font-size: var(--neo-font-size-xs);
+    font-weight: var(--neo-font-weight-bold);
+    border-radius: var(--neo-radius-full);
+    box-shadow: var(--neo-shadow-sm);
 
     @media (min-width: 480px) {
-      top: -6px;
-      right: -6px;
+      top: calc(var(--neo-spacing-2) * -1);
+      right: calc(var(--neo-spacing-2) * -1);
       width: 22px;
       height: 22px;
-      font-size: 0.75rem;
-    }
-  }
-}
-
-// Dark mode adjustments
-:root[data-theme="dark"] {
-  .group-card {
-    &__btn--leave:hover:not(:disabled) {
-      background: rgba(220, 38, 38, 0.2);
-      color: #f87171;
-      border-color: rgba(248, 113, 113, 0.3);
+      font-size: var(--neo-font-size-sm);
     }
   }
 }
