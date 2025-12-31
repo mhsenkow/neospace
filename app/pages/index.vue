@@ -568,6 +568,7 @@ useHead({
   flex: 1;
   min-width: 0;
   max-width: 600px;
+  overflow: hidden;
   
   @media (min-width: 1100px) {
     max-width: 600px;

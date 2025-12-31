@@ -187,6 +187,13 @@ body {
   cursor: var(--neo-cursor);
   min-height: 100vh;
   transition: background-color var(--neo-transition), color var(--neo-transition);
+  overflow-x: hidden; // Prevent horizontal scroll
+}
+
+// Global media overflow protection
+img, video, audio, iframe, embed, object {
+  max-width: 100%;
+  height: auto;
 }
 
 a {

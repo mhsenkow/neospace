@@ -503,6 +503,8 @@ onUnmounted(() => {
   padding: 0.875rem;
   background: var(--neo-bg-card);
   border-radius: 12px;
+  overflow: hidden;
+  max-width: 100%;
   
   // Subtle card feel on mobile too
   @media (max-width: 1023px) {
@@ -536,6 +538,8 @@ onUnmounted(() => {
 .status-main {
   display: flex;
   gap: 0.75rem;
+  overflow: hidden;
+  max-width: 100%;
 }
 
 // Avatar Column
@@ -600,9 +604,11 @@ onUnmounted(() => {
 .status-content-col {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  overflow: hidden;
 }
 
 // Header
@@ -825,6 +831,8 @@ onUnmounted(() => {
   margin-top: 0.5rem;
   border-radius: 12px;
   overflow: hidden;
+  max-width: 100%;
+  overflow: hidden;
 
   // Multi-image grid
   &:has(> *:nth-child(2)) {
@@ -834,10 +842,12 @@ onUnmounted(() => {
 
 .status-media-image {
   width: 100%;
+  max-width: 100%;
   height: auto;
   max-height: 350px;
   object-fit: cover;
   border-radius: 12px;
+  display: block;
   cursor: pointer;
   transition: opacity 0.15s ease;
 
@@ -849,7 +859,15 @@ onUnmounted(() => {
 .status-media-video,
 .status-media-audio {
   width: 100%;
+  max-width: 100%;
   border-radius: 12px;
+  display: block;
+}
+
+.status-media-video {
+  max-height: 500px;
+  object-fit: contain;
+  background: #000;
 }
 
 // Poll
