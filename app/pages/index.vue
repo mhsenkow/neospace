@@ -311,6 +311,7 @@ useHead({
             class="feed-header__tab"
             :class="{ 'feed-header__tab--active': activeTab === 'home' }"
             :disabled="!instancesStore.hasAuthenticatedInstance && !authStore.isAuthenticated"
+            :title="(!instancesStore.hasAuthenticatedInstance && !authStore.isAuthenticated) ? 'Log in to see your personal feed' : 'Posts from people you follow'"
             @click="switchTab('home')"
           >
             For You
@@ -394,12 +395,31 @@ useHead({
 
       <!-- Empty State -->
       <div v-else-if="displayedStatuses.length === 0" class="feed-empty">
+        <template v-if="activeTab === 'home' && !instancesStore.hasAuthenticatedInstance">
+          <span>🔑</span>
+          <p><strong>Log in to see your For You feed</strong></p>
+          <p class="feed-empty__sub">This shows posts from people you follow on your connected servers.</p>
+          <NuxtLink to="/login" class="neo-btn neo-btn--primary">Log In</NuxtLink>
+        </template>
+        <template v-else>
         <span>📭</span>
         <p>No posts yet. Follow some people or check back later!</p>
+        </template>
       </div>
 
       <!-- Posts Feed - Seamless infinite scroll -->
       <div v-else class="feed-posts">
+        <!-- Login Prompt for For You (when viewing local/federated but not logged in) -->
+        <div v-if="!instancesStore.hasAuthenticatedInstance" class="login-prompt">
+          <div class="login-prompt__content">
+            <span>💡</span>
+            <div>
+              <strong>Want your personalized feed?</strong>
+              <p>Log in to see posts from people you follow.</p>
+            </div>
+            <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Log In</NuxtLink>
+          </div>
+        </div>
         <div class="posts-container">
         <TransitionGroup name="post-list">
           <RealPostCard 
@@ -577,7 +597,7 @@ useHead({
 
 // Instance filter pills
 .instance-filters {
-  display: flex;
+      display: flex;
   gap: 0.5rem;
   padding: 0.75rem 0;
   overflow-x: auto;
@@ -665,13 +685,13 @@ useHead({
   @media (max-width: 1023px) {
     padding: 0.5rem;
   }
-}
+  }
 
 .add-server-link {
   background: none;
   border: none;
   color: var(--neo-accent);
-  font-size: 0.8125rem;
+    font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
   
@@ -718,7 +738,7 @@ useHead({
   height: 56px;
     display: flex;
     align-items: center;
-  justify-content: center;
+    justify-content: center;
   background: var(--neo-text-primary);
   color: var(--neo-bg-primary);
   border: none;
@@ -760,7 +780,7 @@ useHead({
 .feed-error {
     display: flex;
     flex-direction: column;
-  align-items: center;
+    align-items: center;
   gap: 0.75rem;
   padding: 3rem 1rem;
   text-align: center;
@@ -770,8 +790,57 @@ useHead({
   }
 
   p {
-    color: var(--neo-text-muted);
+      color: var(--neo-text-muted);
     font-size: 0.9375rem;
+    margin: 0;
+  }
+  
+  &__sub {
+    font-size: 0.875rem !important;
+    max-width: 280px;
+  }
+  
+  .neo-btn {
+    margin-top: 0.5rem;
+  }
+}
+
+.login-prompt {
+  margin: 0.75rem 0;
+  padding: 0.875rem 1rem;
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
+  
+  &__content {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    
+    > span {
+      font-size: 1.25rem;
+    }
+    
+    > div {
+      flex: 1;
+      
+      strong {
+        display: block;
+        font-size: 0.9375rem;
+    color: var(--neo-text-primary);
+  }
+
+      p {
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+        margin: 0.125rem 0 0;
+      }
+    }
+  }
+  
+  .neo-btn--sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
   }
 }
 
@@ -786,8 +855,8 @@ useHead({
 
 // Posts list - Subtle background container
 .feed-posts {
-  display: flex;
-  flex-direction: column;
+    display: flex;
+    flex-direction: column;
   
   @media (max-width: 1023px) {
     margin: 0 -0.5rem;
