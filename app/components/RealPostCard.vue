@@ -2,7 +2,7 @@
 /**
  * RealPostCard Component
  * 
- * Displays a real Mastodon status from the API.
+ * Displays a real Mastodon status with reply preview for conversation intrigue.
  */
 
 import type { mastodon } from 'masto'
@@ -30,6 +30,9 @@ const isMuting = ref(false)
 const isBlocking = ref(false)
 const showCopiedToast = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
+
+// Check if this post has replies (for conversation preview)
+const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString)
@@ -205,13 +208,21 @@ const handleCopyLink = async () => {
   }
 }
 
-// Open in original instance
+// Open in original instance (also serves as "view thread")
 const handleOpenOriginal = () => {
   const url = displayStatus.value.url || displayStatus.value.uri
   if (url) {
     window.open(url, '_blank')
   }
   isMenuOpen.value = false
+}
+
+// View thread - opens the post in its original location
+const viewThread = () => {
+  const url = displayStatus.value.url || displayStatus.value.uri
+  if (url) {
+    window.open(url, '_blank')
+  }
 }
 
 // Add click outside listener
@@ -252,7 +263,8 @@ onUnmounted(() => {
             </svg>
           </button>
         </a>
-        <div class="status-thread-line"></div>
+        <!-- Thread line connecting to replies -->
+        <div v-if="hasReplies" class="status-thread-line"></div>
       </div>
 
       <!-- Content Column -->
@@ -445,6 +457,20 @@ onUnmounted(() => {
             </svg>
       </button>
     </footer>
+
+        <!-- Reply Preview / Thread Teaser -->
+        <button 
+          v-if="hasReplies" 
+          class="status-thread-preview"
+          @click="viewThread"
+        >
+          <span class="thread-preview-text">
+            View {{ displayStatus.repliesCount === 1 ? 'reply' : `${formatNumber(displayStatus.repliesCount)} replies` }}
+          </span>
+          <svg class="thread-preview-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -465,14 +491,14 @@ onUnmounted(() => {
 // ============================================
 
 .status-card {
-  padding: 0.75rem 0;
-  border-bottom: 1px solid var(--neo-border-color);
-
-  // Remove card styling on mobile for cleaner look
+  padding: 0.875rem;
+  background: var(--neo-bg-card);
+  border-radius: 12px;
+  
+  // Subtle card feel on mobile too
   @media (max-width: 1023px) {
-    background: transparent;
-    border-radius: 0;
-    box-shadow: none;
+    background: var(--neo-bg-secondary);
+    border-radius: 8px;
   }
 }
 
@@ -551,13 +577,14 @@ onUnmounted(() => {
   }
 }
 
+// Thread line connecting to replies
 .status-thread-line {
   flex: 1;
   width: 2px;
   background: var(--neo-border-color);
   margin-top: 0.5rem;
-  min-height: 0;
-  display: none; // Show only for threads
+  min-height: 12px;
+  border-radius: 1px;
 }
 
 // Content Column
@@ -919,6 +946,40 @@ onUnmounted(() => {
   }
 }
 
+// Thread Preview / View Replies Button
+.status-thread-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.625rem;
+  padding: 0.5rem 0;
+  background: transparent;
+  border: none;
+  color: var(--neo-text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--neo-text-secondary);
+    
+    .thread-preview-arrow {
+      transform: translateX(2px);
+    }
+  }
+
+  .thread-preview-text {
+    font-weight: 500;
+  }
+
+  .thread-preview-arrow {
+    width: 14px;
+    height: 14px;
+    transition: transform 0.15s ease;
+    opacity: 0.7;
+  }
+}
+
 // Chaos mode
 :global(.chaos-active) {
   .status-display-name {
@@ -937,8 +998,6 @@ onUnmounted(() => {
     border: 1px solid var(--neo-border-color);
     border-radius: 12px;
     padding: 1rem;
-    margin-bottom: 0;
-    border-bottom: none;
 
     &:hover {
       background: var(--neo-bg-secondary);
@@ -1000,4 +1059,3 @@ onUnmounted(() => {
   transform: translateX(-50%) translateY(10px);
 }
 </style>
-

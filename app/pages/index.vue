@@ -2,7 +2,7 @@
 /**
  * Home Page - Threads-inspired minimal feed
  * 
- * Clean, focused design with collapsible compose box
+ * Clean, focused design with subtle card container and reply previews
  */
 
 import { useTimelineStore } from '~/stores/timeline'
@@ -172,15 +172,17 @@ useHead({
         <p>No posts yet. Follow some people or check back later!</p>
       </div>
 
-      <!-- Posts Feed -->
+      <!-- Posts Feed - Subtle background container -->
       <div v-else class="feed-posts">
-        <TransitionGroup name="post-list">
-          <RealPostCard 
-            v-for="status in timelineStore.statuses" 
-            :key="status.id" 
-            :status="status" 
-          />
-        </TransitionGroup>
+        <div class="posts-container">
+          <TransitionGroup name="post-list">
+            <RealPostCard 
+              v-for="status in timelineStore.statuses" 
+              :key="status.id" 
+              :status="status" 
+            />
+          </TransitionGroup>
+        </div>
 
         <!-- Load More -->
         <button 
@@ -231,6 +233,7 @@ useHead({
   gap: 2rem;
   max-width: 680px;
   margin: 0 auto;
+  padding: 0 0.5rem;
   
   @media (min-width: 1100px) {
     max-width: 920px;
@@ -404,13 +407,42 @@ useHead({
   to { transform: rotate(360deg); }
 }
 
-// Posts list
+// Posts list - Subtle background container
 .feed-posts {
   display: flex;
   flex-direction: column;
   
   @media (max-width: 1023px) {
     margin: 0 -0.5rem;
+  }
+}
+
+// Subtle container wrapping posts
+.posts-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem; // Slight spacing between cards
+  
+  // Very subtle background - barely noticeable
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--neo-bg-secondary) 2%,
+    var(--neo-bg-secondary) 98%,
+    transparent 100%
+  );
+  border-radius: 16px;
+  padding: 0.5rem;
+  
+  @media (min-width: 1024px) {
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: linear-gradient(
+      135deg,
+      rgba(var(--neo-bg-secondary-rgb, 30, 30, 30), 0.4) 0%,
+      rgba(var(--neo-bg-secondary-rgb, 30, 30, 30), 0.2) 100%
+    );
+    border: 1px solid rgba(var(--neo-border-rgb, 58, 58, 58), 0.3);
   }
 }
 
