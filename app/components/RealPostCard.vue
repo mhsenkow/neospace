@@ -500,16 +500,22 @@ onUnmounted(() => {
 // ============================================
 
 .status-card {
-  padding: 0.875rem;
+  padding: 0.75rem;
   background: var(--neo-bg-card);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
   max-width: 100%;
+  width: 100%;
+  
+  // Larger padding on bigger screens
+  @media (min-width: 400px) {
+    padding: 0.875rem;
+    border-radius: 12px;
+  }
   
   // Subtle card feel on mobile too
   @media (max-width: 1023px) {
     background: var(--neo-bg-secondary);
-    border-radius: 8px;
   }
 }
 
@@ -547,8 +553,12 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 40px;
+  width: 36px;
   flex-shrink: 0;
+  
+  @media (min-width: 400px) {
+    width: 40px;
+  }
 }
 
 .status-avatar-link {
@@ -558,10 +568,15 @@ onUnmounted(() => {
 }
 
 .status-avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   object-fit: cover;
+  
+  @media (min-width: 400px) {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 .status-follow-btn {
@@ -616,6 +631,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.375rem;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .status-author {
@@ -623,6 +640,8 @@ onUnmounted(() => {
   align-items: center;
   text-decoration: none;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
 
   &:hover .status-display-name {
     text-decoration: underline;
@@ -636,6 +655,7 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 
   :deep(img.emoji) {
     height: 1em;
@@ -644,11 +664,11 @@ onUnmounted(() => {
 }
 
 .status-time {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--neo-text-muted);
   white-space: nowrap;
   text-decoration: none;
-  margin-left: auto;
+  flex-shrink: 0;
   padding-right: 0.25rem;
 
   &:hover {
@@ -684,7 +704,8 @@ onUnmounted(() => {
   position: absolute;
   top: 100%;
   right: 0;
-  min-width: 220px;
+  min-width: 180px;
+  max-width: calc(100vw - 2rem);
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
   border-radius: 12px;
@@ -694,7 +715,7 @@ onUnmounted(() => {
   padding: 0.5rem 0;
 
   @media (min-width: 480px) {
-    min-width: 250px;
+    min-width: 220px;
   }
 }
 
@@ -792,6 +813,8 @@ onUnmounted(() => {
   color: var(--neo-text-primary);
   word-wrap: break-word;
   overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 
   :deep(p) {
     margin-bottom: 0.5rem;
@@ -803,6 +826,7 @@ onUnmounted(() => {
 
   :deep(a) {
     color: var(--neo-accent);
+    word-break: break-all;
 
     &:hover {
       text-decoration: underline;
