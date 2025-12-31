@@ -23,6 +23,9 @@ const router = useRouter()
 // Instance manager ref
 const instanceManagerRef = ref<{ open: () => void } | null>(null)
 
+// Followers modal ref
+const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void } | null>(null)
+
 // Relationship state
 const relationship = ref<mastodon.v1.Relationship | null>(null)
 const isFollowLoading = ref(false)
@@ -139,6 +142,12 @@ useHead({
   <div class="profile-page">
     <!-- Instance Manager Modal -->
     <InstanceManager ref="instanceManagerRef" />
+    
+    <!-- Followers/Following Modal -->
+    <FollowersModal 
+      ref="followersModalRef" 
+      :account-id="profileStore.viewedProfile?.id"
+    />
     
     <!-- Connected Accounts Overview (when viewing own profile with multi-instance) -->
     <section 
@@ -286,14 +295,20 @@ useHead({
                 <span class="profile-stat__value">{{ profileStore.viewedProfile.statusesCount?.toLocaleString() }}</span>
                 <span class="profile-stat__label">Posts</span>
               </div>
-              <div class="profile-stat">
+              <button 
+                class="profile-stat profile-stat--clickable"
+                @click="followersModalRef?.open('following')"
+              >
                 <span class="profile-stat__value">{{ profileStore.viewedProfile.followingCount?.toLocaleString() }}</span>
                 <span class="profile-stat__label">Following</span>
-              </div>
-              <div class="profile-stat">
+              </button>
+              <button 
+                class="profile-stat profile-stat--clickable"
+                @click="followersModalRef?.open('followers')"
+              >
                 <span class="profile-stat__value">{{ profileStore.viewedProfile.followersCount?.toLocaleString() }}</span>
                 <span class="profile-stat__label">Followers</span>
-              </div>
+              </button>
             </div>
           </div>
 
@@ -837,6 +852,9 @@ useHead({
   display: flex;
   flex-direction: column;
   align-items: center;
+  background: none;
+  border: none;
+  padding: 0;
 
   @media (min-width: 640px) {
     align-items: flex-start;
@@ -851,6 +869,22 @@ useHead({
   &__label {
     font-size: 0.8125rem;
     color: var(--neo-text-muted);
+  }
+
+  &--clickable {
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    margin: -0.5rem -0.75rem;
+    border-radius: var(--neo-radius-md);
+    transition: all 0.15s ease;
+
+    &:hover {
+      background: var(--neo-bg-secondary);
+      
+      .profile-stat__value {
+        color: var(--neo-accent);
+      }
+    }
   }
 }
 
