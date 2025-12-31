@@ -2,7 +2,7 @@
 /**
  * Home Page - Threads-inspired minimal feed
  * 
- * Clean, focused design with subtle card container and reply previews
+ * Clean, focused design with seamless infinite scroll
  */
 
 import { useTimelineStore } from '~/stores/timeline'
@@ -20,6 +20,10 @@ const activeTab = ref<TabType>('home')
 const isComposeCollapsed = ref(false)
 const lastScrollY = ref(0)
 const feedContainer = ref<HTMLElement | null>(null)
+
+// Infinite scroll refs
+const loadTrigger = ref<HTMLElement | null>(null)
+const isNearBottom = ref(false)
 
 const handleScroll = () => {
   if (typeof window === 'undefined') return
@@ -44,7 +48,42 @@ const expandCompose = () => {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-// Initialize stores
+// Seamless infinite scroll with IntersectionObserver
+let observer: IntersectionObserver | null = null
+
+const setupInfiniteScroll = () => {
+  if (typeof window === 'undefined' || !loadTrigger.value) return
+  
+  // Disconnect existing observer
+  if (observer) {
+    observer.disconnect()
+  }
+  
+  // Create new observer with large rootMargin for eager loading
+  observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0]
+      if (entry.isIntersecting && !timelineStore.isLoadingMore && timelineStore.hasMore) {
+        // Start loading before user reaches the trigger
+        loadMorePosts()
+      }
+    },
+    {
+      // Trigger 800px before the element comes into view
+      rootMargin: '0px 0px 800px 0px',
+      threshold: 0
+    }
+  )
+  
+  observer.observe(loadTrigger.value)
+}
+
+const loadMorePosts = async () => {
+  if (timelineStore.isLoadingMore || !timelineStore.hasMore) return
+  await timelineStore.loadMore()
+}
+
+// Initialize stores and setup infinite scroll
 onMounted(async () => {
   await authStore.initialize()
   
@@ -61,12 +100,27 @@ onMounted(async () => {
   
   // Add scroll listener
   window.addEventListener('scroll', handleScroll, { passive: true })
+  
+  // Setup infinite scroll after initial load
+  nextTick(() => {
+    setupInfiniteScroll()
+  })
 })
 
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('scroll', handleScroll)
   }
+  if (observer) {
+    observer.disconnect()
+  }
+})
+
+// Re-setup observer when statuses change
+watch(() => timelineStore.statuses.length, () => {
+  nextTick(() => {
+    setupInfiniteScroll()
+  })
 })
 
 const switchTab = async (tab: TabType) => {
@@ -89,10 +143,6 @@ const switchTab = async (tab: TabType) => {
       await timelineStore.fetchFederatedTimeline(fedUrl, true)
       break
   }
-}
-
-const handleLoadMore = () => {
-  timelineStore.loadMore()
 }
 
 const handleRefresh = async () => {
@@ -172,7 +222,7 @@ useHead({
         <p>No posts yet. Follow some people or check back later!</p>
       </div>
 
-      <!-- Posts Feed - Subtle background container -->
+      <!-- Posts Feed - Seamless infinite scroll -->
       <div v-else class="feed-posts">
         <div class="posts-container">
           <TransitionGroup name="post-list">
@@ -184,15 +234,27 @@ useHead({
           </TransitionGroup>
         </div>
 
-        <!-- Load More -->
-        <button 
-          v-if="timelineStore.hasMore"
-          class="feed-load-more neo-btn neo-btn--ghost"
-          :disabled="timelineStore.isLoadingMore"
-          @click="handleLoadMore"
-        >
-          {{ timelineStore.isLoadingMore ? 'Loading...' : 'Load More' }}
-        </button>
+        <!-- Invisible trigger for infinite scroll - loads before visible -->
+        <div ref="loadTrigger" class="infinite-trigger" aria-hidden="true">
+          <!-- Subtle loading indicator only visible when actively loading -->
+          <Transition name="fade">
+            <div v-if="timelineStore.isLoadingMore" class="loading-more">
+              <div class="loading-more__dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
+        <!-- End of feed indicator -->
+        <Transition name="fade">
+          <div v-if="!timelineStore.hasMore && timelineStore.statuses.length > 0" class="feed-end">
+            <span>✨</span>
+            <p>You're all caught up!</p>
+          </div>
+        </Transition>
       </div>
     </section>
 
@@ -421,35 +483,93 @@ useHead({
 .posts-container {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem; // Slight spacing between cards
+  gap: 0.625rem;
   
-  // Very subtle background - barely noticeable
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--neo-bg-secondary) 2%,
-    var(--neo-bg-secondary) 98%,
-    transparent 100%
-  );
+  // Very subtle background for light mode
+  background: transparent;
   border-radius: 16px;
   padding: 0.5rem;
   
   @media (min-width: 1024px) {
     gap: 0.75rem;
     padding: 0.75rem;
-    background: linear-gradient(
-      135deg,
-      rgba(var(--neo-bg-secondary-rgb, 30, 30, 30), 0.4) 0%,
-      rgba(var(--neo-bg-secondary-rgb, 30, 30, 30), 0.2) 100%
-    );
-    border: 1px solid rgba(var(--neo-border-rgb, 58, 58, 58), 0.3);
+    // Subtle tint that works in both modes
+    background: var(--neo-bg-secondary);
+    opacity: 1;
+    border: 1px solid var(--neo-border-color);
+    border-radius: 16px;
   }
 }
 
-.feed-load-more {
-  margin: 1rem auto;
-  padding: 0.625rem 1.5rem;
-  font-size: 0.875rem;
+// Infinite scroll trigger - invisible but positioned to trigger early
+.infinite-trigger {
+  min-height: 1px;
+  margin-top: 1rem;
+}
+
+// Subtle loading indicator
+.loading-more {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 0;
+  
+  &__dots {
+    display: flex;
+    gap: 0.375rem;
+    
+    span {
+      width: 8px;
+      height: 8px;
+      background: var(--neo-text-muted);
+      border-radius: 50%;
+      animation: bounce 1.4s ease-in-out infinite both;
+      
+      &:nth-child(1) { animation-delay: -0.32s; }
+      &:nth-child(2) { animation-delay: -0.16s; }
+      &:nth-child(3) { animation-delay: 0s; }
+    }
+  }
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+// End of feed
+.feed-end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2rem 1rem;
+  text-align: center;
+  
+  span {
+    font-size: 1.5rem;
+  }
+  
+  p {
+    color: var(--neo-text-muted);
+    font-size: 0.875rem;
+  }
+}
+
+// Fade transition
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 // Right sidebar - Ultra minimal
