@@ -117,13 +117,44 @@ const fetchMergedTimeline = async (type: 'local' | 'federated' = 'local') => {
   }
 }
 
-// Fetch merged home timeline (from authenticated instances only)
+// Fetch merged home timeline (from authenticated instances + legacy auth)
 const fetchMergedHomeTimeline = async () => {
   isLoadingMerged.value = true
   mergedError.value = null
   
   try {
-    const statuses = await instancesStore.fetchMergedHomeTimeline(20)
+    // Start with multi-instance home timeline
+    let statuses = await instancesStore.fetchMergedHomeTimeline(20)
+    
+    // Also include legacy authStore timeline if authenticated
+    if (authStore.isAuthenticated && authStore.accessToken && authStore.instanceUrl) {
+      try {
+        // Fetch from legacy auth as well
+        await timelineStore.fetchHomeTimeline(true)
+        
+        // Merge legacy statuses with multi-instance statuses
+        const legacyStatuses = timelineStore.statuses.map(s => ({
+          ...s,
+          _instanceId: 'legacy',
+          _instanceUrl: authStore.instanceUrl,
+        }))
+        
+        // Combine and sort by date
+        statuses = [...statuses, ...legacyStatuses].sort((a, b) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
+        
+        // Remove duplicates by ID
+        const seen = new Set()
+        statuses = statuses.filter(s => {
+          if (seen.has(s.id)) return false
+          seen.add(s.id)
+          return true
+        })
+      } catch (e) {
+        console.warn('Failed to fetch legacy home timeline:', e)
+      }
+    }
     
     // Filter by active instance if set
     if (instancesStore.activeInstanceFilter) {
