@@ -62,11 +62,16 @@ const handleFavourite = async () => {
   
   isFavouriting.value = true
   try {
+    // Pass the status URL for cross-instance resolution
+    const statusUrl = displayStatus.value.url || displayStatus.value.uri
     if (displayStatus.value.favourited) {
-      await timelineStore.unfavouriteStatus(displayStatus.value.id)
+      await timelineStore.unfavouriteStatus(displayStatus.value.id, statusUrl)
     } else {
-      await timelineStore.favouriteStatus(displayStatus.value.id)
+      await timelineStore.favouriteStatus(displayStatus.value.id, statusUrl)
     }
+    // Optimistically update the UI
+    displayStatus.value.favourited = !displayStatus.value.favourited
+    displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
   } catch (e) {
     console.error('Favourite error:', e)
   } finally {
@@ -79,11 +84,15 @@ const handleBoost = async () => {
   
   isBoosting.value = true
   try {
+    const statusUrl = displayStatus.value.url || displayStatus.value.uri
     if (displayStatus.value.reblogged) {
-      await timelineStore.unboostStatus(displayStatus.value.id)
+      await timelineStore.unboostStatus(displayStatus.value.id, statusUrl)
     } else {
-      await timelineStore.boostStatus(displayStatus.value.id)
+      await timelineStore.boostStatus(displayStatus.value.id, statusUrl)
     }
+    // Optimistically update the UI
+    displayStatus.value.reblogged = !displayStatus.value.reblogged
+    displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
   } catch (e) {
     console.error('Boost error:', e)
   } finally {

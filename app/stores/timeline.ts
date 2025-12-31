@@ -284,64 +284,165 @@ export const useTimelineStore = defineStore('timeline', {
     },
 
     /**
-     * Favourite a status
+     * Resolve a status URL to get the local ID on the user's instance
+     * This is needed when interacting with posts from other instances
      */
-    async favouriteStatus(statusId: string) {
-      const client = this.getClient()
-      const updated = await client.v1.statuses.$select(statusId).favourite()
-      
-      // Update in list
-      const index = this.statuses.findIndex(s => s.id === statusId)
-      if (index !== -1) {
-        this.statuses[index] = updated
+    async resolveStatus(statusUrl: string): Promise<string | null> {
+      try {
+        const client = this.getClient()
+        const results = await client.v2.search.fetch({
+          q: statusUrl,
+          resolve: true,
+          type: 'statuses',
+          limit: 1,
+        })
+        
+        if (results.statuses.length > 0) {
+          return results.statuses[0].id
+        }
+        return null
+      } catch (e) {
+        console.warn('Failed to resolve status:', e)
+        return null
       }
+    },
+
+    /**
+     * Favourite a status
+     * statusId: The status ID
+     * statusUrl: The original URL of the status (for cross-instance resolution)
+     */
+    async favouriteStatus(statusId: string, statusUrl?: string) {
+      const client = this.getClient()
       
-      return updated
+      // Try with the provided ID first
+      try {
+        const updated = await client.v1.statuses.$select(statusId).favourite()
+        
+        // Update in list
+        const index = this.statuses.findIndex(s => s.id === statusId)
+        if (index !== -1) {
+          this.statuses[index] = updated
+        }
+        
+        return updated
+      } catch (e: any) {
+        // If 404 and we have a URL, try to resolve it
+        if (e.status === 404 && statusUrl) {
+          const localId = await this.resolveStatus(statusUrl)
+          if (localId) {
+            const updated = await client.v1.statuses.$select(localId).favourite()
+            
+            // Update in list using original ID
+            const index = this.statuses.findIndex(s => s.id === statusId)
+            if (index !== -1) {
+              this.statuses[index] = { ...updated, id: statusId } // Keep original ID for UI consistency
+            }
+            
+            return updated
+          }
+        }
+        throw e
+      }
     },
 
     /**
      * Unfavourite a status
      */
-    async unfavouriteStatus(statusId: string) {
+    async unfavouriteStatus(statusId: string, statusUrl?: string) {
       const client = this.getClient()
-      const updated = await client.v1.statuses.$select(statusId).unfavourite()
       
-      const index = this.statuses.findIndex(s => s.id === statusId)
-      if (index !== -1) {
-        this.statuses[index] = updated
+      try {
+        const updated = await client.v1.statuses.$select(statusId).unfavourite()
+        
+        const index = this.statuses.findIndex(s => s.id === statusId)
+        if (index !== -1) {
+          this.statuses[index] = updated
+        }
+        
+        return updated
+      } catch (e: any) {
+        if (e.status === 404 && statusUrl) {
+          const localId = await this.resolveStatus(statusUrl)
+          if (localId) {
+            const updated = await client.v1.statuses.$select(localId).unfavourite()
+            
+            const index = this.statuses.findIndex(s => s.id === statusId)
+            if (index !== -1) {
+              this.statuses[index] = { ...updated, id: statusId }
+            }
+            
+            return updated
+          }
+        }
+        throw e
       }
-      
-      return updated
     },
 
     /**
      * Boost/reblog a status
      */
-    async boostStatus(statusId: string) {
+    async boostStatus(statusId: string, statusUrl?: string) {
       const client = this.getClient()
-      const updated = await client.v1.statuses.$select(statusId).reblog()
       
-      const index = this.statuses.findIndex(s => s.id === statusId)
-      if (index !== -1) {
-        this.statuses[index] = updated.reblog || updated
+      try {
+        const updated = await client.v1.statuses.$select(statusId).reblog()
+        
+        const index = this.statuses.findIndex(s => s.id === statusId)
+        if (index !== -1) {
+          this.statuses[index] = updated.reblog || updated
+        }
+        
+        return updated
+      } catch (e: any) {
+        if (e.status === 404 && statusUrl) {
+          const localId = await this.resolveStatus(statusUrl)
+          if (localId) {
+            const updated = await client.v1.statuses.$select(localId).reblog()
+            
+            const index = this.statuses.findIndex(s => s.id === statusId)
+            if (index !== -1) {
+              this.statuses[index] = { ...(updated.reblog || updated), id: statusId }
+            }
+            
+            return updated
+          }
+        }
+        throw e
       }
-      
-      return updated
     },
 
     /**
      * Unboost a status
      */
-    async unboostStatus(statusId: string) {
+    async unboostStatus(statusId: string, statusUrl?: string) {
       const client = this.getClient()
-      const updated = await client.v1.statuses.$select(statusId).unreblog()
       
-      const index = this.statuses.findIndex(s => s.id === statusId)
-      if (index !== -1) {
-        this.statuses[index] = updated
+      try {
+        const updated = await client.v1.statuses.$select(statusId).unreblog()
+        
+        const index = this.statuses.findIndex(s => s.id === statusId)
+        if (index !== -1) {
+          this.statuses[index] = updated
+        }
+        
+        return updated
+      } catch (e: any) {
+        if (e.status === 404 && statusUrl) {
+          const localId = await this.resolveStatus(statusUrl)
+          if (localId) {
+            const updated = await client.v1.statuses.$select(localId).unreblog()
+            
+            const index = this.statuses.findIndex(s => s.id === statusId)
+            if (index !== -1) {
+              this.statuses[index] = { ...updated, id: statusId }
+            }
+            
+            return updated
+          }
+        }
+        throw e
       }
-      
-      return updated
     },
 
     /**
