@@ -652,20 +652,20 @@ useHead({
 
 // Instance filter pills
 .instance-filters {
-      display: flex;
+  display: flex;
+  flex-wrap: nowrap;
   gap: 0.5rem;
-  padding: 0.75rem 0;
+  padding: 0.75rem 0.5rem;
   overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  width: 100%;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
   
   &::-webkit-scrollbar {
     display: none;
-  }
-  
-  @media (max-width: 1023px) {
-    margin: 0 -0.5rem;
-    padding: 0.75rem 0.5rem;
   }
 }
 
@@ -681,6 +681,7 @@ useHead({
   font-weight: 500;
   color: var(--neo-text-secondary);
   white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   transition: all 0.15s ease;
   
