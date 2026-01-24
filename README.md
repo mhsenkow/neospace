@@ -4,10 +4,8 @@
 
 A beautiful, customizable frontend for Mastodon, GoToSocial, and other ActivityPub-compatible servers. Features two visual modes:
 
-- **👩 Mom Mode**: Clean, accessible, professional design
-- **🌀 Chaos Mode**: Inject your own CSS and relive the Myspace glory days
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/73c87a4f-141c-4be8-b0b4-7efcbf20702e" />
 
-![NeoSpace Screenshot](https://via.placeholder.com/800x400?text=NeoSpace+Screenshot)
 
 ## ✨ Features
 
