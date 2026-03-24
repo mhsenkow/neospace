@@ -7,11 +7,12 @@
 
 import { defineStore } from 'pinia'
 
-export type ColumnFeedType = 'home' | 'local' | 'federated'
+export type ColumnFeedType = 'home' | 'local' | 'federated' | 'group'
 
 export interface ColumnConfig {
   id: string
   feedType: ColumnFeedType
+  groupTag?: string
 }
 
 interface ColumnsState {
@@ -60,9 +61,11 @@ export const useColumnsStore = defineStore('columns', {
       }
     },
 
-    addColumn(feedType: ColumnFeedType = 'local') {
+    addColumn(feedType: ColumnFeedType = 'local', groupTag?: string) {
       if (this.columns.length >= MAX_COLUMNS) return
-      this.columns.push({ id: generateId(), feedType })
+      const col: ColumnConfig = { id: generateId(), feedType }
+      if (groupTag) col.groupTag = groupTag
+      this.columns.push(col)
       this.saveToStorage()
     },
 
@@ -75,10 +78,11 @@ export const useColumnsStore = defineStore('columns', {
       }
     },
 
-    updateColumnFeedType(columnId: string, feedType: ColumnFeedType) {
+    updateColumnFeedType(columnId: string, feedType: ColumnFeedType, groupTag?: string) {
       const column = this.columns.find(c => c.id === columnId)
       if (column) {
         column.feedType = feedType
+        column.groupTag = feedType === 'group' ? groupTag : undefined
         this.saveToStorage()
       }
     },

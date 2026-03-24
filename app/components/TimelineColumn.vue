@@ -2,11 +2,13 @@
 /**
  * TimelineColumn - Self-contained timeline column for multi-column layout.
  * Each column manages its own feed data, scroll, and infinite loading.
+ * Supports home/local/federated timelines and group (hashtag) timelines.
  */
 
 import { createRestAPIClient, type mastodon } from 'masto'
 import { useAuthStore } from '~/stores/auth'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
+import { useGroupsStore } from '~/stores/groups'
 import type { ColumnConfig, ColumnFeedType } from '~/stores/columns'
 
 interface Props {
@@ -18,11 +20,12 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   remove: []
-  'update-feed-type': [feedType: ColumnFeedType]
+  'update-feed-type': [feedType: ColumnFeedType, groupTag?: string]
 }>()
 
 const authStore = useAuthStore()
 const instancesStore = useInstancesStore()
+const groupsStore = useGroupsStore()
 
 const statuses = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isLoading = ref(false)
@@ -32,33 +35,44 @@ const hasMore = ref(true)
 const maxId = ref<string | null>(null)
 
 const feedMenuOpen = ref(false)
+const groupsExpanded = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
 const loadTrigger = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 
-const feedLabels: Record<ColumnFeedType, string> = {
+const feedLabels: Record<string, string> = {
   home: 'For You',
   local: 'Local',
   federated: 'Federated',
 }
 
-const feedLabel = computed(() => feedLabels[props.column.feedType])
+const feedLabel = computed(() => {
+  if (props.column.feedType === 'group' && props.column.groupTag) {
+    const group = groupsStore.getGroup(props.column.groupTag)
+    return group ? `${group.icon} ${group.name}` : `#${props.column.groupTag}`
+  }
+  return feedLabels[props.column.feedType] ?? props.column.feedType
+})
 
 const canShowHome = computed(() =>
   instancesStore.hasAuthenticatedInstance || authStore.isAuthenticated
 )
 
+const joinedGroups = computed(() => groupsStore.joinedGroups)
+
 const closeFeedMenu = (e: MouseEvent) => {
   const target = e.target as HTMLElement
   if (!target.closest('.column-feed-select') && !target.closest('.feed-dropdown')) {
     feedMenuOpen.value = false
+    groupsExpanded.value = false
   }
 }
 
-const switchFeed = (type: ColumnFeedType) => {
+const switchFeed = (type: ColumnFeedType, groupTag?: string) => {
   feedMenuOpen.value = false
-  if (type === props.column.feedType) return
-  emit('update-feed-type', type)
+  groupsExpanded.value = false
+  if (type === props.column.feedType && groupTag === props.column.groupTag) return
+  emit('update-feed-type', type, groupTag)
 }
 
 const fetchTimeline = async (refresh = false) => {
@@ -74,7 +88,17 @@ const fetchTimeline = async (refresh = false) => {
   try {
     let result: (mastodon.v1.Status | ExtendedStatus)[] = []
 
-    if (instancesStore.instances.length > 0) {
+    // Group (hashtag) timeline
+    if (props.column.feedType === 'group' && props.column.groupTag) {
+      const url = authStore.instanceUrl || 'https://mastodon.social'
+      const client = createRestAPIClient({
+        url,
+        accessToken: authStore.accessToken || undefined,
+      })
+      result = await client.v1.timelines.tag.$select(props.column.groupTag).list({ limit: 20 })
+    }
+    // Standard timelines
+    else if (instancesStore.instances.length > 0) {
       if (props.column.feedType === 'home') {
         let merged = await instancesStore.fetchMergedHomeTimeline(20)
 
@@ -105,7 +129,10 @@ const fetchTimeline = async (refresh = false) => {
         }
         result = merged
       } else {
-        result = await instancesStore.fetchMergedTimeline(props.column.feedType, 20)
+        result = await instancesStore.fetchMergedTimeline(
+          props.column.feedType as 'local' | 'federated',
+          20,
+        )
       }
     } else if (authStore.isAuthenticated && authStore.instanceUrl) {
       const client = createRestAPIClient({
@@ -168,6 +195,11 @@ const loadMore = async () => {
       case 'federated':
         newStatuses = await client.v1.timelines.public.list({ local: false, maxId: maxId.value, limit: 20 })
         break
+      case 'group':
+        if (props.column.groupTag) {
+          newStatuses = await client.v1.timelines.tag.$select(props.column.groupTag).list({ maxId: maxId.value, limit: 20 })
+        }
+        break
     }
 
     if (newStatuses.length > 0) {
@@ -201,15 +233,19 @@ const setupInfiniteScroll = () => {
   observer.observe(loadTrigger.value)
 }
 
-watch(() => props.column.feedType, () => {
-  fetchTimeline(true)
-})
+watch(
+  () => `${props.column.feedType}:${props.column.groupTag ?? ''}`,
+  () => fetchTimeline(true),
+)
 
 watch(() => statuses.value.length, () => {
   nextTick(() => setupInfiniteScroll())
 })
 
 onMounted(async () => {
+  if (authStore.isAuthenticated && groupsStore.groups.length === 0) {
+    groupsStore.initializeGroups()
+  }
   await fetchTimeline()
   nextTick(() => setupInfiniteScroll())
   document.addEventListener('click', closeFeedMenu)
@@ -242,6 +278,7 @@ onUnmounted(() => {
       <!-- Feed Type Dropdown -->
       <Transition name="dropdown">
         <div v-if="feedMenuOpen" class="feed-dropdown" @click.stop>
+          <!-- Standard feeds -->
           <button
             class="feed-dropdown__item"
             :class="{ 'feed-dropdown__item--active': column.feedType === 'home' }"
@@ -277,6 +314,43 @@ onUnmounted(() => {
             </svg>
             Federated
           </button>
+
+          <!-- Groups Section -->
+          <template v-if="joinedGroups.length > 0">
+            <div class="feed-dropdown__divider"></div>
+            <button class="feed-dropdown__section-toggle" @click.stop="groupsExpanded = !groupsExpanded">
+              <span>Groups</span>
+              <svg :class="{ 'rotated': groupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <Transition name="groups-expand">
+              <div v-if="groupsExpanded" class="feed-dropdown__groups">
+                <button
+                  v-for="group in joinedGroups"
+                  :key="group.tag"
+                  class="feed-dropdown__item feed-dropdown__item--group"
+                  :class="{ 'feed-dropdown__item--active': column.feedType === 'group' && column.groupTag === group.tag }"
+                  @click="switchFeed('group', group.tag)"
+                >
+                  <span class="feed-dropdown__group-icon">{{ group.icon }}</span>
+                  {{ group.name }}
+                </button>
+              </div>
+            </Transition>
+          </template>
+
+          <!-- Browse groups link -->
+          <div class="feed-dropdown__divider"></div>
+          <NuxtLink to="/groups" class="feed-dropdown__item feed-dropdown__item--link" @click="feedMenuOpen = false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 00-3-3.87" />
+              <path d="M16 3.13a4 4 0 010 7.75" />
+            </svg>
+            Browse Groups
+          </NuxtLink>
         </div>
       </Transition>
     </div>
@@ -388,11 +462,16 @@ onUnmounted(() => {
   font-size: 0.9375rem;
   font-weight: 600;
   color: var(--neo-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 .column-feed-chevron {
   color: var(--neo-text-muted);
   transition: transform 0.2s ease;
+  flex-shrink: 0;
 
   &--open {
     transform: rotate(180deg);
@@ -415,11 +494,16 @@ onUnmounted(() => {
   }
 }
 
+// ========================================
+// Feed Dropdown
+// ========================================
 .feed-dropdown {
   position: absolute;
   top: 44px;
   left: 0.5rem;
-  width: 180px;
+  width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
   border-radius: 10px;
@@ -438,6 +522,7 @@ onUnmounted(() => {
     color: var(--neo-text-secondary);
     border-radius: 7px;
     transition: all 0.12s ease;
+    text-decoration: none;
 
     &:hover:not(:disabled) {
       background: var(--neo-bg-tertiary);
@@ -455,12 +540,70 @@ onUnmounted(() => {
       font-weight: 600;
     }
 
+    &--group {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8125rem;
+    }
+
+    &--link {
+      color: var(--neo-text-muted);
+      font-size: 0.8125rem;
+    }
+
     svg {
       flex-shrink: 0;
     }
   }
+
+  &__group-icon {
+    font-size: 1rem;
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  &__divider {
+    height: 1px;
+    background: var(--neo-border-color);
+    margin: 0.375rem 0.5rem;
+  }
+
+  &__section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--neo-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: 6px;
+    transition: all 0.12s ease;
+
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-secondary);
+    }
+
+    svg {
+      transition: transform 0.2s ease;
+      &.rotated {
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  &__groups {
+    display: flex;
+    flex-direction: column;
+  }
 }
 
+// ========================================
+// Column Scroll + Posts
+// ========================================
 .column-scroll {
   flex: 1;
   overflow-y: auto;
@@ -528,7 +671,19 @@ onUnmounted(() => {
 .column-posts {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 0.375rem;
+  padding: 0.5rem;
+
+  // Subtle card edges within columns
+  :deep(.status-card) {
+    border: 1px solid var(--neo-border-color-light);
+    border-radius: 10px;
+    transition: border-color 0.15s ease;
+
+    &:hover {
+      border-color: var(--neo-border-color);
+    }
+  }
 }
 
 .column-load-trigger {
@@ -565,7 +720,9 @@ onUnmounted(() => {
   color: var(--neo-text-muted);
 }
 
+// ========================================
 // Animations
+// ========================================
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -585,6 +742,21 @@ onUnmounted(() => {
 .dropdown-leave-to {
   opacity: 0;
   transform: scale(0.95) translateY(-4px);
+}
+
+.groups-expand-enter-active,
+.groups-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.groups-expand-enter-from,
+.groups-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.groups-expand-enter-to,
+.groups-expand-leave-from {
+  max-height: 300px;
 }
 
 .post-list-enter-active,

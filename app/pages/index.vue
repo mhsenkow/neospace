@@ -10,14 +10,17 @@ import { useAuthStore } from '~/stores/auth'
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
+import { useGroupsStore } from '~/stores/groups'
 
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
+const groupsStore = useGroupsStore()
 
 const instanceManagerRef = ref<{ open: () => void } | null>(null)
 const addMenuOpen = ref(false)
+const addGroupsExpanded = ref(false)
 
 const closeAddMenu = (e: MouseEvent) => {
   const target = e.target as HTMLElement
@@ -26,9 +29,10 @@ const closeAddMenu = (e: MouseEvent) => {
   }
 }
 
-const addColumn = (feedType: ColumnFeedType) => {
-  columnsStore.addColumn(feedType)
+const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
+  columnsStore.addColumn(feedType, groupTag)
   addMenuOpen.value = false
+  addGroupsExpanded.value = false
 }
 
 const openInstanceManager = () => {
@@ -41,6 +45,10 @@ onMounted(async () => {
     instancesStore.initialize(),
   ])
   columnsStore.initialize()
+
+  if (authStore.isAuthenticated) {
+    groupsStore.initializeGroups()
+  }
 
   if (authStore.userCustomCSS) {
     themeStore.setUserCustomCSS(authStore.userCustomCSS)
@@ -79,7 +87,7 @@ useHead({ title: 'Home | NeoSpace' })
         :is-first="idx === 0"
         :can-remove="columnsStore.canRemoveColumn"
         @remove="columnsStore.removeColumn(column.id)"
-        @update-feed-type="(type: ColumnFeedType) => columnsStore.updateColumnFeedType(column.id, type)"
+        @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
       />
     </div>
 
@@ -126,6 +134,28 @@ useHead({ title: 'Home | NeoSpace' })
             </svg>
             Federated
           </button>
+
+          <!-- Joined Groups -->
+          <template v-if="groupsStore.joinedGroups.length > 0">
+            <div class="add-column-menu__divider"></div>
+            <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+              <span>Groups</span>
+              <svg :class="{ 'rotated': addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <template v-if="addGroupsExpanded">
+              <button
+                v-for="group in groupsStore.joinedGroups"
+                :key="group.tag"
+                class="add-column-menu__item add-column-menu__item--group"
+                @click="addColumn('group', group.tag)"
+              >
+                <span class="add-column-menu__group-icon">{{ group.icon }}</span>
+                {{ group.name }}
+              </button>
+            </template>
+          </template>
 
           <div class="add-column-menu__divider"></div>
 
@@ -290,6 +320,45 @@ useHead({ title: 'Home | NeoSpace' })
     height: 1px;
     background: var(--neo-border-color);
     margin: 0.375rem 0.5rem;
+  }
+
+  &__section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--neo-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: 6px;
+    transition: all 0.12s ease;
+
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-secondary);
+    }
+
+    svg {
+      transition: transform 0.2s ease;
+      &.rotated {
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  &__item--group {
+    font-size: 0.8125rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  &__group-icon {
+    font-size: 1rem;
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
   }
 
   &__hint {
