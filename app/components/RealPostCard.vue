@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import type { mastodon } from 'masto'
+import { createRestAPIClient, type mastodon } from 'masto'
 import { useTimelineStore } from '~/stores/timeline'
 import { useAuthStore } from '~/stores/auth'
+import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 
 interface Props {
   status: mastodon.v1.Status
@@ -10,6 +11,7 @@ interface Props {
 const props = defineProps<Props>()
 const timelineStore = useTimelineStore()
 const authStore = useAuthStore()
+const instancesStore = useInstancesStore()
 
 const displayStatus = computed(() => props.status.reblog || props.status)
 const isReblog = computed(() => !!props.status.reblog)
@@ -41,6 +43,75 @@ const isOwnPost = computed(() => {
 
 const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
 
+const canInteract = computed(() =>
+  authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+)
+
+let _resolvedIdCache: string | null = null
+let _resolvedClientCache: mastodon.rest.Client | null = null
+
+/**
+ * Determines the correct API client and status ID for performing actions.
+ * Posts from foreign instances need either the source instance's client
+ * (if we're authenticated there) or ID resolution through the primary instance.
+ */
+const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: string } | null> => {
+  if (_resolvedClientCache && _resolvedIdCache) {
+    return { client: _resolvedClientCache, id: _resolvedIdCache }
+  }
+
+  const status = displayStatus.value
+  const ext = status as ExtendedStatus
+
+  // If we have auth on the source instance, use it directly — IDs match there
+  if (ext._instanceUrl) {
+    const source = instancesStore.getInstanceByUrl(ext._instanceUrl)
+    if (source?.accessToken) {
+      const client = instancesStore.getClient(source.id)
+      _resolvedClientCache = client
+      _resolvedIdCache = status.id
+      return { client, id: status.id }
+    }
+  }
+
+  // Fall back to primary auth instance
+  if (!authStore.instanceUrl || !authStore.accessToken) return null
+
+  const primaryClient = createRestAPIClient({
+    url: authStore.instanceUrl,
+    accessToken: authStore.accessToken,
+  })
+
+  // Check if the post is from the same domain as our primary instance
+  const url = statusUrl.value
+  if (url) {
+    try {
+      const statusDomain = new URL(url).hostname
+      const primaryDomain = new URL(authStore.instanceUrl).hostname
+      if (statusDomain === primaryDomain) {
+        _resolvedClientCache = primaryClient
+        _resolvedIdCache = status.id
+        return { client: primaryClient, id: status.id }
+      }
+    } catch { /* bad URL, fall through to resolve */ }
+  }
+
+  // Foreign instance — resolve the URL to get a local ID on our instance
+  if (url) {
+    const localId = await timelineStore.resolveStatus(url)
+    if (localId) {
+      _resolvedClientCache = primaryClient
+      _resolvedIdCache = localId
+      return { client: primaryClient, id: localId }
+    }
+  }
+
+  // Last resort: try the raw ID on the primary client (might work for federated posts)
+  _resolvedClientCache = primaryClient
+  _resolvedIdCache = status.id
+  return { client: primaryClient, id: status.id }
+}
+
 const formatDate = (dateString: string) => {
   const date = new Date(dateString)
   const now = new Date()
@@ -69,18 +140,20 @@ const formatNumber = (num: number) => {
 // ========================================
 
 const handleFavourite = async () => {
-  if (!authStore.isAuthenticated || isFavouriting.value) return
+  if (!canInteract.value || isFavouriting.value) return
 
   isFavouriting.value = true
   displayStatus.value.favourited = !displayStatus.value.favourited
   displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
 
   try {
-    const url = statusUrl.value
+    const ctx = await getActionContext()
+    if (!ctx) throw new Error('Not authenticated')
+
     if (displayStatus.value.favourited) {
-      await timelineStore.favouriteStatus(displayStatus.value.id, url)
+      await ctx.client.v1.statuses.$select(ctx.id).favourite()
     } else {
-      await timelineStore.unfavouriteStatus(displayStatus.value.id, url)
+      await ctx.client.v1.statuses.$select(ctx.id).unfavourite()
     }
   } catch (e) {
     console.error('Favourite error:', e)
@@ -92,18 +165,20 @@ const handleFavourite = async () => {
 }
 
 const handleBoost = async () => {
-  if (!authStore.isAuthenticated || isBoosting.value) return
+  if (!canInteract.value || isBoosting.value) return
 
   isBoosting.value = true
   displayStatus.value.reblogged = !displayStatus.value.reblogged
   displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
 
   try {
-    const url = statusUrl.value
+    const ctx = await getActionContext()
+    if (!ctx) throw new Error('Not authenticated')
+
     if (displayStatus.value.reblogged) {
-      await timelineStore.boostStatus(displayStatus.value.id, url)
+      await ctx.client.v1.statuses.$select(ctx.id).reblog()
     } else {
-      await timelineStore.unboostStatus(displayStatus.value.id, url)
+      await ctx.client.v1.statuses.$select(ctx.id).unreblog()
     }
   } catch (e) {
     console.error('Boost error:', e)
@@ -115,7 +190,7 @@ const handleBoost = async () => {
 }
 
 const handleReply = () => {
-  if (!authStore.isAuthenticated) {
+  if (!canInteract.value) {
     if (statusUrl.value) {
       window.open(statusUrl.value, '_blank')
     }
@@ -143,21 +218,15 @@ const submitReply = async () => {
   replyError.value = null
 
   try {
-    let replyToId = displayStatus.value.id
+    const ctx = await getActionContext()
+    if (!ctx) throw new Error('Not authenticated')
 
-    // Cross-instance: resolve the status to get a local ID
-    const url = statusUrl.value
-    if (url) {
-      const localId = await timelineStore.resolveStatus(url)
-      if (localId) replyToId = localId
-    }
-
-    await timelineStore.postStatus(text, {
-      inReplyToId: replyToId,
+    await ctx.client.v1.statuses.create({
+      status: text,
+      inReplyToId: ctx.id,
       visibility: displayStatus.value.visibility as any,
     })
 
-    // Success: close reply, bump count
     isReplying.value = false
     replyText.value = ''
     displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
@@ -224,16 +293,19 @@ const closeMenu = (event: MouseEvent) => {
 }
 
 const handleBookmark = async () => {
-  if (!authStore.isAuthenticated || isBookmarking.value) return
+  if (!canInteract.value || isBookmarking.value) return
 
   isBookmarking.value = true
   displayStatus.value.bookmarked = !displayStatus.value.bookmarked
 
   try {
+    const ctx = await getActionContext()
+    if (!ctx) throw new Error('Not authenticated')
+
     if (displayStatus.value.bookmarked) {
-      await timelineStore.bookmarkStatus(displayStatus.value.id)
+      await ctx.client.v1.statuses.$select(ctx.id).bookmark()
     } else {
-      await timelineStore.unbookmarkStatus(displayStatus.value.id)
+      await ctx.client.v1.statuses.$select(ctx.id).unbookmark()
     }
   } catch (e) {
     console.error('Bookmark error:', e)
@@ -245,7 +317,7 @@ const handleBookmark = async () => {
 }
 
 const handleMute = async () => {
-  if (!authStore.isAuthenticated || isMuting.value) return
+  if (!canInteract.value || isMuting.value) return
 
   const confirmed = confirm(`Mute @${displayStatus.value.account.acct}? You won't see their posts in your timelines.`)
   if (!confirmed) return
@@ -262,7 +334,7 @@ const handleMute = async () => {
 }
 
 const handleBlock = async () => {
-  if (!authStore.isAuthenticated || isBlocking.value) return
+  if (!canInteract.value || isBlocking.value) return
 
   const confirmed = confirm(`Block @${displayStatus.value.account.acct}? They won't be able to see your posts or interact with you.`)
   if (!confirmed) return
@@ -279,7 +351,7 @@ const handleBlock = async () => {
 }
 
 const handleReport = async () => {
-  if (!authStore.isAuthenticated) return
+  if (!canInteract.value) return
 
   const reason = prompt(`Report this post by @${displayStatus.value.account.acct}?\n\nOptionally, provide a reason:`)
   if (reason === null) return
@@ -388,7 +460,7 @@ onUnmounted(() => {
               <div v-if="isMenuOpen" class="status-dropdown" @click.stop>
                 <!-- Save/Bookmark -->
                 <button
-                  v-if="authStore.isAuthenticated"
+                  v-if="canInteract"
                   class="status-dropdown-item"
                   :disabled="isBookmarking"
                   @click="handleBookmark"
@@ -419,7 +491,7 @@ onUnmounted(() => {
                 </button>
 
                 <!-- Auth-only moderation actions -->
-                <template v-if="authStore.isAuthenticated && !isOwnPost">
+                <template v-if="canInteract && !isOwnPost">
                   <div class="status-dropdown-divider" />
 
                   <button

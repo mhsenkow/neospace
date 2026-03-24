@@ -8,10 +8,12 @@
 import { useThemeStore } from '~/stores/theme'
 import { useAuthStore } from '~/stores/auth'
 import { useSettingsStore } from '~/stores/settings'
+import { useInstancesStore } from '~/stores/instances'
 
 const themeStore = useThemeStore()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+const instancesStore = useInstancesStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -95,9 +97,10 @@ const closeMobileMenu = () => {
             <path d="M16 3.13a4 4 0 010 7.75" />
           </svg>
         </NuxtLink>
-        <NuxtLink v-if="authStore.isAuthenticated" to="/notifications" class="sidebar__link" :class="{ active: route.path === '/notifications' }" title="Notifications">
+        <NuxtLink v-if="authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance" to="/notifications" class="sidebar__link" :class="{ active: route.path === '/notifications' }" title="Notifications">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/notifications' ? 2.5 : 1.5">
-            <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" :fill="route.path === '/notifications' ? 'currentColor' : 'none'" />
+            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" :fill="route.path === '/notifications' ? 'currentColor' : 'none'" />
+            <path d="M13.73 21a2 2 0 01-3.46 0" />
           </svg>
         </NuxtLink>
       </nav>
