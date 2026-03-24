@@ -24,6 +24,12 @@ const isBlocking = ref(false)
 const showCopiedToast = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
 
+const isReplying = ref(false)
+const replyText = ref('')
+const isPostingReply = ref(false)
+const replyError = ref<string | null>(null)
+const replyTextarea = ref<HTMLTextAreaElement | null>(null)
+
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 
 const isOwnPost = computed(() => {
@@ -109,9 +115,70 @@ const handleBoost = async () => {
 }
 
 const handleReply = () => {
-  if (statusUrl.value) {
-    window.open(statusUrl.value, '_blank')
+  if (!authStore.isAuthenticated) {
+    if (statusUrl.value) {
+      window.open(statusUrl.value, '_blank')
+    }
+    return
   }
+  isReplying.value = !isReplying.value
+  replyError.value = null
+  if (isReplying.value) {
+    const acct = displayStatus.value.account.acct
+    replyText.value = `@${acct} `
+    nextTick(() => {
+      replyTextarea.value?.focus()
+      // move cursor to end
+      const len = replyText.value.length
+      replyTextarea.value?.setSelectionRange(len, len)
+    })
+  }
+}
+
+const submitReply = async () => {
+  const text = replyText.value.trim()
+  if (!text || isPostingReply.value) return
+
+  isPostingReply.value = true
+  replyError.value = null
+
+  try {
+    let replyToId = displayStatus.value.id
+
+    // Cross-instance: resolve the status to get a local ID
+    const url = statusUrl.value
+    if (url) {
+      const localId = await timelineStore.resolveStatus(url)
+      if (localId) replyToId = localId
+    }
+
+    await timelineStore.postStatus(text, {
+      inReplyToId: replyToId,
+      visibility: displayStatus.value.visibility as any,
+    })
+
+    // Success: close reply, bump count
+    isReplying.value = false
+    replyText.value = ''
+    displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
+  } catch (e: any) {
+    console.error('Reply error:', e)
+    replyError.value = e.message || 'Failed to post reply'
+  } finally {
+    isPostingReply.value = false
+  }
+}
+
+const cancelReply = () => {
+  isReplying.value = false
+  replyText.value = ''
+  replyError.value = null
+}
+
+const autoResize = (e: Event) => {
+  const el = e.target as HTMLTextAreaElement
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 
 const handleShare = async () => {
@@ -467,7 +534,12 @@ onUnmounted(() => {
             <span v-if="displayStatus.favouritesCount" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
           </button>
 
-          <button class="status-action" aria-label="Reply" @click="handleReply">
+          <button
+            class="status-action"
+            :class="{ 'status-action--replying': isReplying }"
+            aria-label="Reply"
+            @click="handleReply"
+          >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
             </svg>
@@ -495,19 +567,70 @@ onUnmounted(() => {
           </button>
         </footer>
 
+        <!-- Inline Reply Composer -->
+        <Transition name="reply-expand">
+          <div v-if="isReplying" class="reply-composer">
+            <div class="reply-composer__input-row">
+              <img
+                v-if="authStore.$state.currentUser?.avatar"
+                :src="authStore.$state.currentUser.avatar"
+                class="reply-composer__avatar"
+                alt=""
+              />
+              <textarea
+                ref="replyTextarea"
+                v-model="replyText"
+                class="reply-composer__textarea"
+                placeholder="Write a reply..."
+                rows="1"
+                @input="autoResize"
+                @keydown.meta.enter="submitReply"
+                @keydown.ctrl.enter="submitReply"
+              />
+            </div>
+            <div v-if="replyError" class="reply-composer__error">{{ replyError }}</div>
+            <div class="reply-composer__actions">
+              <button class="reply-composer__cancel" @click="cancelReply">Cancel</button>
+              <button
+                class="reply-composer__submit"
+                :disabled="!replyText.trim() || isPostingReply"
+                @click="submitReply"
+              >
+                {{ isPostingReply ? 'Posting...' : 'Reply' }}
+              </button>
+            </div>
+          </div>
+        </Transition>
+
         <!-- Reply Preview / Thread Teaser -->
-        <button
-          v-if="hasReplies"
-          class="status-thread-preview"
-          @click="viewThread"
-        >
-          <span class="thread-preview-text">
-            View {{ displayStatus.repliesCount === 1 ? 'reply' : `${formatNumber(displayStatus.repliesCount)} replies` }}
-          </span>
-          <svg class="thread-preview-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
+        <div class="status-footer-row">
+          <button
+            v-if="hasReplies"
+            class="status-thread-preview"
+            @click="viewThread"
+          >
+            <span class="thread-preview-text">
+              View {{ displayStatus.repliesCount === 1 ? 'reply' : `${formatNumber(displayStatus.repliesCount)} replies` }}
+            </span>
+            <svg class="thread-preview-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+          <a
+            v-if="statusUrl"
+            :href="statusUrl"
+            target="_blank"
+            rel="noopener"
+            class="status-original-link"
+            title="View on original instance"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </a>
+        </div>
       </div>
     </div>
 
@@ -992,6 +1115,20 @@ onUnmounted(() => {
     }
   }
 
+  // Reply active = accent blue
+  &--replying {
+    color: var(--neo-accent);
+
+    svg {
+      stroke: var(--neo-accent);
+    }
+
+    &:hover:not(:disabled) {
+      background: var(--neo-accent-soft);
+      color: var(--neo-accent);
+    }
+  }
+
   &__count {
     font-size: 0.8125rem;
     font-weight: 500;
@@ -1000,13 +1137,129 @@ onUnmounted(() => {
   }
 }
 
-// Thread Preview
+// ========================================
+// Inline Reply Composer
+// ========================================
+.reply-composer {
+  margin-top: 0.5rem;
+  padding: 0.625rem;
+  background: var(--neo-bg-tertiary);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  &__input-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  &__avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    margin-top: 0.25rem;
+  }
+
+  &__textarea {
+    flex: 1;
+    resize: none;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--neo-text-primary);
+    outline: none;
+    min-height: 1.5em;
+    max-height: 200px;
+
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
+  }
+
+  &__error {
+    font-size: 0.75rem;
+    color: var(--neo-danger);
+    padding-left: 2rem;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
+  &__cancel {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--neo-text-muted);
+    border-radius: 999px;
+    transition: all 0.12s ease;
+
+    &:hover {
+      background: var(--neo-bg-secondary);
+      color: var(--neo-text-primary);
+    }
+  }
+
+  &__submit {
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-inverse);
+    background: var(--neo-text-primary);
+    border-radius: 999px;
+    transition: all 0.12s ease;
+
+    &:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.reply-expand-enter-active,
+.reply-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.reply-expand-enter-from,
+.reply-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  padding: 0 0.625rem;
+}
+.reply-expand-enter-to,
+.reply-expand-leave-from {
+  max-height: 300px;
+}
+
+// ========================================
+// Footer Row (thread preview + original link)
+// ========================================
+.status-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.25rem;
+}
+
 .status-thread-preview {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  margin-top: 0.625rem;
-  padding: 0.5rem 0;
+  padding: 0.375rem 0;
   background: transparent;
   border: none;
   color: var(--neo-text-muted);
@@ -1031,6 +1284,25 @@ onUnmounted(() => {
     height: 14px;
     transition: transform 0.15s ease;
     opacity: 0.7;
+  }
+}
+
+.status-original-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--neo-text-muted);
+  opacity: 0.4;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    opacity: 1;
+    background: var(--neo-bg-tertiary);
+    color: var(--neo-text-secondary);
   }
 }
 
