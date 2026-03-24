@@ -399,21 +399,22 @@ const viewThread = () => {
   }
 }
 
-watch(isMenuOpen, (open) => {
+watch(isMenuOpen, async (open) => {
   if (open) {
-    document.addEventListener('click', closeMenu, true)
+    await nextTick()
+    document.addEventListener('click', closeMenu)
   } else {
-    document.removeEventListener('click', closeMenu, true)
+    document.removeEventListener('click', closeMenu)
   }
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeMenu, true)
+  document.removeEventListener('click', closeMenu)
 })
 </script>
 
 <template>
-  <article class="status-card">
+  <article class="status-card" :class="{ 'status-card--menu-open': isMenuOpen }">
     <!-- Reblog indicator -->
     <div v-if="isReblog" class="status-reblog">
       <svg class="status-reblog-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -637,6 +638,23 @@ onUnmounted(() => {
               <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
             </svg>
           </button>
+
+          <a
+            v-if="statusUrl"
+            :href="statusUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="status-action status-action--external"
+            title="View on original instance"
+            aria-label="View on original instance"
+            @click.stop
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </a>
         </footer>
 
         <!-- Inline Reply Composer -->
@@ -674,10 +692,9 @@ onUnmounted(() => {
           </div>
         </Transition>
 
-        <!-- Reply Preview / Thread Teaser -->
-        <div class="status-footer-row">
+        <!-- Thread teaser -->
+        <div v-if="hasReplies" class="status-footer-row">
           <button
-            v-if="hasReplies"
             class="status-thread-preview"
             @click="viewThread"
           >
@@ -688,20 +705,6 @@ onUnmounted(() => {
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </button>
-          <a
-            v-if="statusUrl"
-            :href="statusUrl"
-            target="_blank"
-            rel="noopener"
-            class="status-original-link"
-            title="View on original instance"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </a>
         </div>
       </div>
     </div>
@@ -721,12 +724,18 @@ onUnmounted(() => {
 // ============================================
 
 .status-card {
+  position: relative;
+  z-index: 0;
   padding: 0.75rem;
   background: var(--neo-bg-card);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   max-width: 100%;
   width: 100%;
+
+  &--menu-open {
+    z-index: 30;
+  }
 
   @media (min-width: 400px) {
     padding: 0.875rem;
@@ -763,7 +772,7 @@ onUnmounted(() => {
 .status-main {
   display: flex;
   gap: 0.75rem;
-  overflow: hidden;
+  overflow: visible;
   max-width: 100%;
 }
 
@@ -815,7 +824,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 // Header
@@ -824,7 +833,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .status-author {
@@ -873,6 +882,7 @@ onUnmounted(() => {
 .status-menu-container {
   position: relative;
   flex-shrink: 0;
+  z-index: 2;
 }
 
 .status-more {
@@ -905,7 +915,7 @@ onUnmounted(() => {
   border: 1px solid var(--neo-border-color);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  z-index: 100;
+  z-index: 40;
   overflow: hidden;
   padding: 0.375rem;
 }
@@ -1119,6 +1129,7 @@ onUnmounted(() => {
 .status-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.25rem;
   margin-top: 0.5rem;
   margin-left: -0.5rem;
@@ -1206,6 +1217,15 @@ onUnmounted(() => {
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     color: inherit;
+  }
+
+  &--external {
+    text-decoration: none;
+    opacity: 0.65;
+
+    &:hover {
+      opacity: 1;
+    }
   }
 }
 
@@ -1323,7 +1343,7 @@ onUnmounted(() => {
 .status-footer-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin-top: 0.25rem;
 }
 
@@ -1356,25 +1376,6 @@ onUnmounted(() => {
     height: 14px;
     transition: transform 0.15s ease;
     opacity: 0.7;
-  }
-}
-
-.status-original-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  color: var(--neo-text-muted);
-  opacity: 0.4;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-
-  &:hover {
-    opacity: 1;
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-secondary);
   }
 }
 
