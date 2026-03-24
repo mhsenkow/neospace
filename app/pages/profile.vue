@@ -34,38 +34,55 @@ const isFollowLoading = ref(false)
 const avatarInput = ref<HTMLInputElement | null>(null)
 const headerInput = ref<HTMLInputElement | null>(null)
 
-// Initialize
-onMounted(async () => {
-  // Initialize instances store for multi-account view
-  await instancesStore.initialize()
-  
-  // For profile viewing, we still need auth for the main profile
-  const hasAnyAuth = authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
-  
-  if (!hasAnyAuth) {
-    router.push('/login')
-    return
-  }
+async function loadProfileFromRoute() {
+  const userParam = route.query.user
+  const username = typeof userParam === 'string' ? userParam : undefined
 
-  // Check if viewing specific user or self
-  const username = route.query.user as string
-  
   if (username) {
     await profileStore.fetchProfileByUsername(username)
   } else {
     await profileStore.fetchProfile()
   }
 
-  // Get relationship if viewing someone else
   if (!profileStore.isOwnProfile) {
     relationship.value = await profileStore.getRelationship()
+  } else {
+    relationship.value = null
   }
 
-  // Apply user's custom CSS if they have one
   if (profileStore.profileCustomCSS && themeStore.isChaosMode) {
     themeStore.setUserCustomCSS(profileStore.profileCustomCSS)
   }
+}
+
+const profileRouteReady = ref(false)
+
+// Initialize
+onMounted(async () => {
+  await instancesStore.initialize()
+
+  const hasAnyAuth = authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+
+  if (!hasAnyAuth) {
+    router.push('/login')
+    return
+  }
+
+  await loadProfileFromRoute()
+  profileRouteReady.value = true
 })
+
+watch(
+  () => route.fullPath,
+  async () => {
+    if (!profileRouteReady.value || route.path !== '/profile') return
+
+    const hasAnyAuth = authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+    if (!hasAnyAuth) return
+
+    await loadProfileFromRoute()
+  },
+)
 
 // Cleanup
 onUnmounted(() => {

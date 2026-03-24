@@ -47,6 +47,14 @@ const canInteract = computed(() =>
   authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
 )
 
+/** In-app profile (posts + header); API client is from auth store */
+const accountProfileTo = computed(() => {
+  if (!authStore.isAuthenticated) return null
+  const acct = displayStatus.value.account?.acct
+  if (!acct) return null
+  return { path: '/profile', query: { user: acct } }
+})
+
 let _resolvedIdCache: string | null = null
 let _resolvedClientCache: mastodon.rest.Client | null = null
 
@@ -429,7 +437,20 @@ onUnmounted(() => {
     <div class="status-main">
       <!-- Avatar Column -->
       <div class="status-avatar-col">
-        <a :href="displayStatus.account.url" target="_blank" class="status-avatar-link">
+        <NuxtLink v-if="accountProfileTo" :to="accountProfileTo" class="status-avatar-link">
+          <img
+            :src="displayStatus.account.avatar"
+            :alt="displayStatus.account.displayName || displayStatus.account.username"
+            class="status-avatar"
+          />
+        </NuxtLink>
+        <a
+          v-else
+          :href="displayStatus.account.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="status-avatar-link"
+        >
           <img
             :src="displayStatus.account.avatar"
             :alt="displayStatus.account.displayName || displayStatus.account.username"
@@ -443,7 +464,16 @@ onUnmounted(() => {
       <div class="status-content-col">
         <!-- Header: username + time + menu -->
         <header class="status-header">
-          <a :href="displayStatus.account.url" target="_blank" class="status-author">
+          <NuxtLink v-if="accountProfileTo" :to="accountProfileTo" class="status-author">
+            <span class="status-display-name" v-html="displayStatus.account.displayName || displayStatus.account.username" />
+          </NuxtLink>
+          <a
+            v-else
+            :href="displayStatus.account.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="status-author"
+          >
             <span class="status-display-name" v-html="displayStatus.account.displayName || displayStatus.account.username" />
           </a>
           <a :href="statusUrl || '#'" target="_blank" class="status-time">
