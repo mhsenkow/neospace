@@ -1,10 +1,4 @@
 <script setup lang="ts">
-/**
- * RealPostCard Component
- * 
- * Displays a real Mastodon status with reply preview for conversation intrigue.
- */
-
 import type { mastodon } from 'masto'
 import { useTimelineStore } from '~/stores/timeline'
 import { useAuthStore } from '~/stores/auth'
@@ -17,7 +11,6 @@ const props = defineProps<Props>()
 const timelineStore = useTimelineStore()
 const authStore = useAuthStore()
 
-// Get the actual status (might be a reblog)
 const displayStatus = computed(() => props.status.reblog || props.status)
 const isReblog = computed(() => !!props.status.reblog)
 const reblogger = computed(() => isReblog.value ? props.status.account : null)
@@ -31,23 +24,31 @@ const isBlocking = ref(false)
 const showCopiedToast = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
 
-// Check if this post has replies (for conversation preview)
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
+
+const isOwnPost = computed(() => {
+  const user = authStore.$state.currentUser
+  if (!authStore.isAuthenticated || !user) return false
+  return displayStatus.value.account.id === user.id ||
+    displayStatus.value.account.acct === user.acct
+})
+
+const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
-  
+
   const minutes = Math.floor(diff / (1000 * 60))
   const hours = Math.floor(diff / (1000 * 60 * 60))
   const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  
+
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m`
   if (hours < 24) return `${hours}h`
   if (days < 7) return `${days}d`
-  
+
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
@@ -57,23 +58,28 @@ const formatNumber = (num: number) => {
   return num.toString()
 }
 
+// ========================================
+// Action Handlers
+// ========================================
+
 const handleFavourite = async () => {
   if (!authStore.isAuthenticated || isFavouriting.value) return
-  
+
   isFavouriting.value = true
+  displayStatus.value.favourited = !displayStatus.value.favourited
+  displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
+
   try {
-    // Pass the status URL for cross-instance resolution
-    const statusUrl = displayStatus.value.url || displayStatus.value.uri
+    const url = statusUrl.value
     if (displayStatus.value.favourited) {
-      await timelineStore.unfavouriteStatus(displayStatus.value.id, statusUrl)
+      await timelineStore.favouriteStatus(displayStatus.value.id, url)
     } else {
-      await timelineStore.favouriteStatus(displayStatus.value.id, statusUrl)
+      await timelineStore.unfavouriteStatus(displayStatus.value.id, url)
     }
-    // Optimistically update the UI
-    displayStatus.value.favourited = !displayStatus.value.favourited
-    displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
   } catch (e) {
     console.error('Favourite error:', e)
+    displayStatus.value.favourited = !displayStatus.value.favourited
+    displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
   } finally {
     isFavouriting.value = false
   }
@@ -81,73 +87,102 @@ const handleFavourite = async () => {
 
 const handleBoost = async () => {
   if (!authStore.isAuthenticated || isBoosting.value) return
-  
+
   isBoosting.value = true
+  displayStatus.value.reblogged = !displayStatus.value.reblogged
+  displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
+
   try {
-    const statusUrl = displayStatus.value.url || displayStatus.value.uri
+    const url = statusUrl.value
     if (displayStatus.value.reblogged) {
-      await timelineStore.unboostStatus(displayStatus.value.id, statusUrl)
+      await timelineStore.boostStatus(displayStatus.value.id, url)
     } else {
-      await timelineStore.boostStatus(displayStatus.value.id, statusUrl)
+      await timelineStore.unboostStatus(displayStatus.value.id, url)
     }
-    // Optimistically update the UI
-    displayStatus.value.reblogged = !displayStatus.value.reblogged
-    displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
   } catch (e) {
     console.error('Boost error:', e)
+    displayStatus.value.reblogged = !displayStatus.value.reblogged
+    displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
   } finally {
     isBoosting.value = false
   }
 }
 
-const getVisibilityIcon = (visibility: string) => {
-  switch (visibility) {
-    case 'public': return '🌍'
-    case 'unlisted': return '🔓'
-    case 'private': return '🔒'
-    case 'direct': return '✉️'
-    default: return '🌍'
+const handleReply = () => {
+  if (statusUrl.value) {
+    window.open(statusUrl.value, '_blank')
   }
 }
 
-// Toggle menu
-const toggleMenu = () => {
+const handleShare = async () => {
+  const url = statusUrl.value
+  if (!url) return
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        text: displayStatus.value.content?.replace(/<[^>]*>/g, '').slice(0, 200),
+        url,
+      })
+      return
+    } catch (e: any) {
+      if (e.name === 'AbortError') return
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(url)
+    showCopiedToast.value = true
+    setTimeout(() => { showCopiedToast.value = false }, 2000)
+  } catch {
+    // fallback: prompt
+    prompt('Copy this link:', url)
+  }
+}
+
+// ========================================
+// Menu
+// ========================================
+
+const toggleMenu = (e: Event) => {
+  e.stopPropagation()
   isMenuOpen.value = !isMenuOpen.value
 }
 
-// Close menu when clicking outside
 const closeMenu = (event: MouseEvent) => {
+  if (!isMenuOpen.value) return
   if (menuRef.value && !menuRef.value.contains(event.target as Node)) {
     isMenuOpen.value = false
   }
 }
 
-// Handle bookmark/save
 const handleBookmark = async () => {
   if (!authStore.isAuthenticated || isBookmarking.value) return
-  
+
   isBookmarking.value = true
+  displayStatus.value.bookmarked = !displayStatus.value.bookmarked
+
   try {
     if (displayStatus.value.bookmarked) {
-      await timelineStore.unbookmarkStatus(displayStatus.value.id)
-    } else {
       await timelineStore.bookmarkStatus(displayStatus.value.id)
+    } else {
+      await timelineStore.unbookmarkStatus(displayStatus.value.id)
     }
   } catch (e) {
     console.error('Bookmark error:', e)
+    displayStatus.value.bookmarked = !displayStatus.value.bookmarked
   } finally {
     isBookmarking.value = false
     isMenuOpen.value = false
   }
 }
 
-// Handle mute
 const handleMute = async () => {
   if (!authStore.isAuthenticated || isMuting.value) return
-  
+
   const confirmed = confirm(`Mute @${displayStatus.value.account.acct}? You won't see their posts in your timelines.`)
   if (!confirmed) return
-  
+
   isMuting.value = true
   try {
     await timelineStore.muteAccount(displayStatus.value.account.id)
@@ -159,13 +194,12 @@ const handleMute = async () => {
   }
 }
 
-// Handle block
 const handleBlock = async () => {
   if (!authStore.isAuthenticated || isBlocking.value) return
-  
+
   const confirmed = confirm(`Block @${displayStatus.value.account.acct}? They won't be able to see your posts or interact with you.`)
   if (!confirmed) return
-  
+
   isBlocking.value = true
   try {
     await timelineStore.blockAccount(displayStatus.value.account.id)
@@ -177,16 +211,15 @@ const handleBlock = async () => {
   }
 }
 
-// Handle report
 const handleReport = async () => {
   if (!authStore.isAuthenticated) return
-  
+
   const reason = prompt(`Report this post by @${displayStatus.value.account.acct}?\n\nOptionally, provide a reason:`)
-  if (reason === null) return // User cancelled
-  
+  if (reason === null) return
+
   try {
     await timelineStore.reportStatus(
-      displayStatus.value.id, 
+      displayStatus.value.id,
       displayStatus.value.account.id,
       reason || undefined
     )
@@ -199,48 +232,44 @@ const handleReport = async () => {
   }
 }
 
-// Handle copy link
 const handleCopyLink = async () => {
-  const url = displayStatus.value.url || displayStatus.value.uri
+  const url = statusUrl.value
   if (!url) return
-  
+
   try {
     await navigator.clipboard.writeText(url)
     showCopiedToast.value = true
-    setTimeout(() => {
-      showCopiedToast.value = false
-    }, 2000)
-  } catch (e) {
-    console.error('Copy error:', e)
+    setTimeout(() => { showCopiedToast.value = false }, 2000)
+  } catch {
+    prompt('Copy this link:', url)
   } finally {
     isMenuOpen.value = false
   }
 }
 
-// Open in original instance (also serves as "view thread")
 const handleOpenOriginal = () => {
-  const url = displayStatus.value.url || displayStatus.value.uri
-  if (url) {
-    window.open(url, '_blank')
+  if (statusUrl.value) {
+    window.open(statusUrl.value, '_blank')
   }
   isMenuOpen.value = false
 }
 
-// View thread - opens the post in its original location
 const viewThread = () => {
-  const url = displayStatus.value.url || displayStatus.value.uri
-  if (url) {
-    window.open(url, '_blank')
+  if (statusUrl.value) {
+    window.open(statusUrl.value, '_blank')
   }
 }
 
-// Add click outside listener
-onMounted(() => {
-  document.addEventListener('click', closeMenu)
+watch(isMenuOpen, (open) => {
+  if (open) {
+    document.addEventListener('click', closeMenu, true)
+  } else {
+    document.removeEventListener('click', closeMenu, true)
+  }
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeMenu)
+  document.removeEventListener('click', closeMenu, true)
 })
 </script>
 
@@ -261,43 +290,37 @@ onUnmounted(() => {
       <!-- Avatar Column -->
       <div class="status-avatar-col">
         <a :href="displayStatus.account.url" target="_blank" class="status-avatar-link">
-        <img 
-          :src="displayStatus.account.avatar" 
-          :alt="displayStatus.account.displayName || displayStatus.account.username"
+          <img
+            :src="displayStatus.account.avatar"
+            :alt="displayStatus.account.displayName || displayStatus.account.username"
             class="status-avatar"
           />
-          <button class="status-follow-btn" aria-label="Follow">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
         </a>
-        <!-- Thread line connecting to replies -->
         <div v-if="hasReplies" class="status-thread-line"></div>
       </div>
 
       <!-- Content Column -->
       <div class="status-content-col">
-        <!-- Header: username + time -->
+        <!-- Header: username + time + menu -->
         <header class="status-header">
           <a :href="displayStatus.account.url" target="_blank" class="status-author">
             <span class="status-display-name" v-html="displayStatus.account.displayName || displayStatus.account.username" />
           </a>
-          <a :href="displayStatus.url || '#'" target="_blank" class="status-time">
+          <a :href="statusUrl || '#'" target="_blank" class="status-time">
             <time :datetime="displayStatus.createdAt">{{ formatDate(displayStatus.createdAt) }}</time>
           </a>
           <div class="status-menu-container" ref="menuRef">
-            <button class="status-more" aria-label="More options" @click.stop="toggleMenu">
+            <button class="status-more" aria-label="More options" @click="toggleMenu">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
               </svg>
             </button>
-            
+
             <!-- Dropdown Menu -->
             <Transition name="menu-fade">
-              <div v-if="isMenuOpen" class="status-dropdown">
+              <div v-if="isMenuOpen" class="status-dropdown" @click.stop>
                 <!-- Save/Bookmark -->
-                <button 
+                <button
                   v-if="authStore.isAuthenticated"
                   class="status-dropdown-item"
                   :disabled="isBookmarking"
@@ -307,6 +330,15 @@ onUnmounted(() => {
                     <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
                   </svg>
                   <span>{{ displayStatus.bookmarked ? 'Unsave' : 'Save' }}</span>
+                </button>
+
+                <!-- Copy Link -->
+                <button class="status-dropdown-item" @click="handleCopyLink">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                  </svg>
+                  <span>Copy link</span>
                 </button>
 
                 <!-- Open Original -->
@@ -319,157 +351,153 @@ onUnmounted(() => {
                   <span>Open original</span>
                 </button>
 
-                <!-- Divider -->
-                <div v-if="authStore.isAuthenticated" class="status-dropdown-divider" />
+                <!-- Auth-only moderation actions -->
+                <template v-if="authStore.isAuthenticated && !isOwnPost">
+                  <div class="status-dropdown-divider" />
 
-                <!-- Mute -->
-                <button 
-                  v-if="authStore.isAuthenticated"
-                  class="status-dropdown-item"
-                  :disabled="isMuting"
-                  @click="handleMute"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                    <line x1="23" y1="9" x2="17" y2="15" />
-                    <line x1="17" y1="9" x2="23" y2="15" />
-                  </svg>
-                  <span>Mute @{{ displayStatus.account.username }}</span>
-                </button>
+                  <button
+                    class="status-dropdown-item"
+                    :disabled="isMuting"
+                    @click="handleMute"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M11 5L6 9H2v6h4l5 4V5z" />
+                      <line x1="23" y1="9" x2="17" y2="15" />
+                      <line x1="17" y1="9" x2="23" y2="15" />
+                    </svg>
+                    <span>Mute @{{ displayStatus.account.username }}</span>
+                  </button>
 
-                <!-- Block -->
-                <button 
-                  v-if="authStore.isAuthenticated"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  :disabled="isBlocking"
-                  @click="handleBlock"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-                  </svg>
-                  <span>Block @{{ displayStatus.account.username }}</span>
-                </button>
+                  <button
+                    class="status-dropdown-item status-dropdown-item--danger"
+                    :disabled="isBlocking"
+                    @click="handleBlock"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                    </svg>
+                    <span>Block @{{ displayStatus.account.username }}</span>
+                  </button>
 
-                <!-- Report -->
-                <button 
-                  v-if="authStore.isAuthenticated"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  @click="handleReport"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span>Report</span>
-                </button>
-
-                <!-- Divider -->
-                <div class="status-dropdown-divider" />
-
-                <!-- Copy Link -->
-                <button class="status-dropdown-item" @click="handleCopyLink">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-                  </svg>
-                  <span>Copy link</span>
-                </button>
+                  <button
+                    class="status-dropdown-item status-dropdown-item--danger"
+                    @click="handleReport"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <span>Report</span>
+                  </button>
+                </template>
               </div>
             </Transition>
-      </div>
-    </header>
+          </div>
+        </header>
 
         <!-- Content Warning / Spoiler -->
-    <details v-if="displayStatus.spoilerText" class="status-cw">
-          <summary class="status-cw-summary">⚠️ {{ displayStatus.spoilerText }}</summary>
-      <div class="status-content" v-html="displayStatus.content" />
-    </details>
+        <details v-if="displayStatus.spoilerText" class="status-cw">
+          <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
+          <div class="status-content" v-html="displayStatus.content" />
+        </details>
 
-    <!-- Regular Content -->
-    <div v-else class="status-content" v-html="displayStatus.content" />
+        <!-- Regular Content -->
+        <div v-else class="status-content" v-html="displayStatus.content" />
 
-    <!-- Media Attachments -->
-    <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
-      <template v-for="media in displayStatus.mediaAttachments" :key="media.id">
-        <img 
-          v-if="media.type === 'image'"
-          :src="media.previewUrl || media.url"
-          :alt="media.description || 'Image attachment'"
-          class="status-media-image"
-          loading="lazy"
-        />
-        <video 
-          v-else-if="media.type === 'video' || media.type === 'gifv'"
-          :src="media.url"
-          :poster="media.previewUrl"
-          controls
-          :autoplay="media.type === 'gifv'"
-          :loop="media.type === 'gifv'"
-          :muted="media.type === 'gifv'"
-          class="status-media-video"
-        />
-        <audio 
-          v-else-if="media.type === 'audio'"
-          :src="media.url"
-          controls
-          class="status-media-audio"
-        />
-      </template>
-    </div>
+        <!-- Media Attachments -->
+        <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
+          <template v-for="media in displayStatus.mediaAttachments" :key="media.id">
+            <img
+              v-if="media.type === 'image'"
+              :src="media.previewUrl ?? media.url ?? undefined"
+              :alt="media.description || 'Image attachment'"
+              class="status-media-image"
+              loading="lazy"
+            />
+            <video
+              v-else-if="media.type === 'video' || media.type === 'gifv'"
+              :src="media.url ?? undefined"
+              :poster="media.previewUrl ?? undefined"
+              controls
+              :autoplay="media.type === 'gifv'"
+              :loop="media.type === 'gifv'"
+              :muted="media.type === 'gifv'"
+              class="status-media-video"
+            />
+            <audio
+              v-else-if="media.type === 'audio'"
+              :src="media.url ?? undefined"
+              controls
+              class="status-media-audio"
+            />
+          </template>
+        </div>
 
-    <!-- Poll -->
-    <div v-if="displayStatus.poll" class="status-poll">
-      <div 
-        v-for="option in displayStatus.poll.options" 
-        :key="option.title"
-        class="status-poll-option"
-      >
-        <span class="status-poll-title">{{ option.title }}</span>
-        <span class="status-poll-votes">{{ option.votesCount }} votes</span>
-        <div 
-          class="status-poll-bar" 
-          :style="{ width: `${(option.votesCount || 0) / (displayStatus.poll!.votesCount || 1) * 100}%` }"
-        />
-      </div>
+        <!-- Poll -->
+        <div v-if="displayStatus.poll" class="status-poll">
+          <div
+            v-for="option in displayStatus.poll.options"
+            :key="option.title"
+            class="status-poll-option"
+          >
+            <span class="status-poll-title">{{ option.title }}</span>
+            <span class="status-poll-votes">{{ option.votesCount }} votes</span>
+            <div
+              class="status-poll-bar"
+              :style="{ width: `${(option.votesCount || 0) / (displayStatus.poll!.votesCount || 1) * 100}%` }"
+            />
+          </div>
           <p class="status-poll-info">{{ displayStatus.poll.votesCount }} votes · {{ displayStatus.poll.expired ? 'Closed' : 'Open' }}</p>
-    </div>
+        </div>
 
-        <!-- Actions - Threads Style -->
-    <footer class="status-actions">
-          <button class="status-action" :class="{ 'status-action--active': displayStatus.favourited }" :disabled="isFavouriting" aria-label="Like" @click="handleFavourite">
+        <!-- Actions -->
+        <footer class="status-actions">
+          <button
+            class="status-action"
+            :class="{ 'status-action--liked': displayStatus.favourited }"
+            :disabled="isFavouriting"
+            aria-label="Like"
+            @click="handleFavourite"
+          >
             <svg width="20" height="20" viewBox="0 0 24 24" :fill="displayStatus.favourited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
               <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
             </svg>
-            <span v-if="displayStatus.favouritesCount" class="status-action-count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
-      </button>
-      
-          <button class="status-action" aria-label="Reply">
+            <span v-if="displayStatus.favouritesCount" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
+          </button>
+
+          <button class="status-action" aria-label="Reply" @click="handleReply">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
             </svg>
-            <span v-if="displayStatus.repliesCount" class="status-action-count">{{ formatNumber(displayStatus.repliesCount) }}</span>
-      </button>
-      
-          <button class="status-action" :class="{ 'status-action--active': displayStatus.reblogged }" :disabled="isBoosting" aria-label="Repost" @click="handleBoost">
+            <span v-if="displayStatus.repliesCount" class="status-action__count">{{ formatNumber(displayStatus.repliesCount) }}</span>
+          </button>
+
+          <button
+            class="status-action"
+            :class="{ 'status-action--boosted': displayStatus.reblogged }"
+            :disabled="isBoosting"
+            aria-label="Repost"
+            @click="handleBoost"
+          >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" />
               <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" />
             </svg>
-            <span v-if="displayStatus.reblogsCount" class="status-action-count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
-      </button>
-      
-      <button class="status-action" aria-label="Share">
+            <span v-if="displayStatus.reblogsCount" class="status-action__count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
+          </button>
+
+          <button class="status-action" aria-label="Share" @click="handleShare">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
             </svg>
-      </button>
-    </footer>
+          </button>
+        </footer>
 
         <!-- Reply Preview / Thread Teaser -->
-        <button 
-          v-if="hasReplies" 
+        <button
+          v-if="hasReplies"
           class="status-thread-preview"
           @click="viewThread"
         >
@@ -486,9 +514,7 @@ onUnmounted(() => {
     <!-- Copied Toast -->
     <Teleport to="body">
       <Transition name="toast-fade">
-        <div v-if="showCopiedToast" class="status-toast">
-          ✓ Link copied
-        </div>
+        <div v-if="showCopiedToast" class="status-toast">Link copied</div>
       </Transition>
     </Teleport>
   </article>
@@ -506,14 +532,12 @@ onUnmounted(() => {
   overflow: hidden;
   max-width: 100%;
   width: 100%;
-  
-  // Larger padding on bigger screens
+
   @media (min-width: 400px) {
     padding: 0.875rem;
     border-radius: 12px;
   }
-  
-  // Subtle card feel on mobile too
+
   @media (max-width: 1023px) {
     background: var(--neo-bg-secondary);
   }
@@ -540,7 +564,7 @@ onUnmounted(() => {
   }
 }
 
-// Main layout - two columns like Threads
+// Main layout
 .status-main {
   display: flex;
   gap: 0.75rem;
@@ -555,7 +579,7 @@ onUnmounted(() => {
   align-items: center;
   width: 36px;
   flex-shrink: 0;
-  
+
   @media (min-width: 400px) {
     width: 40px;
   }
@@ -572,40 +596,13 @@ onUnmounted(() => {
   height: 36px;
   border-radius: 50%;
   object-fit: cover;
-  
+
   @media (min-width: 400px) {
     width: 40px;
     height: 40px;
   }
 }
 
-.status-follow-btn {
-  position: absolute;
-  bottom: -4px;
-  right: -4px;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--neo-text-primary);
-  color: var(--neo-bg-primary);
-  border: 2px solid var(--neo-bg-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  transition: transform 0.15s ease;
-
-  svg {
-    width: 10px;
-    height: 10px;
-  }
-
-  &:hover {
-    transform: scale(1.1);
-  }
-}
-
-// Thread line connecting to replies
 .status-thread-line {
   flex: 1;
   width: 2px;
@@ -669,42 +666,45 @@ onUnmounted(() => {
   white-space: nowrap;
   text-decoration: none;
   flex-shrink: 0;
-  padding-right: 0.25rem;
 
   &:hover {
     text-decoration: underline;
   }
 }
 
+// ========================================
+// Three-dot menu
+// ========================================
 .status-menu-container {
   position: relative;
+  flex-shrink: 0;
 }
 
 .status-more {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   background: transparent;
   border: none;
   border-radius: 50%;
   color: var(--neo-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
+  margin: -4px -4px -4px 0;
 
   &:hover {
-    background: var(--neo-accent-soft);
+    background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
   }
 }
 
-// Dropdown Menu - Threads Style
 .status-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 4px);
   right: 0;
-  min-width: 180px;
+  min-width: 200px;
   max-width: calc(100vw - 2rem);
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
@@ -712,11 +712,7 @@ onUnmounted(() => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
   z-index: 100;
   overflow: hidden;
-  padding: 0.5rem 0;
-
-  @media (min-width: 480px) {
-    min-width: 220px;
-  }
+  padding: 0.375rem;
 }
 
 .status-dropdown-item {
@@ -724,14 +720,15 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  padding: 0.75rem 1rem;
-  font-size: 0.9375rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
   color: var(--neo-text-primary);
   background: transparent;
   border: none;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  border-radius: 8px;
+  transition: background-color 0.12s ease;
 
   svg {
     flex-shrink: 0;
@@ -755,14 +752,14 @@ onUnmounted(() => {
   }
 
   &--danger {
-    color: #dc3545;
+    color: var(--neo-danger);
 
     svg {
-      color: #dc3545;
+      color: var(--neo-danger);
     }
 
     &:hover:not(:disabled) {
-      background: rgba(220, 53, 69, 0.1);
+      background: var(--neo-danger-soft);
     }
   }
 }
@@ -770,21 +767,19 @@ onUnmounted(() => {
 .status-dropdown-divider {
   height: 1px;
   background: var(--neo-border-color);
-  margin: 0.5rem 0;
+  margin: 0.25rem 0.5rem;
 }
 
-// Menu animations
 .menu-fade-enter-active,
 .menu-fade-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
 .menu-fade-enter-from,
 .menu-fade-leave-to {
   opacity: 0;
-  transform: translateY(-8px) scale(0.95);
+  transform: translateY(-6px) scale(0.96);
 }
-
 
 // Content Warning
 .status-cw {
@@ -818,28 +813,17 @@ onUnmounted(() => {
 
   :deep(p) {
     margin-bottom: 0.5rem;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
+    &:last-child { margin-bottom: 0; }
   }
 
   :deep(a) {
     color: var(--neo-accent);
     word-break: break-all;
-
-    &:hover {
-      text-decoration: underline;
-    }
+    &:hover { text-decoration: underline; }
   }
 
-  :deep(.mention) {
-    color: var(--neo-accent);
-  }
-
-  :deep(.hashtag) {
-    color: var(--neo-accent);
-  }
+  :deep(.mention) { color: var(--neo-accent); }
+  :deep(.hashtag) { color: var(--neo-accent); }
 
   :deep(img.emoji) {
     height: 1.2em;
@@ -856,9 +840,7 @@ onUnmounted(() => {
   border-radius: 12px;
   overflow: hidden;
   max-width: 100%;
-  overflow: hidden;
 
-  // Multi-image grid
   &:has(> *:nth-child(2)) {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -875,9 +857,7 @@ onUnmounted(() => {
   cursor: pointer;
   transition: opacity 0.15s ease;
 
-  &:hover {
-    opacity: 0.95;
-  }
+  &:hover { opacity: 0.95; }
 }
 
 .status-media-video,
@@ -938,40 +918,44 @@ onUnmounted(() => {
   color: var(--neo-text-muted);
 }
 
-// Actions - Threads Style
+// ========================================
+// Actions - pill-shaped buttons with proper sizing
+// ========================================
 .status-actions {
   display: flex;
   align-items: center;
-  gap: 0.125rem;
+  gap: 0.25rem;
   margin-top: 0.5rem;
   margin-left: -0.5rem;
 }
 
 .status-action {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem;
-  font-size: 0.875rem;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
   color: var(--neo-text-muted);
   background: transparent;
   border: none;
-  border-radius: 50%;
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.15s ease;
+  line-height: 1;
 
   svg {
     width: 20px;
     height: 20px;
+    flex-shrink: 0;
   }
 
   &:hover:not(:disabled) {
-    background: var(--neo-accent-soft);
+    background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
   }
 
   &:active:not(:disabled) {
-    transform: scale(0.9);
+    transform: scale(0.92);
   }
 
   &:disabled {
@@ -979,25 +963,44 @@ onUnmounted(() => {
     cursor: not-allowed;
   }
 
-  &--active {
-    color: #f91880; // Pink like for hearts
+  // Favourite active = pink
+  &--liked {
+    color: #f91880;
 
     svg {
       stroke: #f91880;
       fill: #f91880;
     }
+
+    &:hover:not(:disabled) {
+      background: rgba(249, 24, 128, 0.1);
+      color: #f91880;
+    }
   }
 
-  &-count {
+  // Boost active = green
+  &--boosted {
+    color: #00ba7c;
+
+    svg {
+      stroke: #00ba7c;
+    }
+
+    &:hover:not(:disabled) {
+      background: rgba(0, 186, 124, 0.1);
+      color: #00ba7c;
+    }
+  }
+
+  &__count {
     font-size: 0.8125rem;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     color: inherit;
-    padding-right: 0.375rem;
   }
 }
 
-// Thread Preview / View Replies Button
+// Thread Preview
 .status-thread-preview {
   display: flex;
   align-items: center;
@@ -1013,7 +1016,7 @@ onUnmounted(() => {
 
   &:hover {
     color: var(--neo-text-secondary);
-    
+
     .thread-preview-arrow {
       transform: translateX(2px);
     }
@@ -1037,12 +1040,13 @@ onUnmounted(() => {
     text-shadow: 0 0 5px currentColor;
   }
 
-  .status-action--active {
+  .status-action--liked,
+  .status-action--boosted {
     text-shadow: 0 0 10px currentColor;
   }
 }
 
-// Desktop card style
+// Desktop
 @media (min-width: 1024px) {
   .status-card {
     background: var(--neo-bg-card);
@@ -1082,16 +1086,17 @@ onUnmounted(() => {
 <style lang="scss">
 .status-toast {
   position: fixed;
-  bottom: 7.5rem; // Above mobile bottom nav
+  bottom: 7.5rem;
   left: 50%;
   transform: translateX(-50%);
   padding: 0.75rem 1.25rem;
-  background: #1a1a1a;
-  color: #ffffff;
+  background: var(--neo-bg-secondary);
+  color: var(--neo-text-primary);
+  border: 1px solid var(--neo-border-color);
   border-radius: 100px;
   font-size: 0.875rem;
   font-weight: 500;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   z-index: 9999;
 
   @media (min-width: 1024px) {
