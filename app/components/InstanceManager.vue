@@ -5,6 +5,7 @@
 
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { useAccountsManager } from '~/composables/useAccountsManager'
+import { normalizeServer, friendlyServerError } from '~/utils/instances'
 
 const instancesStore = useInstancesStore()
 const { isOpen, close } = useAccountsManager()
@@ -13,6 +14,7 @@ const router = useRouter()
 const newServerUrl = ref('')
 const isAdding = ref(false)
 const addError = ref<string | null>(null)
+const addSuccess = ref<string | null>(null)
 
 const signedIn = computed(() => instancesStore.authenticatedInstances)
 const watching = computed(() => instancesStore.watchingInstances)
@@ -31,23 +33,26 @@ const closeAndReset = () => {
   close()
   newServerUrl.value = ''
   addError.value = null
+  addSuccess.value = null
 }
 
 const watchServer = async () => {
   if (!newServerUrl.value.trim()) return
   isAdding.value = true
   addError.value = null
+  addSuccess.value = null
 
   try {
-    let url = newServerUrl.value.trim()
-    if (!url.startsWith('http')) url = `https://${url}`
-    await instancesStore.addInstance(url)
+    const url = normalizeServer(newServerUrl.value)
+    if (!url) {
+      addError.value = 'Enter a server name like mastodon.social'
+      return
+    }
+    const instance = await instancesStore.addInstance(url)
     newServerUrl.value = ''
+    addSuccess.value = `Watching ${hostOf(instance)}`
   } catch (e: any) {
-    const msg = e?.message || 'Failed to add server'
-    addError.value = msg.includes('Already watching') || msg.includes('Already connected')
-      ? 'You’re already watching this server.'
-      : msg
+    addError.value = friendlyServerError(e)
   } finally {
     isAdding.value = false
   }
@@ -179,6 +184,7 @@ const isActive = (instance: ConnectedInstance) =>
               </div>
               <p class="accounts-hint">
                 Public timelines only — no login needed.
+                <NuxtLink to="/explore" class="accounts-inline-link" @click="closeAndReset">Browse servers</NuxtLink>
               </p>
 
               <div class="watch-add">
@@ -186,7 +192,7 @@ const isActive = (instance: ConnectedInstance) =>
                   v-model="newServerUrl"
                   type="text"
                   class="neo-input"
-                  placeholder="mastodon.social"
+                  placeholder="mastodon.social or @you@example.social"
                   :disabled="isAdding"
                   @keydown.enter="watchServer"
                 />
@@ -200,6 +206,7 @@ const isActive = (instance: ConnectedInstance) =>
                 </button>
               </div>
               <p v-if="addError" class="watch-error">{{ addError }}</p>
+              <p v-if="addSuccess" class="watch-success">{{ addSuccess }}</p>
 
               <div v-if="watching.length === 0" class="accounts-empty accounts-empty--quiet">
                 Not watching any extra servers.
@@ -540,6 +547,23 @@ const isActive = (instance: ConnectedInstance) =>
   margin: -0.35rem 0 0.75rem;
   font-size: 0.8125rem;
   color: var(--neo-danger);
+}
+
+.watch-success {
+  margin: -0.35rem 0 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--neo-success);
+}
+
+.accounts-inline-link {
+  margin-left: 0.35rem;
+  font-weight: 600;
+  color: var(--neo-accent);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .modal-enter-active,

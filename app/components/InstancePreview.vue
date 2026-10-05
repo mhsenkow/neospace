@@ -1,31 +1,36 @@
 <script setup lang="ts">
 import { useInstancesStore } from '~/stores/instances'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
+import { friendlyServerError, isAuthGatedPublicHost } from '~/utils/instances'
+
+const emit = defineEmits<{
+  watched: [domain: string]
+}>()
 
 const instancesStore = useInstancesStore()
-const { instances } = useCuratedInstances()
+const { getByDomain } = useCuratedInstances()
 
 const isOpen = computed(() => !!instancesStore.previewingInstance)
 const domain = computed(() => instancesStore.previewingInstance)
-const instanceInfo = computed(() => domain.value ? instancesStore.getInstance(domain.value) : null)
-const curatedInfo = computed(() => instances.find(i => i.domain === domain.value))
+const instanceInfo = computed(() => (domain.value ? instancesStore.getInstance(domain.value) : null))
+const curatedInfo = computed(() => (domain.value ? getByDomain(domain.value) : undefined))
 
-// Check if this instance is already connected
 const isWatching = computed(() => {
   if (!domain.value) return false
-  return instancesStore.instances.some(i => 
-    i.url.toLowerCase().includes(domain.value!.toLowerCase())
+  return instancesStore.instances.some((i) =>
+    i.url.toLowerCase().includes(domain.value!.toLowerCase()),
   )
 })
 
-// Check if user is logged into this instance
 const isLoggedIn = computed(() => {
   if (!domain.value) return false
-  const instance = instancesStore.instances.find(i => 
-    i.url.toLowerCase().includes(domain.value!.toLowerCase())
+  const instance = instancesStore.instances.find((i) =>
+    i.url.toLowerCase().includes(domain.value!.toLowerCase()),
   )
-  return instance?.user !== null
+  return !!(instance?.accessToken && instance?.user)
 })
+
+const isGated = computed(() => !!domain.value && isAuthGatedPublicHost(domain.value))
 
 const isAdding = ref(false)
 const addError = ref<string | null>(null)
@@ -34,47 +39,38 @@ const close = () => {
   instancesStore.closePreview()
 }
 
-// Add instance to watch list
 const handleWatch = async () => {
   if (!domain.value || isWatching.value) return
-  
+
   isAdding.value = true
   addError.value = null
-  
+
   try {
     await instancesStore.addInstance(`https://${domain.value}`)
+    emit('watched', domain.value)
   } catch (e: any) {
-    addError.value = e.message || 'Failed to add instance'
+    addError.value = friendlyServerError(e)
   } finally {
     isAdding.value = false
   }
 }
 
-// Start login flow for this instance
 const handleLogin = async () => {
   if (!domain.value) return
-  
-  // First make sure it's in our list
-  if (!isWatching.value) {
-    await handleWatch()
-  }
-  
-  // Find the instance and start auth
-  const instance = instancesStore.instances.find(i => 
-    i.url.toLowerCase().includes(domain.value!.toLowerCase())
-  )
-  
-  if (instance) {
-    try {
-      const authUrl = await instancesStore.startAuth(instance.id)
-      window.location.href = authUrl
-    } catch (e: any) {
-      addError.value = e.message || 'Failed to start login'
-    }
+  addError.value = null
+
+  try {
+    const authUrl = await instancesStore.loginWithInstance(`https://${domain.value}`)
+    window.location.href = authUrl
+  } catch (e: any) {
+    addError.value = friendlyServerError(e)
   }
 }
 
-// Close on escape
+const createAccountUrl = computed(() =>
+  domain.value ? `https://${domain.value}/auth/sign_up` : '#',
+)
+
 onMounted(() => {
   const handleEscape = (e: KeyboardEvent) => {
     if (e.key === 'Escape') close()
@@ -85,11 +81,11 @@ onMounted(() => {
 
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr)
-  return date.toLocaleDateString('en-US', { 
-    month: 'short', 
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   })
 }
 
@@ -103,7 +99,7 @@ const stripHtml = (html: string) => {
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="isOpen" class="preview-overlay" @click.self="close">
-        <div class="preview-modal" :style="{ '--accent': curatedInfo?.color || '#6364ff' }">
+        <div class="preview-modal" :style="{ '--accent': curatedInfo?.color || 'var(--neo-accent)' }">
           <!-- Header -->
           <header class="preview-header">
             <div class="header-content">
@@ -206,73 +202,50 @@ const stripHtml = (html: string) => {
               </article>
 
               <p v-if="!instancesStore.previewTimeline.length" class="no-posts">
-                No recent posts to show
+                <template v-if="isGated">
+                  This server hides its public feed until you sign in. You can still Sign in or create an account.
+                </template>
+                <template v-else>
+                  No recent public posts to show right now.
+                </template>
               </p>
             </div>
           </div>
 
-          <!-- Error message -->
           <div v-if="addError" class="preview-error">
             {{ addError }}
           </div>
 
-          <!-- Action Buttons -->
           <footer class="preview-footer">
-            <!-- Watch Button -->
-            <button 
+            <button
+              v-if="!isLoggedIn"
+              type="button"
+              class="action-btn action-btn--login"
+              @click="handleLogin"
+            >
+              Sign in to this server
+            </button>
+            <div v-else class="logged-in-badge">Signed in</div>
+
+            <button
               v-if="!isWatching"
+              type="button"
               class="action-btn action-btn--watch"
               :disabled="isAdding"
               @click="handleWatch"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-              {{ isAdding ? 'Adding...' : 'Watch' }}
+              {{ isAdding ? 'Adding…' : 'Watch public posts' }}
             </button>
-            
-            <!-- Already Watching Badge -->
-            <div v-else class="watching-badge">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-              Watching
-            </div>
+            <div v-else class="watching-badge">Watching</div>
 
-            <!-- Login Button (if watching but not logged in) -->
-            <button 
-              v-if="isWatching && !isLoggedIn"
-              class="action-btn action-btn--login"
-              @click="handleLogin"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
-                <polyline points="10 17 15 12 10 7"/>
-                <line x1="15" y1="12" x2="3" y2="12"/>
-              </svg>
-              Login
-            </button>
-            
-            <!-- Logged In Badge -->
-            <div v-if="isLoggedIn" class="logged-in-badge">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
-              Logged In
-            </div>
-
-            <!-- External Join Link (always show) -->
-            <a 
-              :href="`https://${domain}/auth/sign_up`" 
-              target="_blank" 
+            <a
+              v-if="instanceInfo?.registrations !== false"
+              :href="createAccountUrl"
+              target="_blank"
+              rel="noopener"
               class="action-btn action-btn--join"
             >
-              Create Account
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
-              </svg>
+              Create account →
             </a>
           </footer>
         </div>

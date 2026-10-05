@@ -1,5 +1,5 @@
 /**
- * Shared instance defaults for guest browsing.
+ * Shared instance defaults and server-name helpers.
  *
  * Several large Mastodon hosts now require auth for public timelines
  * (mastodon.social returns 422 for unauthenticated /api/v1/timelines/public).
@@ -36,4 +36,48 @@ export function resolvePublicInstanceUrl(
     return preferred.replace(/\/+$/, '')
   }
   return fallback
+}
+
+/**
+ * Accept pasted URLs, @user@host, or bare hostnames → https://host
+ */
+export function normalizeServer(raw: string): string | null {
+  let value = raw.trim().toLowerCase()
+  if (!value) return null
+
+  // @alice@mastodon.social → mastodon.social
+  const atMatch = value.match(/^@?[^@\s]+@([^@\s]+)$/)
+  if (atMatch?.[1]) value = atMatch[1]
+
+  value = value.replace(/^https?:\/\//, '')
+  value = value.replace(/\/.*$/, '')
+  value = value.replace(/\/+$/, '')
+
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value)) {
+    return null
+  }
+
+  return `https://${value}`
+}
+
+export function friendlyServerError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err || '')
+  const lower = message.toLowerCase()
+
+  if (lower.includes('already watching') || lower.includes('already connected')) {
+    return 'You’re already connected to this server.'
+  }
+  if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('cors')) {
+    return "We couldn't reach that server. Check the name and your internet connection, then try again."
+  }
+  if (lower.includes('404') || lower.includes('not found')) {
+    return "We couldn't find that server. Double-check the spelling — it usually looks like mastodon.social."
+  }
+  if (lower.includes('timeout')) {
+    return 'That server took too long to respond. Try again in a moment.'
+  }
+  if (message && message.length < 120 && !lower.includes('error:')) {
+    return message
+  }
+  return "Something went wrong connecting to that server. Please try again."
 }

@@ -287,8 +287,7 @@ export const useInstancesStore = defineStore('instances', {
         lastFetched: null,
       }
 
-      this.instances.push(instance)
-
+      // Probe first — only persist if the server responds
       try {
         const client = createRestAPIClient({ url })
         const info = await client.v2.instance.fetch()
@@ -302,12 +301,11 @@ export const useInstancesStore = defineStore('instances', {
         instance.isConnecting = false
         instance.lastFetched = new Date().toISOString()
 
+        this.instances.push(instance)
         this.saveToStorage()
         return instance
       } catch (e: any) {
-        instance.error = e.message || 'Failed to connect'
-        instance.isConnecting = false
-        throw e
+        throw new Error(e?.message || 'Failed to connect')
       }
     },
 
