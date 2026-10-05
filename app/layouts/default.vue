@@ -7,12 +7,14 @@ import { useThemeStore } from '~/stores/theme'
 import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
+import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
+const composeHandoff = useComposeHandoffStore()
 const { open: openAccounts } = useAccountsManager()
 const router = useRouter()
 const route = useRoute()
@@ -54,6 +56,52 @@ onMounted(async () => {
     notificationsStore.refreshUnreadBadge()
   }
 
+  // Loom → NeoSpace chart share handoff (?compose=loom&story=&text=)
+  const loomKey = 'neospace_loom_share'
+  const fromQuery = String(route.query.compose || '') === 'loom'
+  if (fromQuery) {
+    const payload = {
+      story: typeof route.query.story === 'string' ? route.query.story : '',
+      text: typeof route.query.text === 'string' ? route.query.text : '',
+    }
+    try {
+      sessionStorage.setItem(loomKey, JSON.stringify(payload))
+    } catch {
+      /* private mode */
+    }
+    await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })
+  }
+
+  let loomPayload: { story?: string; text?: string } | null = null
+  try {
+    const raw = sessionStorage.getItem(loomKey)
+    if (raw) {
+      loomPayload = JSON.parse(raw)
+      sessionStorage.removeItem(loomKey)
+    }
+  } catch {
+    loomPayload = null
+  }
+
+  if (loomPayload && (loomPayload.story || loomPayload.text)) {
+    if (!instancesStore.isAuthenticated) {
+      // Re-stash until after sign-in
+      try {
+        sessionStorage.setItem(loomKey, JSON.stringify(loomPayload))
+      } catch {
+        /* ignore */
+      }
+      if (route.path !== '/login') await router.replace('/login')
+    } else {
+      await composeHandoff.ingestFromQuery({
+        compose: 'loom',
+        story: loomPayload.story || '',
+        text: loomPayload.text || '',
+      })
+      if (route.path !== '/') await router.replace('/')
+    }
+  }
+
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => {
     if (settingsStore.localPreferences.theme === 'auto') applyTheme()
@@ -71,10 +119,26 @@ watch(
 )
 
 watch(
-  () => instancesStore.hasAuthenticatedInstance,
-  (ok) => {
-    if (ok) notificationsStore.refreshUnreadBadge()
-    else notificationsStore.unreadCount = 0
+  () => instancesStore.isAuthenticated,
+  async (ok) => {
+    if (!ok) return
+    let loomPayload: { story?: string; text?: string } | null = null
+    try {
+      const raw = sessionStorage.getItem('neospace_loom_share')
+      if (raw) {
+        loomPayload = JSON.parse(raw)
+        sessionStorage.removeItem('neospace_loom_share')
+      }
+    } catch {
+      loomPayload = null
+    }
+    if (!loomPayload || (!loomPayload.story && !loomPayload.text)) return
+    await composeHandoff.ingestFromQuery({
+      compose: 'loom',
+      story: loomPayload.story || '',
+      text: loomPayload.text || '',
+    })
+    if (route.path !== '/') await router.replace('/')
   },
 )
 

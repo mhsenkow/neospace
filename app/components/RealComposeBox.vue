@@ -6,6 +6,7 @@
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
+import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
 import type { mastodon } from 'masto'
 
@@ -34,6 +35,7 @@ const emit = defineEmits<{
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
+const handoffStore = useComposeHandoffStore()
 
 const content = ref(props.initialText || '')
 const spoilerText = ref('')
@@ -43,6 +45,7 @@ const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
 const showCW = ref(settingsStore.defaultSensitive)
 const isPosting = ref(false)
 const error = ref<string | null>(null)
+const handoffNotice = ref<string | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
@@ -173,6 +176,31 @@ const focusComposer = () => {
   textareaRef.value?.focus()
 }
 
+const applyHandoff = async () => {
+  // Only the main home compose absorbs Loom shares — not reply bars
+  if (props.inReplyToId || props.compact || !handoffStore.hasPending) return
+  const draft = handoffStore.take()
+  if (!draft) return
+  if (draft.text) content.value = draft.text
+  if (draft.files.length) await addFiles(draft.files)
+  handoffNotice.value = draft.notice
+  if (handoffNotice.value) {
+    window.setTimeout(() => {
+      handoffNotice.value = null
+    }, 5000)
+  }
+  await nextTick()
+  textareaRef.value?.focus()
+  textareaRef.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+watch(
+  () => handoffStore.hasPending,
+  (ready) => {
+    if (ready) void applyHandoff()
+  },
+)
+
 onMounted(() => {
   if (props.inReplyToId && props.initialText) {
     nextTick(() => {
@@ -181,6 +209,7 @@ onMounted(() => {
       textareaRef.value?.setSelectionRange(len, len)
     })
   }
+  void applyHandoff()
 })
 </script>
 
@@ -274,6 +303,8 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <div v-if="handoffNotice" class="compose-handoff" role="status">{{ handoffNotice }}</div>
 
     <div v-if="error" class="compose-error" @click.stop>{{ error }}</div>
 
@@ -578,6 +609,15 @@ onMounted(() => {
   color: var(--neo-danger);
   font-size: 0.8125rem;
   cursor: default;
+}
+
+.compose-handoff {
+  padding: 0.65rem 0.75rem;
+  background: var(--neo-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, transparent);
+  border-radius: var(--neo-radius-md);
+  color: var(--neo-accent);
+  font-size: 0.8125rem;
 }
 
 .compose-footer {
