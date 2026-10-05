@@ -7,7 +7,12 @@ import { useThemeStore } from '~/stores/theme'
 import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
-import { useComposeHandoffStore } from '~/stores/composeHandoff'
+import {
+  useComposeHandoffStore,
+  LOOM_ORIGINS,
+  persistLoomShare,
+  readPersistedLoomShare,
+} from '~/stores/composeHandoff'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 
 const themeStore = useThemeStore()
@@ -56,49 +61,67 @@ onMounted(async () => {
     notificationsStore.refreshUnreadBadge()
   }
 
-  // Loom → NeoSpace chart share handoff (?compose=loom&story=&text=)
-  const loomKey = 'neospace_loom_share'
+  // Loom handoff: accept PNG via postMessage (reliable) + query/session fallback
+  const onLoomMessage = (e: MessageEvent) => {
+    if (!LOOM_ORIGINS.has(e.origin)) return
+    if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
+    void (async () => {
+      await composeHandoff.ingestFromMessage({
+        text: typeof e.data.text === 'string' ? e.data.text : '',
+        story: typeof e.data.story === 'string' ? e.data.story : '',
+        image: e.data.image?.buffer
+          ? {
+              name: e.data.image.name,
+              type: e.data.image.type,
+              buffer: e.data.image.buffer,
+            }
+          : undefined,
+      })
+      if (!instancesStore.isAuthenticated) {
+        await router.replace('/login')
+      } else if (route.path !== '/') {
+        await router.replace('/')
+      }
+    })()
+  }
+  window.addEventListener('message', onLoomMessage)
+  onUnmounted(() => window.removeEventListener('message', onLoomMessage))
+
+  // Tell Loom we're ready to receive the chart image
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'neospace-loom-ready' }, 'https://loom.ibm.io')
+      window.opener.postMessage(
+        { type: 'neospace-loom-ready' },
+        'https://loom-storyteller.mhsenkow.workers.dev',
+      )
+    }
+  } catch {
+    /* cross-origin opener may throw */
+  }
+
   const fromQuery = String(route.query.compose || '') === 'loom'
   if (fromQuery) {
-    const payload = {
+    persistLoomShare({
       story: typeof route.query.story === 'string' ? route.query.story : '',
       text: typeof route.query.text === 'string' ? route.query.text : '',
-    }
-    try {
-      sessionStorage.setItem(loomKey, JSON.stringify(payload))
-    } catch {
-      /* private mode */
-    }
+    })
     await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })
   }
 
-  let loomPayload: { story?: string; text?: string } | null = null
-  try {
-    const raw = sessionStorage.getItem(loomKey)
-    if (raw) {
-      loomPayload = JSON.parse(raw)
-      sessionStorage.removeItem(loomKey)
-    }
-  } catch {
-    loomPayload = null
-  }
+  // Give Loom a moment to postMessage the PNG before falling back to link-only
+  await new Promise((r) => setTimeout(r, 900))
 
-  if (loomPayload && (loomPayload.story || loomPayload.text)) {
-    if (!instancesStore.isAuthenticated) {
-      // Re-stash until after sign-in
-      try {
-        sessionStorage.setItem(loomKey, JSON.stringify(loomPayload))
-      } catch {
-        /* ignore */
+  if (!composeHandoff.hasPending) {
+    const loomPayload = readPersistedLoomShare()
+    if (loomPayload && (loomPayload.story || loomPayload.text || loomPayload.imageDataUrl)) {
+      if (!instancesStore.isAuthenticated) {
+        persistLoomShare(loomPayload)
+        if (route.path !== '/login') await router.replace('/login')
+      } else {
+        await composeHandoff.ingestStored(loomPayload)
+        if (route.path !== '/') await router.replace('/')
       }
-      if (route.path !== '/login') await router.replace('/login')
-    } else {
-      await composeHandoff.ingestFromQuery({
-        compose: 'loom',
-        story: loomPayload.story || '',
-        text: loomPayload.text || '',
-      })
-      if (route.path !== '/') await router.replace('/')
     }
   }
 
@@ -122,22 +145,9 @@ watch(
   () => instancesStore.isAuthenticated,
   async (ok) => {
     if (!ok) return
-    let loomPayload: { story?: string; text?: string } | null = null
-    try {
-      const raw = sessionStorage.getItem('neospace_loom_share')
-      if (raw) {
-        loomPayload = JSON.parse(raw)
-        sessionStorage.removeItem('neospace_loom_share')
-      }
-    } catch {
-      loomPayload = null
-    }
-    if (!loomPayload || (!loomPayload.story && !loomPayload.text)) return
-    await composeHandoff.ingestFromQuery({
-      compose: 'loom',
-      story: loomPayload.story || '',
-      text: loomPayload.text || '',
-    })
+    const loomPayload = readPersistedLoomShare()
+    if (!loomPayload || (!loomPayload.story && !loomPayload.text && !loomPayload.imageDataUrl)) return
+    await composeHandoff.ingestStored(loomPayload)
     if (route.path !== '/') await router.replace('/')
   },
 )
