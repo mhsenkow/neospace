@@ -38,18 +38,6 @@ const groups: SuiteGroup[] = [
         blurb: 'count · draft',
         href: 'https://ibm.io/wordcount/',
       },
-      {
-        id: 'stories',
-        label: 'stories',
-        blurb: 'read · library',
-        href: 'https://ibm.io/stories/',
-      },
-      {
-        id: 'dataexplorer',
-        label: 'data',
-        blurb: 'csv · charts',
-        href: 'https://ibm.io/dataexplorer/',
-      },
     ],
   },
   {
