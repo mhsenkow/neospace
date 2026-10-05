@@ -66,7 +66,9 @@ export const useStatusStore = defineStore('status', {
     },
 
     /**
-     * Upload an image/video for a status. Masto polls until processing completes.
+     * Upload an image/video for a status.
+     * Skip server processing poll — Mastodon accepts the media id immediately,
+     * and waiting for url often hangs the compose button for 60s+.
      */
     async uploadMedia(file: Blob, description?: string): Promise<mastodon.v1.MediaAttachment> {
       const instances = useInstancesStore()
@@ -75,10 +77,14 @@ export const useStatusStore = defineStore('status', {
       }
 
       const client = this.getClient()
+      const named =
+        file instanceof File
+          ? file
+          : new File([file], 'upload.bin', { type: file.type || 'application/octet-stream' })
       return await client.v2.media.create({
-        file,
+        file: named,
         description: description || undefined,
-        skipPolling: false,
+        skipPolling: true,
       })
     },
 

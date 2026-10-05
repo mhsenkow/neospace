@@ -61,6 +61,7 @@ const {
   addFiles,
   removeAttachment,
   clearAttachments,
+  retryUpload,
   onDragEnter,
   onDragLeave,
   onDragOver,
@@ -293,8 +294,16 @@ onMounted(() => {
           <span class="compose-media__video-name">{{ item.file.name }}</span>
         </div>
         <div v-if="item.uploading" class="compose-media__overlay">Uploading…</div>
-        <div v-else-if="item.error" class="compose-media__overlay compose-media__overlay--error">
-          {{ item.error }}
+        <div
+          v-else-if="item.error"
+          class="compose-media__overlay compose-media__overlay--error"
+          role="button"
+          tabindex="0"
+          title="Tap to retry upload"
+          @click="retryUpload(item.localId)"
+          @keydown.enter="retryUpload(item.localId)"
+        >
+          {{ item.error }} · retry
         </div>
         <button
           type="button"

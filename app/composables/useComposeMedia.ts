@@ -58,22 +58,34 @@ export function useComposeMedia() {
     attachments.value = []
   }
 
-  const uploadOne = async (draft: ComposeAttachment) => {
-    draft.uploading = true
-    draft.error = null
+  /** Always mutate via attachments.value so Vue tracks uploading/error/remoteId. */
+  const patchAttachment = (localId: string, patch: Partial<ComposeAttachment>) => {
+    const draft = attachments.value.find((a) => a.localId === localId)
+    if (!draft) return null
+    Object.assign(draft, patch)
+    return draft
+  }
+
+  const uploadOne = async (localId: string) => {
+    const draft = patchAttachment(localId, { uploading: true, error: null })
+    if (!draft) return
     try {
       const remote = await statusStore.uploadMedia(draft.file)
-      draft.remoteId = remote.id
+      const current = attachments.value.find((a) => a.localId === localId)
+      if (!current) return
+      current.remoteId = remote.id
       // Prefer server preview if available
       if (remote.previewUrl) {
-        if (draft.previewUrl.startsWith('blob:')) URL.revokeObjectURL(draft.previewUrl)
-        draft.previewUrl = remote.previewUrl
+        if (current.previewUrl.startsWith('blob:')) URL.revokeObjectURL(current.previewUrl)
+        current.previewUrl = remote.previewUrl
       }
     } catch (e: any) {
-      draft.error = e?.message || 'Upload failed'
-      draft.remoteId = null
+      patchAttachment(localId, {
+        error: e?.message || 'Upload failed',
+        remoteId: null,
+      })
     } finally {
-      draft.uploading = false
+      patchAttachment(localId, { uploading: false })
     }
   }
 
@@ -99,7 +111,13 @@ export function useComposeMedia() {
 
     if (accepted.length === 0) return
     attachments.value.push(...accepted)
-    await Promise.all(accepted.map((a) => uploadOne(a)))
+    await Promise.all(accepted.map((a) => uploadOne(a.localId)))
+  }
+
+  const retryUpload = async (localId: string) => {
+    const draft = attachments.value.find((a) => a.localId === localId)
+    if (!draft || draft.uploading) return
+    await uploadOne(localId)
   }
 
   const onDragEnter = (e: DragEvent) => {
@@ -157,6 +175,7 @@ export function useComposeMedia() {
     canAddMore,
     maxAttachments: MAX_ATTACHMENTS,
     addFiles,
+    retryUpload,
     removeAttachment,
     clearAttachments,
     onDragEnter,
