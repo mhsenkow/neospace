@@ -49,71 +49,24 @@ interface GroupsState {
   maxId: string | null
 }
 
-// Predefined/suggested groups - these are just hashtags with nice metadata
+// Predefined/suggested groups - friendly wrappers over popular hashtags
 const FEATURED_GROUPS: Omit<Group, 'isMember'>[] = [
+  // Tech
   {
     tag: 'fediverse',
     name: 'Fediverse Meta',
-    description: 'Discuss the fediverse itself - instances, protocols, and the future of decentralized social media.',
+    description: 'Discuss the fediverse itself — instances, protocols, and decentralized social.',
     icon: '🌐',
     category: 'tech',
-    featured: true
-  },
-  {
-    tag: 'introduction',
-    name: 'Introductions',
-    description: 'New to the fediverse? Introduce yourself and meet the community!',
-    icon: '👋',
-    category: 'social',
-    featured: true
-  },
-  {
-    tag: 'photography',
-    name: 'Photography',
-    description: 'Share your photos and appreciate the art of photography.',
-    icon: '📸',
-    category: 'creative',
-    featured: true
-  },
-  {
-    tag: 'art',
-    name: 'Art & Artists',
-    description: 'Digital art, traditional art, illustrations, and creative expression.',
-    icon: '🎨',
-    category: 'creative',
-    featured: true
-  },
-  {
-    tag: 'gamedev',
-    name: 'Game Development',
-    description: 'Indie devs, AAA studios, and everyone making games.',
-    icon: '🎮',
-    category: 'gaming',
-    featured: true
-  },
-  {
-    tag: 'music',
-    name: 'Music',
-    description: 'Musicians, producers, and music lovers unite.',
-    icon: '🎵',
-    category: 'creative',
-    featured: true
-  },
-  {
-    tag: 'books',
-    name: 'Book Club',
-    description: 'Readers sharing recommendations, reviews, and literary discussions.',
-    icon: '📚',
-    category: 'creative',
-    featured: true
+    featured: true,
   },
   {
     tag: 'tech',
     name: 'Tech Talk',
-    description: 'Technology news, discussions, and geekery.',
+    description: 'Technology news, gadgets, and geekery.',
     icon: '💻',
     category: 'tech',
-    featured: true
+    featured: true,
   },
   {
     tag: 'opensource',
@@ -121,47 +74,7 @@ const FEATURED_GROUPS: Omit<Group, 'isMember'>[] = [
     description: 'Free and open source software, hardware, and culture.',
     icon: '🔓',
     category: 'tech',
-    featured: true
-  },
-  {
-    tag: 'cooking',
-    name: 'Cooking & Food',
-    description: 'Recipes, food photography, and culinary adventures.',
-    icon: '🍳',
-    category: 'social',
-    featured: true
-  },
-  {
-    tag: 'cats',
-    name: 'Cats',
-    description: 'The internet\'s true purpose: sharing cat photos.',
-    icon: '🐱',
-    category: 'social',
-    featured: true
-  },
-  {
-    tag: 'dogs',
-    name: 'Dogs',
-    description: 'Good boys, good girls, and puppy content.',
-    icon: '🐕',
-    category: 'social',
-    featured: true
-  },
-  {
-    tag: 'nature',
-    name: 'Nature & Wildlife',
-    description: 'Beautiful nature photography and wildlife appreciation.',
-    icon: '🌿',
-    category: 'creative',
-    featured: true
-  },
-  {
-    tag: 'writing',
-    name: 'Writers',
-    description: 'Fiction, non-fiction, poetry - all forms of the written word.',
-    icon: '✍️',
-    category: 'creative',
-    featured: true
+    featured: true,
   },
   {
     tag: 'linux',
@@ -169,7 +82,155 @@ const FEATURED_GROUPS: Omit<Group, 'isMember'>[] = [
     description: 'Linux users, sysadmins, and penguin enthusiasts.',
     icon: '🐧',
     category: 'tech',
-    featured: true
+    featured: true,
+  },
+  {
+    tag: 'privacy',
+    name: 'Privacy & Security',
+    description: 'Digital privacy, security tips, and staying safe online.',
+    icon: '🔒',
+    category: 'tech',
+    featured: true,
+  },
+  {
+    tag: 'webdev',
+    name: 'Web Development',
+    description: 'Front-end, back-end, and everything that ships to the web.',
+    icon: '🕸️',
+    category: 'tech',
+    featured: true,
+  },
+  {
+    tag: 'python',
+    name: 'Python',
+    description: 'Python programming, libraries, and projects.',
+    icon: '🐍',
+    category: 'tech',
+    featured: true,
+  },
+  {
+    tag: 'ai',
+    name: 'AI & Machine Learning',
+    description: 'AI tools, research, and what it means for everyday life.',
+    icon: '🤖',
+    category: 'tech',
+    featured: true,
+  },
+  {
+    tag: 'selfhosting',
+    name: 'Self-Hosting',
+    description: 'Run your own services — home labs, Docker, and independence.',
+    icon: '🏠',
+    category: 'tech',
+    featured: true,
+  },
+
+  // Creative
+  {
+    tag: 'photography',
+    name: 'Photography',
+    description: 'Share your photos and appreciate the art of photography.',
+    icon: '📸',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'art',
+    name: 'Art & Artists',
+    description: 'Digital art, traditional art, illustrations, and creative expression.',
+    icon: '🎨',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'music',
+    name: 'Music',
+    description: 'Musicians, producers, and music lovers unite.',
+    icon: '🎵',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'books',
+    name: 'Book Club',
+    description: 'Recommendations, reviews, and literary discussions.',
+    icon: '📚',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'nature',
+    name: 'Nature & Wildlife',
+    description: 'Nature photography and wildlife appreciation.',
+    icon: '🌿',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'writing',
+    name: 'Writers',
+    description: 'Fiction, non-fiction, poetry — all forms of the written word.',
+    icon: '✍️',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'film',
+    name: 'Film & TV',
+    description: 'Movies, shows, and recommendations worth your evening.',
+    icon: '🎬',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'design',
+    name: 'Design',
+    description: 'Graphic design, UX, typography, and visual craft.',
+    icon: '✏️',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'mastoart',
+    name: 'MastoArt',
+    description: 'Art shared across the fediverse — paint, pixels, and process.',
+    icon: '🖼️',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'crafts',
+    name: 'Crafts & Making',
+    description: 'Knitting, woodworking, DIY, and handmade projects.',
+    icon: '🧵',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'poetry',
+    name: 'Poetry',
+    description: 'Poems, spoken word, and verse from around the network.',
+    icon: '📜',
+    category: 'creative',
+    featured: true,
+  },
+  {
+    tag: 'animation',
+    name: 'Animation',
+    description: '2D, 3D, stop-motion, and motion design.',
+    icon: '🎞️',
+    category: 'creative',
+    featured: true,
+  },
+
+  // Gaming
+  {
+    tag: 'gamedev',
+    name: 'Game Development',
+    description: 'Indie devs, studios, and everyone making games.',
+    icon: '🎮',
+    category: 'gaming',
+    featured: true,
   },
   {
     tag: 'retrogaming',
@@ -177,8 +238,148 @@ const FEATURED_GROUPS: Omit<Group, 'isMember'>[] = [
     description: 'Classic games, nostalgia, and vintage gaming culture.',
     icon: '👾',
     category: 'gaming',
-    featured: true
-  }
+    featured: true,
+  },
+  {
+    tag: 'gaming',
+    name: 'Gaming',
+    description: 'Playing games, sharing clips, and finding co-op friends.',
+    icon: '🕹️',
+    category: 'gaming',
+    featured: true,
+  },
+  {
+    tag: 'indiegames',
+    name: 'Indie Games',
+    description: 'Small teams, big heart — indie game news and love.',
+    icon: '🎲',
+    category: 'gaming',
+    featured: true,
+  },
+  {
+    tag: 'boardgames',
+    name: 'Board Games',
+    description: 'Tabletop nights, reviews, and game-night ideas.',
+    icon: '♟️',
+    category: 'gaming',
+    featured: true,
+  },
+
+  // Social
+  {
+    tag: 'introduction',
+    name: 'Introductions',
+    description: 'New here? Introduce yourself and meet the community.',
+    icon: '👋',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'cooking',
+    name: 'Cooking & Food',
+    description: 'Recipes, food photos, and culinary adventures.',
+    icon: '🍳',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'cats',
+    name: 'Cats',
+    description: 'The internet’s true purpose: sharing cat photos.',
+    icon: '🐱',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'dogs',
+    name: 'Dogs',
+    description: 'Good boys, good girls, and puppy content.',
+    icon: '🐕',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'gardening',
+    name: 'Gardening',
+    description: 'Plants, plots, and growing things at home.',
+    icon: '🌱',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'parenting',
+    name: 'Parenting',
+    description: 'Raising kids — tips, solidarity, and real talk.',
+    icon: '👨‍👩‍👧',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'mentalhealth',
+    name: 'Mental Health',
+    description: 'Support, resources, and kinder conversations.',
+    icon: '💚',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'travel',
+    name: 'Travel',
+    description: 'Trips, tips, and places worth the journey.',
+    icon: '✈️',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'lgbtq',
+    name: 'LGBTQ+',
+    description: 'Pride, community, and queer life on the fediverse.',
+    icon: '🏳️‍🌈',
+    category: 'social',
+    featured: true,
+  },
+  {
+    tag: 'disability',
+    name: 'Disability',
+    description: 'Accessibility, advocacy, and lived experience.',
+    icon: '♿',
+    category: 'social',
+    featured: true,
+  },
+
+  // News
+  {
+    tag: 'news',
+    name: 'News',
+    description: 'Headlines and discussion from around the world.',
+    icon: '📰',
+    category: 'news',
+    featured: true,
+  },
+  {
+    tag: 'climate',
+    name: 'Climate',
+    description: 'Climate science, action, and the living planet.',
+    icon: '🌍',
+    category: 'news',
+    featured: true,
+  },
+  {
+    tag: 'politics',
+    name: 'Politics',
+    description: 'Civic life, policy, and democratic conversation.',
+    icon: '🏛️',
+    category: 'news',
+    featured: true,
+  },
+  {
+    tag: 'science',
+    name: 'Science',
+    description: 'Research, discoveries, and curious minds.',
+    icon: '🔬',
+    category: 'news',
+    featured: true,
+  },
 ]
 
 // Category definitions
