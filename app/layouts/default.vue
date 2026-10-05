@@ -237,6 +237,8 @@ const closeMobileMenu = () => {
       </button>
     </header>
 
+    <SuiteMenu />
+
     <Transition name="fade">
       <div v-if="mobileMenuOpen" class="mobile-overlay" @click="closeMobileMenu"></div>
     </Transition>
