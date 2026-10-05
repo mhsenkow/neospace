@@ -62,9 +62,12 @@ onMounted(async () => {
   }
 
   // Loom handoff: accept PNG via postMessage (reliable) + query/session fallback
+  let loomShareAccepted = false
   const onLoomMessage = (e: MessageEvent) => {
     if (!LOOM_ORIGINS.has(e.origin)) return
     if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
+    if (loomShareAccepted && e.data.image?.buffer) return
+    if (e.data.image?.buffer) loomShareAccepted = true
     void (async () => {
       await composeHandoff.ingestFromMessage({
         text: typeof e.data.text === 'string' ? e.data.text : '',
@@ -87,14 +90,10 @@ onMounted(async () => {
   window.addEventListener('message', onLoomMessage)
   onUnmounted(() => window.removeEventListener('message', onLoomMessage))
 
-  // Tell Loom we're ready to receive the chart image
+  // Tell Loom we're ready to receive the chart image (once)
   try {
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage({ type: 'neospace-loom-ready' }, 'https://loom.ibm.io')
-      window.opener.postMessage(
-        { type: 'neospace-loom-ready' },
-        'https://loom-storyteller.mhsenkow.workers.dev',
-      )
     }
   } catch {
     /* cross-origin opener may throw */

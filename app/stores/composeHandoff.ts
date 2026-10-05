@@ -114,6 +114,8 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     pending: null as ComposeHandoffDraft | null,
     loading: false,
     error: null as string | null,
+    /** Dedupe repeated Loom postMessages (retries / double ready pings). */
+    lastIngestKey: null as string | null,
   }),
 
   getters: {
@@ -136,6 +138,19 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     },
 
     async ingestStored(share: StoredShare) {
+      const key = `${share.story || ''}|${share.text || ''}|${share.imageDataUrl ? 'img' : 'noimg'}`
+      if (this.lastIngestKey === key && (this.pending || this.hasPending)) {
+        return true
+      }
+      // Prefer an image-bearing share over a prior text-only one for the same story
+      if (
+        this.lastIngestKey?.startsWith(`${share.story || ''}|`) &&
+        this.lastIngestKey.endsWith('|img') &&
+        !share.imageDataUrl
+      ) {
+        return true
+      }
+
       this.loading = true
       this.error = null
       try {
@@ -168,6 +183,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
           lines.push('', base)
         }
 
+        this.lastIngestKey = key
         this.pending = {
           text: lines.join('\n').trim(),
           files,

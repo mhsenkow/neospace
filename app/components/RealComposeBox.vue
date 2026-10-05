@@ -182,7 +182,11 @@ const applyHandoff = async () => {
   const draft = handoffStore.take()
   if (!draft) return
   if (draft.text) content.value = draft.text
-  if (draft.files.length) await addFiles(draft.files)
+  // Replace any prior handoff media so retries don't stack duplicates
+  if (draft.files.length) {
+    clearAttachments()
+    await addFiles(draft.files)
+  }
   handoffNotice.value = draft.notice
   if (handoffNotice.value) {
     window.setTimeout(() => {
