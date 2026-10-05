@@ -6,9 +6,13 @@ import { activeClient, clientFor } from '~/composables/useMasto'
 
 interface Props {
   status: mastodon.v1.Status
+  /** When true, skip per-card inline reply (thread page has sticky composer) */
+  hideInlineReply?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  hideInlineReply: false,
+})
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
 }>()
@@ -215,6 +219,12 @@ const handleBoost = async () => {
 }
 
 const handleReply = () => {
+  if (props.hideInlineReply) {
+    // On thread page the sticky bar is the composer — focus it instead
+    const bar = document.querySelector('.thread-reply-bar textarea') as HTMLTextAreaElement | null
+    bar?.focus()
+    return
+  }
   if (!canInteract.value) {
     if (statusUrl.value) {
       window.open(statusUrl.value, '_blank')
@@ -228,7 +238,6 @@ const handleReply = () => {
     replyText.value = `@${acct} `
     nextTick(() => {
       replyTextarea.value?.focus()
-      // move cursor to end
       const len = replyText.value.length
       replyTextarea.value?.setSelectionRange(len, len)
     })
@@ -783,7 +792,7 @@ onUnmounted(() => {
 
         <!-- Inline Reply Composer -->
         <Transition name="reply-expand">
-          <div v-if="isReplying" class="reply-composer">
+          <div v-if="isReplying && !hideInlineReply" class="reply-composer">
             <div class="reply-composer__input-row">
               <img
                 v-if="instancesStore.currentUser?.avatar"
@@ -1329,21 +1338,25 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.25rem;
+  gap: 0.15rem;
   margin-top: 0.5rem;
-  margin-left: -0.5rem;
+  margin-left: -0.35rem;
+  max-width: 100%;
 }
 
 .status-action {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.5rem;
+  gap: 0.3rem;
+  padding: 0.4rem 0.45rem;
+  min-height: 40px;
+  min-width: 40px;
+  justify-content: center;
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
   background: transparent;
   border: none;
-  border-radius: 999px;
+  border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
   line-height: 1;
@@ -1650,6 +1663,7 @@ onUnmounted(() => {
   font-weight: 500;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
   z-index: 9999;
+  max-width: calc(100vw - 1.5rem);
 
   &--action {
     padding-right: 0.5rem;

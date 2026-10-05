@@ -21,6 +21,10 @@ const mobileMenuOpen = ref(false)
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
 
+/** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
+const isThreadRoute = computed(() => route.path.startsWith('/status/'))
+const showMobileNav = computed(() => !isThreadRoute.value)
+
 const applyTheme = () => {
   settingsStore.applyLocalAppearance()
 }
@@ -112,7 +116,13 @@ const closeMobileMenu = () => {
 </script>
 
 <template>
-  <div class="neo-layout" :class="{ 'chaos-active': themeStore.isChaosMode }">
+  <div
+    class="neo-layout"
+    :class="{
+      'chaos-active': themeStore.isChaosMode,
+      'neo-layout--thread': isThreadRoute,
+    }"
+  >
     <Teleport to="head" v-if="themeStore.isChaosMode && themeStore.userCustomCSS">
       <component :is="'style'" id="neospace-chaos-dynamic">
         {{ themeStore.userCustomCSS }}
@@ -304,7 +314,7 @@ const closeMobileMenu = () => {
       <slot />
     </main>
 
-    <nav class="mobile-nav" aria-label="Mobile">
+    <nav v-if="showMobileNav" class="mobile-nav" aria-label="Mobile">
       <NuxtLink to="/" class="mobile-nav__item" :class="{ active: route.path === '/' }">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/' ? 2 : 1.5">
           <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" :fill="route.path === '/' ? 'currentColor' : 'none'" />
@@ -348,7 +358,7 @@ const closeMobileMenu = () => {
     </nav>
 
     <InstanceManager />
-    <FeedbackNotes />
+    <FeedbackNotes v-if="!isThreadRoute" />
     <SettingsModal />
   </div>
 </template>
@@ -851,7 +861,10 @@ const closeMobileMenu = () => {
 .main-content {
   flex: 1;
   min-height: 100vh;
+  min-width: 0;
+  width: 100%;
   padding: 52px 0.5rem calc(52px + env(safe-area-inset-bottom, 0));
+  box-sizing: border-box;
 
   @media (min-width: 600px) {
     padding: 52px 1rem calc(52px + env(safe-area-inset-bottom, 0));
@@ -860,6 +873,15 @@ const closeMobileMenu = () => {
   @media (min-width: 1024px) {
     padding: 1.5rem 2rem;
     margin-left: 64px;
+  }
+
+  .neo-layout--thread & {
+    /* No bottom tab bar on thread — only safe area */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+
+    @media (min-width: 1024px) {
+      padding-bottom: 1.5rem;
+    }
   }
 }
 

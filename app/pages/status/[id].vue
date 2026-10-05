@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * In-app thread / conversation view — sticky reply, local stream
+ * In-app thread / conversation view — mobile-safe sticky chrome + reply
  */
 
 import type { mastodon } from 'masto'
@@ -30,6 +30,8 @@ const replyPrefill = computed(() => {
   return acct ? `@${acct} ` : ''
 })
 
+const canReply = computed(() => instancesStore.isAuthenticated)
+
 const loadThread = async (opts: { quiet?: boolean } = {}) => {
   if (!opts.quiet) {
     isLoading.value = true
@@ -41,10 +43,6 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
 
   try {
     await instancesStore.initialize()
-    if (!instancesStore.isAuthenticated) {
-      error.value = 'Sign in to view threads in NeoSpace.'
-      return
-    }
 
     const resolvedId = await statusStore.resolveThreadId({
       id: paramId.value,
@@ -56,7 +54,6 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
       return
     }
 
-    // Keep URL tidy if we resolved a different local id
     if (resolvedId !== paramId.value) {
       await router.replace({
         path: `/status/${resolvedId}`,
@@ -81,7 +78,6 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
 }
 
 const onReplyPosted = async (status: mastodon.v1.Status) => {
-  // Optimistic: show reply immediately, then refresh context
   if (!descendants.value.some((s) => s.id === status.id)) {
     descendants.value = [...descendants.value, status]
   }
@@ -107,7 +103,7 @@ useHead({
 </script>
 
 <template>
-  <div class="thread-page">
+  <div class="thread-page" :class="{ 'thread-page--can-reply': canReply && focusStatus }">
     <header class="thread-header">
       <button type="button" class="thread-back" @click="router.back()">← Back</button>
       <h1 class="thread-title">Thread</h1>
@@ -118,7 +114,8 @@ useHead({
         target="_blank"
         rel="noopener noreferrer"
       >
-        Open original
+        <span class="thread-external__full">Open original</span>
+        <span class="thread-external__short">Original</span>
       </a>
       <span v-else class="thread-external thread-external--spacer" />
     </header>
@@ -153,6 +150,7 @@ useHead({
           v-for="status in ancestors"
           :key="status.id"
           :status="status"
+          hide-inline-reply
           class="thread-post thread-post--ancestor"
           @replied="onReplyPosted"
         />
@@ -161,6 +159,7 @@ useHead({
           <RealPostCard
             v-if="focusStatus"
             :status="focusStatus"
+            hide-inline-reply
             class="thread-post thread-post--focus"
             @replied="onReplyPosted"
           />
@@ -170,6 +169,7 @@ useHead({
           v-for="status in descendants"
           :key="status.id"
           :status="status"
+          hide-inline-reply
           class="thread-post thread-post--reply"
           @replied="onReplyPosted"
         />
@@ -179,9 +179,8 @@ useHead({
         </p>
       </div>
 
-      <!-- Sticky reply — always ready, like Threads, without Meta chrome -->
       <div
-        v-if="focusStatus && instancesStore.isAuthenticated"
+        v-if="focusStatus && canReply"
         class="thread-reply-bar"
       >
         <RealComposeBox
@@ -194,6 +193,10 @@ useHead({
           @posted="onReplyPosted"
         />
       </div>
+
+      <div v-else-if="focusStatus && !canReply" class="thread-signin-hint">
+        <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in to reply</NuxtLink>
+      </div>
     </template>
   </div>
 </template>
@@ -203,22 +206,39 @@ useHead({
   width: 100%;
   max-width: 40rem;
   margin: 0 auto;
-  padding: 0.75rem 0.75rem 7.5rem;
+  padding: 0.5rem 0.5rem 1.5rem;
+  box-sizing: border-box;
+
+  &--can-reply {
+    // Room for fixed reply bar (no bottom nav on this route)
+    padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0));
+
+    @media (min-width: 640px) {
+      padding-bottom: calc(8.5rem + env(safe-area-inset-bottom, 0));
+    }
+  }
 }
 
 .thread-header {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-  padding-bottom: 0.75rem;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.25rem;
   border-bottom: 1px solid var(--neo-border-color);
   position: sticky;
-  top: 0;
-  z-index: 5;
-  background: color-mix(in srgb, var(--neo-bg-primary) 92%, transparent);
-  backdrop-filter: blur(8px);
+  /* Sit below mobile app header (52px) */
+  top: 52px;
+  z-index: 20;
+  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
+  backdrop-filter: blur(10px);
+
+  @media (min-width: 1024px) {
+    top: 0;
+    margin-bottom: 1rem;
+    padding: 0.65rem 0;
+  }
 }
 
 .thread-back,
@@ -232,6 +252,9 @@ useHead({
   cursor: pointer;
   text-decoration: none;
   padding: 0.35rem 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .thread-back {
@@ -245,14 +268,28 @@ useHead({
     visibility: hidden;
   }
 
-  &:hover {
-    text-decoration: underline;
+  &__short {
+    display: inline;
+  }
+
+  &__full {
+    display: none;
+  }
+
+  @media (min-width: 420px) {
+    &__short {
+      display: none;
+    }
+
+    &__full {
+      display: inline;
+    }
   }
 }
 
 .thread-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: var(--neo-chrome-heading-weight, 700);
   letter-spacing: var(--neo-chrome-heading-tracking, -0.02em);
   text-align: center;
@@ -298,13 +335,14 @@ useHead({
 .thread-stream {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .thread-focus {
-  margin: 0.25rem 0;
-  padding: 0.35rem;
-  border-radius: var(--neo-radius-md);
+  margin: 0.15rem 0;
+  padding: 0.25rem;
+  border-radius: 4px;
   background: var(--neo-accent-soft);
   border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, transparent);
 }
@@ -321,35 +359,84 @@ useHead({
   color: var(--neo-text-muted);
 }
 
-.thread-reply-bar {
+.thread-signin-hint {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 40;
-  padding: 0.65rem 0.75rem calc(0.65rem + env(safe-area-inset-bottom, 0));
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0));
   background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
   border-top: 1px solid var(--neo-border-color);
   backdrop-filter: blur(10px);
 
   @media (min-width: 1024px) {
     left: 64px;
-    padding-bottom: 0.75rem;
   }
+}
 
-  @media (max-width: 1023px) {
-    bottom: calc(3.5rem + env(safe-area-inset-bottom, 0));
+.thread-reply-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 0.5rem 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0));
+  background: color-mix(in srgb, var(--neo-bg-primary) 96%, transparent);
+  border-top: 1px solid var(--neo-border-color);
+  backdrop-filter: blur(12px);
+
+  @media (min-width: 1024px) {
+    left: 64px;
+    padding: 0.65rem 0.75rem 0.75rem;
   }
 
   :deep(.compose) {
     max-width: 40rem;
     margin: 0 auto;
   }
+
+  /* Ultra-slim reply chrome on phones */
+  :deep(.compose--compact) {
+    gap: 0.35rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 4px;
+
+    .compose-header {
+      display: none;
+    }
+
+    .compose-input {
+      min-height: 2.25rem;
+      padding: 0.5rem 0.65rem;
+      font-size: 0.9375rem;
+      border-radius: 4px;
+    }
+
+    .compose-footer {
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .compose-visibility {
+      display: none;
+    }
+
+    .compose-submit {
+      min-height: 2.25rem;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.875rem;
+    }
+  }
 }
 
 @media (min-width: 1024px) {
   .thread-page {
-    padding-top: 1.25rem;
+    padding-top: 0.5rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
   }
 }
 </style>

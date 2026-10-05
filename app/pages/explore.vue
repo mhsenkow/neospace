@@ -185,7 +185,10 @@ onUnmounted(() => {
 .explore-page {
   max-width: 56rem;
   margin: 0 auto;
-  padding: 1.5rem 1rem 4rem;
+  padding: 1rem 0.75rem 5.5rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
 }
 
 .explore-hero {

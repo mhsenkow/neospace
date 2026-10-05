@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
-import { activeClient } from '~/composables/useMasto'
+import { activeClient, publicClient } from '~/composables/useMasto'
 
 interface StatusState {
   error: string | null
@@ -22,6 +22,15 @@ export const useStatusStore = defineStore('status', {
   actions: {
     getClient(): mastodon.rest.Client {
       return activeClient()
+    },
+
+    /** Prefer authenticated client; fall back to public browsing client */
+    getReadClient(): mastodon.rest.Client {
+      try {
+        return activeClient()
+      } catch {
+        return publicClient()
+      }
     },
 
     async postStatus(
@@ -75,7 +84,7 @@ export const useStatusStore = defineStore('status', {
 
     async resolveStatus(statusUrl: string): Promise<string | null> {
       try {
-        const client = this.getClient()
+        const client = this.getReadClient()
         const results = await client.v2.search.fetch({
           q: statusUrl,
           resolve: true,
@@ -112,7 +121,7 @@ export const useStatusStore = defineStore('status', {
     },
 
     async fetchStatus(statusId: string): Promise<mastodon.v1.Status> {
-      return await this.getClient().v1.statuses.$select(statusId).fetch()
+      return await this.getReadClient().v1.statuses.$select(statusId).fetch()
     },
 
     async fetchThread(statusId: string): Promise<{
@@ -120,7 +129,7 @@ export const useStatusStore = defineStore('status', {
       ancestors: mastodon.v1.Status[]
       descendants: mastodon.v1.Status[]
     }> {
-      const client = this.getClient()
+      const client = this.getReadClient()
       const [status, context] = await Promise.all([
         client.v1.statuses.$select(statusId).fetch(),
         client.v1.statuses.$select(statusId).context.fetch(),
