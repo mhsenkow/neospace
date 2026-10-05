@@ -6,11 +6,11 @@
  */
 
 import { ref, computed } from 'vue'
-import { useTimelineStore } from '~/stores/timeline'
-import { useAuthStore } from '~/stores/auth'
+import { useStatusStore } from '~/stores/status'
+import { useInstancesStore } from '~/stores/instances'
 
-const timelineStore = useTimelineStore()
-const authStore = useAuthStore()
+const statusStore = useStatusStore()
+const instancesStore = useInstancesStore()
 
 const content = ref('')
 const spoilerText = ref('')
@@ -27,8 +27,16 @@ const canPost = computed(() =>
   content.value.trim().length > 0 && 
   !isOverLimit.value && 
   !isPosting.value &&
-  authStore.isAuthenticated
+  instancesStore.isAuthenticated
 )
+
+const postingAs = computed(() => {
+  const account = instancesStore.activeAccount
+  if (!account?.user) return null
+  const acct = account.user.acct || account.user.username
+  const host = account.url.replace(/^https?:\/\//, '')
+  return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
+})
 
 const visibilityOptions = [
   { value: 'public', label: 'Public', icon: '🌍', desc: 'Visible to everyone' },
@@ -48,7 +56,7 @@ const handlePost = async () => {
   error.value = null
   
   try {
-    await timelineStore.postStatus(content.value, {
+    await statusStore.postStatus(content.value, {
       visibility: visibility.value,
       spoilerText: showCW.value ? spoilerText.value : undefined,
     })
@@ -76,12 +84,15 @@ const toggleCW = () => {
   <div class="compose neo-card">
     <div class="compose-header">
       <img 
-        v-if="authStore.userAvatar"
-        :src="authStore.userAvatar" 
-        :alt="authStore.userDisplayName"
+        v-if="instancesStore.userAvatar"
+        :src="instancesStore.userAvatar" 
+        :alt="instancesStore.userDisplayName"
         class="compose-avatar neo-avatar"
       />
-      <span class="compose-title">What's on your mind?</span>
+      <div class="compose-heading">
+        <span class="compose-title">What's on your mind?</span>
+        <span v-if="postingAs" class="compose-as">Posting as {{ postingAs }}</span>
+      </div>
     </div>
 
     <!-- Content Warning Input -->
@@ -178,6 +189,13 @@ const toggleCW = () => {
   gap: 0.75rem;
 }
 
+.compose-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
 .compose-avatar {
   width: 40px;
   height: 40px;
@@ -186,6 +204,14 @@ const toggleCW = () => {
 .compose-title {
   font-weight: 600;
   color: var(--neo-text-primary);
+}
+
+.compose-as {
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compose-cw {

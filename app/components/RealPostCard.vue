@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { createRestAPIClient, type mastodon } from 'masto'
-import { useTimelineStore } from '~/stores/timeline'
-import { useAuthStore } from '~/stores/auth'
+import type { mastodon } from 'masto'
+import { useStatusStore } from '~/stores/status'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
+import { activeClient, clientFor } from '~/composables/useMasto'
 
 interface Props {
   status: mastodon.v1.Status
 }
 
 const props = defineProps<Props>()
-const timelineStore = useTimelineStore()
-const authStore = useAuthStore()
+const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 
 const displayStatus = computed(() => props.status.reblog || props.status)
@@ -35,8 +34,8 @@ const replyTextarea = ref<HTMLTextAreaElement | null>(null)
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 
 const isOwnPost = computed(() => {
-  const user = authStore.$state.currentUser
-  if (!authStore.isAuthenticated || !user) return false
+  const user = instancesStore.currentUser
+  if (!instancesStore.isAuthenticated || !user) return false
   return displayStatus.value.account.id === user.id ||
     displayStatus.value.account.acct === user.acct
 })
@@ -44,12 +43,12 @@ const isOwnPost = computed(() => {
 const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
 
 const canInteract = computed(() =>
-  authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+  instancesStore.hasAuthenticatedInstance
 )
 
 /** In-app profile (posts + header); API client is from auth store */
 const accountProfileTo = computed(() => {
-  if (!authStore.isAuthenticated) return null
+  if (!instancesStore.isAuthenticated) return null
   const acct = displayStatus.value.account?.acct
   if (!acct) return null
   return { path: '/profile', query: { user: acct } }
@@ -75,27 +74,24 @@ const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: s
   if (ext._instanceUrl) {
     const source = instancesStore.getInstanceByUrl(ext._instanceUrl)
     if (source?.accessToken) {
-      const client = instancesStore.getClient(source.id)
+      const client = clientFor(source.id)
       _resolvedClientCache = client
       _resolvedIdCache = status.id
       return { client, id: status.id }
     }
   }
 
-  // Fall back to primary auth instance
-  if (!authStore.instanceUrl || !authStore.accessToken) return null
+  // Fall back to active account
+  if (!instancesStore.instanceUrl || !instancesStore.accessToken) return null
 
-  const primaryClient = createRestAPIClient({
-    url: authStore.instanceUrl,
-    accessToken: authStore.accessToken,
-  })
+  const primaryClient = activeClient()
 
   // Check if the post is from the same domain as our primary instance
   const url = statusUrl.value
   if (url) {
     try {
       const statusDomain = new URL(url).hostname
-      const primaryDomain = new URL(authStore.instanceUrl).hostname
+      const primaryDomain = new URL(instancesStore.instanceUrl).hostname
       if (statusDomain === primaryDomain) {
         _resolvedClientCache = primaryClient
         _resolvedIdCache = status.id
@@ -106,7 +102,7 @@ const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: s
 
   // Foreign instance — resolve the URL to get a local ID on our instance
   if (url) {
-    const localId = await timelineStore.resolveStatus(url)
+    const localId = await statusStore.resolveStatus(url)
     if (localId) {
       _resolvedClientCache = primaryClient
       _resolvedIdCache = localId
@@ -332,7 +328,7 @@ const handleMute = async () => {
 
   isMuting.value = true
   try {
-    await timelineStore.muteAccount(displayStatus.value.account.id)
+    await statusStore.muteAccount(displayStatus.value.account.id)
   } catch (e) {
     console.error('Mute error:', e)
   } finally {
@@ -349,7 +345,7 @@ const handleBlock = async () => {
 
   isBlocking.value = true
   try {
-    await timelineStore.blockAccount(displayStatus.value.account.id)
+    await statusStore.blockAccount(displayStatus.value.account.id)
   } catch (e) {
     console.error('Block error:', e)
   } finally {
@@ -365,7 +361,7 @@ const handleReport = async () => {
   if (reason === null) return
 
   try {
-    await timelineStore.reportStatus(
+    await statusStore.reportStatus(
       displayStatus.value.id,
       displayStatus.value.account.id,
       reason || undefined
@@ -692,8 +688,8 @@ onUnmounted(() => {
           <div v-if="isReplying" class="reply-composer">
             <div class="reply-composer__input-row">
               <img
-                v-if="authStore.$state.currentUser?.avatar"
-                :src="authStore.$state.currentUser.avatar"
+                v-if="instancesStore.currentUser?.avatar"
+                :src="instancesStore.currentUser.avatar"
                 class="reply-composer__avatar"
                 alt=""
               />
@@ -758,7 +754,7 @@ onUnmounted(() => {
   z-index: 0;
   padding: 0.75rem;
   background: var(--neo-bg-card);
-  border-radius: 8px;
+  border-radius: 4px;
   overflow: visible;
   max-width: 100%;
   width: 100%;
@@ -769,7 +765,6 @@ onUnmounted(() => {
 
   @media (min-width: 400px) {
     padding: 0.875rem;
-    border-radius: 12px;
   }
 
   @media (max-width: 1023px) {

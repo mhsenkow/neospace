@@ -1,92 +1,54 @@
 /**
- * Mastodon/GoToSocial API Client Composable
- * 
- * Provides a configured masto client for interacting with the fediverse.
- * Works with GoToSocial, Mastodon, Pleroma, and other compatible backends.
+ * Shared Mastodon/GoToSocial API client helpers.
+ * Single place for createRestAPIClient construction.
  */
 
 import { createRestAPIClient, type mastodon } from 'masto'
+import { useInstancesStore } from '~/stores/instances'
+import { resolvePublicInstanceUrl } from '~/utils/instances'
 
-// Re-export types for convenience
 export type { mastodon }
 
-export interface MastoConfig {
-  instanceUrl: string
-  accessToken?: string
+/** Authenticated client for a specific connected instance */
+export function clientFor(instanceId: string): mastodon.rest.Client {
+  const store = useInstancesStore()
+  const instance = store.instances.find((i) => i.id === instanceId)
+  if (!instance) throw new Error('Instance not found')
+  return createRestAPIClient({
+    url: instance.url,
+    accessToken: instance.accessToken || undefined,
+  })
 }
 
-// Store the client instance
-let mastoClient: mastodon.rest.Client | null = null
-let currentConfig: MastoConfig | null = null
+/** Authenticated client for the active account */
+export function activeClient(): mastodon.rest.Client {
+  const store = useInstancesStore()
+  const account = store.activeAccount
+  if (!account?.url || !account.accessToken) {
+    throw new Error('Not authenticated')
+  }
+  return createRestAPIClient({
+    url: account.url,
+    accessToken: account.accessToken,
+  })
+}
 
-/**
- * Create or retrieve the Mastodon API client
- */
+/** Public (optionally authenticated) client for browsing */
+export function publicClient(url?: string | null): mastodon.rest.Client {
+  const store = useInstancesStore()
+  const preferred =
+    url ||
+    store.activeAccount?.url ||
+    store.instances[0]?.url
+  const resolved = resolvePublicInstanceUrl(preferred)
+  const matching = store.getInstanceByUrl(resolved)
+  return createRestAPIClient({
+    url: resolved,
+    accessToken: matching?.accessToken || undefined,
+  })
+}
+
+/** Composable wrapper for Nuxt auto-import convenience */
 export function useMasto() {
-  const config = useRuntimeConfig()
-  
-  /**
-   * Initialize the client with instance URL and optional access token
-   */
-  const initClient = (instanceUrl: string, accessToken?: string) => {
-    // Only recreate if config changed
-    if (
-      mastoClient && 
-      currentConfig?.instanceUrl === instanceUrl && 
-      currentConfig?.accessToken === accessToken
-    ) {
-      return mastoClient
-    }
-
-    currentConfig = { instanceUrl, accessToken }
-    
-    mastoClient = createRestAPIClient({
-      url: instanceUrl,
-      accessToken: accessToken,
-    })
-
-    return mastoClient
-  }
-
-  /**
-   * Get the current client (throws if not initialized)
-   */
-  const getClient = (): mastodon.rest.Client => {
-    if (!mastoClient) {
-      throw new Error('Mastodon client not initialized. Call initClient first.')
-    }
-    return mastoClient
-  }
-
-  /**
-   * Check if client is initialized and authenticated
-   */
-  const isAuthenticated = (): boolean => {
-    return !!mastoClient && !!currentConfig?.accessToken
-  }
-
-  /**
-   * Clear the client (for logout)
-   */
-  const clearClient = () => {
-    mastoClient = null
-    currentConfig = null
-  }
-
-  /**
-   * Get instance information (public, no auth required)
-   */
-  const getInstanceInfo = async (instanceUrl: string) => {
-    const client = createRestAPIClient({ url: instanceUrl })
-    return await client.v2.instance.fetch()
-  }
-
-  return {
-    initClient,
-    getClient,
-    isAuthenticated,
-    clearClient,
-    getInstanceInfo,
-  }
+  return { clientFor, activeClient, publicClient }
 }
-

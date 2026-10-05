@@ -5,11 +5,11 @@
  * Supports home/local/federated timelines and group (hashtag) timelines.
  */
 
-import { createRestAPIClient, type mastodon } from 'masto'
-import { useAuthStore } from '~/stores/auth'
+import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import type { ColumnConfig, ColumnFeedType } from '~/stores/columns'
+import { activeClient, publicClient } from '~/composables/useMasto'
 
 interface Props {
   column: ColumnConfig
@@ -23,7 +23,6 @@ const emit = defineEmits<{
   'update-feed-type': [feedType: ColumnFeedType, groupTag?: string]
 }>()
 
-const authStore = useAuthStore()
 const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
 
@@ -54,9 +53,7 @@ const feedLabel = computed(() => {
   return feedLabels[props.column.feedType] ?? props.column.feedType
 })
 
-const canShowHome = computed(() =>
-  instancesStore.hasAuthenticatedInstance || authStore.isAuthenticated
-)
+const canShowHome = computed(() => instancesStore.hasAuthenticatedInstance)
 
 const joinedGroups = computed(() => groupsStore.joinedGroups)
 
@@ -88,70 +85,21 @@ const fetchTimeline = async (refresh = false) => {
   try {
     let result: (mastodon.v1.Status | ExtendedStatus)[] = []
 
-    // Group (hashtag) timeline
     if (props.column.feedType === 'group' && props.column.groupTag) {
-      const url = authStore.instanceUrl || 'https://mastodon.social'
-      const client = createRestAPIClient({
-        url,
-        accessToken: authStore.accessToken || undefined,
-      })
+      const client = publicClient()
       result = await client.v1.timelines.tag.$select(props.column.groupTag).list({ limit: 20 })
-    }
-    // Standard timelines
-    else if (instancesStore.instances.length > 0) {
-      if (props.column.feedType === 'home') {
-        let merged = await instancesStore.fetchMergedHomeTimeline(20)
-
-        if (authStore.isAuthenticated && authStore.accessToken && authStore.instanceUrl) {
-          try {
-            const client = createRestAPIClient({
-              url: authStore.instanceUrl,
-              accessToken: authStore.accessToken,
-            })
-            const legacy = await client.v1.timelines.home.list({ limit: 20 })
-            const legacyExtended = legacy.map(s => ({
-              ...s,
-              _instanceId: 'legacy',
-              _instanceUrl: authStore.instanceUrl!,
-            }))
-            merged = [...merged, ...legacyExtended].sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-            )
-            const seen = new Set<string>()
-            merged = merged.filter(s => {
-              if (seen.has(s.id)) return false
-              seen.add(s.id)
-              return true
-            })
-          } catch {
-            // legacy fetch failed, use what we have
-          }
-        }
-        result = merged
-      } else {
-        result = await instancesStore.fetchMergedTimeline(
-          props.column.feedType as 'local' | 'federated',
-          20,
-        )
+    } else if (props.column.feedType === 'home') {
+      if (!instancesStore.hasAuthenticatedInstance) {
+        throw new Error('Log in or add an instance to view your home timeline')
       }
-    } else if (authStore.isAuthenticated && authStore.instanceUrl) {
-      const client = createRestAPIClient({
-        url: authStore.instanceUrl,
-        accessToken: authStore.accessToken || undefined,
-      })
-      switch (props.column.feedType) {
-        case 'home':
-          result = await client.v1.timelines.home.list({ limit: 20 })
-          break
-        case 'local':
-          result = await client.v1.timelines.public.list({ local: true, limit: 20 })
-          break
-        case 'federated':
-          result = await client.v1.timelines.public.list({ local: false, limit: 20 })
-          break
-      }
-    } else if (props.column.feedType !== 'home') {
-      const client = createRestAPIClient({ url: 'https://mastodon.social' })
+      result = await instancesStore.fetchMergedHomeTimeline(20)
+    } else if (instancesStore.instances.length > 0) {
+      result = await instancesStore.fetchMergedTimeline(
+        props.column.feedType as 'local' | 'federated',
+        20,
+      )
+    } else {
+      const client = publicClient()
       result = await client.v1.timelines.public.list({
         local: props.column.feedType === 'local',
         limit: 20,
@@ -177,29 +125,44 @@ const loadMore = async () => {
 
   try {
     let newStatuses: mastodon.v1.Status[] = []
-    const url = authStore.instanceUrl || 'https://mastodon.social'
-    const client = createRestAPIClient({
-      url,
-      accessToken: authStore.accessToken || undefined,
-    })
 
     switch (props.column.feedType) {
-      case 'home':
-        if (authStore.isAuthenticated) {
-          newStatuses = await client.v1.timelines.home.list({ maxId: maxId.value, limit: 20 })
-        }
+      case 'home': {
+        if (!instancesStore.isAuthenticated) break
+        const client = activeClient()
+        newStatuses = await client.v1.timelines.home.list({
+          maxId: maxId.value,
+          limit: 20,
+        })
         break
-      case 'local':
-        newStatuses = await client.v1.timelines.public.list({ local: true, maxId: maxId.value, limit: 20 })
+      }
+      case 'local': {
+        const client = publicClient()
+        newStatuses = await client.v1.timelines.public.list({
+          local: true,
+          maxId: maxId.value,
+          limit: 20,
+        })
         break
-      case 'federated':
-        newStatuses = await client.v1.timelines.public.list({ local: false, maxId: maxId.value, limit: 20 })
+      }
+      case 'federated': {
+        const client = publicClient()
+        newStatuses = await client.v1.timelines.public.list({
+          local: false,
+          maxId: maxId.value,
+          limit: 20,
+        })
         break
-      case 'group':
+      }
+      case 'group': {
         if (props.column.groupTag) {
-          newStatuses = await client.v1.timelines.tag.$select(props.column.groupTag).list({ maxId: maxId.value, limit: 20 })
+          const client = publicClient()
+          newStatuses = await client.v1.timelines.tag
+            .$select(props.column.groupTag)
+            .list({ maxId: maxId.value, limit: 20 })
         }
         break
+      }
     }
 
     if (newStatuses.length > 0) {
@@ -228,25 +191,39 @@ const setupInfiniteScroll = () => {
       root: scrollContainer.value,
       rootMargin: '0px 0px 600px 0px',
       threshold: 0,
-    }
+    },
   )
   observer.observe(loadTrigger.value)
 }
 
 watch(
   () => `${props.column.feedType}:${props.column.groupTag ?? ''}`,
-  () => fetchTimeline(true),
+  () => {
+    if (instancesStore.isInitialized) fetchTimeline(true)
+  },
 )
 
-watch(() => statuses.value.length, () => {
-  nextTick(() => setupInfiniteScroll())
-})
+watch(
+  () => instancesStore.isInitialized,
+  (ready) => {
+    if (ready) fetchTimeline(true)
+  },
+)
+
+watch(
+  () => statuses.value.length,
+  () => {
+    nextTick(() => setupInfiniteScroll())
+  },
+)
 
 onMounted(async () => {
-  if (authStore.isAuthenticated && groupsStore.groups.length === 0) {
+  if (instancesStore.isAuthenticated && groupsStore.groups.length === 0) {
     groupsStore.initializeGroups()
   }
-  await fetchTimeline()
+  if (instancesStore.isInitialized) {
+    await fetchTimeline()
+  }
   nextTick(() => setupInfiniteScroll())
   document.addEventListener('click', closeFeedMenu)
 })
@@ -256,7 +233,6 @@ onUnmounted(() => {
   document.removeEventListener('click', closeFeedMenu)
 })
 </script>
-
 <template>
   <div class="timeline-column">
     <!-- Column Header -->
@@ -358,7 +334,7 @@ onUnmounted(() => {
     <!-- Scrollable Content -->
     <div class="column-scroll" ref="scrollContainer">
       <!-- Compose (first column only, when authenticated) -->
-      <div v-if="isFirst && authStore.isAuthenticated && column.feedType === 'home'" class="column-compose">
+      <div v-if="isFirst && instancesStore.isAuthenticated && column.feedType === 'home'" class="column-compose">
         <RealComposeBox />
       </div>
 
@@ -447,10 +423,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  border-radius: 8px;
+  padding: 0.375rem 0.5rem;
+  border-radius: 4px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background-color var(--neo-transition-fast);
   user-select: none;
 
   &:hover {
@@ -484,9 +460,9 @@ onUnmounted(() => {
   justify-content: center;
   width: 30px;
   height: 30px;
-  border-radius: 6px;
+  border-radius: 4px;
   color: var(--neo-text-muted);
-  transition: all 0.15s ease;
+  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
   &:hover {
     background: var(--neo-danger-soft);
@@ -506,8 +482,8 @@ onUnmounted(() => {
   overflow-y: auto;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
-  border-radius: 10px;
-  box-shadow: var(--neo-shadow-lg);
+  border-radius: 4px;
+  box-shadow: var(--neo-shadow-md);
   padding: 0.375rem;
   z-index: 20;
 
@@ -676,12 +652,12 @@ onUnmounted(() => {
 
   // Subtle card edges within columns
   :deep(.status-card) {
-    border: 1px solid var(--neo-border-color-light);
-    border-radius: 10px;
-    transition: border-color 0.15s ease;
+    border: 1px solid var(--neo-border-color);
+    border-radius: 4px;
+    transition: border-color var(--neo-transition-fast);
 
     &:hover {
-      border-color: var(--neo-border-color);
+      border-color: var(--neo-border-color-dark);
     }
   }
 }

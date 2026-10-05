@@ -7,12 +7,12 @@
  */
 
 import { useGroupsStore } from '~/stores/groups'
-import { useAuthStore } from '~/stores/auth'
+import { useInstancesStore } from '~/stores/instances'
 
 const route = useRoute()
 const router = useRouter()
 const groupsStore = useGroupsStore()
-const authStore = useAuthStore()
+const instancesStore = useInstancesStore()
 
 // Get the tag from route
 const tag = computed(() => route.params.tag as string)
@@ -65,7 +65,7 @@ onUnmounted(() => {
 
 // Handle join
 const handleJoin = async () => {
-  if (!authStore.isAuthenticated) {
+  if (!instancesStore.isAuthenticated) {
     router.push('/login')
     return
   }
@@ -105,13 +105,13 @@ const goBack = () => {
 // Get category color
 const getCategoryColor = (category: string) => {
   const colors: Record<string, string> = {
-    tech: '#6366f1',
-    creative: '#f59e0b',
-    gaming: '#10b981',
-    social: '#ec4899',
-    news: '#3b82f6',
-    local: '#8b5cf6',
-    other: '#6b7280'
+    tech: '#c45c26',
+    creative: '#b8860b',
+    gaming: '#2f7d4a',
+    social: '#a84c1e',
+    news: '#3a6ea5',
+    local: '#757575',
+    other: '#757575'
   }
   return colors[category] || colors.other
 }
@@ -163,8 +163,8 @@ useHead({
           <button
             v-else
             class="action-btn action-btn--join"
-            :disabled="isJoining || !authStore.isAuthenticated"
-            :title="authStore.isAuthenticated ? 'Join this group' : 'Log in to join'"
+            :disabled="isJoining || !instancesStore.isAuthenticated"
+            :title="instancesStore.isAuthenticated ? 'Join this group' : 'Log in to join'"
             @click="handleJoin"
           >
             <span v-if="isJoining">Joining...</span>
@@ -187,7 +187,7 @@ useHead({
 
     <!-- Compose Box (for authenticated users) -->
     <GroupComposeBox
-      v-if="authStore.isAuthenticated"
+      v-if="instancesStore.isAuthenticated"
       :tag="tag"
       :group-name="displayGroup.name"
       :group-icon="displayGroup.icon"
@@ -244,7 +244,7 @@ useHead({
     </section>
 
     <!-- Floating Post Hint (for non-authenticated users) -->
-    <div v-if="!authStore.isAuthenticated" class="post-hint">
+    <div v-if="!instancesStore.isAuthenticated" class="post-hint">
       <p>Log in to post in this group using <code>#{{ tag }}</code></p>
       <NuxtLink to="/login" class="post-hint__login">Log In</NuxtLink>
     </div>

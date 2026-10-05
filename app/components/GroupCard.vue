@@ -8,7 +8,7 @@
 
 import type { Group } from '~/stores/groups'
 import { useGroupsStore } from '~/stores/groups'
-import { useAuthStore } from '~/stores/auth'
+import { useInstancesStore } from '~/stores/instances'
 
 interface Props {
   group: Group
@@ -24,13 +24,13 @@ const emit = defineEmits<{
 }>()
 
 const groupsStore = useGroupsStore()
-const authStore = useAuthStore()
+const instancesStore = useInstancesStore()
 
 const isJoining = ref(false)
 const isLeaving = ref(false)
 
 const handleJoin = async () => {
-  if (!authStore.isAuthenticated) {
+  if (!instancesStore.isAuthenticated) {
     // Could redirect to login or show a message
     return
   }
@@ -62,13 +62,13 @@ const handleView = () => {
 
 const getCategoryColor = (category: string) => {
   const colors: Record<string, string> = {
-    tech: '#6366f1',
-    creative: '#f59e0b',
-    gaming: '#10b981',
-    social: '#ec4899',
-    news: '#3b82f6',
-    local: '#8b5cf6',
-    other: '#6b7280'
+    tech: '#c45c26',
+    creative: '#b8860b',
+    gaming: '#2f7d4a',
+    social: '#a84c1e',
+    news: '#3a6ea5',
+    local: '#757575',
+    other: '#757575'
   }
   return colors[category] || colors.other
 }
@@ -113,8 +113,8 @@ const getCategoryColor = (category: string) => {
       <button
         v-else
         class="group-card__btn group-card__btn--join"
-        :disabled="isJoining || !authStore.isAuthenticated"
-        :title="authStore.isAuthenticated ? 'Join this group' : 'Log in to join groups'"
+        :disabled="isJoining || !instancesStore.isAuthenticated"
+        :title="instancesStore.isAuthenticated ? 'Join this group' : 'Log in to join groups'"
         @click="handleJoin"
       >
         <span v-if="isJoining">...</span>
@@ -132,76 +132,59 @@ const getCategoryColor = (category: string) => {
 <style lang="scss" scoped>
 .group-card {
   position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--neo-spacing-3);
-  padding: var(--neo-spacing-4);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.875rem;
   background: var(--neo-bg-card);
-  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
-  border-radius: var(--neo-radius-lg);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 4px;
   cursor: pointer;
-  transition: all var(--neo-transition);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
 
   @media (min-width: 480px) {
-    gap: 1rem;
-    padding: 1.25rem;
-    border-radius: 16px;
+    gap: 0.875rem;
+    padding: 1rem;
   }
 
   &:hover {
-    border-color: var(--neo-accent);
-    transform: translateY(-2px);
-    box-shadow: var(--neo-shadow-md);
-  }
-
-  // Disable hover transform on touch devices
-  @media (hover: none) {
-    &:hover {
-      transform: none;
-    }
+    border-color: var(--neo-border-color-dark);
+    background: var(--neo-bg-secondary);
   }
 
   &--member {
-    border-color: var(--neo-accent);
-    background: linear-gradient(135deg, var(--neo-bg-card), var(--neo-accent-soft));
+    border-color: color-mix(in srgb, var(--neo-accent) 40%, transparent);
+    background: var(--neo-accent-soft);
   }
 
   &--compact {
-    padding: var(--neo-spacing-3);
-    gap: var(--neo-spacing-2);
-
-    @media (min-width: 480px) {
-      padding: var(--neo-spacing-4);
-      gap: var(--neo-spacing-3);
-    }
+    padding: 0.625rem 0.75rem;
+    gap: 0.625rem;
+    align-items: center;
 
     .group-card__icon {
       width: 36px;
       height: 36px;
-
-      @media (min-width: 480px) {
-        width: 40px;
-        height: 40px;
-      }
     }
 
     .group-card__emoji {
       font-size: 1.125rem;
-
-      @media (min-width: 480px) {
-        font-size: 1.25rem;
-      }
     }
 
     .group-card__name {
-      font-size: 0.9375rem;
-
-      @media (min-width: 480px) {
-        font-size: 1rem;
-      }
+      font-size: 0.875rem;
+      margin-bottom: 0.125rem;
     }
 
     .group-card__description {
+      display: none;
+    }
+
+    .group-card__actions {
       display: none;
     }
   }
@@ -213,76 +196,55 @@ const getCategoryColor = (category: string) => {
     justify-content: center;
     width: 44px;
     height: 44px;
-    border-radius: var(--neo-radius-md);
-    transition: transform var(--neo-transition);
-
-    @media (min-width: 480px) {
-      width: 56px;
-      height: 56px;
-      border-radius: var(--neo-radius-lg);
-    }
+    border-radius: 4px;
+    transition: transform 0.15s ease;
   }
 
-  .group-card:hover &__icon {
+  &:hover &__icon {
     @media (hover: hover) {
-      transform: scale(1.05) rotate(-3deg);
+      transform: scale(1.04);
     }
   }
 
   &__emoji {
     font-size: 1.375rem;
     line-height: 1;
-
-    @media (min-width: 480px) {
-      font-size: 1.75rem;
-    }
   }
 
   &__content {
-    flex: 1;
     min-width: 0;
   }
 
   &__name {
-    margin: 0 0 var(--neo-spacing-1);
-    font-size: var(--neo-font-size-base);
-    font-weight: var(--neo-font-weight-bold);
+    margin: 0 0 0.25rem;
+    font-size: 0.9375rem;
+    font-weight: 700;
     color: var(--neo-text-primary);
-    line-height: var(--neo-line-height-tight);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
 
     @media (min-width: 480px) {
-      margin-bottom: var(--neo-spacing-2);
-      font-size: var(--neo-font-size-lg);
+      font-size: 1rem;
     }
   }
 
   &__description {
-    margin: 0 0 var(--neo-spacing-2);
-    font-size: var(--neo-font-size-sm);
+    margin: 0 0 0.5rem;
+    font-size: 0.8125rem;
     color: var(--neo-text-secondary);
-    line-height: var(--neo-line-height-relaxed);
+    line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-
-    @media (min-width: 480px) {
-      margin-bottom: var(--neo-spacing-3);
-      font-size: var(--neo-font-size-sm);
-      line-height: var(--neo-line-height-normal);
-    }
   }
 
   &__meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--neo-spacing-2);
-    font-size: var(--neo-font-size-xs);
-
-    @media (min-width: 480px) {
-      gap: var(--neo-spacing-3);
-      font-size: var(--neo-font-size-sm);
-    }
+    gap: 0.375rem 0.625rem;
+    font-size: 0.75rem;
   }
 
   &__tag {
@@ -291,34 +253,26 @@ const getCategoryColor = (category: string) => {
   }
 
   &__category {
-    font-weight: var(--neo-font-weight-semibold);
+    font-weight: 600;
     text-transform: uppercase;
-    font-size: var(--neo-font-size-xs);
-    letter-spacing: var(--neo-letter-spacing-wide);
-
-    @media (min-width: 480px) {
-      font-size: var(--neo-font-size-xs);
-    }
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
   }
 
   &__actions {
-    flex-shrink: 0;
     align-self: center;
   }
 
   &__btn {
-    padding: var(--neo-spacing-2) var(--neo-spacing-4);
-    font-size: var(--neo-font-size-sm);
-    font-weight: var(--neo-font-weight-semibold);
+    min-height: 36px;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
     border: none;
-    border-radius: var(--neo-radius-full);
+    border-radius: 4px;
     cursor: pointer;
-    transition: all var(--neo-transition-fast);
-
-    @media (min-width: 480px) {
-      padding: var(--neo-spacing-2) var(--neo-spacing-4);
-      font-size: var(--neo-font-size-sm);
-    }
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
 
     &--join {
       background: var(--neo-accent);
@@ -326,12 +280,10 @@ const getCategoryColor = (category: string) => {
 
       &:hover:not(:disabled) {
         background: var(--neo-accent-hover);
-        transform: scale(1.02);
-        box-shadow: var(--neo-shadow-sm);
       }
 
       &:disabled {
-        opacity: var(--neo-opacity-50);
+        opacity: 0.5;
         cursor: not-allowed;
       }
     }
@@ -339,7 +291,7 @@ const getCategoryColor = (category: string) => {
     &--leave {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-secondary);
-      border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
+      border: 1px solid var(--neo-border-color);
 
       &:hover:not(:disabled) {
         background: var(--neo-danger-soft);
@@ -348,15 +300,15 @@ const getCategoryColor = (category: string) => {
       }
 
       &:disabled {
-        opacity: var(--neo-opacity-50);
+        opacity: 0.5;
       }
     }
   }
 
   &__badge {
     position: absolute;
-    top: calc(var(--neo-spacing-1) * -1);
-    right: calc(var(--neo-spacing-1) * -1);
+    top: -6px;
+    right: -6px;
     width: 18px;
     height: 18px;
     display: flex;
@@ -364,17 +316,29 @@ const getCategoryColor = (category: string) => {
     justify-content: center;
     background: var(--neo-accent);
     color: var(--neo-text-inverse);
-    font-size: var(--neo-font-size-xs);
-    font-weight: var(--neo-font-weight-bold);
-    border-radius: var(--neo-radius-full);
-    box-shadow: var(--neo-shadow-sm);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    border-radius: 50%;
+  }
+}
 
-    @media (min-width: 480px) {
-      top: calc(var(--neo-spacing-2) * -1);
-      right: calc(var(--neo-spacing-2) * -1);
-      width: 22px;
-      height: 22px;
-      font-size: var(--neo-font-size-sm);
+// Narrow phones: stack action under content so Join isn't crushed
+@media (max-width: 379px) {
+  .group-card:not(.group-card--compact) {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'icon content'
+      'actions actions';
+
+    .group-card__icon { grid-area: icon; }
+    .group-card__content { grid-area: content; }
+    .group-card__actions {
+      grid-area: actions;
+      justify-self: stretch;
+
+      .group-card__btn {
+        width: 100%;
+      }
     }
   }
 }

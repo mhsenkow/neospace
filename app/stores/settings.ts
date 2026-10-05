@@ -6,8 +6,18 @@
  */
 
 import { defineStore } from 'pinia'
-import { createRestAPIClient, type mastodon } from 'masto'
-import { useAuthStore } from './auth'
+import type { mastodon } from 'masto'
+import { useInstancesStore } from './instances'
+import { activeClient } from '~/composables/useMasto'
+import type { NeoFontId, NeoFontSizeId, NeoThemeId, NeoUiId } from '~/utils/appearance'
+import {
+  applyAppearance,
+  normalizeFont,
+  normalizeTheme,
+  normalizeUi,
+  nextTheme,
+  nextUi,
+} from '~/utils/appearance'
 
 // Settings categories for the sidebar
 export interface SettingsCategory {
@@ -51,8 +61,10 @@ interface SettingsState {
   
   // Local app preferences (stored locally)
   localPreferences: {
-    theme: 'auto' | 'light' | 'dark'
-    fontSize: 'small' | 'medium' | 'large'
+    theme: NeoThemeId
+    ui: NeoUiId
+    font: NeoFontId
+    fontSize: NeoFontSizeId
     reduceMotion: boolean
     compactMode: boolean
   }
@@ -85,6 +97,8 @@ export const useSettingsStore = defineStore('settings', {
     
     localPreferences: {
       theme: 'auto',
+      ui: 'braun',
+      font: 'sans',
       fontSize: 'medium',
       reduceMotion: false,
       compactMode: false,
@@ -142,16 +156,7 @@ export const useSettingsStore = defineStore('settings', {
      * Get authenticated API client
      */
     getClient(): mastodon.rest.Client {
-      const authStore = useAuthStore()
-      
-      if (!authStore.instanceUrl || !authStore.accessToken) {
-        throw new Error('Not authenticated')
-      }
-      
-      return createRestAPIClient({
-        url: authStore.instanceUrl,
-        accessToken: authStore.accessToken,
-      })
+      return activeClient()
     },
     
     /**
@@ -193,10 +198,40 @@ export const useSettingsStore = defineStore('settings', {
       try {
         const saved = localStorage.getItem(LOCAL_PREFS_KEY)
         if (saved) {
-          this.localPreferences = { ...this.localPreferences, ...JSON.parse(saved) }
+          const parsed = JSON.parse(saved)
+          this.localPreferences = {
+            ...this.localPreferences,
+            ...parsed,
+            theme: normalizeTheme(parsed.theme),
+            ui: normalizeUi(parsed.ui),
+            font: normalizeFont(parsed.font),
+            fontSize: (['small', 'medium', 'large'].includes(parsed.fontSize)
+              ? parsed.fontSize
+              : this.localPreferences.fontSize) as NeoFontSizeId,
+          }
         }
+        this.applyLocalAppearance()
       } catch (e) {
         console.error('Failed to load local preferences:', e)
+      }
+    },
+
+    applyLocalAppearance() {
+      applyAppearance({
+        theme: this.localPreferences.theme,
+        ui: this.localPreferences.ui,
+        font: this.localPreferences.font,
+        fontSize: this.localPreferences.fontSize,
+      })
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.toggle(
+          'reduce-motion',
+          this.localPreferences.reduceMotion,
+        )
+        document.documentElement.classList.toggle(
+          'compact-mode',
+          this.localPreferences.compactMode,
+        )
       }
     },
     
@@ -217,8 +252,8 @@ export const useSettingsStore = defineStore('settings', {
      * Load all settings from Mastodon
      */
     async loadSettings() {
-      const authStore = useAuthStore()
-      if (!authStore.isAuthenticated) return
+      const instancesStore = useInstancesStore()
+      if (!instancesStore.isAuthenticated) return
       
       this.isLoading = true
       this.error = null
@@ -316,7 +351,7 @@ export const useSettingsStore = defineStore('settings', {
       
       try {
         const client = this.getClient()
-        const authStore = useAuthStore()
+        const instancesStore = useInstancesStore()
         
         const updateData: any = {}
         
@@ -337,7 +372,7 @@ export const useSettingsStore = defineStore('settings', {
         const updated = await client.v1.accounts.updateCredentials(updateData)
         
         this.account = updated
-        authStore.currentUser = updated
+        instancesStore.updateActiveAccount(updated)
         this.saveSuccess = true
         
         return updated
@@ -370,17 +405,6 @@ export const useSettingsStore = defineStore('settings', {
         }
       }
       
-      // Store in local storage for use in compose
-      const postingDefaults = {
-        visibility: data.visibility || this.preferences?.['posting:default:visibility'],
-        sensitive: data.sensitive ?? this.preferences?.['posting:default:sensitive'],
-        language: data.language,
-      }
-      
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('neospace_posting_defaults', JSON.stringify(postingDefaults))
-      }
-      
       this.saveSuccess = true
     },
     
@@ -388,9 +412,28 @@ export const useSettingsStore = defineStore('settings', {
      * Update local appearance preferences
      */
     updateAppearance(data: Partial<SettingsState['localPreferences']>) {
-      this.localPreferences = { ...this.localPreferences, ...data }
+      this.localPreferences = {
+        ...this.localPreferences,
+        ...data,
+        theme: normalizeTheme(data.theme ?? this.localPreferences.theme),
+        ui: normalizeUi(data.ui ?? this.localPreferences.ui),
+        font: normalizeFont(data.font ?? this.localPreferences.font),
+      }
       this.saveLocalPreferences()
+      this.applyLocalAppearance()
       this.saveSuccess = true
+    },
+
+    cycleTheme() {
+      const upcoming = nextTheme(this.localPreferences.theme)
+      this.updateAppearance({ theme: upcoming })
+      return upcoming
+    },
+
+    cycleUi() {
+      const upcoming = nextUi(this.localPreferences.ui)
+      this.updateAppearance({ ui: upcoming })
+      return upcoming
     },
     
     /**

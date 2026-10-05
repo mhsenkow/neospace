@@ -1,0 +1,790 @@
+// ============================================
+// NeoSpace themes — ibm.io / wordcount palette
+// Maps Braun tokens onto the --neo-* runtime system
+// ============================================
+
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/opendyslexic@5.2.5/latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'OpenDyslexic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('https://cdn.jsdelivr.net/fontsource/fonts/opendyslexic@5.2.5/latin-700-normal.woff2') format('woff2');
+}
+
+@mixin neo-from-braun(
+  $bg,
+  $face,
+  $ink,
+  $mute,
+  $rule,
+  $hair,
+  $accent,
+  $mark,
+  $scheme: light
+) {
+  --bg: #{$bg};
+  --face: #{$face};
+  --ink: #{$ink};
+  --mute: #{$mute};
+  --rule: #{$rule};
+  --hair: #{$hair};
+  --accent: #{$accent};
+  --accent-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
+  --mark: #{$mark};
+
+  --neo-bg-primary: #{$bg};
+  --neo-bg-secondary: #{$face};
+  --neo-bg-tertiary: #{$hair};
+  --neo-bg-card: #{$face};
+  --neo-bg-overlay: color-mix(in srgb, #{$ink} 45%, transparent);
+  --neo-bg-hover: #{$hair};
+  --neo-bg-active: #{$rule};
+
+  --neo-text-primary: #{$ink};
+  --neo-text-secondary: #{$mute};
+  --neo-text-muted: #{$mute};
+  --neo-text-disabled: color-mix(in srgb, #{$mute} 70%, #{$bg});
+  --neo-text-inverse: #{$bg};
+  --neo-text-link: #{$accent};
+  --neo-text-link-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
+
+  --neo-accent: #{$accent};
+  --neo-accent-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
+  --neo-accent-light: color-mix(in srgb, #{$accent} 18%, transparent);
+  --neo-accent-dark: color-mix(in srgb, #{$accent} 75%, #{$ink});
+  --neo-accent-soft: color-mix(in srgb, #{$accent} 12%, transparent);
+  --neo-accent-soft-hover: color-mix(in srgb, #{$accent} 18%, transparent);
+  --neo-text-on-accent: #{if($scheme == dark, $bg, #ffffff)};
+
+  --neo-danger: #{$mark};
+  --neo-danger-soft: color-mix(in srgb, #{$mark} 12%, transparent);
+
+  --neo-border-color: #{$hair};
+  --neo-border-color-light: #{$hair};
+  --neo-border-color-dark: #{$rule};
+
+  color-scheme: #{$scheme};
+}
+
+// Default = light (also used when data-theme missing before boot)
+:root {
+  @include neo-from-braun(
+    #f2f2f0,
+    #fafaf8,
+    #111111,
+    #757575,
+    #c8c8c4,
+    #e4e4e0,
+    #c45c26,
+    #c62828,
+    light
+  );
+}
+
+[data-theme='light'] {
+  @include neo-from-braun(
+    #f2f2f0,
+    #fafaf8,
+    #111111,
+    #757575,
+    #c8c8c4,
+    #e4e4e0,
+    #c45c26,
+    #c62828,
+    light
+  );
+}
+
+[data-theme='dark'] {
+  @include neo-from-braun(
+    #161616,
+    #1c1c1c,
+    #f0f0ee,
+    #8a8a8a,
+    #3a3a3a,
+    #2a2a2a,
+    #e07a45,
+    #e57373,
+    dark
+  );
+  --neo-text-inverse: #161616;
+  --neo-text-on-accent: #161616;
+}
+
+[data-theme='contrast'] {
+  @include neo-from-braun(
+    #000000,
+    #000000,
+    #ffffff,
+    #b0b0b0,
+    #ffffff,
+    #666666,
+    #ffff00,
+    #ffff00,
+    dark
+  );
+  --neo-border-width: 2px;
+  --neo-text-inverse: #000000;
+  --neo-text-on-accent: #000000;
+  --neo-accent-soft: color-mix(in srgb, #ffff00 22%, transparent);
+}
+
+[data-theme='paper'] {
+  @include neo-from-braun(
+    #e8e2d6,
+    #f3efe6,
+    #1c1914,
+    #6e685c,
+    #c4bbaa,
+    #d9d1c3,
+    #8b4510,
+    #9b2c2c,
+    light
+  );
+  --neo-text-on-accent: #f3efe6;
+}
+
+[data-theme='glass'] {
+  @include neo-from-braun(
+    #e8eef8,
+    #f4f7fc,
+    #0f172a,
+    #64748b,
+    #c5d0e0,
+    #e8eef8,
+    #7c3aed,
+    #dc2626,
+    light
+  );
+  --neo-bg-secondary: rgba(255, 255, 255, 0.78);
+  --neo-bg-card: rgba(255, 255, 255, 0.78);
+  --neo-text-on-accent: #ffffff;
+
+  body {
+    background-image:
+      radial-gradient(1200px 700px at 12% -10%, rgba(147, 51, 234, 0.16), transparent 55%),
+      radial-gradient(900px 600px at 90% 10%, rgba(59, 130, 246, 0.14), transparent 50%);
+    background-attachment: fixed;
+  }
+
+  .neo-card,
+  .login__stage,
+  .callback__card,
+  .settings-modal,
+  .status-card {
+    backdrop-filter: blur(12px) saturate(1.2);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  }
+}
+
+[data-theme='frost'] {
+  @include neo-from-braun(
+    #070b16,
+    #10182a,
+    #e2e8f0,
+    #94a3b8,
+    #2a3650,
+    #152038,
+    #a78bfa,
+    #f87171,
+    dark
+  );
+  --neo-bg-secondary: rgba(15, 23, 42, 0.88);
+  --neo-bg-card: rgba(15, 23, 42, 0.88);
+  --neo-text-inverse: #070b16;
+  --neo-text-on-accent: #070b16;
+
+  body {
+    background-image:
+      radial-gradient(1000px 600px at 20% -20%, rgba(167, 139, 250, 0.18), transparent 55%),
+      radial-gradient(800px 500px at 90% 0%, rgba(56, 189, 248, 0.1), transparent 50%);
+    background-attachment: fixed;
+  }
+
+  .neo-card,
+  .login__stage,
+  .callback__card,
+  .settings-modal,
+  .status-card {
+    backdrop-filter: blur(14px) saturate(1.15);
+    -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  }
+}
+
+[data-theme='brutal'] {
+  // hair must stay light — it's used for panel chrome; borders use rule (black)
+  @include neo-from-braun(
+    #ffffff,
+    #ffffff,
+    #000000,
+    #444444,
+    #000000,
+    #f2f2f2,
+    #ff0000,
+    #000000,
+    light
+  );
+  --neo-border-width: 3px;
+  --neo-border-color: #000000;
+  --neo-border-color-light: #000000;
+  --neo-border-color-dark: #000000;
+  --neo-bg-hover: #f2f2f2;
+  --neo-bg-active: #e8e8e8;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-shadow-sm: 4px 4px 0 #000;
+  --neo-shadow-md: 6px 6px 0 #000;
+  --neo-text-inverse: #ffffff;
+  --neo-text-on-accent: #ffffff;
+  --neo-accent-soft: color-mix(in srgb, #ff0000 12%, #ffffff);
+}
+
+[data-theme='loom'] {
+  @include neo-from-braun(
+    #0a0a0f,
+    #12121a,
+    #e8e6e3,
+    #a8a5a0,
+    #2a2a35,
+    #1a1a25,
+    #d4a84b,
+    #ef4444,
+    dark
+  );
+  --neo-text-inverse: #0a0a0f;
+  --neo-text-on-accent: #0a0a0f;
+}
+
+[data-theme='tank'] {
+  @include neo-from-braun(
+    #0b1a22,
+    #163040,
+    #c5e2e7,
+    #69a1b3,
+    #23475a,
+    #1d3b22,
+    #57a253,
+    #c33b3b,
+    dark
+  );
+  --neo-text-inverse: #0b1a22;
+  --neo-text-on-accent: #0b1a22;
+  --neo-border-width: 2px;
+}
+
+[data-theme='nes'] {
+  @include neo-from-braun(
+    #209cee,
+    #f8f8f8,
+    #212529,
+    #495057,
+    #000000,
+    #dee2e6,
+    #e4002b,
+    #e4002b,
+    light
+  );
+  --neo-border-width: 3px;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-shadow-sm: 4px 4px 0 #000;
+  --neo-shadow-md: 6px 6px 0 #000;
+  --neo-text-inverse: #f8f8f8;
+  --neo-text-on-accent: #ffffff;
+}
+
+// ============================================
+// Chrome (data-ui) — full interface systems
+// Each face owns: UI type, radius, border weight,
+// label casing, button weight, card treatment.
+// Body type stacks come from JS (chrome × font).
+// ============================================
+
+@mixin neo-chrome-base {
+  --neo-chrome-label-transform: none;
+  --neo-chrome-label-tracking: 0;
+  --neo-chrome-btn-tracking: 0.01em;
+  --neo-chrome-btn-weight: 500;
+  --neo-chrome-heading-tracking: -0.02em;
+  --neo-chrome-card-shadow: none;
+  --neo-chrome-border-width: 1px;
+  --neo-leading-body: 1.5;
+  --neo-leading-ui: 1.35;
+  --neo-measure: 62ch;
+}
+
+:root,
+html[data-ui='braun'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: Helvetica, 'Helvetica Neue', Arial, sans-serif;
+  --neo-chrome-tracking: 0;
+  --neo-chrome-heading-weight: 700;
+  --neo-chrome-btn-weight: 500;
+  --neo-radius-chrome: 4px;
+  --neo-radius-sm: 2px;
+  --neo-radius-md: 4px;
+  --neo-radius-lg: 6px;
+  --neo-chrome-border-width: 1px;
+  --neo-chrome-heading-tracking: -0.03em;
+}
+
+html[data-ui='monocle'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: 'Source Sans 3', 'Avenir Next', 'Gill Sans', 'Gill Sans MT', sans-serif;
+  --neo-chrome-tracking: 0.012em;
+  --neo-chrome-heading-weight: 500;
+  --neo-chrome-btn-weight: 500;
+  --neo-radius-chrome: 6px;
+  --neo-radius-sm: 4px;
+  --neo-radius-md: 8px;
+  --neo-radius-lg: 12px;
+  --neo-chrome-border-width: 1px;
+  --neo-chrome-heading-tracking: 0;
+  --neo-leading-body: 1.55;
+  --neo-measure: 58ch;
+}
+
+html[data-ui='bauhaus'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: 'Josefin Sans', Futura, 'Century Gothic', 'URW Gothic', sans-serif;
+  --neo-chrome-tracking: 0.06em;
+  --neo-chrome-heading-weight: 400;
+  --neo-chrome-btn-weight: 500;
+  --neo-chrome-label-tracking: 0.08em;
+  --neo-chrome-btn-tracking: 0.06em;
+  --neo-chrome-heading-tracking: 0.04em;
+  --neo-radius-chrome: 0;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-chrome-border-width: 2px;
+  --neo-leading-body: 1.45;
+}
+
+html[data-ui='noyes'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: 'IBM Plex Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --neo-chrome-tracking: 0;
+  --neo-chrome-heading-weight: 600;
+  --neo-chrome-btn-weight: 500;
+  --neo-radius-chrome: 2px;
+  --neo-radius-sm: 2px;
+  --neo-radius-md: 2px;
+  --neo-radius-lg: 4px;
+  --neo-chrome-border-width: 1px;
+  --neo-chrome-heading-tracking: -0.01em;
+  --neo-leading-ui: 1.4;
+}
+
+html[data-ui='ikea'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: Verdana, Geneva, Tahoma, sans-serif;
+  --neo-chrome-tracking: 0;
+  --neo-chrome-heading-weight: 700;
+  --neo-chrome-btn-weight: 700;
+  --neo-radius-chrome: 0;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-chrome-border-width: 2px;
+  --neo-chrome-heading-tracking: 0;
+  --neo-leading-body: 1.5;
+}
+
+html[data-ui='military'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: Oswald, 'Arial Narrow', 'Helvetica Neue Condensed', sans-serif;
+  --neo-chrome-tracking: 0.08em;
+  --neo-chrome-heading-weight: 500;
+  --neo-chrome-btn-weight: 500;
+  --neo-chrome-label-transform: uppercase;
+  --neo-chrome-label-tracking: 0.1em;
+  --neo-chrome-btn-tracking: 0.08em;
+  --neo-chrome-heading-tracking: 0.06em;
+  --neo-radius-chrome: 0;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-chrome-border-width: 2px;
+  --neo-leading-body: 1.45;
+}
+
+html[data-ui='terminal'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+  --neo-chrome-tracking: 0;
+  --neo-chrome-heading-weight: 500;
+  --neo-chrome-btn-weight: 500;
+  --neo-chrome-btn-tracking: 0;
+  --neo-chrome-heading-tracking: 0;
+  --neo-radius-chrome: 0;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-chrome-border-width: 1px;
+  --neo-leading-body: 1.45;
+  --neo-leading-ui: 1.3;
+}
+
+html[data-ui='nyt'] {
+  @include neo-chrome-base;
+  --neo-font-family-ui: Georgia, 'Times New Roman', Times, serif;
+  --neo-chrome-tracking: 0;
+  --neo-chrome-heading-weight: 700;
+  --neo-chrome-btn-weight: 400;
+  --neo-chrome-btn-tracking: 0;
+  --neo-chrome-heading-tracking: -0.02em;
+  --neo-radius-chrome: 0;
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-chrome-border-width: 1px;
+  --neo-leading-body: 1.6;
+  --neo-measure: 54ch;
+}
+
+// --- Chrome body / layout tracking ---
+
+html[data-ui='monocle'] body {
+  letter-spacing: 0.01em;
+}
+
+html[data-ui='bauhaus'] body {
+  letter-spacing: 0.04em;
+}
+
+html[data-ui='bauhaus'] .status-content,
+html[data-ui='bauhaus'] .compose-input,
+html[data-ui='bauhaus'] .login__lede,
+html[data-ui='monocle'] .status-content,
+html[data-ui='nyt'] .status-content {
+  letter-spacing: normal;
+}
+
+// --- Chrome surfaces: sidebar, headers, marks ---
+
+html[data-ui] .sidebar,
+html[data-ui] .mobile-header,
+html[data-ui] .mobile-sidebar,
+html[data-ui] .mobile-nav {
+  font-family: var(--neo-font-family-ui);
+  letter-spacing: var(--neo-chrome-tracking);
+}
+
+html[data-ui] .sidebar__mark,
+html[data-ui] .mobile-sidebar__mark,
+html[data-ui] .login__mark {
+  border-radius: var(--neo-radius-chrome);
+  font-family: var(--neo-font-family-ui);
+  font-weight: var(--neo-chrome-heading-weight);
+  letter-spacing: var(--neo-chrome-label-tracking);
+  text-transform: var(--neo-chrome-label-transform);
+}
+
+html[data-ui='bauhaus'] .sidebar__mark,
+html[data-ui='ikea'] .sidebar__mark,
+html[data-ui='military'] .sidebar__mark,
+html[data-ui='terminal'] .sidebar__mark,
+html[data-ui='nyt'] .sidebar__mark {
+  border-radius: 0;
+}
+
+html[data-ui='military'] .sidebar__link,
+html[data-ui='military'] .mobile-sidebar__link,
+html[data-ui='military'] .mobile-sidebar__action,
+html[data-ui='military'] .mobile-header__logo,
+html[data-ui='military'] .settings-nav__item,
+html[data-ui='military'] .settings-subheading,
+html[data-ui='military'] .neo-btn,
+html[data-ui='military'] .add-column-menu__title,
+html[data-ui='military'] .accounts-section__head h3 {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+html[data-ui='terminal'] .sidebar,
+html[data-ui='terminal'] .mobile-header,
+html[data-ui='terminal'] .mobile-sidebar,
+html[data-ui='terminal'] .mobile-nav,
+html[data-ui='terminal'] .neo-btn,
+html[data-ui='terminal'] .settings-modal,
+html[data-ui='terminal'] .accounts-modal,
+html[data-ui='terminal'] .notes-panel {
+  font-family: var(--neo-font-family-ui);
+}
+
+html[data-ui='terminal'] .sidebar {
+  border-right-style: dashed;
+}
+
+html[data-ui='nyt'] .mobile-header__logo,
+html[data-ui='nyt'] .sidebar__mark,
+html[data-ui='nyt'] .login__wordmark,
+html[data-ui='nyt'] .explore-hero h1,
+html[data-ui='nyt'] .groups-hero h1,
+html[data-ui='nyt'] .profile-name {
+  font-family: Georgia, 'Times New Roman', Times, serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+html[data-ui='nyt'] .sidebar {
+  border-right-width: 1px;
+}
+
+html[data-ui='nyt'] .neo-card,
+html[data-ui='nyt'] .status-card,
+html[data-ui='nyt'] .settings-modal,
+html[data-ui='nyt'] .accounts-modal {
+  border-top-width: 2px;
+  border-top-color: var(--neo-text-primary);
+}
+
+html[data-ui='ikea'] .neo-btn--primary {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+html[data-ui='bauhaus'] .neo-btn {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+
+html[data-ui='noyes'] .neo-btn {
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+html[data-ui='braun'] .neo-btn {
+  letter-spacing: 0.01em;
+}
+
+html[data-ui='monocle'] .neo-card,
+html[data-ui='monocle'] .status-card {
+  border-color: color-mix(in srgb, var(--neo-border-color) 80%, transparent);
+}
+
+html[data-ui='ikea'] .neo-card,
+html[data-ui='ikea'] .status-card,
+html[data-ui='ikea'] .settings-modal,
+html[data-ui='military'] .neo-card,
+html[data-ui='military'] .status-card {
+  border-width: 2px;
+}
+
+html[data-ui='terminal'] .neo-card,
+html[data-ui='terminal'] .status-card,
+html[data-ui='terminal'] .settings-modal,
+html[data-ui='terminal'] .accounts-modal,
+html[data-ui='terminal'] .notes-panel {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+html[data-ui='bauhaus'] .neo-avatar,
+html[data-ui='ikea'] .neo-avatar,
+html[data-ui='military'] .neo-avatar,
+html[data-ui='terminal'] .neo-avatar,
+html[data-ui='nyt'] .neo-avatar {
+  border-radius: 0;
+}
+
+html[data-ui='bauhaus'] .acct-switch__avatar,
+html[data-ui='ikea'] .acct-switch__avatar,
+html[data-ui='military'] .acct-switch__avatar,
+html[data-ui='terminal'] .acct-switch__avatar,
+html[data-ui='nyt'] .acct-switch__avatar,
+html[data-ui='bauhaus'] .sidebar__avatar,
+html[data-ui='ikea'] .sidebar__avatar,
+html[data-ui='military'] .sidebar__avatar,
+html[data-ui='terminal'] .sidebar__avatar,
+html[data-ui='nyt'] .sidebar__avatar {
+  border-radius: 0;
+}
+
+// Page titles / chrome labels
+html[data-ui] h1,
+html[data-ui] h2,
+html[data-ui] .neo-heading {
+  font-family: var(--neo-font-family-heading);
+  font-weight: var(--neo-chrome-heading-weight);
+  letter-spacing: var(--neo-chrome-heading-tracking);
+  line-height: var(--neo-leading-ui);
+}
+
+html[data-ui='bauhaus'] h1,
+html[data-ui='bauhaus'] h2 {
+  text-transform: uppercase;
+}
+
+html[data-ui='military'] h1,
+html[data-ui='military'] h2 {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+html[data-ui='nyt'] h1 {
+  font-family: Georgia, 'Times New Roman', Times, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+// Reading surfaces — body type, never chrome casing
+.status-content,
+.compose-input,
+.login__lede,
+.profile-bio,
+.post-text,
+.recent-post-content {
+  font-family: var(--neo-font-family);
+  line-height: var(--neo-leading-body);
+  letter-spacing: normal;
+  text-transform: none;
+  max-width: var(--neo-measure);
+}
+
+// UI chrome controls
+.neo-btn,
+.settings-nav__item,
+.settings-subheading,
+.settings-segmented__btn,
+.add-column-menu__title,
+.add-column-menu__item,
+.accounts-section__head h3,
+.notes-kind,
+.action-label {
+  font-family: var(--neo-font-family-ui);
+}
+
+.neo-btn {
+  font-weight: var(--neo-chrome-btn-weight);
+  letter-spacing: var(--neo-chrome-btn-tracking);
+  border-radius: var(--neo-radius-chrome);
+  text-transform: var(--neo-chrome-label-transform);
+}
+
+.neo-card {
+  border-radius: var(--neo-radius-md);
+  border-width: var(--neo-chrome-border-width);
+  box-shadow: var(--neo-chrome-card-shadow);
+}
+
+// ============================================
+// Typography — data-font (chrome-aware via JS;
+// these are fallbacks when JS hasn't run yet)
+// ============================================
+
+:root,
+[data-font='sans'] {
+  --neo-font-family: Helvetica, 'Helvetica Neue', Arial, ui-sans-serif, system-ui, sans-serif;
+  --neo-font-family-heading: var(--neo-font-family);
+  --neo-leading-body: 1.5;
+  --neo-body-tracking: 0;
+}
+
+[data-font='serif'] {
+  --neo-font-family: Georgia, 'Times New Roman', Times, serif;
+  --neo-font-family-heading: var(--neo-font-family);
+  --neo-leading-body: 1.55;
+  --neo-body-tracking: 0;
+}
+
+[data-font='book'] {
+  --neo-font-family: Palatino, 'Palatino Linotype', Georgia, serif;
+  --neo-font-family-heading: var(--neo-font-family);
+  --neo-leading-body: 1.65;
+  --neo-body-tracking: 0.01em;
+  --neo-measure: 52ch;
+}
+
+[data-font='mono'] {
+  --neo-font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --neo-font-family-heading: var(--neo-font-family);
+  --neo-leading-body: 1.45;
+  --neo-body-tracking: 0;
+}
+
+[data-font='dyslexic'] {
+  --neo-font-family: OpenDyslexic, 'Comic Sans MS', Arial, sans-serif;
+  --neo-font-family-heading: var(--neo-font-family);
+  --neo-leading-body: 1.7;
+  --neo-body-tracking: 0.02em;
+  --neo-measure: 48ch;
+}
+
+html[data-font='book'] .status-content,
+html[data-font='book'] .profile-bio {
+  letter-spacing: 0.01em;
+  line-height: 1.65;
+}
+
+html[data-font='dyslexic'] .status-content,
+html[data-font='dyslexic'] body {
+  letter-spacing: 0.02em;
+  word-spacing: 0.04em;
+  line-height: 1.7;
+}
+
+html[data-font='mono'] .status-content {
+  letter-spacing: 0;
+  line-height: 1.45;
+}
+
+// Theme × chrome: hard-edge themes win on radius
+html[data-theme='brutal'],
+html[data-theme='nes'] {
+  --neo-radius-sm: 0;
+  --neo-radius-md: 0;
+  --neo-radius-lg: 0;
+  --neo-radius-chrome: 0;
+}
+
+// Light faces: denser stems; dark faces: grayscale AA (wordcount)
+[data-theme='light'] body,
+[data-theme='paper'] body {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+[data-theme='dark'] body,
+[data-theme='contrast'] body,
+[data-theme='frost'] body,
+[data-theme='loom'] body,
+[data-theme='tank'] body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// ============================================
+// Font size scale
+// ============================================
+
+[data-font-size='small'] {
+  --neo-font-size-base: 0.875rem;
+  --neo-leading-body: 1.45;
+  font-size: 0.875rem;
+}
+
+[data-font-size='medium'] {
+  --neo-font-size-base: 0.9375rem;
+  font-size: 0.9375rem;
+}
+
+[data-font-size='large'] {
+  --neo-font-size-base: 1.0625rem;
+  --neo-leading-body: 1.55;
+  font-size: 1.0625rem;
+}

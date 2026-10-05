@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { useNotificationsStore, type NotificationFilterType, type SortOrder } from '~/stores/notifications'
-import { useAuthStore } from '~/stores/auth'
 import { useInstancesStore } from '~/stores/instances'
 import type { mastodon } from 'masto'
 
 const notificationsStore = useNotificationsStore()
-const authStore = useAuthStore()
 const instancesStore = useInstancesStore()
 
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -15,7 +13,7 @@ const actionsMenuOpen = ref(false)
 let observer: IntersectionObserver | null = null
 
 const canView = computed(() =>
-  authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+  instancesStore.hasAuthenticatedInstance
 )
 
 const filters: { key: NotificationFilterType; label: string; icon: string }[] = [
@@ -111,9 +109,17 @@ const notifLabel = (type: string) => {
 }
 
 const stripHtml = (html: string) => {
+  if (typeof document === 'undefined') return html.replace(/<[^>]*>/g, '')
   const tmp = document.createElement('div')
   tmp.innerHTML = html
   return tmp.textContent || tmp.innerText || ''
+}
+
+const previewText = (status?: mastodon.v1.Status | null) => {
+  if (!status?.content) return ''
+  const text = stripHtml(status.content).replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text
 }
 
 const closeDropdowns = (e: MouseEvent) => {
@@ -290,17 +296,20 @@ onBeforeUnmount(() => {
               <!-- Content -->
               <div class="notif-item__body">
                 <div class="notif-item__headline">
-                  <strong v-if="notif.account" class="notif-item__name">
-                    {{ notif.account.displayName || notif.account.username }}
-                  </strong>
-                  <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
-                  <span class="notif-item__time">{{ formatTime(notif.createdAt) }}</span>
+                  <p class="notif-item__who">
+                    <strong v-if="notif.account" class="notif-item__name">
+                      {{ notif.account.displayName || notif.account.username }}
+                    </strong>
+                    <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
+                  </p>
+                  <time class="notif-item__time" :datetime="notif.createdAt">
+                    {{ formatTime(notif.createdAt) }}
+                  </time>
                 </div>
 
-                <!-- Status preview (for mention/fav/reblog/poll/update) -->
-                <div v-if="notif.status" class="notif-item__preview">
-                  {{ stripHtml(notif.status.content).slice(0, 180) }}{{ stripHtml(notif.status.content).length > 180 ? '...' : '' }}
-                </div>
+                <p v-if="previewText(notif.status)" class="notif-item__preview">
+                  {{ previewText(notif.status) }}
+                </p>
 
                 <!-- Media thumbnails -->
                 <div v-if="notif.status?.mediaAttachments?.length" class="notif-item__media">
@@ -345,15 +354,23 @@ onBeforeUnmount(() => {
   min-height: 100vh;
   min-height: 100dvh;
   overflow-y: auto;
-  padding-bottom: 6rem;
+  padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0));
 }
 
-// ====== Container ======
-
 .notif-container {
-  max-width: 640px;
+  width: 100%;
+  max-width: min(100%, 820px);
   margin: 0 auto;
-  padding: 0 1rem;
+  padding: 0 0.75rem;
+  box-sizing: border-box;
+
+  @media (min-width: 600px) {
+    padding: 0 1.25rem;
+  }
+
+  @media (min-width: 1024px) {
+    padding: 0 1.5rem;
+  }
 }
 
 // ====== Header ======
@@ -362,27 +379,45 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--neo-bg-primary);
-  padding: 1.25rem 0 0;
+  margin: 0 -0.75rem;
+  padding: 1rem 0.75rem 0;
+  background: color-mix(in srgb, var(--neo-bg-primary) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  @media (min-width: 600px) {
+    margin: 0 -1.25rem;
+    padding: 1.25rem 1.25rem 0;
+  }
+
+  @media (min-width: 1024px) {
+    top: 0;
+    margin: 0 -1.5rem;
+    padding: 1.5rem 1.5rem 0;
+  }
 
   &__top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 0.75rem;
+    gap: 0.75rem;
+    margin-bottom: 0.875rem;
   }
 
   &__title {
-    font-size: 1.5rem;
+    margin: 0;
+    font-size: clamp(1.375rem, 3vw, 1.75rem);
     font-weight: 700;
     color: var(--neo-text-primary);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
   }
 
   &__actions {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.125rem;
+    flex-shrink: 0;
   }
 }
 
@@ -392,20 +427,21 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  border: none;
+  border-radius: var(--neo-radius-sm, 4px);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--neo-text-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 
   &:hover {
     background: var(--neo-bg-hover);
+    border-color: var(--neo-border-color);
     color: var(--neo-text-primary);
   }
 
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: default;
   }
 }
@@ -420,35 +456,38 @@ onBeforeUnmount(() => {
 
 // ====== Sort & Actions dropdowns ======
 
-.sort-menu, .actions-menu {
+.sort-menu,
+.actions-menu {
   position: relative;
 }
 
-.sort-menu__dropdown, .actions-menu__dropdown {
+.sort-menu__dropdown,
+.actions-menu__dropdown {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color-light);
-  border-radius: 12px;
-  padding: 0.375rem;
-  min-width: 170px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  background: var(--neo-bg-secondary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
+  border-radius: var(--neo-radius-sm, 4px);
+  padding: 0.25rem;
+  min-width: 180px;
+  box-shadow: var(--neo-shadow-md);
   z-index: 30;
 }
 
-.sort-menu__item, .actions-menu__item {
+.sort-menu__item,
+.actions-menu__item {
   display: block;
   width: 100%;
   text-align: left;
   padding: 0.5rem 0.75rem;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: calc(var(--neo-radius-sm, 4px) - 1px);
   font-size: 0.875rem;
   color: var(--neo-text-primary);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background-color 0.15s;
 
   &:hover {
     background: var(--neo-bg-hover);
@@ -472,43 +511,65 @@ onBeforeUnmount(() => {
 
 .notif-filters {
   display: flex;
-  gap: 0.375rem;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
   overflow-x: auto;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--neo-border-color-light);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  padding: 0 0 0.875rem;
+  margin: 0 -0.75rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  border-bottom: 1px solid var(--neo-border-color);
   scrollbar-width: none;
 
-  &::-webkit-scrollbar { display: none; }
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  @media (min-width: 720px) {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    margin: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 
 .notif-filter-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.375rem;
+  min-height: 34px;
   padding: 0.375rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--neo-border-color-light);
-  background: var(--neo-bg-card);
+  border-radius: var(--neo-radius-sm, 4px);
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary);
   font-size: 0.8125rem;
-  color: var(--neo-text-secondary);
+  color: var(--neo-text-primary);
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s;
-  flex-shrink: 0;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+  flex: 0 0 auto;
 
   &:hover {
-    border-color: var(--neo-border-color);
-    color: var(--neo-text-primary);
+    border-color: var(--neo-border-color-dark);
   }
 
   &.active {
     background: var(--neo-accent);
     border-color: var(--neo-accent);
-    color: #fff;
+    color: var(--neo-text-on-accent);
   }
 
-  &__icon { font-size: 0.875rem; line-height: 1; }
-  &__label { font-weight: 500; }
+  &__icon {
+    font-size: 0.875rem;
+    line-height: 1;
+  }
+
+  &__label {
+    font-weight: 500;
+  }
 }
 
 // ====== Skeleton loading ======
@@ -521,6 +582,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 0.75rem;
   padding: 0.875rem 0;
+  border-bottom: 1px solid var(--neo-border-color);
 }
 
 .notif-skeleton__avatar {
@@ -542,16 +604,23 @@ onBeforeUnmount(() => {
 
 .notif-skeleton__line {
   height: 12px;
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--neo-bg-tertiary);
   animation: pulse 1.5s ease-in-out infinite;
 
-  &--short { height: 10px; }
+  &--short {
+    height: 10px;
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 // ====== Error ======
@@ -561,22 +630,29 @@ onBeforeUnmount(() => {
   padding: 3rem 1rem;
   color: var(--neo-text-secondary);
 
-  &__icon { font-size: 2rem; margin-bottom: 0.75rem; }
+  &__icon {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+  }
 
-  p { margin-bottom: 1rem; }
+  p {
+    margin-bottom: 1rem;
+    color: var(--neo-text-primary);
+  }
 
   &__retry {
     padding: 0.5rem 1.25rem;
-    border-radius: 999px;
-    border: 1px solid var(--neo-border-color);
-    background: transparent;
+    border-radius: var(--neo-radius-sm, 4px);
+    border: 1px solid var(--neo-border-color-dark);
+    background: var(--neo-bg-secondary);
     color: var(--neo-text-primary);
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s;
 
-    &:hover { background: var(--neo-bg-hover); }
+    &:hover {
+      background: var(--neo-bg-hover);
+    }
   }
 }
 
@@ -588,144 +664,165 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 5rem 1.5rem;
-  min-height: 60vh;
+  padding: 4rem 1.5rem;
+  min-height: 50vh;
 
   &__icon {
-    font-size: 3.5rem;
-    margin-bottom: 1.25rem;
+    font-size: 2.75rem;
+    margin-bottom: 1rem;
     line-height: 1;
   }
 
   &__title {
-    font-size: 1.375rem;
+    margin: 0 0 0.5rem;
+    font-size: 1.25rem;
     font-weight: 700;
     color: var(--neo-text-primary);
-    margin-bottom: 0.5rem;
   }
 
   &__desc {
+    margin: 0 0 1.5rem;
     font-size: 0.9375rem;
-    color: var(--neo-text-muted);
-    max-width: 360px;
+    color: var(--neo-text-secondary);
+    max-width: 36ch;
     line-height: 1.5;
-    margin-bottom: 1.5rem;
   }
 
   &__cta {
     display: inline-flex;
-    padding: 0.625rem 1.5rem;
-    border-radius: 999px;
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--neo-radius-sm, 4px);
     background: var(--neo-accent);
-    color: #fff;
+    color: var(--neo-text-on-accent);
     font-weight: 600;
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
     text-decoration: none;
-    transition: opacity 0.15s;
 
-    &:hover { opacity: 0.9; }
+    &:hover {
+      background: var(--neo-accent-hover);
+    }
   }
 }
 
 // ====== Notification list ======
 
 .notif-list {
-  padding-top: 0.5rem;
+  padding-top: 0.25rem;
 }
 
 .notif-group {
   &__label {
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.6875rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--neo-text-muted);
-    padding: 1rem 0 0.375rem;
+    letter-spacing: 0.08em;
+    color: var(--neo-text-secondary);
+    padding: 1.25rem 0 0.5rem;
+  }
+
+  &__items {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-top: 1px solid var(--neo-border-color);
   }
 }
 
 // ====== Notification item ======
 
 .notif-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.625rem;
-  padding: 0.75rem 0.625rem;
-  border-radius: 12px;
-  transition: background 0.15s;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.875rem 0.5rem 0.875rem 0.625rem;
+  border-bottom: 1px solid var(--neo-border-color);
+  border-left: 3px solid transparent;
+  background: transparent;
+  transition: background-color 0.15s;
   position: relative;
 
   &:hover {
     background: var(--neo-bg-hover);
 
-    .notif-item__dismiss { opacity: 1; }
+    .notif-item__dismiss {
+      opacity: 1;
+    }
   }
 
   &__type-badge {
-    position: absolute;
-    top: 0.5rem;
-    left: 0.25rem;
-    font-size: 0.75rem;
+    width: 1.25rem;
+    padding-top: 0.7rem;
+    font-size: 0.8125rem;
     line-height: 1;
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
+    text-align: center;
+    flex-shrink: 0;
   }
 
   &__avatar {
     flex-shrink: 0;
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
     overflow: hidden;
-    margin-left: 0.75rem;
+    background: var(--neo-bg-tertiary);
+    margin-top: 0.125rem;
 
     img {
       width: 100%;
       height: 100%;
       object-fit: cover;
+      display: block;
     }
   }
 
   &__body {
-    flex: 1;
     min-width: 0;
+    padding-right: 1.75rem;
   }
 
   &__headline {
     display: flex;
     align-items: baseline;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    font-size: 0.875rem;
-    line-height: 1.4;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.9375rem;
+    line-height: 1.35;
+  }
+
+  &__who {
+    margin: 0;
+    min-width: 0;
   }
 
   &__name {
     color: var(--neo-text-primary);
-    font-weight: 600;
+    font-weight: 700;
+    margin-right: 0.35rem;
   }
 
   &__action {
     color: var(--neo-text-secondary);
+    font-weight: 400;
   }
 
   &__time {
-    color: var(--neo-text-muted);
+    color: var(--neo-text-secondary);
     font-size: 0.75rem;
-    margin-left: auto;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
     flex-shrink: 0;
   }
 
   &__preview {
-    margin-top: 0.25rem;
-    font-size: 0.8125rem;
-    color: var(--neo-text-secondary);
+    margin: 0.375rem 0 0;
+    padding: 0.5rem 0.625rem;
+    font-size: 0.875rem;
+    color: var(--neo-text-primary);
     line-height: 1.45;
+    background: var(--neo-bg-secondary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 4px);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -734,57 +831,75 @@ onBeforeUnmount(() => {
 
   &__media {
     display: flex;
-    gap: 0.25rem;
-    margin-top: 0.375rem;
+    gap: 0.375rem;
+    margin-top: 0.5rem;
     align-items: center;
   }
 
   &__media-thumb {
-    width: 48px;
-    height: 48px;
+    width: 52px;
+    height: 52px;
     object-fit: cover;
-    border-radius: 8px;
+    border-radius: var(--neo-radius-sm, 4px);
     background: var(--neo-bg-tertiary);
+    border: 1px solid var(--neo-border-color);
   }
 
   &__media-more {
     font-size: 0.75rem;
-    color: var(--neo-text-muted);
-    font-weight: 500;
-    padding-left: 0.25rem;
+    color: var(--neo-text-secondary);
+    font-weight: 600;
   }
 
   &__dismiss {
     position: absolute;
-    top: 0.5rem;
-    right: 0.375rem;
+    top: 0.625rem;
+    right: 0.25rem;
     opacity: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     width: 28px;
     height: 28px;
-    border-radius: 50%;
-    border: none;
-    background: transparent;
-    color: var(--neo-text-muted);
+    border-radius: var(--neo-radius-sm, 4px);
+    border: 1px solid transparent;
+    background: var(--neo-bg-secondary);
+    color: var(--neo-text-secondary);
     cursor: pointer;
-    transition: opacity 0.15s, background 0.15s, color 0.15s;
+    transition: opacity 0.15s, background-color 0.15s, color 0.15s, border-color 0.15s;
 
     &:hover {
       background: var(--neo-danger-soft);
+      border-color: var(--neo-danger);
       color: var(--neo-danger);
+    }
+
+    @media (hover: none) {
+      opacity: 1;
     }
   }
 }
 
 // Type-specific accent strips
-.notif-item--favourite { border-left: 3px solid #e0245e; }
-.notif-item--reblog { border-left: 3px solid #00ba7c; }
-.notif-item--mention { border-left: 3px solid var(--neo-accent); }
-.notif-item--follow, .notif-item--follow_request { border-left: 3px solid #7c3aed; }
-.notif-item--poll { border-left: 3px solid #f59e0b; }
-.notif-item--update { border-left: 3px solid #06b6d4; }
+.notif-item--favourite {
+  border-left-color: #e0245e;
+}
+.notif-item--reblog {
+  border-left-color: #00ba7c;
+}
+.notif-item--mention {
+  border-left-color: var(--neo-accent);
+}
+.notif-item--follow,
+.notif-item--follow_request {
+  border-left-color: #7c3aed;
+}
+.notif-item--poll {
+  border-left-color: #f59e0b;
+}
+.notif-item--update {
+  border-left-color: #06b6d4;
+}
 
 // ====== Load more ======
 
@@ -796,7 +911,7 @@ onBeforeUnmount(() => {
   &__spinner {
     width: 24px;
     height: 24px;
-    border: 2px solid var(--neo-border-color-light);
+    border: 2px solid var(--neo-border-color);
     border-top-color: var(--neo-accent);
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
@@ -804,43 +919,49 @@ onBeforeUnmount(() => {
 
   &__end {
     font-size: 0.8125rem;
-    color: var(--neo-text-muted);
+    color: var(--neo-text-secondary);
   }
 }
 
 // ====== Dropdown transition ======
 
-.dropdown-enter-active, .dropdown-leave-active {
+.dropdown-enter-active,
+.dropdown-leave-active {
   transition: opacity 0.15s, transform 0.15s;
 }
-.dropdown-enter-from, .dropdown-leave-to {
+.dropdown-enter-from,
+.dropdown-leave-to {
   opacity: 0;
   transform: translateY(-4px);
 }
 
-// ====== Dark mode refinements ======
-
-[data-theme="dark"] {
-  .sort-menu__dropdown, .actions-menu__dropdown {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    border-color: var(--neo-border-color);
-  }
-}
-
 // ====== Responsive ======
 
-@media (max-width: 640px) {
-  .notif-container { padding: 0 0.5rem; }
-
-  .notif-header__title { font-size: 1.25rem; }
-
+@media (max-width: 560px) {
   .notif-item {
     gap: 0.5rem;
-    padding: 0.625rem 0.375rem;
+    padding: 0.75rem 0.25rem 0.75rem 0.375rem;
 
-    &__avatar { width: 38px; height: 38px; margin-left: 0.5rem; }
-    &__type-badge { display: none; }
-    &__time { font-size: 0.6875rem; }
+    &__type-badge {
+      display: none;
+    }
+
+    &__avatar {
+      width: 36px;
+      height: 36px;
+    }
+
+    &__headline {
+      font-size: 0.875rem;
+    }
+
+    &__preview {
+      font-size: 0.8125rem;
+    }
+
+    &__body {
+      padding-right: 1.5rem;
+    }
   }
 }
 </style>

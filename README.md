@@ -1,70 +1,69 @@
 # 🌌 NeoSpace
 
-**Dual-Mode Social Media Frontend for the Fediverse**
+**Fediverse frontend for Mastodon, GoToSocial, and ActivityPub-compatible servers**
 
-A beautiful, customizable frontend for Mastodon, GoToSocial, and other ActivityPub-compatible servers. Features two visual modes:
+Multi-column TweetDeck-style layout, multi-instance watching, OAuth login, and CSS theming (including Chaos Mode via profile metadata).
 
-<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/73c87a4f-141c-4be8-b0b4-7efcbf20702e" />
-
-
-## ✨ Features
-
-- 🔐 OAuth authentication with any Mastodon-compatible instance
-- 📱 Responsive 3-column layout
-- 🎨 Full CSS variable theming system
-- ✏️ Edit your profile directly from NeoSpace
-- 📝 Post, boost, and favorite content
-- 🌐 View local and federated timelines without login
-- 💜 Custom CSS injection via profile metadata
-
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-# Install dependencies
+# Node 22+
 npm install
-
-# Run development server
 npm run dev
-
-# Build for production
-npm run build
 ```
 
-## 🌐 Deploy
+Open [http://localhost:3000](http://localhost:3000).
 
-### Vercel (Recommended)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/neospace)
+## Deploy
 
-1. Push to GitHub
-2. Connect to Vercel
-3. Deploy automatically
+### Cloudflare Pages (primary)
 
-### Netlify
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start)
+Live: [https://neospace.ibm.io](https://neospace.ibm.io)  
+Also: [https://neospace-dc4.pages.dev](https://neospace-dc4.pages.dev)
 
-1. Push to GitHub
-2. Connect to Netlify
-3. Deploy automatically
+```bash
+# One-time: npx wrangler login
+npm run cf:deploy
+```
 
-### Cloudflare Pages
-1. Push to GitHub
-2. Connect repository in Cloudflare Dashboard
-3. Set build command: `npm run build`
-4. Set output directory: `.output/public`
+**Dashboard / Git settings** (if connecting the repo for push-to-deploy):
+- Build command: `npm run generate`
+- Output directory: `.output/public`
+- Node version: `22` (see `.nvmrc`)
+
+This project is currently **direct-upload** via Wrangler. A Git-connected Pages project would need to be created fresh (direct-upload projects cannot be converted) if you want PR preview URLs.
+
+SPA deep links use `public/_redirects`. Security/cache headers use `public/_headers`.
+
+### Leave-a-note (GitHub issues)
+
+The floating note button posts to `POST /api/feedback` (Pages Function), which opens an issue on [mhsenkow/neospace](https://github.com/mhsenkow/neospace).
+
+One-time secret (classic PAT with `repo` scope, or fine-grained with Issues write on this repo):
+
+```bash
+npx wrangler pages secret put GITHUB_TOKEN --project-name neospace
+```
+
+Optional label (created automatically on first note if missing is fine — the API retries without labels):
+
+```bash
+gh label create feedback --repo mhsenkow/neospace --color 0E8A16 --description "Leave-a-note from neospace.ibm.io" || true
+```
 
 ### Docker
+
 ```bash
 docker build -t neospace .
-docker run -p 3000:3000 neospace
+docker run -p 8080:80 neospace
 ```
 
-## 🎨 Custom CSS (Chaos Mode)
+## Custom CSS (Chaos Mode)
 
-Add a profile field on your Mastodon instance:
+Add a profile field on your instance:
 - **Name**: `css` (or `custom_css`, `theme`, `style`)
 - **Value**: Your custom CSS
 
-Example:
 ```css
 :root {
   --neo-bg-primary: #0a0a0a;
@@ -74,34 +73,29 @@ Example:
 }
 ```
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-- **Framework**: Nuxt 3
-- **Styling**: SCSS (no Tailwind - full CSS control)
-- **State**: Pinia
-- **API**: masto.js (Mastodon API client)
-- **Auth**: OAuth 2.0
+- **Framework**: Nuxt 4 (SPA, `ssr: false`)
+- **Styling**: SCSS + CSS variables
+- **State**: Pinia (single multi-account `instances` store)
+- **API**: masto.js via `~/composables/useMasto`
+- **Auth**: OAuth 2.0 (browser; tokens in localStorage)
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 app/
 ├── assets/css/       # Global styles & variables
 ├── components/       # Vue components
-├── composables/      # Composables (useMasto, useMockData)
+├── composables/      # useMasto, curated instances, accounts manager
 ├── layouts/          # App layouts
-├── pages/            # Route pages
-└── stores/           # Pinia stores (auth, theme, timeline, profile)
+├── pages/            # Routes
+├── stores/           # Pinia stores
+└── utils/            # Shared helpers (appearance, feedback, instances)
+functions/
+└── api/feedback.ts   # Pages Function → GitHub issues
 ```
 
-## 🤝 Contributing
+## License
 
-PRs welcome! Please follow the existing code style.
-
-## 📄 License
-
-MIT License - do whatever you want with it!
-
----
-
-Built with 💜 and questionable CSS decisions
+MIT

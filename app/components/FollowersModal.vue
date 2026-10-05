@@ -7,12 +7,11 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { useAuthStore } from '~/stores/auth'
-import { useTimelineStore } from '~/stores/timeline'
-import { createRestAPIClient, type mastodon } from 'masto'
+import { useInstancesStore } from '~/stores/instances'
+import type { mastodon } from 'masto'
+import { activeClient } from '~/composables/useMasto'
 
-const authStore = useAuthStore()
-const timelineStore = useTimelineStore()
+const instancesStore = useInstancesStore()
 
 const props = defineProps<{
   accountId?: string
@@ -44,18 +43,10 @@ const close = () => {
   relationships.value = {}
 }
 
-const getClient = () => {
-  if (!authStore.instanceUrl || !authStore.accessToken) {
-    throw new Error('Not authenticated')
-  }
-  return createRestAPIClient({
-    url: authStore.instanceUrl,
-    accessToken: authStore.accessToken,
-  })
-}
+const getClient = () => activeClient()
 
 const loadAccounts = async () => {
-  if (!authStore.isAuthenticated) return
+  if (!instancesStore.isAuthenticated) return
   
   isLoading.value = true
   accounts.value = []
@@ -63,7 +54,7 @@ const loadAccounts = async () => {
   
   try {
     const client = getClient()
-    const accountId = props.accountId || authStore.currentUser?.id
+    const accountId = props.accountId || instancesStore.currentUser?.id
     
     if (!accountId) return
     
@@ -122,7 +113,7 @@ const loadMore = async () => {
   isLoading.value = true
   try {
     const client = getClient()
-    const accountId = props.accountId || authStore.currentUser?.id
+    const accountId = props.accountId || instancesStore.currentUser?.id
     if (!accountId) return
     
     const lastAccount = accounts.value[accounts.value.length - 1]

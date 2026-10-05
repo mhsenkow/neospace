@@ -1,9 +1,6 @@
 <script setup lang="ts">
 /**
- * NeoSpace - Root App Component
- * 
- * The beating heart of our dual-mode social media experience.
- * Where Mom Mode meets Chaos Mode in glorious harmony.
+ * NeoSpace — root app shell
  */
 </script>
 

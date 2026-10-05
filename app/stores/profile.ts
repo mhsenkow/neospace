@@ -6,8 +6,9 @@
  */
 
 import { defineStore } from 'pinia'
-import { createRestAPIClient, type mastodon } from 'masto'
-import { useAuthStore } from './auth'
+import type { mastodon } from 'masto'
+import { useInstancesStore } from './instances'
+import { activeClient } from '~/composables/useMasto'
 
 interface ProfileState {
   // Viewed profile (can be self or other user)
@@ -69,9 +70,9 @@ export const useProfileStore = defineStore('profile', {
      * Check if viewing own profile
      */
     isOwnProfile(): boolean {
-      const authStore = useAuthStore()
-      if (!authStore.currentUser || !this.viewedProfile) return false
-      return authStore.currentUser.id === this.viewedProfile.id
+      const instancesStore = useInstancesStore()
+      if (!instancesStore.currentUser || !this.viewedProfile) return false
+      return instancesStore.currentUser.id === this.viewedProfile.id
     },
 
     /**
@@ -104,21 +105,14 @@ export const useProfileStore = defineStore('profile', {
      * Get authenticated API client
      */
     getClient(): mastodon.rest.Client {
-      const authStore = useAuthStore()
-      if (!authStore.instanceUrl || !authStore.accessToken) {
-        throw new Error('Not authenticated')
-      }
-      return createRestAPIClient({
-        url: authStore.instanceUrl,
-        accessToken: authStore.accessToken,
-      })
+      return activeClient()
     },
 
     /**
      * Fetch a profile by ID or username
      */
     async fetchProfile(accountId?: string) {
-      const authStore = useAuthStore()
+      const instancesStore = useInstancesStore()
       
       this.isLoading = true
       this.error = null
@@ -286,7 +280,7 @@ export const useProfileStore = defineStore('profile', {
      * Update profile on the server
      */
     async updateProfile() {
-      const authStore = useAuthStore()
+      const instancesStore = useInstancesStore()
       if (!this.isOwnProfile) {
         throw new Error('Cannot edit someone else\'s profile')
       }
@@ -330,7 +324,7 @@ export const useProfileStore = defineStore('profile', {
 
         // Update local state
         this.viewedProfile = updated
-        authStore.currentUser = updated
+        instancesStore.updateActiveAccount(updated)
         
         // Exit edit mode
         this.isEditing = false

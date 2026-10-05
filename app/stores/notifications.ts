@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { createRestAPIClient, type mastodon } from 'masto'
-import { useAuthStore } from './auth'
+import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
+import { activeClient } from '~/composables/useMasto'
 
 export type NotificationFilterType = 'all' | 'mention' | 'favourite' | 'reblog' | 'follow' | 'poll' | 'status' | 'update'
 
@@ -102,21 +102,11 @@ export const useNotificationsStore = defineStore('notifications', {
 
   actions: {
     getClient(): mastodon.rest.Client | null {
-      const authStore = useAuthStore()
-      if (authStore.instanceUrl && authStore.accessToken) {
-        return createRestAPIClient({
-          url: authStore.instanceUrl,
-          accessToken: authStore.accessToken,
-        })
+      try {
+        return activeClient()
+      } catch {
+        return null
       }
-
-      const instancesStore = useInstancesStore()
-      const primary = instancesStore.primaryInstance
-      if (primary?.accessToken) {
-        return instancesStore.getClient(primary.id)
-      }
-
-      return null
     },
 
     async fetchNotifications(refresh = false) {

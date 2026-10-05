@@ -28,10 +28,10 @@ useHead({
     <header class="explore-hero">
       <div class="hero-content">
         <span class="hero-emoji">🏘️</span>
-        <h1>Instance Hopper</h1>
+        <h1>Find servers</h1>
         <p class="hero-subtitle">
-          The Fediverse is a galaxy of communities. Each instance is a neighborhood with its own vibe, rules, and people. 
-          Explore them without leaving NeoSpace.
+          The Fediverse is a galaxy of communities. Each server is a neighborhood with its own vibe, rules, and people.
+          Watch public posts without leaving NeoSpace — or sign in when you want an account there.
         </p>
       </div>
       <div class="hero-decoration">
@@ -75,18 +75,18 @@ useHead({
     <!-- Info Section -->
     <section class="info-section">
       <div class="info-card">
-        <h3>🤔 What's an instance?</h3>
+        <h3>What's a server?</h3>
         <p>
-          The Fediverse is made up of independent servers called "instances." Each one is run by different people 
-          with different rules and communities. Unlike Twitter or Facebook, there's no single company in control. 
-          You can join any instance and still talk to people on other instances!
+          The Fediverse is made up of independent servers (sometimes called instances). Each one is run by different people
+          with different rules and communities. Unlike Twitter or Facebook, there's no single company in control.
+          You can join any server and still talk to people on other servers.
         </p>
       </div>
       <div class="info-card">
-        <h3>🔗 Already have an account?</h3>
+        <h3>Already have an account?</h3>
         <p>
-          You don't need to join these instances to see their content. If you're already logged into NeoSpace, 
-          you can follow anyone from any instance. The Fediverse is all connected!
+          You don't need to join these servers to see their public posts — use Watch.
+          When you want to post or follow from a server, Sign in from Accounts &amp; servers.
         </p>
       </div>
     </section>

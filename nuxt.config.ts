@@ -34,18 +34,23 @@ export default defineNuxtConfig({
         lang: 'en'
       },
       meta: [
-        { name: 'description', content: 'Dual-Mode Social Media - Mom Mode or Chaos Mode, you decide.' },
+        { name: 'description', content: 'NeoSpace — a multi-column Fediverse client.' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
-        { name: 'theme-color', content: '#000000', media: '(prefers-color-scheme: dark)' },
-        { name: 'theme-color', content: '#f8f9fa', media: '(prefers-color-scheme: light)' }
+        { name: 'theme-color', content: '#f2f2f0' }
       ],
       link: [
-        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+        {
+          rel: 'stylesheet',
+          href: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Serif:wght@400;500&family=Josefin+Sans:wght@400;500&family=Josefin+Slab:wght@400;500&family=Libre+Franklin:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Oswald:wght@400;500&family=Roboto+Slab:wght@400;500&family=Share+Tech+Mono&family=Source+Code+Pro:wght@400;500&family=Source+Sans+3:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&family=Space+Mono:wght@400;700&display=swap'
+        }
       ],
       script: [
         {
-          // Prevent flash of unstyled content by applying theme before render
-          innerHTML: `(function(){try{var t=localStorage.getItem('neospace_local_prefs');if(t){var p=JSON.parse(t);if(p.theme==='dark'){document.documentElement.setAttribute('data-theme','dark')}else if(p.theme==='light'){document.documentElement.setAttribute('data-theme','light')}}}catch(e){}})()`,
+          // Apply theme + chrome + font before paint
+          innerHTML: `(function(){try{var raw=localStorage.getItem('neospace_local_prefs');var p=raw?JSON.parse(raw):{};var map={hc:'contrast',electric:'frost',forest:'tank'};var t=p.theme||'auto';if(map[t])t=map[t];var ok=['light','dark','contrast','paper','glass','frost','brutal','loom','tank','nes'];if(t==='auto'||ok.indexOf(t)<0){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}document.documentElement.setAttribute('data-theme',t);var uis=['braun','monocle','bauhaus','noyes','ikea','military','terminal','nyt'];var u=uis.indexOf(p.ui)>=0?p.ui:'braun';document.documentElement.setAttribute('data-ui',u);var fonts=['sans','serif','book','mono','dyslexic'];var f=fonts.indexOf(p.font)>=0?p.font:'sans';document.documentElement.setAttribute('data-font',f);var sizes=['small','medium','large'];var s=sizes.indexOf(p.fontSize)>=0?p.fontSize:'medium';document.documentElement.setAttribute('data-font-size',s);}catch(e){document.documentElement.setAttribute('data-theme','light');document.documentElement.setAttribute('data-ui','braun');document.documentElement.setAttribute('data-font','sans');}})()`,
           type: 'text/javascript'
         }
       ]

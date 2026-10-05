@@ -6,19 +6,16 @@
  * feed type, scroll position, and data. Column config is persisted.
  */
 
-import { useAuthStore } from '~/stores/auth'
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 
-const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 
-const instanceManagerRef = ref<{ open: () => void } | null>(null)
 const addMenuOpen = ref(false)
 const addGroupsExpanded = ref(false)
 
@@ -35,30 +32,23 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   addGroupsExpanded.value = false
 }
 
-const openInstanceManager = () => {
-  instanceManagerRef.value?.open()
-}
-
 onMounted(async () => {
-  await Promise.all([
-    authStore.initialize(),
-    instancesStore.initialize(),
-  ])
+  await instancesStore.initialize()
   columnsStore.initialize()
 
-  if (authStore.isAuthenticated) {
+  if (instancesStore.isAuthenticated) {
     groupsStore.initializeGroups()
   }
 
-  if (authStore.userCustomCSS) {
-    themeStore.setUserCustomCSS(authStore.userCustomCSS)
+  if (instancesStore.userCustomCSS) {
+    themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   }
 
   // If user is authenticated and first column is 'local', switch to 'home'
   const firstCol = columnsStore.columns[0]
   if (
     firstCol &&
-    (authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance) &&
+    instancesStore.hasAuthenticatedInstance &&
     columnsStore.columns.length === 1 &&
     firstCol.feedType === 'local'
   ) {
@@ -77,8 +67,6 @@ useHead({ title: 'Home | NeoSpace' })
 
 <template>
   <div class="columns-page" :class="{ 'columns-page--multi': columnsStore.isMultiColumn }">
-    <InstanceManager ref="instanceManagerRef" />
-
     <div class="columns-container">
       <TimelineColumn
         v-for="(column, idx) in columnsStore.columns"
@@ -156,18 +144,6 @@ useHead({ title: 'Home | NeoSpace' })
               </button>
             </template>
           </template>
-
-          <div class="add-column-menu__divider"></div>
-
-          <button class="add-column-menu__item add-column-menu__item--server" @click="openInstanceManager(); addMenuOpen = false">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-              <line x1="6" y1="6" x2="6.01" y2="6" />
-              <line x1="6" y1="18" x2="6.01" y2="18" />
-            </svg>
-            Manage Servers
-          </button>
 
           <span class="add-column-menu__hint">{{ columnsStore.columnCount }}/4 columns</span>
         </div>

@@ -7,10 +7,10 @@
  */
 
 import { useGroupsStore, GROUP_CATEGORIES } from '~/stores/groups'
-import { useAuthStore } from '~/stores/auth'
+import { useInstancesStore } from '~/stores/instances'
 
 const groupsStore = useGroupsStore()
-const authStore = useAuthStore()
+const instancesStore = useInstancesStore()
 const router = useRouter()
 
 const selectedCategory = ref('all')
@@ -76,25 +76,18 @@ useHead({
     <!-- Hero Section -->
     <header class="groups-hero">
       <div class="hero-content">
-        <span class="hero-emoji">👥</span>
+        <p class="hero-kicker">Communities</p>
         <h1>Groups</h1>
         <p class="hero-subtitle">
           Find your people. Join communities around topics you care about.
         </p>
       </div>
-      <div class="hero-shapes">
-        <div class="shape shape-1"></div>
-        <div class="shape shape-2"></div>
-        <div class="shape shape-3"></div>
-      </div>
     </header>
 
     <div class="groups-layout">
       <!-- Sidebar: Your Groups -->
-      <aside v-if="authStore.isAuthenticated && joinedGroups.length > 0" class="groups-sidebar">
-        <h2 class="sidebar-title">
-          <span>⭐</span> Your Groups
-        </h2>
+      <aside v-if="instancesStore.isAuthenticated && joinedGroups.length > 0" class="groups-sidebar">
+        <h2 class="sidebar-title">Your Groups</h2>
         <div class="joined-groups">
           <GroupCard
             v-for="group in joinedGroups"
@@ -160,20 +153,23 @@ useHead({
             <p>No groups found in this category.</p>
           </div>
 
-          <div v-else class="groups-grid">
-            <TransitionGroup name="card">
-              <GroupCard
-                v-for="group in filteredGroups"
-                :key="group.tag"
-                :group="group"
-                @view="viewGroup"
-              />
-            </TransitionGroup>
-          </div>
+          <TransitionGroup
+            v-else
+            name="card"
+            tag="div"
+            class="groups-grid"
+          >
+            <GroupCard
+              v-for="group in filteredGroups"
+              :key="group.tag"
+              :group="group"
+              @view="viewGroup"
+            />
+          </TransitionGroup>
         </section>
 
         <!-- Not Logged In Notice -->
-        <div v-if="!authStore.isAuthenticated" class="login-notice">
+        <div v-if="!instancesStore.isAuthenticated" class="login-notice">
           <div class="notice-content">
             <span class="notice-icon">🔐</span>
             <div>
@@ -190,173 +186,87 @@ useHead({
 
 <style lang="scss" scoped>
 .groups-page {
-  max-width: var(--neo-container-xl);
+  width: 100%;
+  max-width: min(100%, 1400px);
   margin: 0 auto;
-  padding: 0 var(--neo-spacing-2) var(--neo-spacing-6);
+  padding: 0 0.75rem 4rem;
+  box-sizing: border-box;
 
   @media (min-width: 480px) {
-    padding: 0 var(--neo-spacing-4) var(--neo-spacing-8);
+    padding: 0 1.25rem 5rem;
+  }
+
+  @media (min-width: 1024px) {
+    padding: 0 1.5rem 4rem;
   }
 }
 
 // Hero Section
 .groups-hero {
   position: relative;
-  text-align: center;
-  padding: var(--neo-spacing-7) var(--neo-spacing-4);
-  margin-bottom: var(--neo-spacing-5);
-  background: linear-gradient(135deg, var(--neo-success-dark) 0%, var(--neo-success) 50%, var(--neo-success-light) 100%);
-  border-radius: var(--neo-radius-xl);
-  overflow: hidden;
-  box-shadow: var(--neo-shadow-lg);
-
-  @media (min-width: 480px) {
-    padding: var(--neo-spacing-10) var(--neo-spacing-6);
-    margin-bottom: var(--neo-spacing-6);
-    border-radius: var(--neo-radius-2xl);
-  }
+  text-align: left;
+  padding: 1.5rem 0 1.25rem;
+  margin-bottom: 1.25rem;
+  background: transparent;
+  border-bottom: 1px solid var(--neo-border-color);
 
   @media (min-width: 768px) {
-    padding: var(--neo-spacing-12) var(--neo-spacing-8);
-    margin-bottom: var(--neo-spacing-8);
-    border-radius: var(--neo-radius-3xl);
-    box-shadow: var(--neo-shadow-xl);
+    padding: 2rem 0 1.5rem;
+    margin-bottom: 1.75rem;
   }
 }
 
 .hero-content {
   position: relative;
   z-index: 2;
+  max-width: 42rem;
 }
 
-.hero-emoji {
-  font-size: 2.5rem;
-  display: block;
-  margin-bottom: 0.5rem;
-  animation: bounce 2s ease-in-out infinite;
-
-  @media (min-width: 480px) {
-    font-size: 3rem;
-    margin-bottom: 0.75rem;
-  }
-
-  @media (min-width: 768px) {
-    font-size: 3.5rem;
-  }
-}
-
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+.hero-kicker {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--neo-accent);
+  margin: 0 0 0.5rem;
 }
 
 .groups-hero h1 {
-  font-size: var(--neo-font-size-3xl);
-  font-weight: var(--neo-font-weight-extrabold);
-  color: var(--neo-text-inverse);
-  margin: 0 0 var(--neo-spacing-2);
-  letter-spacing: var(--neo-letter-spacing-tight);
-  text-shadow: var(--neo-shadow-md);
-
-  @media (min-width: 480px) {
-    font-size: var(--neo-font-size-4xl);
-    margin-bottom: var(--neo-spacing-3);
-  }
-
-  @media (min-width: 768px) {
-    font-size: var(--neo-font-size-5xl);
-  }
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  font-weight: 700;
+  color: var(--neo-text-primary);
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
 }
 
 .hero-subtitle {
-  color: rgba(255, 255, 255, 0.95);
-  font-size: var(--neo-font-size-sm);
-  line-height: var(--neo-line-height-normal);
-  max-width: 400px;
-  margin: 0 auto;
-
-  @media (min-width: 480px) {
-    font-size: var(--neo-font-size-base);
-    max-width: 450px;
-  }
-
-  @media (min-width: 768px) {
-    font-size: var(--neo-font-size-lg);
-    max-width: 500px;
-  }
-}
-
-.hero-shapes {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.shape {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-
-  &.shape-1 {
-    width: 120px;
-    height: 120px;
-    top: -40px;
-    right: -30px;
-
-    @media (min-width: 768px) {
-      width: 200px;
-      height: 200px;
-      top: -60px;
-      right: -40px;
-    }
-  }
-
-  &.shape-2 {
-    width: 80px;
-    height: 80px;
-    bottom: -20px;
-    left: 5%;
-
-    @media (min-width: 768px) {
-      width: 120px;
-      height: 120px;
-      bottom: -30px;
-      left: 10%;
-    }
-  }
-
-  &.shape-3 {
-    width: 50px;
-    height: 50px;
-    top: 40%;
-    left: -15px;
-
-    @media (min-width: 768px) {
-      width: 80px;
-      height: 80px;
-      left: -20px;
-    }
-  }
+  color: var(--neo-text-muted);
+  font-size: clamp(0.875rem, 2vw, 1.0625rem);
+  line-height: 1.5;
+  max-width: 40ch;
+  margin: 0;
 }
 
 // Layout
 .groups-layout {
   display: grid;
-  gap: var(--neo-spacing-5);
+  gap: 1.5rem;
+  grid-template-columns: 1fr;
+  align-items: start;
 
-  @media (min-width: 768px) {
-    gap: var(--neo-spacing-6);
-  }
-
-  @media (min-width: 900px) {
-    grid-template-columns: 260px 1fr;
-    gap: var(--neo-spacing-8);
+  @media (min-width: 1100px) {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    gap: 2rem;
   }
 }
 
 // Sidebar
 .groups-sidebar {
-  @media (max-width: 899px) {
+  position: sticky;
+  top: 1rem;
+
+  @media (max-width: 1099px) {
     display: none;
   }
 }
@@ -364,45 +274,33 @@ useHead({
 .sidebar-title {
   display: flex;
   align-items: center;
-  gap: var(--neo-spacing-2);
-  font-size: var(--neo-font-size-sm);
-  font-weight: var(--neo-font-weight-bold);
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
   color: var(--neo-text-secondary);
-  margin: 0 0 var(--neo-spacing-3);
+  margin: 0 0 0.75rem;
   text-transform: uppercase;
-  letter-spacing: var(--neo-letter-spacing-wide);
-
-  @media (min-width: 768px) {
-    font-size: var(--neo-font-size-base);
-    margin-bottom: var(--neo-spacing-4);
-  }
-
-  span {
-    font-size: var(--neo-font-size-lg);
-  }
+  letter-spacing: 0.06em;
 }
 
 .joined-groups {
   display: flex;
   flex-direction: column;
-  gap: var(--neo-spacing-3);
+  gap: 0.625rem;
 }
 
 // Main Content
 .groups-main {
   min-width: 0;
+  width: 100%;
 }
 
 // Search
 .groups-search {
-  margin-bottom: var(--neo-spacing-4);
-
-  @media (min-width: 480px) {
-    margin-bottom: var(--neo-spacing-5);
-  }
+  margin-bottom: 1rem;
 
   @media (min-width: 768px) {
-    margin-bottom: var(--neo-spacing-6);
+    margin-bottom: 1.25rem;
   }
 }
 
@@ -410,43 +308,32 @@ useHead({
   position: relative;
   display: flex;
   align-items: center;
+  max-width: 40rem;
 }
 
 .search-icon {
   position: absolute;
   left: 0.875rem;
   font-size: 1rem;
-  opacity: 0.6;
-
-  @media (min-width: 480px) {
-    left: 1rem;
-    font-size: 1.125rem;
-  }
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .search-input {
   width: 100%;
-  padding: var(--neo-spacing-3) var(--neo-spacing-3) var(--neo-spacing-3) calc(var(--neo-spacing-10) + var(--neo-spacing-2));
-  font-size: var(--neo-font-size-sm);
+  min-height: 44px;
+  padding: 0.75rem 2.5rem 0.75rem 2.5rem;
+  font-size: 1rem;
   background: var(--neo-bg-secondary);
-  border: var(--neo-border-width-thick) var(--neo-border-style) var(--neo-border-color);
-  border-radius: var(--neo-radius-full);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 4px;
   color: var(--neo-text-primary);
-  transition: all var(--neo-transition);
-
-  @media (min-width: 480px) {
-    padding: var(--neo-spacing-4) var(--neo-spacing-4) var(--neo-spacing-4) var(--neo-spacing-12);
-    font-size: var(--neo-font-size-base);
-  }
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
   &:focus {
     outline: none;
     border-color: var(--neo-accent);
     box-shadow: 0 0 0 3px var(--neo-accent-soft);
-
-    @media (min-width: 480px) {
-      box-shadow: 0 0 0 4px var(--neo-accent-soft);
-    }
   }
 
   &::placeholder {
@@ -467,78 +354,63 @@ useHead({
 
 // Search Results
 .search-results {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 .section-title {
-  font-size: var(--neo-font-size-lg);
-  font-weight: var(--neo-font-weight-bold);
+  font-size: 1.125rem;
+  font-weight: 700;
   color: var(--neo-text-primary);
-  margin: 0 0 var(--neo-spacing-4);
+  margin: 0 0 1rem;
 }
 
-// Category Navigation
+// Category Navigation — swipe on phones, wrap on wider
 .category-nav {
   display: flex;
   flex-wrap: nowrap;
-  gap: 0.375rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
+  margin: 0 -0.75rem 1.25rem;
+  padding: 0 0.75rem 0.35rem;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
-  padding-bottom: 0.25rem;
-  margin-left: -0.5rem;
-  margin-right: -0.5rem;
-  padding-left: 0.5rem;
-  padding-right: 0.5rem;
+  overscroll-behavior-x: contain;
 
   &::-webkit-scrollbar {
     display: none;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     flex-wrap: wrap;
     overflow-x: visible;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-    margin-left: 0;
-    margin-right: 0;
-    padding-left: 0;
-    padding-right: 0;
+    margin: 0 0 1.5rem;
+    padding: 0;
   }
 }
 
 .category-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--neo-spacing-1);
-  padding: var(--neo-spacing-2) var(--neo-spacing-3);
+  gap: 0.375rem;
+  min-height: 36px;
+  padding: 0.375rem 0.875rem;
   background: var(--neo-bg-secondary);
-  border: var(--neo-border-width-thick) var(--neo-border-style) var(--neo-border-color);
-  border-radius: var(--neo-radius-full);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 4px;
   cursor: pointer;
-  transition: all var(--neo-transition-fast);
-  font-size: var(--neo-font-size-xs);
-  flex-shrink: 0;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  font-size: 0.8125rem;
+  flex: 0 0 auto;
   white-space: nowrap;
-
-  @media (min-width: 480px) {
-    gap: var(--neo-spacing-2);
-    padding: var(--neo-spacing-2) var(--neo-spacing-4);
-    font-size: var(--neo-font-size-sm);
-  }
 
   .cat-emoji {
     font-size: 0.875rem;
-
-    @media (min-width: 480px) {
-      font-size: 1rem;
-    }
+    line-height: 1;
   }
 
   .cat-label {
     color: var(--neo-text-primary);
-    font-weight: var(--neo-font-weight-medium);
+    font-weight: 500;
   }
 
   &:hover {
@@ -555,21 +427,22 @@ useHead({
   }
 }
 
-// Groups Grid
+// Groups Grid — real multi-column once TransitionGroup is the grid root
 .groups-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--neo-spacing-3);
+  gap: 0.75rem;
 
-  @media (min-width: 480px) {
-    gap: var(--neo-spacing-4);
+  @media (min-width: 560px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
   }
 
-  @media (min-width: 600px) {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  @media (min-width: 960px) {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   }
 
-  @media (min-width: 900px) {
+  @media (min-width: 1280px) {
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
 }

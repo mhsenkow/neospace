@@ -7,9 +7,9 @@
  */
 
 import { ref, computed } from 'vue'
-import { useTimelineStore } from '~/stores/timeline'
+import { useStatusStore } from '~/stores/status'
 import { useGroupsStore } from '~/stores/groups'
-import { useAuthStore } from '~/stores/auth'
+import { useInstancesStore } from '~/stores/instances'
 
 const props = defineProps<{
   /** The group's hashtag (without #) */
@@ -24,9 +24,9 @@ const emit = defineEmits<{
   (e: 'posted', status: any): void
 }>()
 
-const timelineStore = useTimelineStore()
+const statusStore = useStatusStore()
 const groupsStore = useGroupsStore()
-const authStore = useAuthStore()
+const instancesStore = useInstancesStore()
 
 const content = ref('')
 const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>('public')
@@ -45,7 +45,7 @@ const canPost = computed(() =>
   content.value.trim().length > 0 && 
   !isOverLimit.value && 
   !isPosting.value &&
-  authStore.isAuthenticated
+  instancesStore.isAuthenticated
 )
 
 const visibilityOptions = [
@@ -64,7 +64,7 @@ const handlePost = async () => {
     // Append the hashtag to the content
     const postContent = `${content.value.trim()} #${props.tag}`
     
-    const status = await timelineStore.postStatus(postContent, {
+    const status = await statusStore.postStatus(postContent, {
       visibility: visibility.value,
     })
     
@@ -101,9 +101,9 @@ const handlePost = async () => {
     <!-- User avatar and input -->
     <div class="group-compose__body">
       <img 
-        v-if="authStore.userAvatar"
-        :src="authStore.userAvatar" 
-        :alt="authStore.userDisplayName || 'Your avatar'"
+        v-if="instancesStore.userAvatar"
+        :src="instancesStore.userAvatar" 
+        :alt="instancesStore.userDisplayName || 'Your avatar'"
         class="group-compose__avatar"
       />
       <div class="group-compose__input-wrapper">

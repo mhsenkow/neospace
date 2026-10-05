@@ -12,12 +12,24 @@
  */
 
 import { useSettingsStore, SETTINGS_CATEGORIES } from '~/stores/settings'
-import { useAuthStore } from '~/stores/auth'
+import { useInstancesStore } from '~/stores/instances'
 import { useThemeStore } from '~/stores/theme'
+import {
+  FONT_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  THEME_OPTIONS,
+  UI_OPTIONS,
+  TYPE_FACES,
+  type NeoFontId,
+  type NeoFontSizeId,
+  type NeoThemeId,
+  type NeoUiId,
+} from '~/utils/appearance'
 
 const settingsStore = useSettingsStore()
-const authStore = useAuthStore()
+const instancesStore = useInstancesStore()
 const themeStore = useThemeStore()
+const contentEl = ref<HTMLElement | null>(null)
 
 // Edit form for profile
 const profileForm = reactive({
@@ -36,8 +48,10 @@ const postingForm = reactive({
 
 // Appearance form
 const appearanceForm = reactive({
-  theme: 'auto' as 'auto' | 'light' | 'dark',
-  fontSize: 'medium' as 'small' | 'medium' | 'large',
+  theme: 'auto' as NeoThemeId,
+  ui: 'braun' as NeoUiId,
+  font: 'sans' as NeoFontId,
+  fontSize: 'medium' as NeoFontSizeId,
   reduceMotion: false,
   compactMode: false,
 })
@@ -63,11 +77,20 @@ watch(() => settingsStore.preferences, (prefs) => {
 watch(() => settingsStore.localPreferences, (prefs) => {
   if (prefs) {
     appearanceForm.theme = prefs.theme
+    appearanceForm.ui = prefs.ui
+    appearanceForm.font = prefs.font
     appearanceForm.fontSize = prefs.fontSize
     appearanceForm.reduceMotion = prefs.reduceMotion
     appearanceForm.compactMode = prefs.compactMode
   }
 }, { immediate: true })
+
+watch(
+  () => settingsStore.activeCategory,
+  () => {
+    if (contentEl.value) contentEl.value.scrollTop = 0
+  },
+)
 
 // Handle close on escape
 const handleKeydown = (e: KeyboardEvent) => {
@@ -107,20 +130,12 @@ const savePostingDefaults = () => {
 const saveAppearance = () => {
   settingsStore.updateAppearance({
     theme: appearanceForm.theme,
+    ui: appearanceForm.ui,
+    font: appearanceForm.font,
     fontSize: appearanceForm.fontSize,
     reduceMotion: appearanceForm.reduceMotion,
     compactMode: appearanceForm.compactMode,
   })
-  
-  // Apply theme immediately
-  if (appearanceForm.theme === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark')
-  } else if (appearanceForm.theme === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light')
-  } else {
-    document.documentElement.removeAttribute('data-theme')
-  }
-  
   settingsStore.clearSuccess()
 }
 
@@ -133,17 +148,24 @@ const visibilityOptions = [
 ]
 
 const themeOptions = [
-  { value: 'auto', label: 'Auto', icon: '🌗', desc: 'Match system preference' },
-  { value: 'light', label: 'Light', icon: '☀️', desc: 'Light appearance' },
-  { value: 'dark', label: 'Dark', icon: '🌙', desc: 'Dark appearance' },
+  { value: 'auto' as const, label: 'Auto', desc: 'Match system light/dark', swatch: 'linear-gradient(135deg,#f2f2f0 50%,#161616 50%)', ink: '#c45c26' },
+  ...THEME_OPTIONS.map((t) => ({
+    value: t.id,
+    label: t.label,
+    desc: t.desc,
+    swatch: t.swatch,
+    ink: t.ink,
+  })),
 ]
 
-const fontSizeOptions = [
-  { value: 'small', label: 'Small' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'large', label: 'Large' },
-]
-</script>
+const uiOptions = UI_OPTIONS
+const fontOptions = FONT_OPTIONS
+const fontSizeOptions = FONT_SIZE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
+
+const fontPreviewStack = (fontId: NeoFontId) => {
+  const ui = appearanceForm.ui || 'braun'
+  return TYPE_FACES[ui]?.[fontId] || TYPE_FACES.braun[fontId]
+}</script>
 
 <template>
   <Teleport to="body">
@@ -188,7 +210,7 @@ const fontSizeOptions = [
             </nav>
 
             <!-- Content -->
-            <main class="settings-content">
+            <main ref="contentEl" class="settings-content">
               <!-- Loading -->
               <div v-if="settingsStore.isLoading" class="settings-loading">
                 <span class="settings-loading__spinner">🌀</span>
@@ -377,8 +399,8 @@ const fontSizeOptions = [
                   </p>
 
                   <a 
-                    v-if="authStore.instanceUrl"
-                    :href="`${authStore.instanceUrl}/settings/notifications`"
+                    v-if="instancesStore.instanceUrl"
+                    :href="`${instancesStore.instanceUrl}/settings/notifications`"
                     target="_blank"
                     class="settings-btn settings-btn--primary"
                   >
@@ -396,21 +418,79 @@ const fontSizeOptions = [
 
                 <div class="settings-group">
                   <h3 class="settings-subheading">Theme</h3>
-                  <div class="settings-option-grid">
-                    <label 
+                  <p class="settings-hint">Color system — tap a swatch or use the sidebar cycle button.</p>
+                  <div class="settings-theme-grid">
+                    <label
                       v-for="option in themeOptions"
                       :key="option.value"
-                      :class="['settings-option-card', { active: appearanceForm.theme === option.value }]"
+                      :class="['settings-theme-swatch', { active: appearanceForm.theme === option.value }]"
+                      :title="option.desc"
                     >
-                      <input 
-                        v-model="appearanceForm.theme" 
-                        type="radio" 
+                      <input
+                        v-model="appearanceForm.theme"
+                        type="radio"
                         :value="option.value"
                         class="settings-radio-hidden"
+                        @change="saveAppearance"
                       />
-                      <span class="settings-option-card__icon">{{ option.icon }}</span>
-                      <span class="settings-option-card__label">{{ option.label }}</span>
-                      <span class="settings-option-card__desc">{{ option.desc }}</span>
+                      <span
+                        class="settings-theme-swatch__chip"
+                        :style="{ background: option.swatch, color: option.ink }"
+                      >
+                        <span class="settings-theme-swatch__dot"></span>
+                      </span>
+                      <span class="settings-theme-swatch__label">{{ option.label }}</span>
+                    </label>
+                  </div>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Chrome</h3>
+                  <p class="settings-hint">Full interface system — type, corners, borders, labels. Same set as wordcount.</p>
+                  <div class="settings-chrome-grid">
+                    <label
+                      v-for="option in uiOptions"
+                      :key="option.id"
+                      :class="['settings-chrome-card', { active: appearanceForm.ui === option.id }]"
+                      :data-preview-ui="option.id"
+                      :title="option.desc"
+                    >
+                      <input
+                        v-model="appearanceForm.ui"
+                        type="radio"
+                        :value="option.id"
+                        class="settings-radio-hidden"
+                        @change="saveAppearance"
+                      />
+                      <span class="settings-chrome-card__sample">{{ option.sample }}</span>
+                      <span class="settings-chrome-card__label">{{ option.label }}</span>
+                      <span class="settings-chrome-card__desc">{{ option.desc }}</span>
+                    </label>
+                  </div>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Typography</h3>
+                  <p class="settings-hint">Reading face for posts &amp; pages — remapped through the active chrome.</p>
+                  <div class="settings-font-grid">
+                    <label
+                      v-for="option in fontOptions"
+                      :key="option.id"
+                      :class="['settings-font-card', { active: appearanceForm.font === option.id }]"
+                    >
+                      <input
+                        v-model="appearanceForm.font"
+                        type="radio"
+                        :value="option.id"
+                        class="settings-radio-hidden"
+                        @change="saveAppearance"
+                      />
+                      <span
+                        class="settings-font-card__sample"
+                        :style="{ fontFamily: fontPreviewStack(option.id) }"
+                      >{{ option.sample }}</span>
+                      <span class="settings-font-card__label">{{ option.label }}</span>
+                      <span class="settings-font-card__desc">{{ option.desc }}</span>
                     </label>
                   </div>
 
@@ -421,8 +501,9 @@ const fontSizeOptions = [
                     <button
                       v-for="option in fontSizeOptions"
                       :key="option.value"
+                      type="button"
                       :class="['settings-segmented__btn', { active: appearanceForm.fontSize === option.value }]"
-                      @click="appearanceForm.fontSize = option.value as any"
+                      @click="appearanceForm.fontSize = option.value; saveAppearance()"
                     >
                       {{ option.label }}
                     </button>
@@ -432,7 +513,7 @@ const fontSizeOptions = [
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">🎬 Reduce motion</span>
+                      <span class="settings-toggle__label">Reduce motion</span>
                       <span class="settings-toggle__desc">Disable animations and auto-playing content</span>
                     </div>
                     <input v-model="appearanceForm.reduceMotion" type="checkbox" class="settings-checkbox" />
@@ -440,25 +521,11 @@ const fontSizeOptions = [
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">📱 Compact mode</span>
+                      <span class="settings-toggle__label">Compact mode</span>
                       <span class="settings-toggle__desc">Show more content with reduced spacing</span>
                     </div>
                     <input v-model="appearanceForm.compactMode" type="checkbox" class="settings-checkbox" />
                   </label>
-
-                  <div class="settings-divider" />
-
-                  <h3 class="settings-subheading">Chaos Mode</h3>
-                  <p class="settings-hint">
-                    Enable Chaos Mode to unlock user-defined custom CSS and wild themes.
-                  </p>
-                  <button 
-                    class="settings-btn"
-                    :class="themeStore.isChaosMode ? 'settings-btn--danger' : 'settings-btn--primary'"
-                    @click="themeStore.isChaosMode ? themeStore.disableChaosMode() : themeStore.enableChaosMode()"
-                  >
-                    {{ themeStore.isChaosMode ? '🔥 Disable Chaos Mode' : '🌀 Enable Chaos Mode' }}
-                  </button>
                 </div>
 
                 <div class="settings-actions">
@@ -566,8 +633,8 @@ const fontSizeOptions = [
                     To create new filters, use your instance's settings page.
                   </p>
                   <a 
-                    v-if="authStore.instanceUrl"
-                    :href="`${authStore.instanceUrl}/settings/filters`"
+                    v-if="instancesStore.instanceUrl"
+                    :href="`${instancesStore.instanceUrl}/settings/filters`"
                     target="_blank"
                     class="settings-btn settings-btn--ghost"
                   >
@@ -596,7 +663,7 @@ const fontSizeOptions = [
                         @{{ settingsStore.account.acct }}
                       </span>
                       <span class="settings-account-card__instance">
-                        {{ authStore.instanceUrl?.replace('https://', '') }}
+                        {{ instancesStore.instanceUrl?.replace('https://', '') }}
                       </span>
                     </div>
                   </div>
@@ -610,8 +677,8 @@ const fontSizeOptions = [
                   </p>
                   
                   <a 
-                    v-if="authStore.instanceUrl"
-                    :href="`${authStore.instanceUrl}/settings`"
+                    v-if="instancesStore.instanceUrl"
+                    :href="`${instancesStore.instanceUrl}/settings`"
                     target="_blank"
                     class="settings-btn settings-btn--primary"
                   >
@@ -626,8 +693,8 @@ const fontSizeOptions = [
                   </p>
                   
                   <a 
-                    v-if="authStore.instanceUrl"
-                    :href="`${authStore.instanceUrl}/settings/export`"
+                    v-if="instancesStore.instanceUrl"
+                    :href="`${instancesStore.instanceUrl}/settings/export`"
                     target="_blank"
                     class="settings-btn settings-btn--ghost"
                   >
@@ -652,43 +719,56 @@ const fontSizeOptions = [
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
+  padding:
+    max(0.75rem, env(safe-area-inset-top, 0px))
+    max(0.75rem, env(safe-area-inset-right, 0px))
+    max(0.75rem, env(safe-area-inset-bottom, 0px))
+    max(0.75rem, env(safe-area-inset-left, 0px));
+  background: color-mix(in srgb, #000 48%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-// Modal Container
+// Fixed viewport height — category switches must not resize the shell
 .settings-modal {
-  width: 100%;
-  max-width: 900px;
-  max-height: calc(100vh - 4rem);
+  --settings-h: min(42rem, calc(100dvh - 1.5rem));
+  width: min(56rem, calc(100vw - 1.5rem));
+  height: var(--settings-h);
+  max-height: var(--settings-h);
   background: var(--neo-bg-secondary);
-  border-radius: 16px;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.35);
+  color: var(--neo-text-primary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
+  border-radius: var(--neo-radius-md, 6px);
+  box-shadow: var(--neo-shadow-xl);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-family: var(--neo-font-family-ui, var(--neo-font-family));
 }
 
-// Header
+// Header — use secondary (face), not tertiary (hair). Hair can equal ink in
+// hard themes (brutal) and makes titles vanish.
 .settings-header {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 1.5rem;
-  background: var(--neo-bg-tertiary);
-  border-bottom: 1px solid var(--neo-border-color);
+  flex: 0 0 auto;
+  padding: 0.875rem 1.25rem;
+  background: var(--neo-bg-secondary);
+  border-bottom: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
 
   &__left {
-    flex: 1;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   &__center {
-    flex: 2;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   &__right {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     justify-content: flex-end;
   }
@@ -696,32 +776,38 @@ const fontSizeOptions = [
 
 .settings-title {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
   font-weight: 700;
   color: var(--neo-text-primary);
+  white-space: nowrap;
 }
 
 .settings-search {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
+  max-width: 28rem;
+  margin: 0 auto;
 
   &__icon {
     position: absolute;
-    left: 0.875rem;
+    left: 0.75rem;
     font-size: 0.875rem;
-    opacity: 0.5;
+    opacity: 0.55;
+    pointer-events: none;
   }
 
   &__input {
     width: 100%;
-    padding: 0.625rem 1rem 0.625rem 2.5rem;
+    min-height: 40px;
+    padding: 0.5rem 0.875rem 0.5rem 2.25rem;
     font-size: 0.9375rem;
     background: var(--neo-bg-primary);
-    border: 1px solid var(--neo-border-color);
-    border-radius: 8px;
+    border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 4px);
     color: var(--neo-text-primary);
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
     &:focus {
       outline: none;
@@ -736,40 +822,41 @@ const fontSizeOptions = [
 }
 
 .settings-close {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: none;
-  border-radius: 8px;
-  color: var(--neo-text-muted);
+  border: var(--neo-border-width, 1px) solid transparent;
+  border-radius: var(--neo-radius-sm, 4px);
+  color: var(--neo-text-primary);
   font-size: 1.125rem;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 
   &:hover {
-    background: var(--neo-bg-primary);
-    color: var(--neo-text-primary);
+    background: var(--neo-bg-hover);
+    border-color: var(--neo-border-color-dark);
   }
 }
 
-// Body
 .settings-body {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
 }
 
-// Sidebar
 .settings-sidebar {
-  width: 200px;
-  flex-shrink: 0;
+  width: 11.5rem;
+  flex: 0 0 auto;
   padding: 0.5rem;
-  background: var(--neo-bg-tertiary);
-  border-right: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary);
+  border-right: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .settings-nav-item {
@@ -777,40 +864,54 @@ const fontSizeOptions = [
   align-items: center;
   gap: 0.625rem;
   width: 100%;
-  padding: 0.625rem 0.875rem;
+  padding: 0.625rem 0.75rem;
   margin-bottom: 0.25rem;
   background: transparent;
-  border: none;
-  border-radius: 8px;
-  color: var(--neo-text-secondary);
-  font-size: 0.9375rem;
+  border: var(--neo-border-width, 1px) solid transparent;
+  border-radius: var(--neo-radius-sm, 4px);
+  color: var(--neo-text-primary);
+  font-size: 0.875rem;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
   &__icon {
     font-size: 1rem;
     width: 1.25rem;
     text-align: center;
+    flex-shrink: 0;
+  }
+
+  &__label {
+    color: inherit;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &:hover {
-    background: var(--neo-bg-primary);
+    background: var(--neo-bg-hover);
     color: var(--neo-text-primary);
   }
 
   &.active {
     background: var(--neo-accent);
-    color: white;
+    border-color: var(--neo-accent);
+    color: var(--neo-text-on-accent);
   }
 }
 
-// Content
 .settings-content {
-  flex: 1;
-  padding: 1.5rem 2rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 1.25rem 1.5rem 1.5rem;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .settings-loading {
@@ -862,52 +963,48 @@ const fontSizeOptions = [
 
 // Section
 .settings-section {
-  animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: none;
 }
 
 .settings-section__header {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 
   h2 {
     margin: 0 0 0.375rem;
-    font-size: 1.5rem;
+    font-size: 1.375rem;
     font-weight: 700;
     color: var(--neo-text-primary);
   }
 
   p {
     margin: 0;
-    color: var(--neo-text-muted);
-    font-size: 0.9375rem;
+    color: var(--neo-text-secondary);
+    font-size: 0.875rem;
   }
 }
 
 .settings-group {
   background: var(--neo-bg-primary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
   padding: 1.25rem;
 }
 
 .settings-subheading {
-  margin: 0 0 0.75rem;
-  font-size: 0.8125rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: var(--neo-text-muted);
+  color: var(--neo-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
 }
 
 .settings-hint {
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
+  margin: 0 0 0.875rem;
+  font-size: 0.8125rem;
   color: var(--neo-text-muted);
-  line-height: 1.5;
+  line-height: 1.45;
+  max-width: 52ch;
 }
 
 .settings-divider {
@@ -1051,25 +1148,225 @@ const fontSizeOptions = [
   }
 }
 
+.settings-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 0.625rem;
+}
+
+.settings-theme-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  min-width: 0;
+
+  &.active .settings-theme-swatch__chip {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+
+  &__chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1.35;
+    border-radius: var(--neo-radius-sm, 4px);
+    border: 1px solid var(--neo-border-color-dark);
+  }
+
+  &__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  &__label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--neo-text-muted);
+    letter-spacing: 0.02em;
+    text-align: center;
+    line-height: 1.2;
+  }
+
+  &.active &__label {
+    color: var(--neo-text-primary);
+  }
+}
+
+.settings-chrome-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 0.625rem;
+}
+
+.settings-chrome-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem 0.625rem;
+  background: var(--neo-bg-primary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  min-width: 0;
+
+  &:hover {
+    border-color: var(--neo-border-color-dark);
+  }
+
+  &.active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  /* Shape language preview per chrome */
+  &[data-preview-ui='braun'] { border-radius: 4px; }
+  &[data-preview-ui='monocle'] { border-radius: 8px; }
+  &[data-preview-ui='noyes'] { border-radius: 2px; }
+  &[data-preview-ui='bauhaus'],
+  &[data-preview-ui='ikea'],
+  &[data-preview-ui='military'],
+  &[data-preview-ui='terminal'],
+  &[data-preview-ui='nyt'] { border-radius: 0; }
+  &[data-preview-ui='bauhaus'],
+  &[data-preview-ui='ikea'],
+  &[data-preview-ui='military'] { border-width: 2px; }
+  &[data-preview-ui='terminal'] { border-style: dashed; }
+  &[data-preview-ui='nyt'] {
+    border-top-width: 2px;
+    border-top-color: var(--neo-text-primary);
+  }
+
+  &__sample {
+    font-size: 1.25rem;
+    line-height: 1.2;
+    color: var(--neo-text-primary);
+    margin-bottom: 0.125rem;
+  }
+
+  &__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    line-height: 1.3;
+  }
+
+  &[data-preview-ui='braun'] .settings-chrome-card__sample {
+    font-family: Helvetica, 'Helvetica Neue', Arial, sans-serif;
+  }
+  &[data-preview-ui='monocle'] .settings-chrome-card__sample {
+    font-family: 'Source Sans 3', 'Avenir Next', 'Gill Sans', sans-serif;
+  }
+  &[data-preview-ui='bauhaus'] .settings-chrome-card__sample {
+    font-family: 'Josefin Sans', Futura, 'Century Gothic', sans-serif;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 1.05rem;
+  }
+  &[data-preview-ui='noyes'] .settings-chrome-card__sample {
+    font-family: 'IBM Plex Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  &[data-preview-ui='ikea'] .settings-chrome-card__sample {
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+    font-weight: 700;
+  }
+  &[data-preview-ui='military'] .settings-chrome-card__sample {
+    font-family: Oswald, 'Arial Narrow', sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 1rem;
+  }
+  &[data-preview-ui='terminal'] .settings-chrome-card__sample {
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+  }
+  &[data-preview-ui='nyt'] .settings-chrome-card__sample {
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    font-weight: 400;
+  }
+}
+
+.settings-font-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.625rem;
+}
+
+.settings-font-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.875rem 0.75rem;
+  background: var(--neo-bg-primary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--neo-border-color-dark);
+  }
+
+  &.active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  &__sample {
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--neo-text-primary);
+  }
+
+  &__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    line-height: 1.3;
+  }
+}
+
 // Segmented Control
 .settings-segmented {
   display: flex;
   gap: 0.25rem;
   padding: 0.25rem;
-  background: var(--neo-bg-secondary);
-  border-radius: 8px;
+  background: var(--neo-bg-primary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 8px);
 
   &__btn {
     flex: 1;
-    padding: 0.625rem 1rem;
-    font-size: 0.9375rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.875rem;
     font-weight: 500;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: calc(var(--neo-radius-sm, 6px) - 1px);
     color: var(--neo-text-secondary);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    text-transform: none;
+    letter-spacing: normal;
 
     &:hover {
       color: var(--neo-text-primary);
@@ -1077,7 +1374,7 @@ const fontSizeOptions = [
 
     &.active {
       background: var(--neo-accent);
-      color: white;
+      color: var(--neo-text-on-accent);
     }
   }
 }
@@ -1271,22 +1568,24 @@ const fontSizeOptions = [
   font-size: 0.9375rem;
   font-weight: 600;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--neo-radius-sm, 8px);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, filter 0.15s ease;
   text-decoration: none;
+  text-transform: none;
+  letter-spacing: normal;
 
   &--primary {
     background: var(--neo-accent);
-    color: white;
+    color: var(--neo-text-on-accent);
 
     &:hover:not(:disabled) {
-      filter: brightness(1.1);
+      background: var(--neo-accent-hover);
     }
   }
 
   &--ghost {
-    background: var(--neo-bg-secondary);
+    background: var(--neo-bg-primary);
     color: var(--neo-text-primary);
     border: 1px solid var(--neo-border-color);
 
@@ -1296,8 +1595,8 @@ const fontSizeOptions = [
   }
 
   &--danger {
-    background: #ef4444;
-    color: white;
+    background: var(--neo-danger);
+    color: var(--neo-text-on-accent, #fff);
 
     &:hover:not(:disabled) {
       background: #dc2626;
@@ -1352,76 +1651,49 @@ const fontSizeOptions = [
 
 // Responsive - Tablet
 @media (max-width: 768px) {
-  .settings-overlay {
-    padding: 1rem;
-  }
-
   .settings-modal {
-    max-width: 100%;
-    max-height: calc(100vh - 2rem);
-    border-radius: 12px;
+    --settings-h: calc(100dvh - 1rem);
+    width: min(100%, calc(100vw - 1rem));
+    border-radius: var(--neo-radius-md, 8px);
   }
 
   .settings-header {
-    padding: 0.875rem 1rem;
+    padding: 0.75rem 1rem;
     flex-wrap: wrap;
-    gap: 0.75rem;
+    gap: 0.625rem;
 
-    &__left {
-      order: 1;
-    }
-
-    &__center {
-      order: 3;
-      flex: 100%;
-    }
-
-    &__right {
-      order: 2;
-    }
+    &__left { order: 1; }
+    &__center { order: 3; flex: 1 1 100%; }
+    &__right { order: 2; margin-left: auto; }
   }
 
-  .settings-title {
-    font-size: 1rem;
-  }
+  .settings-search { max-width: none; }
+
+  .settings-title { font-size: 1rem; }
 
   .settings-sidebar {
-    width: 56px;
-    padding: 0.25rem;
+    width: 3.25rem;
+    padding: 0.375rem;
   }
 
   .settings-nav-item {
     justify-content: center;
     padding: 0.625rem;
 
-    &__label {
-      display: none;
-    }
-
-    &__icon {
-      font-size: 1.125rem;
-    }
+    &__label { display: none; }
+    &__icon { font-size: 1.125rem; }
   }
 
-  .settings-content {
-    padding: 1rem 1.25rem;
-  }
+  .settings-content { padding: 1rem 1.125rem 1.25rem; }
 
   .settings-section__header {
     margin-bottom: 1rem;
 
-    h2 {
-      font-size: 1.25rem;
-    }
-
-    p {
-      font-size: 0.875rem;
-    }
+    h2 { font-size: 1.25rem; }
+    p { font-size: 0.875rem; }
   }
 
-  .settings-option-grid {
-    grid-template-columns: 1fr;
-  }
+  .settings-option-grid { grid-template-columns: 1fr; }
 
   .settings-toggle {
     flex-wrap: wrap;
@@ -1433,11 +1705,15 @@ const fontSizeOptions = [
 @media (max-width: 480px) {
   .settings-overlay {
     padding: 0;
+    align-items: stretch;
   }
 
   .settings-modal {
-    max-height: 100%;
+    --settings-h: 100dvh;
+    width: 100%;
     border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
 
   .settings-header {
@@ -1455,53 +1731,23 @@ const fontSizeOptions = [
     font-size: 0.75rem;
   }
 
-  .settings-sidebar {
-    width: 48px;
-  }
+  .settings-sidebar { width: 3rem; }
 
   .settings-nav-item {
     padding: 0.5rem;
-
-    &__icon {
-      font-size: 1rem;
-    }
+    &__icon { font-size: 1rem; }
   }
 
-  .settings-content {
-    padding: 0.875rem;
-  }
+  .settings-content { padding: 0.875rem; }
 
   .settings-group {
     padding: 1rem;
-    border-radius: 10px;
+    border-radius: var(--neo-radius-sm, 4px);
   }
 
   .settings-section__header {
-    h2 {
-      font-size: 1.125rem;
-    }
-
-    p {
-      font-size: 0.8125rem;
-    }
-  }
-
-  .settings-label__text {
-    font-size: 0.875rem;
-  }
-
-  .settings-input,
-  .settings-textarea {
-    padding: 0.625rem 0.875rem;
-    font-size: 0.9375rem;
-  }
-
-  .settings-toggle__label {
-    font-size: 0.875rem;
-  }
-
-  .settings-toggle__desc {
-    font-size: 0.75rem;
+    h2 { font-size: 1.125rem; }
+    p { font-size: 0.8125rem; }
   }
 
   .settings-btn {
@@ -1515,103 +1761,9 @@ const fontSizeOptions = [
     margin-top: 1.25rem;
   }
 
-  .settings-option-card {
-    padding: 1rem 0.875rem;
-
-    &__icon {
-      font-size: 1.5rem;
-    }
-
-    &__label {
-      font-size: 0.875rem;
-    }
-
-    &__desc {
-      font-size: 0.6875rem;
-    }
-  }
-
-  .settings-option-row {
-    padding: 0.875rem;
-    gap: 0.75rem;
-
-    &__icon {
-      font-size: 1.125rem;
-    }
-
-    &__label {
-      font-size: 0.875rem;
-    }
-
-    &__desc {
-      font-size: 0.75rem;
-    }
-  }
-
-  .settings-segmented {
-    &__btn {
-      padding: 0.5rem 0.75rem;
-      font-size: 0.8125rem;
-    }
-  }
-
-  .settings-account-card {
-    padding: 0.875rem;
-    gap: 0.75rem;
-
-    &__avatar {
-      width: 48px;
-      height: 48px;
-    }
-
-    &__name {
-      font-size: 1rem;
-    }
-
-    &__handle {
-      font-size: 0.875rem;
-    }
-
-    &__instance {
-      font-size: 0.75rem;
-    }
-  }
-
-  .settings-account-item {
-    padding: 0.625rem;
-    gap: 0.625rem;
-  }
-
-  .settings-account-avatar {
-    width: 36px;
-    height: 36px;
-  }
-
-  .settings-account-name {
-    font-size: 0.875rem;
-  }
-
-  .settings-account-handle {
-    font-size: 0.75rem;
-  }
-
-  .settings-subheading {
-    font-size: 0.75rem;
-    margin-bottom: 0.625rem;
-  }
-
-  .settings-hint {
+  .settings-segmented__btn {
+    padding: 0.5rem 0.75rem;
     font-size: 0.8125rem;
-    margin-bottom: 0.875rem;
-  }
-
-  .settings-divider {
-    margin: 1rem 0;
-  }
-
-  .settings-empty {
-    padding: 1.25rem;
-    font-size: 0.875rem;
   }
 }
 </style>

@@ -6,69 +6,35 @@
 
 @use 'sass:color';
 @use 'variables' as vars;
+@use 'themes';
 
 // ============================================
 // CSS CUSTOM PROPERTIES (Runtime Theming)
 // ============================================
-// These CSS variables are derived from SCSS variables
-// and can be overridden at runtime for theming
+// Color themes live in _themes.scss (ibm.io / wordcount).
+// Structural tokens below remain shared across looks.
 
 :root {
-  // ============================================
-  // LIGHT MODE (Default)
-  // ============================================
-  
-  // === Background Colors ===
-  --neo-bg-primary: #{vars.$gray-50};
-  --neo-bg-secondary: #{vars.$gray-100};
-  --neo-bg-tertiary: #{vars.$gray-200};
-  --neo-bg-card: #ffffff;
-  --neo-bg-overlay: rgba(0, 0, 0, 0.5);
-  --neo-bg-hover: #{vars.$gray-200};
-  --neo-bg-active: #{vars.$gray-300};
-  
-  // === Text Colors ===
-  --neo-text-primary: #{vars.$gray-900};
-  --neo-text-secondary: #{vars.$gray-700};
-  --neo-text-muted: #{vars.$gray-600};
-  --neo-text-disabled: #{vars.$gray-400};
-  --neo-text-inverse: #ffffff;
-  --neo-text-link: #{vars.$accent-primary};
-  --neo-text-link-hover: #{vars.$accent-primary-hover};
-  
-  // === Accent Colors ===
-  --neo-accent: #{vars.$accent-primary};
-  --neo-accent-hover: #{vars.$accent-primary-hover};
-  --neo-accent-light: #{vars.$accent-primary-light};
-  --neo-accent-dark: #{vars.$accent-primary-dark};
-  --neo-accent-soft: rgba(13, 110, 253, 0.1);
-  --neo-accent-soft-hover: rgba(13, 110, 253, 0.15);
-  
-  // === Status Colors ===
+  // Status colors (shared; themes may override danger)
   --neo-success: #{vars.$success};
   --neo-success-light: #{vars.$success-light};
   --neo-success-dark: #{vars.$success-dark};
-  --neo-success-soft: rgba(25, 135, 84, 0.1);
+  --neo-success-soft: color-mix(in srgb, #{vars.$success} 12%, transparent);
   
   --neo-warning: #{vars.$warning};
   --neo-warning-light: #{vars.$warning-light};
   --neo-warning-dark: #{vars.$warning-dark};
-  --neo-warning-soft: rgba(255, 193, 7, 0.1);
+  --neo-warning-soft: color-mix(in srgb, #{vars.$warning} 12%, transparent);
   
-  --neo-danger: #{vars.$danger};
   --neo-danger-light: #{vars.$danger-light};
   --neo-danger-dark: #{vars.$danger-dark};
-  --neo-danger-soft: rgba(220, 53, 69, 0.1);
   
   --neo-info: #{vars.$info};
   --neo-info-light: #{vars.$info-light};
   --neo-info-dark: #{vars.$info-dark};
-  --neo-info-soft: rgba(13, 202, 240, 0.1);
+  --neo-info-soft: color-mix(in srgb, #{vars.$info} 12%, transparent);
   
   // === Border System ===
-  --neo-border-color: #{vars.$gray-300};
-  --neo-border-color-light: #{vars.$gray-200};
-  --neo-border-color-dark: #{vars.$gray-400};
   --neo-border-width: #{vars.$border-width-1};
   --neo-border-width-thick: #{vars.$border-width-2};
   --neo-border-style: #{vars.$border-style-solid};
@@ -96,6 +62,10 @@
   --neo-font-family: #{vars.$font-family-base};
   --neo-font-family-heading: #{vars.$font-family-heading};
   --neo-font-family-mono: #{vars.$font-family-mono};
+  --neo-font-family-ui: #{vars.$font-family-base};
+  --neo-chrome-tracking: 0;
+  --neo-chrome-heading-weight: 700;
+  --neo-radius-chrome: #{vars.$radius-md};
   
   --neo-font-size-xs: #{vars.$font-size-xs};
   --neo-font-size-sm: #{vars.$font-size-sm};
@@ -220,140 +190,6 @@
   --neo-glow: none;
 }
 
-// ============================================
-// DARK MODE
-// ============================================
-// Threads-inspired dark theme with deep blacks
-
-[data-theme="dark"] {
-  // === Background Colors ===
-  --neo-bg-primary: #{vars.$dark-bg-primary};
-  --neo-bg-secondary: #{vars.$dark-bg-secondary};
-  --neo-bg-tertiary: #{vars.$dark-bg-tertiary};
-  --neo-bg-card: #{vars.$dark-bg-card};
-  --neo-bg-overlay: rgba(0, 0, 0, 0.7);
-  --neo-bg-hover: #{vars.$dark-bg-tertiary};
-  --neo-bg-active: #{color.adjust(vars.$dark-bg-tertiary, $lightness: 5%)};
-  
-  // === Text Colors ===
-  --neo-text-primary: #{vars.$dark-text-primary};
-  --neo-text-secondary: #{vars.$dark-text-secondary};
-  --neo-text-muted: #{vars.$dark-text-muted};
-  --neo-text-disabled: #{color.adjust(vars.$dark-text-muted, $lightness: -10%)};
-  --neo-text-inverse: #{vars.$dark-bg-primary};
-  --neo-text-link: #ffffff;
-  --neo-text-link-hover: #{color.adjust(#ffffff, $lightness: -10%)};
-  
-  // === Accent Colors ===
-  --neo-accent: #ffffff;
-  --neo-accent-hover: #{color.adjust(#ffffff, $lightness: -5%)};
-  --neo-accent-light: rgba(255, 255, 255, 0.9);
-  --neo-accent-dark: rgba(255, 255, 255, 0.7);
-  --neo-accent-soft: rgba(255, 255, 255, 0.08);
-  --neo-accent-soft-hover: rgba(255, 255, 255, 0.12);
-  
-  // === Status Colors (brighter for dark mode) ===
-  --neo-success: #22c55e;
-  --neo-success-light: rgba(34, 197, 94, 0.2);
-  --neo-success-dark: #16a34a;
-  --neo-success-soft: rgba(34, 197, 94, 0.1);
-  
-  --neo-warning: #facc15;
-  --neo-warning-light: rgba(250, 204, 21, 0.2);
-  --neo-warning-dark: #eab308;
-  --neo-warning-soft: rgba(250, 204, 21, 0.1);
-  
-  --neo-danger: #ef4444;
-  --neo-danger-light: rgba(239, 68, 68, 0.2);
-  --neo-danger-dark: #dc2626;
-  --neo-danger-soft: rgba(239, 68, 68, 0.1);
-  
-  --neo-info: #38bdf8;
-  --neo-info-light: rgba(56, 189, 248, 0.2);
-  --neo-info-dark: #0ea5e9;
-  --neo-info-soft: rgba(56, 189, 248, 0.1);
-  
-  // === Border System ===
-  --neo-border-color: #{vars.$dark-border};
-  --neo-border-color-light: #{color.adjust(vars.$dark-border, $lightness: -5%)};
-  --neo-border-color-dark: #{color.adjust(vars.$dark-border, $lightness: 10%)};
-  
-  // === Shadow System (more intense for dark mode) ===
-  --neo-shadow-sm: #{vars.$shadow-dark-sm};
-  --neo-shadow-md: #{vars.$shadow-dark-md};
-  --neo-shadow-lg: #{vars.$shadow-dark-lg};
-  --neo-shadow-xl: #{vars.$shadow-dark-xl};
-  --neo-shadow-2xl: #{vars.$shadow-dark-2xl};
-  
-  // === Scrollbar ===
-  color-scheme: dark;
-}
-
-// Auto theme - respects system preference
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    // === Background Colors ===
-    --neo-bg-primary: #{vars.$dark-bg-primary};
-    --neo-bg-secondary: #{vars.$dark-bg-secondary};
-    --neo-bg-tertiary: #{vars.$dark-bg-tertiary};
-    --neo-bg-card: #{vars.$dark-bg-card};
-    --neo-bg-overlay: rgba(0, 0, 0, 0.7);
-    --neo-bg-hover: #{vars.$dark-bg-tertiary};
-    --neo-bg-active: #{color.adjust(vars.$dark-bg-tertiary, $lightness: 5%)};
-    
-    // === Text Colors ===
-    --neo-text-primary: #{vars.$dark-text-primary};
-    --neo-text-secondary: #{vars.$dark-text-secondary};
-    --neo-text-muted: #{vars.$dark-text-muted};
-    --neo-text-disabled: #{color.adjust(vars.$dark-text-muted, $lightness: -10%)};
-    --neo-text-inverse: #{vars.$dark-bg-primary};
-    --neo-text-link: #ffffff;
-    --neo-text-link-hover: #{color.adjust(#ffffff, $lightness: -10%)};
-    
-    // === Accent Colors ===
-    --neo-accent: #ffffff;
-    --neo-accent-hover: #{color.adjust(#ffffff, $lightness: -5%)};
-    --neo-accent-light: rgba(255, 255, 255, 0.9);
-    --neo-accent-dark: rgba(255, 255, 255, 0.7);
-    --neo-accent-soft: rgba(255, 255, 255, 0.08);
-    --neo-accent-soft-hover: rgba(255, 255, 255, 0.12);
-    
-    // === Status Colors ===
-    --neo-success: #22c55e;
-    --neo-success-light: rgba(34, 197, 94, 0.2);
-    --neo-success-dark: #16a34a;
-    --neo-success-soft: rgba(34, 197, 94, 0.1);
-    
-    --neo-warning: #facc15;
-    --neo-warning-light: rgba(250, 204, 21, 0.2);
-    --neo-warning-dark: #eab308;
-    --neo-warning-soft: rgba(250, 204, 21, 0.1);
-    
-    --neo-danger: #ef4444;
-    --neo-danger-light: rgba(239, 68, 68, 0.2);
-    --neo-danger-dark: #dc2626;
-    --neo-danger-soft: rgba(239, 68, 68, 0.1);
-    
-    --neo-info: #38bdf8;
-    --neo-info-light: rgba(56, 189, 248, 0.2);
-    --neo-info-dark: #0ea5e9;
-    --neo-info-soft: rgba(56, 189, 248, 0.1);
-    
-    // === Border System ===
-    --neo-border-color: #{vars.$dark-border};
-    --neo-border-color-light: #{color.adjust(vars.$dark-border, $lightness: -5%)};
-    --neo-border-color-dark: #{color.adjust(vars.$dark-border, $lightness: 10%)};
-    
-    // === Shadow System ===
-    --neo-shadow-sm: #{vars.$shadow-dark-sm};
-    --neo-shadow-md: #{vars.$shadow-dark-md};
-    --neo-shadow-lg: #{vars.$shadow-dark-lg};
-    --neo-shadow-xl: #{vars.$shadow-dark-xl};
-    --neo-shadow-2xl: #{vars.$shadow-dark-2xl};
-    
-    color-scheme: dark;
-  }
-}
 
 // ============================================
 // CHAOS MODE OVERRIDE CLASS
@@ -388,7 +224,7 @@ html {
 
 body {
   font-family: var(--neo-font-family);
-  line-height: var(--neo-line-height);
+  line-height: var(--neo-leading-body, var(--neo-line-height));
   color: var(--neo-text-primary);
   background-color: var(--neo-bg-primary);
   background-image: var(--neo-bg-image);
@@ -398,6 +234,8 @@ body {
   min-height: 100vh;
   transition: background-color var(--neo-transition), color var(--neo-transition);
   overflow-x: hidden; // Prevent horizontal scroll
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+  font-variant-ligatures: common-ligatures contextual;
 }
 
 // Global media overflow protection
@@ -423,14 +261,14 @@ img {
 }
 
 button {
-  font-family: inherit;
+  font-family: var(--neo-font-family-ui, inherit);
   cursor: pointer;
   border: none;
   background: none;
 }
 
 input, textarea, select {
-  font-family: inherit;
+  font-family: var(--neo-font-family);
   font-size: inherit;
 }
 
@@ -474,20 +312,19 @@ ul, ol {
 // COMPONENT STYLES
 // ============================================
 
-// Card Component
+// Card Component — flat instrument face (chrome sets radius/border)
 .neo-card {
   background-color: var(--neo-bg-card);
-  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
-  border-radius: var(--neo-radius-lg);
-  box-shadow: var(--neo-shadow-sm);
+  border: var(--neo-chrome-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-md);
+  box-shadow: var(--neo-chrome-card-shadow, none);
   padding: var(--neo-spacing-6);
-  transition: box-shadow var(--neo-transition), transform var(--neo-transition), border-color var(--neo-transition);
+  transition: border-color var(--neo-transition-fast);
   max-width: 100%;
   overflow: hidden;
   box-sizing: border-box;
   
   &:hover {
-    box-shadow: var(--neo-shadow-md);
     border-color: var(--neo-border-color-dark);
   }
 }
@@ -499,50 +336,60 @@ ul, ol {
   justify-content: center;
   gap: var(--neo-spacing-2);
   padding: var(--neo-spacing-3) var(--neo-spacing-6);
+  font-family: var(--neo-font-family-ui);
   font-size: var(--neo-font-size-sm);
-  font-weight: var(--neo-font-weight-semibold);
-  border-radius: var(--neo-radius-md);
-  transition: all var(--neo-transition);
+  font-weight: var(--neo-chrome-btn-weight, var(--neo-font-weight-medium));
+  letter-spacing: var(--neo-chrome-btn-tracking, 0.01em);
+  text-transform: var(--neo-chrome-label-transform, none);
+  border-radius: var(--neo-radius-chrome, var(--neo-radius-sm));
+  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast), border-color var(--neo-transition-fast);
   
   &--primary {
     background-color: var(--neo-accent);
-    color: var(--neo-text-inverse);
+    color: var(--neo-text-on-accent, var(--neo-text-inverse));
     
     &:hover {
       background-color: var(--neo-accent-hover);
-      transform: translateY(-1px);
-      box-shadow: var(--neo-shadow-md);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
   }
   
   &--secondary {
     background-color: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
+    border: 1px solid var(--neo-border-color);
     
     &:hover {
       background-color: var(--neo-bg-hover);
+      border-color: var(--neo-border-color-dark);
     }
   }
   
   &--ghost {
     background-color: transparent;
     color: var(--neo-text-secondary);
+    border: 1px solid var(--neo-border-color);
     
     &:hover {
       background-color: var(--neo-accent-soft);
       color: var(--neo-accent);
+      border-color: color-mix(in srgb, var(--neo-accent) 35%, transparent);
     }
   }
   
   &--chaos {
-    background: linear-gradient(135deg, #ff006e, #8338ec, #3a86ff);
+    background: linear-gradient(135deg, #c45c26, #8338ec, #3a86ff);
     background-size: 200% 200%;
     color: white;
     animation: gradient-shift 3s ease infinite;
     box-shadow: var(--neo-glow);
     
     &:hover {
-      transform: scale(1.05);
+      filter: brightness(1.05);
     }
   }
 }

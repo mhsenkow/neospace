@@ -7,8 +7,9 @@
  */
 
 import { defineStore } from 'pinia'
-import { createRestAPIClient, type mastodon } from 'masto'
-import { useAuthStore } from './auth'
+import type { mastodon } from 'masto'
+import { useInstancesStore } from './instances'
+import { activeClient, publicClient } from '~/composables/useMasto'
 
 export interface Group {
   /** The hashtag (without #) - this is the group's unique ID */
@@ -239,31 +240,11 @@ export const useGroupsStore = defineStore('groups', {
      * Get an authenticated API client
      */
     getClient(): mastodon.rest.Client {
-      const authStore = useAuthStore()
-      
-      if (!authStore.instanceUrl || !authStore.accessToken) {
-        throw new Error('Not authenticated')
-      }
-      
-      return createRestAPIClient({
-        url: authStore.instanceUrl,
-        accessToken: authStore.accessToken,
-      })
+      return activeClient()
     },
 
-    /**
-     * Get a public client (no auth required)
-     * Falls back to mastodon.social for unauthenticated users
-     */
     getPublicClient(instanceUrl?: string): mastodon.rest.Client {
-      const authStore = useAuthStore()
-      // Use provided URL, user's instance, or fallback to mastodon.social for public browsing
-      const url = instanceUrl || authStore.instanceUrl || 'https://mastodon.social'
-      
-      return createRestAPIClient({
-        url,
-        accessToken: authStore.accessToken || undefined,
-      })
+      return publicClient(instanceUrl)
     },
 
     /**
@@ -278,8 +259,8 @@ export const useGroupsStore = defineStore('groups', {
         this.groups = FEATURED_GROUPS.map(g => ({ ...g, isMember: false }))
 
         // If authenticated, fetch followed tags to determine membership
-        const authStore = useAuthStore()
-        if (authStore.isAuthenticated) {
+        const instancesStore = useInstancesStore()
+        if (instancesStore.isAuthenticated) {
           await this.fetchFollowedTags()
         }
       } catch (e: any) {
@@ -294,8 +275,8 @@ export const useGroupsStore = defineStore('groups', {
      * Fetch hashtags the user is following (their group memberships)
      */
     async fetchFollowedTags() {
-      const authStore = useAuthStore()
-      if (!authStore.isAuthenticated) return
+      const instancesStore = useInstancesStore()
+      if (!instancesStore.isAuthenticated) return
 
       try {
         const client = this.getClient()
@@ -333,8 +314,8 @@ export const useGroupsStore = defineStore('groups', {
      * Join a group (follow the hashtag)
      */
     async joinGroup(tag: string) {
-      const authStore = useAuthStore()
-      if (!authStore.isAuthenticated) {
+      const instancesStore = useInstancesStore()
+      if (!instancesStore.isAuthenticated) {
         throw new Error('Must be logged in to join groups')
       }
 
@@ -374,8 +355,8 @@ export const useGroupsStore = defineStore('groups', {
      * Leave a group (unfollow the hashtag)
      */
     async leaveGroup(tag: string) {
-      const authStore = useAuthStore()
-      if (!authStore.isAuthenticated) {
+      const instancesStore = useInstancesStore()
+      if (!instancesStore.isAuthenticated) {
         throw new Error('Must be logged in to leave groups')
       }
 
@@ -403,7 +384,7 @@ export const useGroupsStore = defineStore('groups', {
      * Fetch the group's timeline (hashtag timeline)
      */
     async fetchGroupTimeline(tag: string, refresh = false) {
-      const authStore = useAuthStore()
+      const instancesStore = useInstancesStore()
       
       if (refresh) {
         this.groupTimeline = []

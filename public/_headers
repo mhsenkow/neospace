@@ -1,0 +1,11 @@
+# Security headers (no strict CSP — app talks to arbitrary Fediverse instances,
+# loads remote media, injects user CSS, and uses an inline theme boot script)
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Content-hashed Nuxt assets — cache forever
+/_nuxt/*
+  Cache-Control: public, max-age=31536000, immutable

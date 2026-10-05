@@ -1,41 +1,40 @@
 /**
- * NeoSpace Multi-Instance Store
- * 
- * Manages connections to multiple Mastodon/ActivityPub instances.
- * Supports both authenticated accounts and "watching" instances without login.
+ * NeoSpace Multi-Instance / Accounts Store
+ *
+ * Single source of truth for connected instances and authenticated accounts.
+ * Supports watching public timelines and multi-account OAuth.
  */
 
 import { defineStore } from 'pinia'
 import { createRestAPIClient, type mastodon } from 'masto'
+import {
+  DEFAULT_PUBLIC_INSTANCE,
+  isAuthGatedPublicHost,
+} from '~/utils/instances'
 
 export interface ConnectedInstance {
-  id: string // Unique identifier
-  url: string // Base URL (e.g., https://mastodon.social)
-  name: string // Display name (e.g., "Mastodon Social")
-  // Auth (optional - null means just watching public timelines)
+  id: string
+  url: string
+  name: string
   accessToken: string | null
   clientId: string | null
   clientSecret: string | null
-  // User info (if authenticated)
   user: mastodon.v1.Account | null
-  // Instance info
   instanceInfo: {
     title?: string
-  thumbnail?: string
+    thumbnail?: string
     description?: string
   } | null
-  // Status
   isConnecting: boolean
   error: string | null
   lastFetched: string | null
 }
 
 export interface ExtendedStatus extends mastodon.v1.Status {
-  _instanceId: string // Track which instance this came from
+  _instanceId: string
   _instanceUrl: string
 }
 
-// Instance info for preview (fetched from API)
 export interface InstanceApiInfo {
   title: string
   description: string
@@ -51,9 +50,10 @@ export interface InstanceApiInfo {
 
 interface MultiInstanceState {
   instances: ConnectedInstance[]
-  activeInstanceFilter: string | null // null = show all, or instance ID
+  activeAccountId: string | null
+  activeInstanceFilter: string | null
   isLoading: boolean
-  // Preview modal state (for explore page)
+  isInitialized: boolean
   previewingInstance: string | null
   previewLoading: boolean
   previewError: string | null
@@ -62,24 +62,34 @@ interface MultiInstanceState {
 }
 
 const STORAGE_KEY = 'neospace_instances'
+const LEGACY_AUTH_KEY = 'neospace_auth'
 const APP_NAME = 'NeoSpace'
 const SCOPES = 'read write follow push'
 
-// Helper to get redirect URI
 const getRedirectUri = () => {
   if (typeof window === 'undefined') return 'http://localhost:3000/auth/callback'
   return `${window.location.origin}/auth/callback`
 }
 
-// Generate a simple unique ID
 const generateId = () => Math.random().toString(36).substring(2, 15)
+
+function extractCustomCSS(user: mastodon.v1.Account | null): string {
+  if (!user?.fields) return ''
+  const cssField = user.fields.find((field) =>
+    ['css', 'custom_css', 'theme', 'style', 'chaos_css'].includes(
+      field.name.toLowerCase().replace(/[^a-z_]/g, ''),
+    ),
+  )
+  return cssField?.value || ''
+}
 
 export const useInstancesStore = defineStore('instances', {
   state: (): MultiInstanceState => ({
     instances: [],
+    activeAccountId: null,
     activeInstanceFilter: null,
     isLoading: false,
-    // Preview modal state
+    isInitialized: false,
     previewingInstance: null,
     previewLoading: false,
     previewError: null,
@@ -88,82 +98,107 @@ export const useInstancesStore = defineStore('instances', {
   }),
 
   getters: {
-    // Get all connected instances
     connectedInstances: (state): ConnectedInstance[] => state.instances,
-    
-    // Get only authenticated instances
-    authenticatedInstances: (state): ConnectedInstance[] => 
-      state.instances.filter(i => i.accessToken && i.user),
-    
-    // Get only watching (non-authenticated) instances
-    watchingInstances: (state): ConnectedInstance[] => 
-      state.instances.filter(i => !i.accessToken),
-    
-    // Check if any instance is authenticated
-    hasAuthenticatedInstance: (state): boolean => 
-      state.instances.some(i => i.accessToken && i.user),
-    
-    // Get primary instance (first authenticated one)
-    primaryInstance: (state): ConnectedInstance | null => 
-      state.instances.find(i => i.accessToken && i.user) || null,
-    
-    // Get instance by ID
+
+    authenticatedInstances: (state): ConnectedInstance[] =>
+      state.instances.filter((i) => i.accessToken && i.user),
+
+    watchingInstances: (state): ConnectedInstance[] =>
+      state.instances.filter((i) => !i.accessToken),
+
+    hasAuthenticatedInstance: (state): boolean =>
+      state.instances.some((i) => i.accessToken && i.user),
+
+    activeAccount(state): ConnectedInstance | null {
+      if (state.activeAccountId) {
+        const selected = state.instances.find(
+          (i) => i.id === state.activeAccountId && i.accessToken && i.user,
+        )
+        if (selected) return selected
+      }
+      return state.instances.find((i) => i.accessToken && i.user) || null
+    },
+
+    primaryInstance(): ConnectedInstance | null {
+      return this.activeAccount
+    },
+
+    isAuthenticated(): boolean {
+      return !!this.activeAccount
+    },
+
+    instanceUrl(): string | null {
+      return this.activeAccount?.url ?? null
+    },
+
+    accessToken(): string | null {
+      return this.activeAccount?.accessToken ?? null
+    },
+
+    currentUser(): mastodon.v1.Account | null {
+      return this.activeAccount?.user ?? null
+    },
+
+    userDisplayName(): string {
+      const user = this.activeAccount?.user
+      if (!user) return 'Guest'
+      return user.displayName || user.username
+    },
+
+    userAvatar(): string | null {
+      return this.activeAccount?.user?.avatar || null
+    },
+
+    userCustomCSS(): string {
+      return extractCustomCSS(this.activeAccount?.user ?? null)
+    },
+
     getInstanceById: (state) => (id: string): ConnectedInstance | undefined =>
-      state.instances.find(i => i.id === id),
-    
-    // Get instance by URL
+      state.instances.find((i) => i.id === id),
+
     getInstanceByUrl: (state) => (url: string): ConnectedInstance | undefined => {
       const normalizedUrl = url.replace(/\/+$/, '').toLowerCase()
-      return state.instances.find(i => 
-        i.url.toLowerCase() === normalizedUrl
-      )
+      return state.instances.find((i) => i.url.toLowerCase() === normalizedUrl)
     },
-    
-    // Get instance API info by domain (for preview modal)
+
     getInstance: (state) => (domain: string): InstanceApiInfo | null => {
       return state.previewInstanceInfo[domain] || null
     },
   },
 
   actions: {
-    /**
-     * Load saved instances from localStorage
-     */
     loadFromStorage() {
       if (typeof window === 'undefined') return
-      
+
       try {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
           const data = JSON.parse(saved)
-          // Restore instances, but reset transient state
           this.instances = (data.instances || []).map((i: ConnectedInstance) => ({
             ...i,
             isConnecting: false,
             error: null,
           }))
           this.activeInstanceFilter = data.activeInstanceFilter || null
+          this.activeAccountId = data.activeAccountId || null
         }
       } catch (e) {
         console.error('Failed to load instances from storage:', e)
       }
     },
 
-    /**
-     * Save instances to localStorage
-     */
     saveToStorage() {
       if (typeof window === 'undefined') return
-      
+
       try {
-        // Don't save transient state
         const toSave = {
-          instances: this.instances.map(i => ({
+          instances: this.instances.map((i) => ({
             ...i,
             isConnecting: false,
             error: null,
           })),
           activeInstanceFilter: this.activeInstanceFilter,
+          activeAccountId: this.activeAccountId,
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
       } catch (e) {
@@ -171,22 +206,77 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /**
-     * Add a new instance (just watching, no auth)
-     */
+    migrateLegacyAuth() {
+      if (typeof window === 'undefined') return
+
+      try {
+        const raw = localStorage.getItem(LEGACY_AUTH_KEY)
+        if (!raw) return
+
+        const data = JSON.parse(raw)
+        if (!data.instanceUrl || !data.accessToken) {
+          localStorage.removeItem(LEGACY_AUTH_KEY)
+          return
+        }
+
+        const url = String(data.instanceUrl).replace(/\/+$/, '')
+        let instance = this.getInstanceByUrl(url)
+        if (!instance) {
+          instance = {
+            id: generateId(),
+            url,
+            name: url.replace(/^https?:\/\//, ''),
+            accessToken: data.accessToken,
+            clientId: data.clientId || null,
+            clientSecret: data.clientSecret || null,
+            user: null,
+            instanceInfo: null,
+            isConnecting: false,
+            error: null,
+            lastFetched: null,
+          }
+          this.instances.push(instance)
+        } else if (!instance.accessToken) {
+          instance.accessToken = data.accessToken
+          instance.clientId = data.clientId || instance.clientId
+          instance.clientSecret = data.clientSecret || instance.clientSecret
+        }
+
+        if (!this.activeAccountId && instance) {
+          this.activeAccountId = instance.id
+        }
+
+        this.saveToStorage()
+        localStorage.removeItem(LEGACY_AUTH_KEY)
+      } catch (e) {
+        console.warn('Failed to migrate legacy auth:', e)
+      }
+    },
+
+    setActiveAccount(instanceId: string | null) {
+      this.activeAccountId = instanceId
+      this.saveToStorage()
+    },
+
+    updateActiveAccount(user: mastodon.v1.Account) {
+      const account = this.instances.find((i) => i.id === this.activeAccount?.id)
+      if (!account) return
+      account.user = user
+      this.saveToStorage()
+    },
+
     async addInstance(instanceUrl: string): Promise<ConnectedInstance> {
       const url = instanceUrl.replace(/\/+$/, '')
-      
-      // Check if already connected
+
       const existing = this.getInstanceByUrl(url)
       if (existing) {
-        throw new Error('Already connected to this instance')
+        throw new Error('Already watching this server')
       }
-      
+
       const instance: ConnectedInstance = {
         id: generateId(),
         url,
-        name: url.replace('https://', ''),
+        name: url.replace(/^https?:\/\//, ''),
         accessToken: null,
         clientId: null,
         clientSecret: null,
@@ -196,15 +286,14 @@ export const useInstancesStore = defineStore('instances', {
         error: null,
         lastFetched: null,
       }
-      
+
       this.instances.push(instance)
-      
+
       try {
-        // Fetch instance info
         const client = createRestAPIClient({ url })
         const info = await client.v2.instance.fetch()
-        
-        instance.name = info.title || url.replace('https://', '')
+
+        instance.name = info.title || url.replace(/^https?:\/\//, '')
         instance.instanceInfo = {
           title: info.title,
           thumbnail: info.thumbnail?.url,
@@ -212,7 +301,7 @@ export const useInstancesStore = defineStore('instances', {
         }
         instance.isConnecting = false
         instance.lastFetched = new Date().toISOString()
-        
+
         this.saveToStorage()
         return instance
       } catch (e: any) {
@@ -222,56 +311,62 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /**
-     * Remove an instance
-     */
     removeInstance(instanceId: string) {
-      const index = this.instances.findIndex(i => i.id === instanceId)
+      const index = this.instances.findIndex((i) => i.id === instanceId)
       if (index !== -1) {
         this.instances.splice(index, 1)
+        if (this.activeAccountId === instanceId) {
+          this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
+        }
         this.saveToStorage()
       }
     },
 
     /**
-     * Start OAuth flow for an instance (to log in)
+     * Login flow for /login — add instance if needed, then start OAuth
      */
+    async loginWithInstance(instanceUrl: string): Promise<string> {
+      const url = instanceUrl.replace(/\/+$/, '')
+      let instance = this.getInstanceByUrl(url)
+      if (!instance) {
+        instance = await this.addInstance(url)
+      }
+      return await this.startAuth(instance.id)
+    },
+
     async startAuth(instanceId: string) {
-      const instance = this.instances.find(i => i.id === instanceId)
-      if (!instance) throw new Error('Instance not found')
-      
+      const instance = this.instances.find((i) => i.id === instanceId)
+      if (!instance) throw new Error('Server not found')
+
       instance.isConnecting = true
       instance.error = null
-      
+
       try {
         const client = createRestAPIClient({ url: instance.url })
-        
-        // Register the OAuth app
+
         const app = await client.v1.apps.create({
           clientName: APP_NAME,
           redirectUris: getRedirectUri(),
           scopes: SCOPES,
-          website: 'https://neospace.social',
+          website: 'https://neospace.ibm.io',
         })
-        
+
         instance.clientId = app.clientId ?? null
         instance.clientSecret = app.clientSecret ?? null
-        
-        // Store which instance we're authenticating
+
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('neospace_auth_instance_id', instanceId)
         }
-        
+
         this.saveToStorage()
-        
-        // Build auth URL
+
         const params = new URLSearchParams({
           client_id: instance.clientId!,
           redirect_uri: getRedirectUri(),
           response_type: 'code',
           scope: SCOPES,
         })
-        
+
         return `${instance.url}/oauth/authorize?${params.toString()}`
       } catch (e: any) {
         instance.error = e.message || 'Failed to start auth'
@@ -280,30 +375,26 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /**
-     * Complete OAuth flow after callback
-     */
     async completeAuth(code: string) {
-      // Get the instance ID from session storage
-      const instanceId = typeof window !== 'undefined' 
-        ? sessionStorage.getItem('neospace_auth_instance_id')
-        : null
-        
+      const instanceId =
+        typeof window !== 'undefined'
+          ? sessionStorage.getItem('neospace_auth_instance_id')
+          : null
+
       if (!instanceId) {
         throw new Error('No pending authentication')
       }
-      
-      const instance = this.instances.find(i => i.id === instanceId)
+
+      const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) throw new Error('Instance not found')
-      
+
       instance.isConnecting = true
-      
+
       try {
         if (!instance.clientId || !instance.clientSecret) {
           throw new Error('Missing OAuth credentials')
         }
-        
-        // Exchange code for token
+
         const response = await fetch(`${instance.url}/oauth/token`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -316,30 +407,30 @@ export const useInstancesStore = defineStore('instances', {
             scope: SCOPES,
           }),
         })
-        
+
         if (!response.ok) {
           const error = await response.json()
           throw new Error(error.error_description || error.error || 'Token exchange failed')
         }
-        
+
         const data = await response.json()
         instance.accessToken = data.access_token
-        
-        // Fetch user info
+
         const client = createRestAPIClient({
           url: instance.url,
           accessToken: instance.accessToken!,
         })
-        
+
         instance.user = await client.v1.accounts.verifyCredentials()
         instance.isConnecting = false
         instance.error = null
-        
-        // Clear session storage
+
+        this.activeAccountId = instance.id
+
         if (typeof window !== 'undefined') {
           sessionStorage.removeItem('neospace_auth_instance_id')
         }
-        
+
         this.saveToStorage()
         return instance
       } catch (e: any) {
@@ -349,14 +440,10 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /**
-     * Logout from an instance (but keep watching)
-     */
     async logoutInstance(instanceId: string) {
-      const instance = this.instances.find(i => i.id === instanceId)
+      const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) return
-      
-      // Revoke token if possible
+
       if (instance.accessToken && instance.clientId && instance.clientSecret) {
         try {
           await fetch(`${instance.url}/oauth/revoke`, {
@@ -368,28 +455,37 @@ export const useInstancesStore = defineStore('instances', {
               token: instance.accessToken,
             }),
           })
-        } catch (e) {
+        } catch {
           // Ignore
         }
       }
-      
+
       instance.accessToken = null
       instance.clientId = null
       instance.clientSecret = null
       instance.user = null
-      
+
+      if (this.activeAccountId === instanceId) {
+        this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
+      }
+
       this.saveToStorage()
     },
 
-    /**
-     * Verify all authenticated instances (refresh user data)
-     */
+    /** Log out of the active account */
+    async logout() {
+      const account = this.activeAccount
+      if (account) {
+        await this.logoutInstance(account.id)
+      }
+    },
+
     async verifyAllInstances() {
       const promises = this.instances
-        .filter(i => i.accessToken)
+        .filter((i) => i.accessToken)
         .map(async (instance) => {
-      try {
-        const client = createRestAPIClient({
+          try {
+            const client = createRestAPIClient({
               url: instance.url,
               accessToken: instance.accessToken!,
             })
@@ -397,155 +493,168 @@ export const useInstancesStore = defineStore('instances', {
             instance.error = null
           } catch (e: any) {
             if (e.status === 401 || e.status === 403) {
-              // Token invalid, logout
               instance.accessToken = null
               instance.user = null
             }
             instance.error = 'Session expired'
           }
         })
-      
+
       await Promise.all(promises)
+
+      if (
+        this.activeAccountId &&
+        !this.instances.some(
+          (i) => i.id === this.activeAccountId && i.accessToken && i.user,
+        )
+      ) {
+        this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
+      }
+
       this.saveToStorage()
     },
 
-    /**
-     * Set the active instance filter
-     */
     setFilter(instanceId: string | null) {
       this.activeInstanceFilter = instanceId
     },
 
-    /**
-     * Initialize: load from storage and verify
-     */
     async initialize() {
       this.loadFromStorage()
-      
-      // If no instances, add default one for viewing
+      this.migrateLegacyAuth()
+
+      const gatedWatchOnly = this.instances.filter(
+        (i) => !i.accessToken && isAuthGatedPublicHost(i.url),
+      )
+      for (const instance of gatedWatchOnly) {
+        this.instances = this.instances.filter((i) => i.id !== instance.id)
+      }
+      if (gatedWatchOnly.length > 0) {
+        this.saveToStorage()
+      }
+
       if (this.instances.length === 0) {
         try {
-          await this.addInstance('https://mastodon.social')
-        } catch (e) {
+          await this.addInstance(DEFAULT_PUBLIC_INSTANCE)
+        } catch {
           console.warn('Failed to add default instance')
         }
       }
-      
-      // Verify authenticated instances
+
       await this.verifyAllInstances()
+      this.isInitialized = true
     },
 
-    /**
-     * Get API client for an instance
-     */
     getClient(instanceId: string): mastodon.rest.Client {
-      const instance = this.instances.find(i => i.id === instanceId)
+      const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) throw new Error('Instance not found')
-      
+
       return createRestAPIClient({
         url: instance.url,
         accessToken: instance.accessToken || undefined,
       })
     },
 
-    /**
-     * Fetch merged timeline from all instances
-     */
     async fetchMergedTimeline(
       type: 'local' | 'federated' = 'local',
-      limit: number = 20
+      limit: number = 20,
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
-      
-      const fetchPromises = this.instances.map(async (instance) => {
+      const errors: string[] = []
+
+      const targets = this.activeInstanceFilter
+        ? this.instances.filter((i) => i.id === this.activeInstanceFilter)
+        : this.instances
+
+      const fetchPromises = targets.map(async (instance) => {
         try {
+          if (!instance.accessToken && isAuthGatedPublicHost(instance.url)) {
+            errors.push(`${instance.name} requires login for public timelines`)
+            return []
+          }
+
           const client = createRestAPIClient({
             url: instance.url,
             accessToken: instance.accessToken || undefined,
-        })
-
-        const statuses = await client.v1.timelines.public.list({
-            local: type === 'local',
-          limit,
           })
-          
-          // Add instance metadata to each status
-          return statuses.map(s => ({
+
+          const statuses = await client.v1.timelines.public.list({
+            local: type === 'local',
+            limit,
+          })
+
+          return statuses.map((s) => ({
             ...s,
             _instanceId: instance.id,
             _instanceUrl: instance.url,
           }))
-        } catch (e) {
+        } catch (e: any) {
+          const message = e?.message || 'Failed to fetch'
           console.warn(`Failed to fetch from ${instance.url}:`, e)
+          errors.push(`${instance.name}: ${message}`)
           return []
         }
       })
-      
+
       const results = await Promise.all(fetchPromises)
-      
-      // Merge all statuses
-      results.forEach(statuses => allStatuses.push(...statuses))
-      
-      // Sort by created date (newest first)
-      allStatuses.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      results.forEach((statuses) => allStatuses.push(...statuses))
+
+      if (allStatuses.length === 0 && errors.length > 0 && targets.length > 0) {
+        throw new Error(
+          errors[0]?.includes('requires login') || errors[0]?.includes('authenticated')
+            ? 'This instance requires login to view timelines. Connect an account or add a different instance.'
+            : errors[0] || 'Failed to fetch timeline',
+        )
+      }
+
+      allStatuses.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
-      
+
       return allStatuses
     },
 
-    /**
-     * Fetch home timeline (only from authenticated instances)
-     */
     async fetchMergedHomeTimeline(limit: number = 20): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
-      
-      const authInstances = this.instances.filter(i => i.accessToken)
-      
+      const authInstances = this.instances.filter((i) => i.accessToken)
+
       const fetchPromises = authInstances.map(async (instance) => {
         try {
           const client = createRestAPIClient({
             url: instance.url,
             accessToken: instance.accessToken!,
           })
-          
+
           const statuses = await client.v1.timelines.home.list({ limit })
-          
-          return statuses.map(s => ({
+
+          return statuses.map((s) => ({
             ...s,
             _instanceId: instance.id,
             _instanceUrl: instance.url,
           }))
         } catch (e) {
           console.warn(`Failed to fetch home from ${instance.url}:`, e)
-        return []
-      }
+          return []
+        }
       })
-      
+
       const results = await Promise.all(fetchPromises)
-      results.forEach(statuses => allStatuses.push(...statuses))
-      
-      // Sort by created date
-      allStatuses.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      results.forEach((statuses) => allStatuses.push(...statuses))
+
+      allStatuses.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
-      
+
       return allStatuses
     },
 
-    /**
-     * Fetch instance info for a domain (used by InstanceCard)
-     */
     async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {
-      // Return cached if available
       if (this.previewInstanceInfo[domain]) {
         return this.previewInstanceInfo[domain]
       }
-      
+
       try {
         const url = `https://${domain}`
         const client = createRestAPIClient({ url })
-        
         const info = await client.v2.instance.fetch()
         const apiInfo: InstanceApiInfo = {
           title: info.title,
@@ -555,10 +664,9 @@ export const useInstancesStore = defineStore('instances', {
           },
           registrations: info.registrations?.enabled,
           languages: info.languages,
-          rules: info.rules?.map(r => ({ id: r.id, text: r.text })),
+          rules: info.rules?.map((r) => ({ id: r.id, text: r.text })),
         }
-        
-        // Cache it
+
         this.previewInstanceInfo[domain] = apiInfo
         return apiInfo
       } catch (e) {
@@ -567,9 +675,6 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /**
-     * Open preview modal for an instance (explore page)
-     */
     async openPreview(domain: string) {
       this.previewingInstance = domain
       this.previewLoading = true
@@ -579,8 +684,7 @@ export const useInstancesStore = defineStore('instances', {
       try {
         const url = `https://${domain}`
         const client = createRestAPIClient({ url })
-        
-        // Fetch instance info
+
         const info = await client.v2.instance.fetch()
         this.previewInstanceInfo[domain] = {
           title: info.title,
@@ -590,16 +694,18 @@ export const useInstancesStore = defineStore('instances', {
           },
           registrations: info.registrations?.enabled,
           languages: info.languages,
-          rules: info.rules?.map(r => ({ id: r.id, text: r.text })),
+          rules: info.rules?.map((r) => ({ id: r.id, text: r.text })),
         }
-        
-        // Fetch local timeline
-        const statuses = await client.v1.timelines.public.list({
-          local: true,
-          limit: 10,
-        })
-        
-        this.previewTimeline = statuses
+
+        try {
+          this.previewTimeline = await client.v1.timelines.public.list({
+            local: true,
+            limit: 10,
+          })
+        } catch {
+          // Auth-gated public timelines — preview still shows instance info
+          this.previewTimeline = []
+        }
       } catch (e: any) {
         this.previewError = e.message || 'Failed to load instance'
       } finally {
@@ -607,9 +713,6 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /**
-     * Close preview modal
-     */
     closePreview() {
       this.previewingInstance = null
       this.previewTimeline = []

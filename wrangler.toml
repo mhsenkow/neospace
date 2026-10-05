@@ -1,0 +1,7 @@
+# Cloudflare Pages
+# Dashboard (Git): build `npm run generate`, output `.output/public`
+# CLI: `npm run cf:deploy` (requires `wrangler login` once)
+
+name = "neospace"
+compatibility_date = "2025-07-15"
+pages_build_output_dir = ".output/public"

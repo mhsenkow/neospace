@@ -1,198 +1,241 @@
 <script setup lang="ts">
 /**
- * Instance Manager Component
- * 
- * UI for managing multiple Mastodon instance connections.
- * Add/remove instances, log in/out of each.
+ * Accounts & Servers — signed-in accounts vs watching servers.
  */
 
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
+import { useAccountsManager } from '~/composables/useAccountsManager'
 
 const instancesStore = useInstancesStore()
+const { isOpen, close } = useAccountsManager()
 const router = useRouter()
 
-const isOpen = ref(false)
-const newInstanceUrl = ref('')
+const newServerUrl = ref('')
 const isAdding = ref(false)
 const addError = ref<string | null>(null)
 
-const open = () => {
-  isOpen.value = true
+const signedIn = computed(() => instancesStore.authenticatedInstances)
+const watching = computed(() => instancesStore.watchingInstances)
+
+const hostOf = (instance: ConnectedInstance) =>
+  instance.url.replace(/^https?:\/\//, '')
+
+const handleOf = (instance: ConnectedInstance) => {
+  if (!instance.user) return ''
+  const acct = instance.user.acct || instance.user.username
+  if (acct.includes('@')) return `@${acct}`
+  return `@${acct}@${hostOf(instance)}`
 }
 
-const close = () => {
-  isOpen.value = false
-  newInstanceUrl.value = ''
+const closeAndReset = () => {
+  close()
+  newServerUrl.value = ''
   addError.value = null
 }
 
-const addInstance = async () => {
-  if (!newInstanceUrl.value.trim()) return
-  
+const watchServer = async () => {
+  if (!newServerUrl.value.trim()) return
   isAdding.value = true
   addError.value = null
-  
+
   try {
-    let url = newInstanceUrl.value.trim()
-    if (!url.startsWith('http')) {
-      url = `https://${url}`
-    }
-    
+    let url = newServerUrl.value.trim()
+    if (!url.startsWith('http')) url = `https://${url}`
     await instancesStore.addInstance(url)
-    newInstanceUrl.value = ''
+    newServerUrl.value = ''
   } catch (e: any) {
-    addError.value = e.message || 'Failed to add instance'
+    const msg = e?.message || 'Failed to add server'
+    addError.value = msg.includes('Already watching') || msg.includes('Already connected')
+      ? 'You’re already watching this server.'
+      : msg
   } finally {
     isAdding.value = false
   }
 }
 
-const removeInstance = (instance: ConnectedInstance) => {
-  if (confirm(`Remove ${instance.name}? ${instance.user ? 'You will be logged out.' : ''}`)) {
+const stopWatching = (instance: ConnectedInstance) => {
+  if (confirm(`Stop watching ${instance.name}?`)) {
     instancesStore.removeInstance(instance.id)
   }
 }
 
-const loginToInstance = async (instance: ConnectedInstance) => {
-  try {
-    const authUrl = await instancesStore.startAuth(instance.id)
-    window.location.href = authUrl
-  } catch (e: any) {
-    console.error('Login error:', e)
+const removeAccount = (instance: ConnectedInstance) => {
+  if (confirm(`Remove ${handleOf(instance)} from NeoSpace? You’ll be signed out of this server.`)) {
+    instancesStore.removeInstance(instance.id)
   }
 }
 
-const logoutFromInstance = async (instance: ConnectedInstance) => {
-  if (confirm(`Log out from ${instance.name}? You can still view public posts.`)) {
+const signIn = async (instance: ConnectedInstance) => {
+  try {
+    const authUrl = await instancesStore.startAuth(instance.id)
+    window.location.href = authUrl
+  } catch (e) {
+    console.error('Sign in error:', e)
+  }
+}
+
+const signOut = async (instance: ConnectedInstance) => {
+  if (confirm(`Sign out of ${instance.name}? You can keep watching public posts.`)) {
     await instancesStore.logoutInstance(instance.id)
   }
 }
 
-// Expose open method
-defineExpose({ open })
+const useForPosting = (instance: ConnectedInstance) => {
+  instancesStore.setActiveAccount(instance.id)
+}
+
+const addAccount = () => {
+  closeAndReset()
+  router.push('/login?add=1')
+}
+
+const isActive = (instance: ConnectedInstance) =>
+  instancesStore.activeAccount?.id === instance.id
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="isOpen" class="instance-modal-overlay" @click.self="close">
-        <div class="instance-modal">
-          <header class="modal-header">
-            <h2>Manage Servers</h2>
-            <button class="modal-close" @click="close" aria-label="Close">
+      <div v-if="isOpen" class="accounts-overlay" @click.self="closeAndReset">
+        <div class="accounts-modal" role="dialog" aria-modal="true" aria-labelledby="accounts-title">
+          <header class="accounts-header">
+            <div>
+              <h2 id="accounts-title">Accounts &amp; Servers</h2>
+              <p class="accounts-lede">
+                Sign in to post. Watch servers to browse public posts without an account.
+              </p>
+            </div>
+            <button type="button" class="accounts-close" aria-label="Close" @click="closeAndReset">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
           </header>
 
-          <div class="modal-content">
-            <!-- Add New Instance -->
-            <div class="add-instance">
-              <div class="add-instance-input">
-                <input
-                  v-model="newInstanceUrl"
-                  type="text"
-                  placeholder="mastodon.social, hachyderm.io..."
-                  class="neo-input"
-                  :disabled="isAdding"
-                  @keydown.enter="addInstance"
-                />
-                <button 
-                  class="add-btn neo-btn neo-btn--primary"
-                  :disabled="isAdding || !newInstanceUrl.trim()"
-                  @click="addInstance"
-                >
-                  {{ isAdding ? 'Adding...' : 'Add' }}
+          <div class="accounts-body">
+            <!-- Signed in -->
+            <section class="accounts-section">
+              <div class="accounts-section__head">
+                <h3>Signed in</h3>
+                <button type="button" class="accounts-link-btn" @click="addAccount">
+                  + Add account
                 </button>
               </div>
-              <p v-if="addError" class="add-error">{{ addError }}</p>
-              <p class="add-hint">Add servers to view their public timelines or log in to your accounts.</p>
-            </div>
 
-            <!-- Connected Instances -->
-            <div class="instances-list">
-              <div 
-                v-for="instance in instancesStore.instances" 
-                :key="instance.id"
-                class="instance-card"
-                :class="{ 'instance-card--authenticated': instance.user }"
-              >
-                <div class="instance-main">
-                  <div class="instance-icon">
-                    <img 
-                      v-if="instance.instanceInfo?.thumbnail" 
-                      :src="instance.instanceInfo.thumbnail" 
+              <div v-if="signedIn.length === 0" class="accounts-empty">
+                No accounts yet.
+                <button type="button" class="accounts-inline-link" @click="addAccount">
+                  Sign in to a server
+                </button>
+              </div>
+
+              <ul v-else class="accounts-list">
+                <li
+                  v-for="instance in signedIn"
+                  :key="instance.id"
+                  class="account-row"
+                  :class="{ 'account-row--active': isActive(instance) }"
+                >
+                  <img
+                    v-if="instance.user?.avatar"
+                    :src="instance.user.avatar"
+                    :alt="instance.user.displayName || instance.user.username"
+                    class="account-row__avatar"
+                  />
+                  <div class="account-row__info">
+                    <div class="account-row__name-row">
+                      <span class="account-row__name">
+                        {{ instance.user?.displayName || instance.user?.username }}
+                      </span>
+                      <span v-if="isActive(instance)" class="account-row__badge">Posting as</span>
+                    </div>
+                    <span class="account-row__handle">{{ handleOf(instance) }}</span>
+                    <span class="account-row__server">{{ hostOf(instance) }}</span>
+                  </div>
+                  <div class="account-row__actions">
+                    <button
+                      v-if="!isActive(instance)"
+                      type="button"
+                      class="action-label action-label--primary"
+                      @click="useForPosting(instance)"
+                    >
+                      Use for posting
+                    </button>
+                    <button type="button" class="action-label" @click="signOut(instance)">
+                      Sign out
+                    </button>
+                    <button type="button" class="action-label action-label--danger" @click="removeAccount(instance)">
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              </ul>
+            </section>
+
+            <!-- Watching -->
+            <section class="accounts-section">
+              <div class="accounts-section__head">
+                <h3>Watching</h3>
+              </div>
+              <p class="accounts-hint">
+                Public timelines only — no login needed.
+              </p>
+
+              <div class="watch-add">
+                <input
+                  v-model="newServerUrl"
+                  type="text"
+                  class="neo-input"
+                  placeholder="mastodon.social"
+                  :disabled="isAdding"
+                  @keydown.enter="watchServer"
+                />
+                <button
+                  type="button"
+                  class="neo-btn neo-btn--primary watch-add__btn"
+                  :disabled="isAdding || !newServerUrl.trim()"
+                  @click="watchServer"
+                >
+                  {{ isAdding ? 'Adding…' : 'Watch' }}
+                </button>
+              </div>
+              <p v-if="addError" class="watch-error">{{ addError }}</p>
+
+              <div v-if="watching.length === 0" class="accounts-empty accounts-empty--quiet">
+                Not watching any extra servers.
+              </div>
+
+              <ul v-else class="accounts-list">
+                <li v-for="instance in watching" :key="instance.id" class="account-row account-row--watch">
+                  <div class="account-row__icon">
+                    <img
+                      v-if="instance.instanceInfo?.thumbnail"
+                      :src="instance.instanceInfo.thumbnail"
                       :alt="instance.name"
                     />
-                    <span v-else>🌐</span>
+                    <span v-else aria-hidden="true">🌐</span>
                   </div>
-                  
-                  <div class="instance-info">
-                    <h3 class="instance-name">{{ instance.name }}</h3>
-                    <p class="instance-url">{{ instance.url.replace('https://', '') }}</p>
-                    
-                    <!-- User info if logged in -->
-                    <div v-if="instance.user" class="instance-user">
-                      <img :src="instance.user.avatar" :alt="instance.user.displayName" class="user-avatar" />
-                      <span class="user-name">{{ instance.user.displayName || instance.user.username }}</span>
-                      <span class="user-handle">@{{ instance.user.acct }}</span>
-                    </div>
-                    
-                    <p v-if="instance.error" class="instance-error">{{ instance.error }}</p>
+                  <div class="account-row__info">
+                    <span class="account-row__name">{{ instance.name }}</span>
+                    <span class="account-row__server">{{ hostOf(instance) }}</span>
+                    <p v-if="instance.error" class="account-row__error">{{ instance.error }}</p>
                   </div>
-                </div>
-
-                <div class="instance-actions">
-                  <template v-if="instance.isConnecting">
-                    <span class="connecting-spinner">⏳</span>
-                  </template>
-                  <template v-else-if="instance.user">
-                    <button 
-                      class="action-btn action-btn--logout" 
-                      @click="logoutFromInstance(instance)"
-                      title="Log out"
+                  <div class="account-row__actions">
+                    <button
+                      type="button"
+                      class="action-label action-label--primary"
+                      :disabled="instance.isConnecting"
+                      @click="signIn(instance)"
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" y1="12" x2="9" y2="12" />
-                      </svg>
+                      Sign in
                     </button>
-                  </template>
-                  <template v-else>
-                    <button 
-                      class="action-btn action-btn--login" 
-                      @click="loginToInstance(instance)"
-                      title="Log in"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4" />
-                        <polyline points="10 17 15 12 10 7" />
-                        <line x1="15" y1="12" x2="3" y2="12" />
-                      </svg>
+                    <button type="button" class="action-label" @click="stopWatching(instance)">
+                      Stop watching
                     </button>
-                  </template>
-                  
-                  <button 
-                    class="action-btn action-btn--remove" 
-                    @click="removeInstance(instance)"
-                    title="Remove server"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Empty state -->
-              <div v-if="instancesStore.instances.length === 0" class="instances-empty">
-                <span>🌍</span>
-                <p>No servers connected. Add one above!</p>
-              </div>
-            </div>
+                  </div>
+                </li>
+              </ul>
+            </section>
           </div>
         </div>
       </div>
@@ -201,281 +244,309 @@ defineExpose({ open })
 </template>
 
 <style lang="scss" scoped>
-.instance-modal-overlay {
+.accounts-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
   padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
 }
 
-.instance-modal {
+.accounts-modal {
   width: 100%;
-  max-width: 500px;
+  max-width: 32rem;
   max-height: 85vh;
-  background: var(--neo-bg-secondary);
-  border-radius: 16px;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 12px;
 }
 
-.modal-header {
+.accounts-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
+  gap: 1rem;
+  padding: 1.125rem 1.25rem 0.875rem;
   border-bottom: 1px solid var(--neo-border-color);
-  
+
   h2 {
+    margin: 0 0 0.25rem;
     font-size: 1.125rem;
     font-weight: 600;
     color: var(--neo-text-primary);
   }
 }
 
-.modal-close {
+.accounts-lede {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--neo-text-muted);
+  max-width: 36ch;
+}
+
+.accounts-close {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  background: transparent;
+  flex-shrink: 0;
   color: var(--neo-text-muted);
-  transition: all 0.15s ease;
-  
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+
   &:hover {
     background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
   }
 }
 
-.modal-content {
+.accounts-body {
   flex: 1;
   overflow-y: auto;
-  padding: 1.25rem;
+  padding: 1rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-// Add Instance Section
-.add-instance {
-  margin-bottom: 1.5rem;
+.accounts-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+
+  h3 {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--neo-text-secondary);
+  }
 }
 
-.add-instance-input {
+.accounts-link-btn,
+.accounts-inline-link {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    color: var(--neo-accent-hover);
+    text-decoration: underline;
+  }
+}
+
+.accounts-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+}
+
+.accounts-empty {
+  padding: 0.875rem 0;
+  font-size: 0.875rem;
+  color: var(--neo-text-muted);
+
+  &--quiet {
+    padding-top: 0.5rem;
+  }
+}
+
+.accounts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.account-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 10px;
+
+  &--active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  &__avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  &__icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--neo-bg-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  &__info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  &__name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  &__name {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+
+  &__badge {
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--neo-accent);
+    background: color-mix(in srgb, var(--neo-accent) 16%, transparent);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+  }
+
+  &__handle,
+  &__server {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__error {
+    margin: 0.25rem 0 0;
+    font-size: 0.75rem;
+    color: var(--neo-danger);
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    width: 100%;
+
+    @media (min-width: 480px) {
+      width: auto;
+      flex-direction: column;
+      align-items: stretch;
+      min-width: 7.5rem;
+    }
+  }
+}
+
+.action-label {
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    color: var(--neo-text-primary);
+    border-color: var(--neo-border-color-dark);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &--primary {
+    color: var(--neo-text-on-accent, #fafaf8);
+    background: var(--neo-accent);
+    border-color: var(--neo-accent);
+
+    &:hover:not(:disabled) {
+      background: var(--neo-accent-hover);
+      color: var(--neo-text-on-accent, #fafaf8);
+    }
+  }
+
+  &--danger:hover:not(:disabled) {
+    color: white;
+    background: var(--neo-danger);
+    border-color: var(--neo-danger);
+  }
+}
+
+.watch-add {
   display: flex;
   gap: 0.5rem;
-  
+  margin-bottom: 0.75rem;
+
   .neo-input {
     flex: 1;
     min-width: 0;
   }
-  
-  .add-btn {
+
+  &__btn {
     flex-shrink: 0;
-    padding: 0.75rem 1rem;
+    padding: 0.65rem 0.9rem;
   }
 }
 
-.add-error {
-  margin-top: 0.5rem;
+.watch-error {
+  margin: -0.35rem 0 0.75rem;
   font-size: 0.8125rem;
   color: var(--neo-danger);
 }
 
-.add-hint {
-  margin-top: 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-}
-
-// Instances List
-.instances-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.instance-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 1rem;
-  background: var(--neo-bg-tertiary);
-  border-radius: 12px;
-  border: 1px solid var(--neo-border-color);
-  
-  &--authenticated {
-    border-color: var(--neo-accent);
-    background: var(--neo-accent-soft);
-  }
-}
-
-.instance-main {
-  flex: 1;
-  display: flex;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.instance-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--neo-bg-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  
-  span {
-    font-size: 1.25rem;
-  }
-}
-
-.instance-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.instance-name {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--neo-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.instance-url {
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-}
-
-.instance-user {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  margin-top: 0.5rem;
-  padding: 0.375rem 0.5rem;
-  background: var(--neo-bg-secondary);
-  border-radius: 6px;
-  
-  .user-avatar {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-  }
-  
-  .user-name {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--neo-text-primary);
-  }
-  
-  .user-handle {
-    font-size: 0.75rem;
-    color: var(--neo-text-muted);
-  }
-}
-
-.instance-error {
-  font-size: 0.75rem;
-  color: var(--neo-danger);
-  margin-top: 0.25rem;
-}
-
-// Actions
-.instance-actions {
-  display: flex;
-  gap: 0.375rem;
-  flex-shrink: 0;
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--neo-bg-secondary);
-  color: var(--neo-text-muted);
-  transition: all 0.15s ease;
-  
-  &:hover {
-    color: var(--neo-text-primary);
-  }
-  
-  &--login {
-    background: var(--neo-accent);
-    color: var(--neo-text-inverse);
-    
-    &:hover {
-      filter: brightness(1.1);
-    }
-  }
-  
-  &--logout {
-    &:hover {
-      background: var(--neo-warning);
-      color: #000;
-    }
-  }
-  
-  &--remove {
-    &:hover {
-      background: var(--neo-danger);
-      color: white;
-    }
-  }
-}
-
-.connecting-spinner {
-  font-size: 1.25rem;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.instances-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 2rem;
-  text-align: center;
-  
-  span {
-    font-size: 2rem;
-  }
-  
-  p {
-    color: var(--neo-text-muted);
-    font-size: 0.875rem;
-  }
-}
-
-// Modal transitions
 .modal-enter-active,
 .modal-leave-active {
   transition: opacity 0.2s ease;
-  
-  .instance-modal {
+
+  .accounts-modal {
     transition: transform 0.2s ease;
   }
 }
@@ -483,10 +554,9 @@ defineExpose({ open })
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
-  
-  .instance-modal {
-    transform: scale(0.95) translateY(10px);
+
+  .accounts-modal {
+    transform: scale(0.96) translateY(8px);
   }
 }
 </style>
-

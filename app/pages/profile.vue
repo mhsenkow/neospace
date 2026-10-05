@@ -8,20 +8,17 @@
  */
 
 import { useProfileStore } from '~/stores/profile'
-import { useAuthStore } from '~/stores/auth'
-import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
+import { useThemeStore } from '~/stores/theme'
+import { useAccountsManager } from '~/composables/useAccountsManager'
 import type { mastodon } from 'masto'
 
 const profileStore = useProfileStore()
-const authStore = useAuthStore()
-const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
+const themeStore = useThemeStore()
+const { open: openAccounts } = useAccountsManager()
 const route = useRoute()
 const router = useRouter()
-
-// Instance manager ref
-const instanceManagerRef = ref<{ open: () => void } | null>(null)
 
 // Followers modal ref
 const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void } | null>(null)
@@ -61,7 +58,7 @@ const profileRouteReady = ref(false)
 onMounted(async () => {
   await instancesStore.initialize()
 
-  const hasAnyAuth = authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+  const hasAnyAuth = instancesStore.hasAuthenticatedInstance
 
   if (!hasAnyAuth) {
     router.push('/login')
@@ -77,7 +74,7 @@ watch(
   async () => {
     if (!profileRouteReady.value || route.path !== '/profile') return
 
-    const hasAnyAuth = authStore.isAuthenticated || instancesStore.hasAuthenticatedInstance
+    const hasAnyAuth = instancesStore.hasAuthenticatedInstance
     if (!hasAnyAuth) return
 
     await loadProfileFromRoute()
@@ -157,9 +154,6 @@ useHead({
 
 <template>
   <div class="profile-page">
-    <!-- Instance Manager Modal -->
-    <InstanceManager ref="instanceManagerRef" />
-    
     <!-- Followers/Following Modal -->
     <FollowersModal 
       ref="followersModalRef" 
@@ -172,18 +166,20 @@ useHead({
       class="connected-accounts neo-card"
     >
       <div class="connected-accounts__header">
-        <h2>🌐 Your Fediverse Accounts</h2>
-        <button class="connected-accounts__add" @click="instanceManagerRef?.open()">
-          + Add Account
+        <h2>Your accounts</h2>
+        <button class="connected-accounts__add" @click="openAccounts()">
+          Accounts &amp; servers
         </button>
       </div>
       
       <div class="connected-accounts__list">
-        <div 
+        <button 
           v-for="instance in instancesStore.authenticatedInstances" 
           :key="instance.id"
+          type="button"
           class="account-card"
-          :class="{ 'account-card--active': instance.url === authStore.instanceUrl }"
+          :class="{ 'account-card--active': instance.id === instancesStore.activeAccount?.id }"
+          @click="instancesStore.setActiveAccount(instance.id)"
         >
           <img 
             :src="instance.user?.avatar" 
@@ -196,10 +192,11 @@ useHead({
             <span class="account-card__instance">{{ instance.name }}</span>
           </div>
           <div class="account-card__stats">
+            <span v-if="instance.id === instancesStore.activeAccount?.id" class="account-card__posting">Posting as</span>
             <span>{{ instance.user?.statusesCount }} posts</span>
             <span>{{ instance.user?.followersCount }} followers</span>
           </div>
-        </div>
+        </button>
       </div>
       
       <div v-if="instancesStore.watchingInstances.length > 0" class="watching-instances">
@@ -436,7 +433,7 @@ useHead({
               + Add Field
             </button>
             <p class="profile-fields-hint">
-              💡 Add a field named <code>css</code> with your custom CSS to enable personalized Chaos Mode!
+              Profile fields show on your account. Use them for links, pronouns, or other details.
             </p>
           </div>
         </template>
@@ -585,16 +582,19 @@ useHead({
   display: flex;
   align-items: center;
   gap: 1rem;
+  width: 100%;
   padding: 0.875rem 1rem;
+  text-align: left;
   background: var(--neo-bg-tertiary);
   border-radius: 12px;
   border: 1px solid var(--neo-border-color);
+  cursor: pointer;
   transition: all 0.15s ease;
-  
+
   &:hover {
     border-color: var(--neo-text-muted);
   }
-  
+
   &--active {
     border-color: var(--neo-accent);
     background: var(--neo-accent-soft);
@@ -640,6 +640,14 @@ useHead({
     gap: 0.125rem;
     font-size: 0.75rem;
     color: var(--neo-text-muted);
+  }
+
+  &__posting {
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--neo-accent);
   }
 }
 
