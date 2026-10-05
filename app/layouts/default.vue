@@ -6,16 +6,20 @@
 import { useThemeStore } from '~/stores/theme'
 import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
+import { useNotificationsStore } from '~/stores/notifications'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
+const notificationsStore = useNotificationsStore()
 const { open: openAccounts } = useAccountsManager()
 const router = useRouter()
 const route = useRoute()
 
 const mobileMenuOpen = ref(false)
+
+const notifBadge = computed(() => notificationsStore.badgeLabel)
 
 const applyTheme = () => {
   settingsStore.applyLocalAppearance()
@@ -40,6 +44,11 @@ onMounted(async () => {
   if (instancesStore.userCustomCSS) {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   }
+  settingsStore.syncCustomProfileCss()
+
+  if (instancesStore.hasAuthenticatedInstance) {
+    notificationsStore.refreshUnreadBadge()
+  }
 
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const onScheme = () => {
@@ -48,6 +57,37 @@ onMounted(async () => {
   mq.addEventListener?.('change', onScheme)
   onUnmounted(() => mq.removeEventListener?.('change', onScheme))
 })
+
+watch(
+  () => instancesStore.userCustomCSS,
+  (css) => {
+    themeStore.setUserCustomCSS(css || '')
+    settingsStore.syncCustomProfileCss()
+  },
+)
+
+watch(
+  () => instancesStore.hasAuthenticatedInstance,
+  (ok) => {
+    if (ok) notificationsStore.refreshUnreadBadge()
+    else notificationsStore.unreadCount = 0
+  },
+)
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/notifications') {
+      // Visiting the page counts as catching up
+      nextTick(() => {
+        if (notificationsStore.notifications[0]?.id) {
+          notificationsStore.persistLastRead(notificationsStore.notifications[0].id)
+          notificationsStore.unreadCount = 0
+        }
+      })
+    }
+  },
+)
 
 watch(
   () => [
@@ -107,7 +147,7 @@ const closeMobileMenu = () => {
         <NuxtLink
           v-if="instancesStore.hasAuthenticatedInstance"
           to="/notifications"
-          class="sidebar__link"
+          class="sidebar__link sidebar__link--badge"
           :class="{ active: route.path === '/notifications' }"
           title="Notifications"
         >
@@ -115,6 +155,7 @@ const closeMobileMenu = () => {
             <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 01-3.46 0" />
           </svg>
+          <span v-if="notifBadge" class="nav-badge" :aria-label="`${notifBadge} unread`">{{ notifBadge }}</span>
         </NuxtLink>
       </nav>
 
@@ -216,6 +257,7 @@ const closeMobileMenu = () => {
             @click="closeMobileMenu"
           >
             Notifications
+            <span v-if="notifBadge" class="nav-badge nav-badge--inline">{{ notifBadge }}</span>
           </NuxtLink>
         </nav>
 
@@ -273,6 +315,18 @@ const closeMobileMenu = () => {
           <circle cx="11" cy="11" r="8" />
           <path d="M21 21l-4.35-4.35" />
         </svg>
+      </NuxtLink>
+      <NuxtLink
+        v-if="instancesStore.hasAuthenticatedInstance"
+        to="/notifications"
+        class="mobile-nav__item mobile-nav__item--badge"
+        :class="{ active: route.path === '/notifications' }"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/notifications' ? 2 : 1.5">
+          <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 01-3.46 0" />
+        </svg>
+        <span v-if="notifBadge" class="nav-badge">{{ notifBadge }}</span>
       </NuxtLink>
       <NuxtLink to="/groups" class="mobile-nav__item" :class="{ active: route.path.startsWith('/groups') }">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path.startsWith('/groups') ? 2 : 1.5">
@@ -366,6 +420,11 @@ const closeMobileMenu = () => {
     background: transparent;
     border: none;
     cursor: pointer;
+    position: relative;
+
+    &--badge {
+      position: relative;
+    }
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
     &:hover {
@@ -527,6 +586,7 @@ const closeMobileMenu = () => {
     text-decoration: none;
     border-radius: 4px;
     transition: color var(--neo-transition-fast), background-color var(--neo-transition-fast);
+    position: relative;
 
     &.active {
       color: var(--neo-accent);
@@ -556,6 +616,34 @@ const closeMobileMenu = () => {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-muted);
     }
+  }
+}
+
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.22rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--neo-font-family-ui);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--neo-text-inverse);
+  background: var(--neo-accent);
+  border-radius: 2px;
+  pointer-events: none;
+
+  &--inline {
+    position: static;
+    margin-left: 0.4rem;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    font-size: 0.6875rem;
   }
 }
 

@@ -81,6 +81,14 @@ watch(
   },
 )
 
+const switchOwnAccount = async (instanceId: string) => {
+  if (route.query.user) return
+  if (instancesStore.activeAccount?.id === instanceId) return
+  instancesStore.setActiveAccount(instanceId)
+  await profileStore.fetchProfile()
+  relationship.value = null
+}
+
 // Cleanup
 onUnmounted(() => {
   profileStore.clear()
@@ -179,7 +187,7 @@ useHead({
           type="button"
           class="account-card"
           :class="{ 'account-card--active': instance.id === instancesStore.activeAccount?.id }"
-          @click="instancesStore.setActiveAccount(instance.id)"
+          @click="switchOwnAccount(instance.id)"
         >
           <img 
             :src="instance.user?.avatar" 

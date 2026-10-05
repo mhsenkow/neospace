@@ -9,7 +9,7 @@ import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import type { ColumnConfig, ColumnFeedType } from '~/stores/columns'
-import { activeClient, publicClient } from '~/composables/useMasto'
+import { publicClient } from '~/composables/useMasto'
 
 interface Props {
   column: ColumnConfig
@@ -32,12 +32,25 @@ const isLoadingMore = ref(false)
 const error = ref<string | null>(null)
 const hasMore = ref(true)
 const maxId = ref<string | null>(null)
+/** Per-instance max_id cursors for merged home timeline */
+const homeCursors = ref<Record<string, string>>({})
 
 const feedMenuOpen = ref(false)
 const groupsExpanded = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
 const loadTrigger = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+/** Newer posts waiting while you read (never auto-jump) */
+const pendingNew = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
+const isNearTop = ref(true)
+
+const pendingLabel = computed(() => {
+  const n = pendingNew.value.length
+  if (n <= 0) return ''
+  return n === 1 ? '1 new post' : `${n} new posts`
+})
 
 const feedLabels: Record<string, string> = {
   home: 'For You',
@@ -68,14 +81,103 @@ const closeFeedMenu = (e: MouseEvent) => {
 const switchFeed = (type: ColumnFeedType, groupTag?: string) => {
   feedMenuOpen.value = false
   groupsExpanded.value = false
+  pendingNew.value = []
   if (type === props.column.feedType && groupTag === props.column.groupTag) return
   emit('update-feed-type', type, groupTag)
+}
+
+const onComposePosted = (status: mastodon.v1.Status) => {
+  if (statuses.value.some((s) => s.id === status.id)) return
+  statuses.value = [status, ...statuses.value]
+  pendingNew.value = pendingNew.value.filter((s) => s.id !== status.id)
+}
+
+const onScroll = () => {
+  if (!scrollContainer.value) return
+  isNearTop.value = scrollContainer.value.scrollTop < 96
+}
+
+/** Tap feed title: if scrolled, jump to top (and merge new posts); else open menu */
+const onFeedHeaderClick = () => {
+  if (scrollContainer.value && scrollContainer.value.scrollTop > 96) {
+    if (pendingNew.value.length) {
+      jumpToNew()
+    } else {
+      scrollContainer.value.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+    return
+  }
+  feedMenuOpen.value = !feedMenuOpen.value
+}
+
+const jumpToNew = () => {
+  const seen = new Set(statuses.value.map((s) => s.id))
+  const unique = pendingNew.value.filter((s) => !seen.has(s.id))
+  if (unique.length) {
+    statuses.value = [...unique, ...statuses.value]
+  }
+  pendingNew.value = []
+  scrollContainer.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
+  if (!fresh.length || !statuses.value.length) return
+  const existing = new Set(statuses.value.map((s) => s.id))
+  const pendingIds = new Set(pendingNew.value.map((s) => s.id))
+  const cutoff = new Date(statuses.value[0]!.createdAt).getTime()
+  const newer = fresh.filter((s) => {
+    if (existing.has(s.id) || pendingIds.has(s.id)) return false
+    return new Date(s.createdAt).getTime() > cutoff
+  })
+  if (!newer.length) return
+
+  if (isNearTop.value) {
+    statuses.value = [...newer, ...statuses.value]
+  } else {
+    pendingNew.value = [...newer, ...pendingNew.value].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+  }
+}
+
+const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+  if (props.column.feedType === 'group' && props.column.groupTag) {
+    const client = publicClient()
+    return await client.v1.timelines.tag.$select(props.column.groupTag).list({ limit: 20 })
+  }
+  if (props.column.feedType === 'home') {
+    if (!instancesStore.hasAuthenticatedInstance) return []
+    return await instancesStore.fetchMergedHomeTimeline(20)
+  }
+  if (instancesStore.instances.length > 0) {
+    return await instancesStore.fetchMergedTimeline(
+      props.column.feedType as 'local' | 'federated',
+      20,
+    )
+  }
+  const client = publicClient()
+  return await client.v1.timelines.public.list({
+    local: props.column.feedType === 'local',
+    limit: 20,
+  })
+}
+
+const pollForNew = async () => {
+  if (isLoading.value || document.hidden || !statuses.value.length) return
+  try {
+    const fresh = await fetchFreshPage()
+    mergeIncoming(fresh)
+  } catch {
+    // quiet — polling failures shouldn't interrupt reading
+  }
 }
 
 const fetchTimeline = async (refresh = false) => {
   if (refresh) {
     statuses.value = []
     maxId.value = null
+    homeCursors.value = {}
+    pendingNew.value = []
     hasMore.value = true
   }
 
@@ -93,6 +195,15 @@ const fetchTimeline = async (refresh = false) => {
         throw new Error('Log in or add an instance to view your home timeline')
       }
       result = await instancesStore.fetchMergedHomeTimeline(20)
+      // Seed per-instance cursors from the oldest post we got from each instance
+      const next: Record<string, string> = {}
+      for (const s of result) {
+        const ext = s as ExtendedStatus
+        if (!ext._instanceId) continue
+        const prev = next[ext._instanceId]
+        if (!prev || s.id < prev) next[ext._instanceId] = s.id
+      }
+      homeCursors.value = next
     } else if (instancesStore.instances.length > 0) {
       result = await instancesStore.fetchMergedTimeline(
         props.column.feedType as 'local' | 'federated',
@@ -119,28 +230,38 @@ const fetchTimeline = async (refresh = false) => {
 }
 
 const loadMore = async () => {
-  if (isLoadingMore.value || !hasMore.value || !maxId.value) return
+  if (isLoadingMore.value || !hasMore.value) return
+  if (props.column.feedType === 'home') {
+    if (!Object.keys(homeCursors.value).length) return
+  } else if (!maxId.value) {
+    return
+  }
 
   isLoadingMore.value = true
 
   try {
-    let newStatuses: mastodon.v1.Status[] = []
+    let newStatuses: (mastodon.v1.Status | ExtendedStatus)[] = []
 
     switch (props.column.feedType) {
       case 'home': {
-        if (!instancesStore.isAuthenticated) break
-        const client = activeClient()
-        newStatuses = await client.v1.timelines.home.list({
-          maxId: maxId.value,
-          limit: 20,
-        })
+        if (!instancesStore.hasAuthenticatedInstance) break
+        newStatuses = await instancesStore.fetchMergedHomeTimeline(20, { ...homeCursors.value })
+        // Advance cursors with oldest id per instance from this page
+        const next = { ...homeCursors.value }
+        for (const s of newStatuses) {
+          const ext = s as ExtendedStatus
+          if (!ext._instanceId) continue
+          const prev = next[ext._instanceId]
+          if (!prev || s.id < prev) next[ext._instanceId] = s.id
+        }
+        homeCursors.value = next
         break
       }
       case 'local': {
         const client = publicClient()
         newStatuses = await client.v1.timelines.public.list({
           local: true,
-          maxId: maxId.value,
+          maxId: maxId.value!,
           limit: 20,
         })
         break
@@ -149,7 +270,7 @@ const loadMore = async () => {
         const client = publicClient()
         newStatuses = await client.v1.timelines.public.list({
           local: false,
-          maxId: maxId.value,
+          maxId: maxId.value!,
           limit: 20,
         })
         break
@@ -159,14 +280,17 @@ const loadMore = async () => {
           const client = publicClient()
           newStatuses = await client.v1.timelines.tag
             .$select(props.column.groupTag)
-            .list({ maxId: maxId.value, limit: 20 })
+            .list({ maxId: maxId.value!, limit: 20 })
         }
         break
       }
     }
 
     if (newStatuses.length > 0) {
-      statuses.value = [...statuses.value, ...newStatuses]
+      // Dedupe by id when merging across accounts
+      const seen = new Set(statuses.value.map((s) => s.id))
+      const unique = newStatuses.filter((s) => !seen.has(s.id))
+      statuses.value = [...statuses.value, ...unique]
       maxId.value = newStatuses.at(-1)!.id
     }
     hasMore.value = newStatuses.length > 0
@@ -224,20 +348,26 @@ onMounted(async () => {
   if (instancesStore.isInitialized) {
     await fetchTimeline()
   }
-  nextTick(() => setupInfiniteScroll())
+  nextTick(() => {
+    setupInfiniteScroll()
+    scrollContainer.value?.addEventListener('scroll', onScroll, { passive: true })
+  })
   document.addEventListener('click', closeFeedMenu)
+  pollTimer = setInterval(pollForNew, 45000)
 })
 
 onUnmounted(() => {
   if (observer) observer.disconnect()
   document.removeEventListener('click', closeFeedMenu)
+  scrollContainer.value?.removeEventListener('scroll', onScroll)
+  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 <template>
   <div class="timeline-column">
     <!-- Column Header -->
     <div class="column-header">
-      <div class="column-feed-select" @click.stop="feedMenuOpen = !feedMenuOpen">
+      <div class="column-feed-select" @click.stop="onFeedHeaderClick">
         <span class="column-feed-label">{{ feedLabel }}</span>
         <svg class="column-feed-chevron" :class="{ 'column-feed-chevron--open': feedMenuOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <polyline points="6 9 12 15 18 9" />
@@ -334,9 +464,21 @@ onUnmounted(() => {
     <!-- Scrollable Content -->
     <div class="column-scroll" ref="scrollContainer">
       <!-- Compose (first column only, when authenticated) -->
-      <div v-if="isFirst && instancesStore.isAuthenticated && column.feedType === 'home'" class="column-compose">
-        <RealComposeBox />
+      <div v-if="isFirst && instancesStore.isAuthenticated" class="column-compose">
+        <RealComposeBox @posted="onComposePosted" />
       </div>
+
+      <!-- New posts pill — never auto-jumps the feed -->
+      <Transition name="pill-slide">
+        <button
+          v-if="pendingNew.length"
+          type="button"
+          class="column-new-pill"
+          @click="jumpToNew"
+        >
+          {{ pendingLabel }}
+        </button>
+      </Transition>
 
       <!-- Loading -->
       <div v-if="isLoading" class="column-state">
@@ -417,6 +559,45 @@ onUnmounted(() => {
   background: var(--neo-bg-primary);
   position: relative;
   z-index: 10;
+}
+
+.column-new-pill {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 8;
+  display: block;
+  margin: 0.75rem auto;
+  padding: 0.4rem 0.9rem;
+  font-family: var(--neo-font-family-ui);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--neo-text-inverse);
+  background: var(--neo-accent);
+  border: 1px solid var(--neo-accent-dark, var(--neo-accent));
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--neo-accent) 28%, transparent);
+  transition: transform 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    background: var(--neo-accent-hover);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+.pill-slide-enter-active,
+.pill-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.pill-slide-enter-from,
+.pill-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-0.5rem);
 }
 
 .column-feed-select {

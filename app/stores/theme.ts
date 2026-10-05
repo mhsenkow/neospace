@@ -1,9 +1,10 @@
 /**
  * NeoSpace Theme Store
- * 
- * Manages the dual-mode theme system:
- * - Mom Mode: Clean, accessible, professional
- * - Chaos Mode: User-defined CSS chaos from Myspace-era glory
+ *
+ * Manages optional custom profile CSS (historically "Chaos Mode"):
+ * Myspace-era skins from Mastodon profile metadata fields
+ * (css | custom_css | theme | style | chaos_css).
+ * Default UI is always clean; custom CSS is opt-in via Settings → Appearance.
  */
 
 import { defineStore } from 'pinia'
@@ -26,14 +27,14 @@ export const useThemeStore = defineStore('theme', {
      * Returns the current mode name for display
      */
     currentModeName: (state): string => {
-      return state.isChaosMode ? '🌀 Chaos Mode' : '👩 Mom Mode'
+      return state.isChaosMode ? 'Custom profile CSS' : 'Default'
     },
 
     /**
      * Returns the opposite mode name for toggle button
      */
     toggleButtonText: (state): string => {
-      return state.isChaosMode ? 'Switch to Mom Mode' : 'Unleash Chaos'
+      return state.isChaosMode ? 'Turn off profile CSS' : 'Apply profile CSS'
     }
   },
 
@@ -101,7 +102,7 @@ export const useThemeStore = defineStore('theme', {
         this.chaosStyleElement = styleEl
       }
 
-      console.log('🌀 Chaos Mode activated! Welcome to the void.')
+      console.log('Custom profile CSS applied')
     },
 
     /**
@@ -116,7 +117,7 @@ export const useThemeStore = defineStore('theme', {
       // Remove the style element
       this.ejectChaosStyle()
 
-      console.log('👩 Mom Mode restored. Everything is fine.')
+      console.log('Custom profile CSS cleared')
     },
 
     /**

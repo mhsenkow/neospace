@@ -564,3 +564,48 @@ html {
     min-width: 44px;
   }
 }
+
+// ============================================
+// Appearance toggles (settings → local prefs)
+// ============================================
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html.compact-mode {
+  --neo-spacing-2: 0.25rem;
+  --neo-spacing-3: 0.35rem;
+  --neo-spacing-4: 0.5rem;
+  --neo-spacing-6: 0.75rem;
+  --neo-spacing-8: 1rem;
+  --neo-font-size-base: 0.875rem;
+
+  .neo-card {
+    padding: 0.75rem;
+  }
+
+  .status-card,
+  .compose.neo-card {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .column-compose {
+    margin-bottom: 0.5rem;
+  }
+
+  .compose-input {
+    min-height: 3.5rem;
+  }
+
+  .sidebar__link {
+    width: 40px;
+    height: 40px;
+  }
+}
+

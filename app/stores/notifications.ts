@@ -35,6 +35,8 @@ const FILTER_TO_TYPES: Record<NotificationFilterType, string[] | undefined> = {
   update: ['update'],
 }
 
+const LAST_READ_KEY = 'neospace_notif_last_read'
+
 export const useNotificationsStore = defineStore('notifications', {
   state: (): NotificationsState => ({
     notifications: [],
@@ -51,6 +53,11 @@ export const useNotificationsStore = defineStore('notifications', {
 
   getters: {
     isEmpty: (state): boolean => state.notifications.length === 0,
+
+    badgeLabel: (state): string => {
+      if (state.unreadCount <= 0) return ''
+      return state.unreadCount > 99 ? '99+' : String(state.unreadCount)
+    },
 
     filteredNotifications: (state): ExtendedNotification[] => {
       let items = [...state.notifications]
@@ -109,6 +116,68 @@ export const useNotificationsStore = defineStore('notifications', {
       }
     },
 
+    loadLastRead() {
+      if (typeof window === 'undefined') return
+      try {
+        const saved = localStorage.getItem(LAST_READ_KEY)
+        if (saved) this.lastReadId = saved
+      } catch {
+        // ignore
+      }
+    },
+
+    persistLastRead(id: string | null) {
+      this.lastReadId = id
+      if (typeof window === 'undefined' || !id) return
+      try {
+        localStorage.setItem(LAST_READ_KEY, id)
+      } catch {
+        // ignore
+      }
+    },
+
+    recomputeUnread() {
+      if (!this.lastReadId) {
+        this.unreadCount = 0
+        return
+      }
+      this.unreadCount = this.notifications.filter((n) => n.id > this.lastReadId!).length
+    },
+
+    /**
+     * Lightweight badge refresh — used from layout without loading the full page.
+     */
+    async refreshUnreadBadge() {
+      const instances = useInstancesStore()
+      if (!instances.hasAuthenticatedInstance) {
+        this.unreadCount = 0
+        return
+      }
+
+      this.loadLastRead()
+      const client = this.getClient()
+      if (!client) return
+
+      try {
+        const items = await client.v1.notifications.list({ limit: 40 } as any)
+        if (!items.length) {
+          this.unreadCount = 0
+          return
+        }
+
+        // First visit: treat current stack as read so badge doesn't explode
+        if (!this.lastReadId) {
+          this.persistLastRead(items[0].id)
+          this.unreadCount = 0
+          return
+        }
+
+        this.unreadCount = items.filter((n) => n.id > this.lastReadId!).length
+      } catch (e) {
+        console.warn('Unread badge refresh failed:', e)
+      }
+    },
+
     async fetchNotifications(refresh = false) {
       if (this.isLoading) return
 
@@ -124,6 +193,7 @@ export const useNotificationsStore = defineStore('notifications', {
         return
       }
 
+      this.loadLastRead()
       this.isLoading = true
       this.error = null
 
@@ -137,10 +207,11 @@ export const useNotificationsStore = defineStore('notifications', {
         if (items.length > 0) {
           this.maxId = items[items.length - 1].id
           if (!this.lastReadId) {
-            this.lastReadId = items[0].id
+            this.persistLastRead(items[0].id)
           }
         }
         this.hasMore = items.length >= 30
+        this.recomputeUnread()
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch notifications'
         console.error('Notifications fetch error:', e)
@@ -191,12 +262,18 @@ export const useNotificationsStore = defineStore('notifications', {
       if (!client) return
 
       try {
+        const topId = this.notifications[0]?.id
         await (client.v1.markers as any).create({
-          notifications: { lastReadId: this.notifications[0]?.id },
+          notifications: { lastReadId: topId },
         })
+        if (topId) this.persistLastRead(topId)
         this.unreadCount = 0
       } catch (e) {
         console.warn('Failed to mark notifications as read:', e)
+        // Still clear locally so the badge isn't stuck
+        const topId = this.notifications[0]?.id
+        if (topId) this.persistLastRead(topId)
+        this.unreadCount = 0
       }
     },
 

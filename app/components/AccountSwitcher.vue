@@ -39,9 +39,14 @@ const toggleMenu = () => {
   menuOpen.value = !menuOpen.value
 }
 
-const selectAccount = (id: string) => {
+const selectAccount = async (id: string) => {
   instancesStore.setActiveAccount(id)
   closeMenu()
+  // If viewing own profile, reload so the switched account shows
+  if (route.path === '/profile' && !route.query.user) {
+    const { useProfileStore } = await import('~/stores/profile')
+    await useProfileStore().fetchProfile()
+  }
 }
 
 const goProfile = () => {

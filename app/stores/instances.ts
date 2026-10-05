@@ -613,7 +613,10 @@ export const useInstancesStore = defineStore('instances', {
       return allStatuses
     },
 
-    async fetchMergedHomeTimeline(limit: number = 20): Promise<ExtendedStatus[]> {
+    async fetchMergedHomeTimeline(
+      limit: number = 20,
+      cursors?: Record<string, string>,
+    ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
       const authInstances = this.instances.filter((i) => i.accessToken)
 
@@ -624,7 +627,11 @@ export const useInstancesStore = defineStore('instances', {
             accessToken: instance.accessToken!,
           })
 
-          const statuses = await client.v1.timelines.home.list({ limit })
+          const maxId = cursors?.[instance.id]
+          const statuses = await client.v1.timelines.home.list({
+            limit,
+            ...(maxId ? { maxId } : {}),
+          })
 
           return statuses.map((s) => ({
             ...s,

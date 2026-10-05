@@ -9,6 +9,9 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{
+  replied: [status: mastodon.v1.Status]
+}>()
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 
@@ -23,6 +26,8 @@ const isBookmarking = ref(false)
 const isMuting = ref(false)
 const isBlocking = ref(false)
 const showCopiedToast = ref(false)
+const showReplyToast = ref(false)
+const likePop = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
 
 const isReplying = ref(false)
@@ -30,6 +35,16 @@ const replyText = ref('')
 const isPostingReply = ref(false)
 const replyError = ref<string | null>(null)
 const replyTextarea = ref<HTMLTextAreaElement | null>(null)
+
+/** Media lightbox */
+const lightbox = ref<{ src: string; alt: string } | null>(null)
+
+/** Long-post collapse (Threads-style see more, without engagement bait) */
+const contentExpanded = ref(false)
+const plainLength = computed(() =>
+  (displayStatus.value.content || '').replace(/<[^>]*>/g, '').length,
+)
+const isLongPost = computed(() => plainLength.value > 320)
 
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 
@@ -39,6 +54,8 @@ const isOwnPost = computed(() => {
   return displayStatus.value.account.id === user.id ||
     displayStatus.value.account.acct === user.acct
 })
+
+const router = useRouter()
 
 const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
 
@@ -149,6 +166,10 @@ const handleFavourite = async () => {
   isFavouriting.value = true
   displayStatus.value.favourited = !displayStatus.value.favourited
   displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
+  if (displayStatus.value.favourited) {
+    likePop.value = true
+    setTimeout(() => { likePop.value = false }, 320)
+  }
 
   try {
     const ctx = await getActionContext()
@@ -229,11 +250,14 @@ const submitReply = async () => {
       status: text,
       inReplyToId: ctx.id,
       visibility: displayStatus.value.visibility as any,
+    }).then((created) => {
+      isReplying.value = false
+      replyText.value = ''
+      displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
+      emit('replied', created)
+      showReplyToast.value = true
+      setTimeout(() => { showReplyToast.value = false }, 3500)
     })
-
-    isReplying.value = false
-    replyText.value = ''
-    displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
   } catch (e: any) {
     console.error('Reply error:', e)
     replyError.value = e.message || 'Failed to post reply'
@@ -328,9 +352,12 @@ const handleMute = async () => {
 
   isMuting.value = true
   try {
-    await statusStore.muteAccount(displayStatus.value.account.id)
+    await statusStore.muteAccount(displayStatus.value.account.id, {
+      acct: displayStatus.value.account.acct,
+    })
   } catch (e) {
     console.error('Mute error:', e)
+    alert('Couldn’t mute that account. Try again from your home server.')
   } finally {
     isMuting.value = false
     isMenuOpen.value = false
@@ -345,9 +372,12 @@ const handleBlock = async () => {
 
   isBlocking.value = true
   try {
-    await statusStore.blockAccount(displayStatus.value.account.id)
+    await statusStore.blockAccount(displayStatus.value.account.id, {
+      acct: displayStatus.value.account.acct,
+    })
   } catch (e) {
     console.error('Block error:', e)
+    alert('Couldn’t block that account. Try again from your home server.')
   } finally {
     isBlocking.value = false
     isMenuOpen.value = false
@@ -361,10 +391,15 @@ const handleReport = async () => {
   if (reason === null) return
 
   try {
+    const ctx = await getActionContext()
     await statusStore.reportStatus(
-      displayStatus.value.id,
+      ctx?.id || displayStatus.value.id,
       displayStatus.value.account.id,
-      reason || undefined
+      reason || undefined,
+      {
+        statusUrl: statusUrl.value || undefined,
+        acct: displayStatus.value.account.acct,
+      },
     )
     alert('Report submitted. Thank you for helping keep the community safe.')
   } catch (e) {
@@ -397,11 +432,48 @@ const handleOpenOriginal = () => {
   isMenuOpen.value = false
 }
 
-const viewThread = () => {
-  if (statusUrl.value) {
-    window.open(statusUrl.value, '_blank')
-  }
+const openThread = () => {
+  const id = displayStatus.value.id
+  if (!id) return
+  const query = statusUrl.value ? { url: statusUrl.value } : undefined
+  router.push({ path: `/status/${id}`, query })
 }
+
+const viewThread = () => {
+  openThread()
+}
+
+const onContentClick = (e: MouseEvent) => {
+  const target = e.target as HTMLElement
+  // Let real links inside the HTML work normally
+  if (target.closest('a')) return
+  openThread()
+}
+
+const openLightbox = (media: mastodon.v1.MediaAttachment) => {
+  const src = media.url || media.previewUrl
+  if (!src) return
+  lightbox.value = { src, alt: media.description || 'Image' }
+}
+
+const closeLightbox = () => {
+  lightbox.value = null
+}
+
+const onLightboxKey = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') closeLightbox()
+}
+
+watch(lightbox, (val) => {
+  if (typeof document === 'undefined') return
+  if (val) {
+    document.addEventListener('keydown', onLightboxKey)
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.removeEventListener('keydown', onLightboxKey)
+    document.body.style.overflow = ''
+  }
+})
 
 watch(isMenuOpen, async (open) => {
   if (open) {
@@ -414,6 +486,8 @@ watch(isMenuOpen, async (open) => {
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenu)
+  document.removeEventListener('keydown', onLightboxKey)
+  document.body.style.overflow = ''
 })
 </script>
 
@@ -566,22 +640,43 @@ onUnmounted(() => {
         <!-- Content Warning / Spoiler -->
         <details v-if="displayStatus.spoilerText" class="status-cw">
           <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
-          <div class="status-content" v-html="displayStatus.content" />
+          <div class="status-content status-content--clickable" v-html="displayStatus.content" @click="onContentClick" />
         </details>
 
         <!-- Regular Content -->
-        <div v-else class="status-content" v-html="displayStatus.content" />
+        <div v-else class="status-content-wrap">
+          <div
+            class="status-content status-content--clickable"
+            :class="{ 'status-content--clamped': isLongPost && !contentExpanded }"
+            v-html="displayStatus.content"
+            @click="onContentClick"
+          />
+          <button
+            v-if="isLongPost && !contentExpanded"
+            type="button"
+            class="status-see-more"
+            @click.stop="contentExpanded = true"
+          >
+            See more
+          </button>
+        </div>
 
         <!-- Media Attachments -->
         <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
           <template v-for="media in displayStatus.mediaAttachments" :key="media.id">
-            <img
+            <button
               v-if="media.type === 'image'"
-              :src="media.previewUrl ?? media.url ?? undefined"
-              :alt="media.description || 'Image attachment'"
-              class="status-media-image"
-              loading="lazy"
-            />
+              type="button"
+              class="status-media-hit"
+              @click.stop="openLightbox(media)"
+            >
+              <img
+                :src="media.previewUrl ?? media.url ?? undefined"
+                :alt="media.description || 'Image attachment'"
+                class="status-media-image"
+                loading="lazy"
+              />
+            </button>
             <video
               v-else-if="media.type === 'video' || media.type === 'gifv'"
               :src="media.url ?? undefined"
@@ -622,7 +717,10 @@ onUnmounted(() => {
         <footer class="status-actions">
           <button
             class="status-action"
-            :class="{ 'status-action--liked': displayStatus.favourited }"
+            :class="{
+              'status-action--liked': displayStatus.favourited,
+              'status-action--pop': likePop,
+            }"
             :disabled="isFavouriting"
             aria-label="Like"
             @click="handleFavourite"
@@ -739,6 +837,32 @@ onUnmounted(() => {
     <Teleport to="body">
       <Transition name="toast-fade">
         <div v-if="showCopiedToast" class="status-toast">Link copied</div>
+      </Transition>
+      <Transition name="toast-fade">
+        <div v-if="showReplyToast" class="status-toast status-toast--action">
+          <span>Reply posted</span>
+          <button type="button" class="status-toast__btn" @click="openThread(); showReplyToast = false">
+            View thread
+          </button>
+        </div>
+      </Transition>
+      <Transition name="toast-fade">
+        <div
+          v-if="lightbox"
+          class="status-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image"
+          @click.self="closeLightbox"
+        >
+          <button type="button" class="status-lightbox__close" aria-label="Close" @click="closeLightbox">
+            ×
+          </button>
+          <img :src="lightbox.src" :alt="lightbox.alt" class="status-lightbox__img" />
+          <p v-if="lightbox.alt && lightbox.alt !== 'Image'" class="status-lightbox__caption">
+            {{ lightbox.alt }}
+          </p>
+        </div>
       </Transition>
     </Teleport>
   </article>
@@ -1041,6 +1165,17 @@ onUnmounted(() => {
   word-break: break-word;
   max-width: 100%;
 
+  &--clickable {
+    cursor: pointer;
+  }
+
+  &--clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
   :deep(p) {
     margin-bottom: 0.5rem;
     &:last-child { margin-bottom: 0; }
@@ -1067,12 +1202,51 @@ onUnmounted(() => {
   grid-template-columns: 1fr;
   gap: 0.375rem;
   margin-top: 0.5rem;
-  border-radius: 12px;
+  border-radius: 4px;
   overflow: hidden;
   max-width: 100%;
 
   &:has(> *:nth-child(2)) {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.status-media-hit {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.status-see-more {
+  margin-top: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--neo-font-family-ui);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--neo-accent);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+@keyframes like-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-action--pop svg {
+    animation: none;
   }
 }
 
@@ -1194,32 +1368,36 @@ onUnmounted(() => {
     cursor: not-allowed;
   }
 
-  // Favourite active = pink
+  // Liked = Braun accent (not X pink)
   &--liked {
-    color: #f91880;
+    color: var(--neo-accent);
 
     svg {
-      stroke: #f91880;
-      fill: #f91880;
+      stroke: var(--neo-accent);
+      fill: var(--neo-accent);
     }
 
     &:hover:not(:disabled) {
-      background: rgba(249, 24, 128, 0.1);
-      color: #f91880;
+      background: var(--neo-accent-soft);
+      color: var(--neo-accent);
     }
   }
 
-  // Boost active = green
+  &--pop svg {
+    animation: like-pop 0.32s ease;
+  }
+
+  // Boosted = success green (instrument, not Twitter)
   &--boosted {
-    color: #00ba7c;
+    color: var(--neo-success);
 
     svg {
-      stroke: #00ba7c;
+      stroke: var(--neo-success);
     }
 
     &:hover:not(:disabled) {
-      background: rgba(0, 186, 124, 0.1);
-      color: #00ba7c;
+      background: var(--neo-success-soft);
+      color: var(--neo-success);
     }
   }
 
@@ -1452,25 +1630,98 @@ onUnmounted(() => {
 }
 </style>
 
-<!-- Unscoped styles for teleported toast -->
+<!-- Unscoped styles for teleported toast / lightbox -->
 <style lang="scss">
 .status-toast {
   position: fixed;
   bottom: 7.5rem;
   left: 50%;
   transform: translateX(-50%);
-  padding: 0.75rem 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
   background: var(--neo-bg-secondary);
   color: var(--neo-text-primary);
   border: 1px solid var(--neo-border-color);
-  border-radius: 100px;
+  border-radius: 2px;
+  font-family: var(--neo-font-family-ui);
   font-size: 0.875rem;
   font-weight: 500;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
   z-index: 9999;
+
+  &--action {
+    padding-right: 0.5rem;
+  }
+
+  &__btn {
+    border: none;
+    background: var(--neo-accent);
+    color: var(--neo-text-inverse);
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 2px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--neo-accent-hover);
+    }
+  }
 
   @media (min-width: 1024px) {
     bottom: 2rem;
+  }
+}
+
+.status-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  background: color-mix(in srgb, #000 78%, transparent);
+  cursor: zoom-out;
+
+  &__close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 1px solid color-mix(in srgb, #fff 35%, transparent);
+    background: color-mix(in srgb, #000 40%, transparent);
+    color: #fff;
+    font-size: 1.5rem;
+    line-height: 1;
+    border-radius: 2px;
+    cursor: pointer;
+
+    &:hover {
+      background: color-mix(in srgb, #000 60%, transparent);
+    }
+  }
+
+  &__img {
+    max-width: min(96vw, 1200px);
+    max-height: 82vh;
+    object-fit: contain;
+    border-radius: 2px;
+    cursor: default;
+  }
+
+  &__caption {
+    margin: 0;
+    max-width: 40rem;
+    text-align: center;
+    color: color-mix(in srgb, #fff 85%, transparent);
+    font-size: 0.875rem;
   }
 }
 

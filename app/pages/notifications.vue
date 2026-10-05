@@ -80,6 +80,34 @@ const formatTime = (dateString: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+const router = useRouter()
+
+const openNotification = (notif: mastodon.v1.Notification) => {
+  // Follows → profile; everything else with a status → in-app thread
+  if (notif.type === 'follow' || notif.type === 'follow_request') {
+    const acct = notif.account?.acct
+    if (acct) {
+      router.push({ path: '/profile', query: { user: acct } })
+      return
+    }
+  }
+
+  const status = notif.status
+  if (status?.id) {
+    const url = status.url || status.uri
+    router.push({
+      path: `/status/${status.id}`,
+      query: url ? { url } : undefined,
+    })
+    return
+  }
+
+  const acct = notif.account?.acct
+  if (acct) {
+    router.push({ path: '/profile', query: { user: acct } })
+  }
+}
+
 const notifIcon = (type: string) => {
   switch (type) {
     case 'mention': return '💬'
@@ -131,6 +159,7 @@ const closeDropdowns = (e: MouseEvent) => {
 onMounted(async () => {
   if (canView.value) {
     await notificationsStore.fetchNotifications(true)
+    await notificationsStore.markAllRead()
   }
 
   if (loadTrigger.value) {
@@ -278,6 +307,10 @@ onBeforeUnmount(() => {
               :key="notif.id"
               class="notif-item"
               :class="'notif-item--' + notif.type"
+              role="button"
+              tabindex="0"
+              @click="openNotification(notif)"
+              @keydown.enter="openNotification(notif)"
             >
               <!-- Type icon badge -->
               <div class="notif-item__type-badge">
@@ -741,6 +774,7 @@ onBeforeUnmount(() => {
   background: transparent;
   transition: background-color 0.15s;
   position: relative;
+  cursor: pointer;
 
   &:hover {
     background: var(--neo-bg-hover);
@@ -748,6 +782,11 @@ onBeforeUnmount(() => {
     .notif-item__dismiss {
       opacity: 1;
     }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: -2px;
   }
 
   &__type-badge {

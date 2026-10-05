@@ -8,6 +8,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
+import { useThemeStore } from './theme'
 import { activeClient } from '~/composables/useMasto'
 import type { NeoFontId, NeoFontSizeId, NeoThemeId, NeoUiId } from '~/utils/appearance'
 import {
@@ -67,6 +68,10 @@ interface SettingsState {
     fontSize: NeoFontSizeId
     reduceMotion: boolean
     compactMode: boolean
+    /** Apply custom CSS from your Mastodon profile fields (css / custom_css / theme / style / chaos_css) */
+    customProfileCss: boolean
+    defaultVisibility: 'public' | 'unlisted' | 'private' | 'direct'
+    defaultSensitive: boolean
   }
   
   // Filters
@@ -102,6 +107,9 @@ export const useSettingsStore = defineStore('settings', {
       fontSize: 'medium',
       reduceMotion: false,
       compactMode: false,
+      customProfileCss: false,
+      defaultVisibility: 'public',
+      defaultSensitive: false,
     },
     
     filters: [],
@@ -137,16 +145,23 @@ export const useSettingsStore = defineStore('settings', {
     },
     
     /**
-     * Default post visibility
+     * Default post visibility — prefers local override, then Mastodon prefs
      */
-    defaultVisibility: (state): string => {
-      return state.preferences?.['posting:default:visibility'] || 'public'
+    defaultVisibility: (state): 'public' | 'unlisted' | 'private' | 'direct' => {
+      return (
+        state.localPreferences.defaultVisibility ||
+        state.preferences?.['posting:default:visibility'] ||
+        'public'
+      )
     },
     
     /**
      * Default sensitive media
      */
     defaultSensitive: (state): boolean => {
+      if (typeof state.localPreferences.defaultSensitive === 'boolean') {
+        return state.localPreferences.defaultSensitive
+      }
       return state.preferences?.['posting:default:sensitive'] || false
     },
   },
@@ -199,6 +214,7 @@ export const useSettingsStore = defineStore('settings', {
         const saved = localStorage.getItem(LOCAL_PREFS_KEY)
         if (saved) {
           const parsed = JSON.parse(saved)
+          const vis = parsed.defaultVisibility
           this.localPreferences = {
             ...this.localPreferences,
             ...parsed,
@@ -208,9 +224,17 @@ export const useSettingsStore = defineStore('settings', {
             fontSize: (['small', 'medium', 'large'].includes(parsed.fontSize)
               ? parsed.fontSize
               : this.localPreferences.fontSize) as NeoFontSizeId,
+            reduceMotion: !!parsed.reduceMotion,
+            compactMode: !!parsed.compactMode,
+            customProfileCss: !!parsed.customProfileCss,
+            defaultVisibility: (['public', 'unlisted', 'private', 'direct'].includes(vis)
+              ? vis
+              : this.localPreferences.defaultVisibility) as SettingsState['localPreferences']['defaultVisibility'],
+            defaultSensitive: !!parsed.defaultSensitive,
           }
         }
         this.applyLocalAppearance()
+        this.syncCustomProfileCss()
       } catch (e) {
         console.error('Failed to load local preferences:', e)
       }
@@ -232,6 +256,23 @@ export const useSettingsStore = defineStore('settings', {
           'compact-mode',
           this.localPreferences.compactMode,
         )
+      }
+    },
+
+    /**
+     * Apply or clear Myspace-style profile CSS ("Chaos Mode").
+     * CSS comes from Mastodon profile metadata fields: css, custom_css, theme, style, chaos_css.
+     */
+    syncCustomProfileCss() {
+      const themeStore = useThemeStore()
+      const instancesStore = useInstancesStore()
+      const css = instancesStore.userCustomCSS
+      if (css) themeStore.setUserCustomCSS(css)
+
+      if (this.localPreferences.customProfileCss && css) {
+        themeStore.enableChaosMode()
+      } else {
+        themeStore.disableChaosMode()
       }
     },
     
@@ -385,26 +426,26 @@ export const useSettingsStore = defineStore('settings', {
     },
     
     /**
-     * Update posting preferences
-     * Note: Mastodon API doesn't have a direct endpoint for this,
-     * but we can store it locally and use it when posting
+     * Update posting preferences — persisted locally (Mastodon prefs API is read-only)
      */
     async updatePostingDefaults(data: {
       visibility?: 'public' | 'unlisted' | 'private' | 'direct'
       sensitive?: boolean
       language?: string
     }) {
-      // These are stored in preferences but read-only via API
-      // We'll store locally and apply when posting
-      if (this.preferences) {
-        if (data.visibility) {
+      if (data.visibility) {
+        this.localPreferences.defaultVisibility = data.visibility
+        if (this.preferences) {
           this.preferences['posting:default:visibility'] = data.visibility
         }
-        if (data.sensitive !== undefined) {
+      }
+      if (data.sensitive !== undefined) {
+        this.localPreferences.defaultSensitive = data.sensitive
+        if (this.preferences) {
           this.preferences['posting:default:sensitive'] = data.sensitive
         }
       }
-      
+      this.saveLocalPreferences()
       this.saveSuccess = true
     },
     
@@ -421,6 +462,9 @@ export const useSettingsStore = defineStore('settings', {
       }
       this.saveLocalPreferences()
       this.applyLocalAppearance()
+      if (typeof data.customProfileCss === 'boolean') {
+        this.syncCustomProfileCss()
+      }
       this.saveSuccess = true
     },
 

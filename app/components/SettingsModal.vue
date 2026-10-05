@@ -13,7 +13,6 @@
 
 import { useSettingsStore, SETTINGS_CATEGORIES } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
-import { useThemeStore } from '~/stores/theme'
 import {
   FONT_OPTIONS,
   FONT_SIZE_OPTIONS,
@@ -28,7 +27,6 @@ import {
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
-const themeStore = useThemeStore()
 const contentEl = ref<HTMLElement | null>(null)
 
 // Edit form for profile
@@ -54,6 +52,7 @@ const appearanceForm = reactive({
   fontSize: 'medium' as NeoFontSizeId,
   reduceMotion: false,
   compactMode: false,
+  customProfileCss: false,
 })
 
 // Watch for settings load to populate forms
@@ -68,11 +67,22 @@ watch(() => settingsStore.account, (account) => {
 })
 
 watch(() => settingsStore.preferences, (prefs) => {
-  if (prefs) {
-    postingForm.visibility = prefs['posting:default:visibility'] || 'public'
-    postingForm.sensitive = prefs['posting:default:sensitive'] || false
-  }
-})
+  // Local overrides win; fall back to Mastodon prefs when present
+  postingForm.visibility = settingsStore.defaultVisibility
+  postingForm.sensitive = settingsStore.defaultSensitive
+  if (!prefs) return
+}, { immediate: true })
+
+watch(
+  () => [
+    settingsStore.localPreferences.defaultVisibility,
+    settingsStore.localPreferences.defaultSensitive,
+  ],
+  () => {
+    postingForm.visibility = settingsStore.defaultVisibility
+    postingForm.sensitive = settingsStore.defaultSensitive
+  },
+)
 
 watch(() => settingsStore.localPreferences, (prefs) => {
   if (prefs) {
@@ -82,6 +92,7 @@ watch(() => settingsStore.localPreferences, (prefs) => {
     appearanceForm.fontSize = prefs.fontSize
     appearanceForm.reduceMotion = prefs.reduceMotion
     appearanceForm.compactMode = prefs.compactMode
+    appearanceForm.customProfileCss = prefs.customProfileCss
   }
 }, { immediate: true })
 
@@ -135,9 +146,12 @@ const saveAppearance = () => {
     fontSize: appearanceForm.fontSize,
     reduceMotion: appearanceForm.reduceMotion,
     compactMode: appearanceForm.compactMode,
+    customProfileCss: appearanceForm.customProfileCss,
   })
   settingsStore.clearSuccess()
 }
+
+const hasProfileCss = computed(() => !!instancesStore.userCustomCSS)
 
 // Visibility options
 const visibilityOptions = [
@@ -312,6 +326,16 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     </div>
                     <input v-model="profileForm.locked" type="checkbox" class="settings-checkbox" />
                   </label>
+
+                  <div class="settings-actions" style="margin-top: 1rem;">
+                    <button
+                      class="settings-btn settings-btn--primary"
+                      :disabled="settingsStore.isSaving"
+                      @click="saveProfile"
+                    >
+                      {{ settingsStore.isSaving ? 'Saving...' : 'Save Privacy' }}
+                    </button>
+                  </div>
 
                   <div class="settings-divider" />
                   
@@ -525,6 +549,35 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <span class="settings-toggle__desc">Show more content with reduced spacing</span>
                     </div>
                     <input v-model="appearanceForm.compactMode" type="checkbox" class="settings-checkbox" />
+                  </label>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Custom profile CSS</h3>
+                  <p class="settings-hint">
+                    Optional Myspace-style skins. If your Mastodon profile has a field named
+                    <code>css</code>, <code>custom_css</code>, <code>theme</code>, <code>style</code>, or
+                    <code>chaos_css</code>, NeoSpace can apply that CSS here. (Formerly called Chaos Mode.)
+                  </p>
+
+                  <label class="settings-toggle">
+                    <div class="settings-toggle__info">
+                      <span class="settings-toggle__label">Apply my profile CSS</span>
+                      <span class="settings-toggle__desc">
+                        {{
+                          hasProfileCss
+                            ? 'Uses the CSS from your profile metadata fields'
+                            : 'No custom CSS found on your profile yet — add a field named css or custom_css'
+                        }}
+                      </span>
+                    </div>
+                    <input
+                      v-model="appearanceForm.customProfileCss"
+                      type="checkbox"
+                      class="settings-checkbox"
+                      :disabled="!hasProfileCss"
+                      @change="saveAppearance"
+                    />
                   </label>
                 </div>
 
