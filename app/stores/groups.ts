@@ -547,48 +547,36 @@ export const useGroupsStore = defineStore('groups', {
           ? this.getClient()
           : this.getPublicClient()
 
-        // Mastodon caps around 20 per page; walk a few pages for breadth
         const seen = new Set(this.groups.map((g) => g.tag.toLowerCase()))
-        let offset = 0
-        const pageSize = 20
-        const maxPages = 3
 
-        for (let page = 0; page < maxPages; page++) {
-          const tags = await client.v1.trends.tags.list({
-            limit: pageSize,
-            offset,
-          })
-          if (!tags?.length) break
+        // Mastodon trends/tags maxes out around 20 — still a live slice of the network
+        const tags = await client.v1.trends.tags.list({ limit: 20 })
+        if (!tags?.length) return
 
-          for (const tag of tags) {
-            const name = tag.name
-            const key = name.toLowerCase()
-            if (seen.has(key)) {
-              // Mark existing curated groups as also trending
-              const existing = this.groups.find((g) => g.tag.toLowerCase() === key)
-              if (existing) existing.trending = true
-              continue
-            }
-            seen.add(key)
-
-            const uses =
-              tag.history?.reduce((sum, day) => sum + Number(day.uses || 0), 0) || undefined
-
-            this.groups.push({
-              tag: name,
-              name: this.formatTagAsName(name),
-              description: `Live on the network — #${name}`,
-              icon: '🔥',
-              category: this.guessCategory(name),
-              isMember: false,
-              featured: false,
-              trending: true,
-              postsCount: uses,
-            })
+        for (const tag of tags) {
+          const name = tag.name
+          const key = name.toLowerCase()
+          if (seen.has(key)) {
+            const existing = this.groups.find((g) => g.tag.toLowerCase() === key)
+            if (existing) existing.trending = true
+            continue
           }
+          seen.add(key)
 
-          if (tags.length < pageSize) break
-          offset += pageSize
+          const uses =
+            tag.history?.reduce((sum, day) => sum + Number(day.uses || 0), 0) || undefined
+
+          this.groups.push({
+            tag: name,
+            name: this.formatTagAsName(name),
+            description: `Live on the network — #${name}`,
+            icon: '🔥',
+            category: this.guessCategory(name),
+            isMember: false,
+            featured: false,
+            trending: true,
+            postsCount: uses,
+          })
         }
       } catch (e: any) {
         // Trending is best-effort; curated list still works
