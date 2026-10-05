@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Subtle top-right suite waffle — same pattern as ibm.io/wordcount.
- * Curated for “be smarter”: Loom + desk instruments + NeoSpace, then the full map.
+ * Subtle bottom-right suite waffle — same pattern as ibm.io/wordcount,
+ * tucked above mobile chrome so it stays out of the way.
  */
 
 type SuiteTool = {
@@ -165,11 +165,12 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .suite-menu {
   position: fixed;
-  top: max(10px, env(safe-area-inset-top));
   right: max(10px, env(safe-area-inset-right));
+  // Above mobile bottom nav (+ leave-a-note sits on the left)
+  bottom: max(4.5rem, calc(env(safe-area-inset-bottom) + 3.75rem));
   z-index: 90;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: flex-end;
   font-family: var(--neo-font-family-ui, var(--neo-font-family));
   color: var(--neo-text-muted);
@@ -179,14 +180,9 @@ onUnmounted(() => {
     z-index: 120;
   }
 
-  // Desktop: clear of the left rail. Mobile: sit left of the theme orb.
   @media (min-width: 1024px) {
-    top: max(12px, env(safe-area-inset-top));
     right: max(16px, env(safe-area-inset-right));
-  }
-
-  @media (max-width: 1023px) {
-    right: max(52px, calc(env(safe-area-inset-right) + 48px));
+    bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
   }
 }
 
@@ -232,9 +228,9 @@ onUnmounted(() => {
 
 .suite-menu__panel {
   pointer-events: auto;
-  margin-top: 4px;
+  margin-bottom: 4px;
   width: min(292px, calc(100vw - 24px));
-  max-height: min(72vh, calc(100dvh - 64px));
+  max-height: min(60vh, calc(100dvh - 8rem));
   overflow: auto;
   overscroll-behavior: contain;
   padding: 12px 12px 14px;
