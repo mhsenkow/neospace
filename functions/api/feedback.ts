@@ -3,6 +3,8 @@
  * Requires Pages secret: wrangler pages secret put GITHUB_TOKEN --project-name neospace
  */
 
+import { allowRequest, clientIp } from '../utils/rateLimit'
+
 interface Env {
   GITHUB_TOKEN?: string
 }
@@ -14,6 +16,27 @@ interface PagesContext {
 
 const GITHUB_REPO = 'mhsenkow/neospace'
 const UA = 'NeoSpace-Feedback/1.0'
+
+/** Feedback submissions per IP per hour */
+const RATE_LIMIT = 5
+const RATE_WINDOW_MS = 60 * 60 * 1000
+
+const ALLOWED_ORIGINS = new Set([
+  'https://neospace.ibm.io',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+])
+
+function originAllowed(origin: string | null): boolean {
+  if (!origin) return false
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  try {
+    const host = new URL(origin).hostname
+    return host.endsWith('.neospace-dc4.pages.dev') || host.endsWith('.pages.dev')
+  } catch {
+    return false
+  }
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -27,6 +50,16 @@ function json(data: unknown, status = 200): Response {
 
 export const onRequestPost = async (context: PagesContext) => {
   const { request, env } = context
+
+  const origin = request.headers.get('Origin')
+  if (!originAllowed(origin)) {
+    return json({ error: 'Forbidden origin' }, 403)
+  }
+
+  const ip = clientIp(request)
+  if (!allowRequest(`feedback:${ip}`, RATE_LIMIT, RATE_WINDOW_MS)) {
+    return json({ error: 'Too many notes — try again later' }, 429)
+  }
 
   if (!env.GITHUB_TOKEN) {
     return json(

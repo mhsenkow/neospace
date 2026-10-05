@@ -67,25 +67,66 @@ export const useStatusStore = defineStore('status', {
 
     /**
      * Upload an image/video for a status.
-     * Skip server processing poll — Mastodon accepts the media id immediately,
-     * and waiting for url often hangs the compose button for 60s+.
+     * Uses raw fetch — masto's media.create polls /api/v1/media until `url` is
+     * set, which routinely hangs 30–60s on mastodon.social even with skipPolling
+     * (and older cached bundles ignored it). The media id from v2 is enough to post.
      */
     async uploadMedia(file: Blob, description?: string): Promise<mastodon.v1.MediaAttachment> {
       const instances = useInstancesStore()
-      if (!instances.isAuthenticated) {
+      if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
         throw new Error('Not authenticated')
       }
 
-      const client = this.getClient()
       const named =
         file instanceof File
           ? file
           : new File([file], 'upload.bin', { type: file.type || 'application/octet-stream' })
-      return await client.v2.media.create({
-        file: named,
-        description: description || undefined,
-        skipPolling: true,
-      })
+
+      const form = new FormData()
+      form.append('file', named)
+      if (description) form.append('description', description)
+
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), 25_000)
+      try {
+        const res = await fetch(`${instances.instanceUrl}/api/v2/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${instances.accessToken}` },
+          body: form,
+          signal: controller.signal,
+        })
+        const raw = await res.json().catch(() => ({} as Record<string, unknown>))
+        if (!res.ok) {
+          const msg =
+            (typeof raw.error === 'string' && raw.error) ||
+            (typeof raw.error_description === 'string' && raw.error_description) ||
+            `Upload failed (${res.status})`
+          throw new Error(msg)
+        }
+        const id = String(raw.id || '')
+        if (!id) throw new Error('Upload failed — no media id returned')
+
+        // Normalize snake_case Mastodon payload to the shape compose expects
+        return {
+          id,
+          type: (raw.type as mastodon.v1.MediaAttachment['type']) || 'image',
+          url: (raw.url as string) || null,
+          previewUrl: (raw.preview_url as string) || (raw.previewUrl as string) || null,
+          remoteUrl: (raw.remote_url as string) || null,
+          previewRemoteUrl: (raw.preview_remote_url as string) || null,
+          textUrl: (raw.text_url as string) || null,
+          description: (raw.description as string) || null,
+          blurhash: (raw.blurhash as string) || null,
+          meta: (raw.meta as mastodon.v1.MediaAttachment['meta']) || undefined,
+        } as mastodon.v1.MediaAttachment
+      } catch (e: any) {
+        if (e?.name === 'AbortError') {
+          throw new Error('Upload timed out — tap the image to retry')
+        }
+        throw e
+      } finally {
+        window.clearTimeout(timer)
+      }
     },
 
     async resolveStatus(statusUrl: string): Promise<string | null> {

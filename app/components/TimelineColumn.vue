@@ -172,6 +172,28 @@ const pollForNew = async () => {
   }
 }
 
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+const startPolling = () => {
+  stopPolling()
+  if (typeof document !== 'undefined' && document.hidden) return
+  pollTimer = setInterval(pollForNew, 45000)
+}
+
+const onVisibilityChange = () => {
+  if (document.hidden) {
+    stopPolling()
+    return
+  }
+  void pollForNew()
+  startPolling()
+}
+
 const fetchTimeline = async (refresh = false) => {
   if (refresh) {
     statuses.value = []
@@ -353,14 +375,16 @@ onMounted(async () => {
     scrollContainer.value?.addEventListener('scroll', onScroll, { passive: true })
   })
   document.addEventListener('click', closeFeedMenu)
-  pollTimer = setInterval(pollForNew, 45000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  startPolling()
 })
 
 onUnmounted(() => {
   if (observer) observer.disconnect()
   document.removeEventListener('click', closeFeedMenu)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   scrollContainer.value?.removeEventListener('scroll', onScroll)
-  if (pollTimer) clearInterval(pollTimer)
+  stopPolling()
 })
 </script>
 <template>

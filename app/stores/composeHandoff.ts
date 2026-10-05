@@ -1,9 +1,10 @@
 /**
  * Cross-app compose handoff — Loom → NeoSpace chart + lineage.
  *
- * Preferred path: Loom opens NeoSpace and postMessages the PNG (Cache API
- * for /s/{id}.img is colo-local and often 404s from another edge).
- * Fallback: fetch story .img / .data when present.
+ * Reliable path: Loom publishes the story (KV-backed `/s/{id}.img`) and opens
+ * NeoSpace with `?compose=loom&story=…`. We fetch the PNG + lineage over HTTPS.
+ * postMessage is an optional fast path when opener survives; large charts often
+ * fail that channel, so story fetch is authoritative.
  */
 
 import { defineStore } from 'pinia'
@@ -22,7 +23,7 @@ const STORAGE_KEY = 'neospace_loom_share_v1'
 type StoredShare = {
   text: string
   story: string
-  /** data URL for the chart image */
+  /** data URL for the chart image (optional; story fetch is preferred) */
   imageDataUrl?: string
   imageName?: string
 }
@@ -50,6 +51,17 @@ async function fetchAsFile(url: string, filename: string, typeHint?: string): Pr
   } catch {
     return null
   }
+}
+
+/** Story assets can take a beat after publish — retry briefly. */
+async function fetchStoryImage(base: string, filename: string): Promise<File | null> {
+  const delays = [0, 400, 900, 1600, 2500]
+  for (const wait of delays) {
+    if (wait) await new Promise((r) => setTimeout(r, wait))
+    const img = await fetchAsFile(`${base}.img`, filename)
+    if (img) return img
+  }
+  return null
 }
 
 function lineageBlurb(data: unknown): string | null {
@@ -92,7 +104,16 @@ function bufferToDataUrl(buffer: ArrayBuffer, type: string): string {
 
 export function persistLoomShare(share: StoredShare) {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(share))
+    // Prefer not storing huge data URLs — story URL is enough to re-fetch
+    const slim: StoredShare = {
+      text: share.text,
+      story: share.story,
+      imageName: share.imageName,
+    }
+    if (share.imageDataUrl && share.imageDataUrl.length < 500_000) {
+      slim.imageDataUrl = share.imageDataUrl
+    }
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(slim))
   } catch {
     /* quota / private */
   }
@@ -114,7 +135,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     pending: null as ComposeHandoffDraft | null,
     loading: false,
     error: null as string | null,
-    /** Dedupe repeated Loom postMessages (retries / double ready pings). */
+    /** Dedupe repeated Loom postMessages / query ingest. */
     lastIngestKey: null as string | null,
   }),
 
@@ -138,35 +159,38 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     },
 
     async ingestStored(share: StoredShare) {
-      const key = `${share.story || ''}|${share.text || ''}|${share.imageDataUrl ? 'img' : 'noimg'}`
-      if (this.lastIngestKey === key && (this.pending || this.hasPending)) {
-        return true
-      }
-      // Prefer an image-bearing share over a prior text-only one for the same story
+      const base = share.story ? storyBase(share.story) : null
+      // Key without img flag first — we upgrade after fetch
+      const provisionalKey = `${share.story || ''}|${share.text || ''}`
       if (
-        this.lastIngestKey?.startsWith(`${share.story || ''}|`) &&
+        this.lastIngestKey?.startsWith(provisionalKey) &&
         this.lastIngestKey.endsWith('|img') &&
-        !share.imageDataUrl
+        (this.pending || this.hasPending)
       ) {
-        return true
+        // Already have image-bearing draft for this story
+        if (!share.imageDataUrl) return true
       }
 
       this.loading = true
       this.error = null
       try {
         const files: File[] = []
-        if (share.imageDataUrl) {
-          const f = await fileFromDataUrl(share.imageDataUrl, share.imageName || 'loom-chart.png')
+        const imageName = share.imageName || 'loom-chart.png'
+
+        // 1) Prefer live story image (KV — works cross-colo)
+        if (base) {
+          const img = await fetchStoryImage(base, imageName)
+          if (img) files.push(img)
+        }
+
+        // 2) Fallback: data URL from postMessage / session
+        if (!files.length && share.imageDataUrl) {
+          const f = await fileFromDataUrl(share.imageDataUrl, imageName)
           if (f) files.push(f)
         }
 
         let lineageLine: string | null = null
-        const base = share.story ? storyBase(share.story) : null
         if (base) {
-          if (!files.length) {
-            const img = await fetchAsFile(`${base}.img`, 'loom-chart.png')
-            if (img) files.push(img)
-          }
           try {
             const dataRes = await fetch(`${base}.data`, { cache: 'no-store' })
             if (dataRes.ok) lineageLine = lineageBlurb(await dataRes.json())
@@ -181,6 +205,16 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         }
         if (base && !lines.some((l) => l.includes(base))) {
           lines.push('', base)
+        }
+
+        const key = `${share.story || ''}|${share.text || ''}|${files.length ? 'img' : 'noimg'}`
+        // Don't replace an image draft with a later text-only one
+        if (
+          this.lastIngestKey?.startsWith(`${share.story || ''}|`) &&
+          this.lastIngestKey.endsWith('|img') &&
+          !files.length
+        ) {
+          return true
         }
 
         this.lastIngestKey = key
@@ -210,20 +244,31 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     },
 
     /**
-     * Accept a live postMessage from Loom (includes the PNG bytes).
+     * Optional live postMessage from Loom (may include PNG bytes).
+     * Still re-fetches story.img when possible — more reliable for large charts.
      */
     async ingestFromMessage(data: {
       text?: string
       story?: string
       image?: { name?: string; type?: string; buffer: ArrayBuffer }
     }) {
+      const imageName = data.image?.name || 'loom-chart.png'
+      const imageType = data.image?.type?.startsWith('image/')
+        ? data.image.type
+        : 'image/png'
+
       let imageDataUrl: string | undefined
-      let imageName: string | undefined
-      if (data.image?.buffer) {
-        const type = data.image.type?.startsWith('image/') ? data.image.type : 'image/png'
-        imageDataUrl = bufferToDataUrl(data.image.buffer, type)
-        imageName = data.image.name || 'loom-chart.png'
+      if (data.image?.buffer && data.image.buffer.byteLength > 0) {
+        try {
+          // Only keep small images in sessionStorage; large ones use story fetch
+          if (data.image.buffer.byteLength < 400_000) {
+            imageDataUrl = bufferToDataUrl(data.image.buffer, imageType)
+          }
+        } catch {
+          /* ignore */
+        }
       }
+
       const share: StoredShare = {
         text: data.text || '',
         story: data.story || '',
@@ -231,6 +276,27 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         imageName,
       }
       persistLoomShare(share)
+
+      // If we have bytes and no story URL yet, use them directly
+      if (data.image?.buffer && data.image.buffer.byteLength > 0 && !share.story) {
+        const key = `|${share.text || ''}|img`
+        if (this.lastIngestKey === key && (this.pending || this.hasPending)) return true
+        this.loading = true
+        this.error = null
+        try {
+          const file = new File([data.image.buffer], imageName, { type: imageType })
+          this.lastIngestKey = key
+          this.pending = {
+            text: (share.text || '').trim(),
+            files: [file],
+            notice: 'Chart image loaded from Loom — review and post',
+          }
+          return true
+        } finally {
+          this.loading = false
+        }
+      }
+
       return this.ingestStored(share)
     },
   },

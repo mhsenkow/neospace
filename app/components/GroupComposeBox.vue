@@ -48,9 +48,9 @@ const {
   onPaste,
 } = useComposeMedia()
 
-const maxLength = 500
+const maxLength = computed(() => instancesStore.statusMaxCharacters)
 const hashtagLength = computed(() => ` #${props.tag}`.length)
-const effectiveMaxLength = computed(() => maxLength - hashtagLength.value)
+const effectiveMaxLength = computed(() => maxLength.value - hashtagLength.value)
 
 const characterCount = computed(() => content.value.length)
 const isOverLimit = computed(() => characterCount.value > effectiveMaxLength.value)

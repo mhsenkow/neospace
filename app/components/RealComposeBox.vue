@@ -69,10 +69,10 @@ const {
   onPaste,
 } = useComposeMedia()
 
-const maxLength = 500
+const maxLength = computed(() => instancesStore.statusMaxCharacters)
 
 const characterCount = computed(() => content.value.length)
-const isOverLimit = computed(() => characterCount.value > maxLength)
+const isOverLimit = computed(() => characterCount.value > maxLength.value)
 const canPost = computed(() => {
   const hasText = content.value.trim().length > 0
   return (

@@ -48,6 +48,78 @@ const currentThemeLabel = computed(() => settingsStore.localPreferences.theme)
 const currentUiLabel = computed(() => settingsStore.localPreferences.ui)
 
 onMounted(async () => {
+  // Loom handoff listener MUST register before initialize() — Loom may postMessage
+  // while auth/storage is still loading, and those messages are otherwise lost.
+  let loomShareAccepted = false
+  const LOOM_READY_ORIGINS = [...LOOM_ORIGINS]
+
+  const bufferFromMessage = (raw: unknown): ArrayBuffer | null => {
+    if (!raw) return null
+    if (raw instanceof ArrayBuffer && raw.byteLength > 0) return raw
+    if (ArrayBuffer.isView(raw) && raw.byteLength > 0) {
+      const view = raw as ArrayBufferView
+      return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+    }
+    return null
+  }
+
+  const ackLoom = (origin: string) => {
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'neospace-loom-ack', v: 1 }, origin)
+      }
+    } catch {
+      /* opener may be gone */
+    }
+  }
+
+  const pingLoomReady = () => {
+    try {
+      if (!window.opener || window.opener.closed) return
+      for (const origin of LOOM_READY_ORIGINS) {
+        window.opener.postMessage({ type: 'neospace-loom-ready', v: 1 }, origin)
+      }
+    } catch {
+      /* cross-origin opener may throw */
+    }
+  }
+
+  const onLoomMessage = (e: MessageEvent) => {
+    if (!LOOM_ORIGINS.has(e.origin)) return
+    if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
+    const buffer = bufferFromMessage(e.data.image?.buffer)
+    // Always ACK so Loom stops retrying — even for duplicate deliveries
+    ackLoom(e.origin)
+    if (loomShareAccepted && buffer) return
+    if (buffer) loomShareAccepted = true
+    void (async () => {
+      await composeHandoff.ingestFromMessage({
+        text: typeof e.data.text === 'string' ? e.data.text : '',
+        story: typeof e.data.story === 'string' ? e.data.story : '',
+        image: buffer
+          ? {
+              name: typeof e.data.image?.name === 'string' ? e.data.image.name : undefined,
+              type: typeof e.data.image?.type === 'string' ? e.data.image.type : undefined,
+              buffer,
+            }
+          : undefined,
+      })
+      if (!instancesStore.isAuthenticated) {
+        await router.replace('/login')
+      } else if (route.path !== '/') {
+        await router.replace('/')
+      }
+    })()
+  }
+  window.addEventListener('message', onLoomMessage)
+  pingLoomReady()
+  const readyInterval = window.setInterval(pingLoomReady, 400)
+  window.setTimeout(() => window.clearInterval(readyInterval), 10000)
+  onUnmounted(() => {
+    window.removeEventListener('message', onLoomMessage)
+    window.clearInterval(readyInterval)
+  })
+
   await instancesStore.initialize()
   settingsStore.loadLocalPreferences()
   applyTheme()
@@ -61,65 +133,40 @@ onMounted(async () => {
     notificationsStore.refreshUnreadBadge()
   }
 
-  // Loom handoff: accept PNG via postMessage (reliable) + query/session fallback
-  let loomShareAccepted = false
-  const onLoomMessage = (e: MessageEvent) => {
-    if (!LOOM_ORIGINS.has(e.origin)) return
-    if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
-    if (loomShareAccepted && e.data.image?.buffer) return
-    if (e.data.image?.buffer) loomShareAccepted = true
-    void (async () => {
-      await composeHandoff.ingestFromMessage({
-        text: typeof e.data.text === 'string' ? e.data.text : '',
-        story: typeof e.data.story === 'string' ? e.data.story : '',
-        image: e.data.image?.buffer
-          ? {
-              name: e.data.image.name,
-              type: e.data.image.type,
-              buffer: e.data.image.buffer,
-            }
-          : undefined,
-      })
-      if (!instancesStore.isAuthenticated) {
-        await router.replace('/login')
-      } else if (route.path !== '/') {
-        await router.replace('/')
-      }
-    })()
-  }
-  window.addEventListener('message', onLoomMessage)
-  onUnmounted(() => window.removeEventListener('message', onLoomMessage))
-
-  // Tell Loom we're ready to receive the chart image (once)
-  try {
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage({ type: 'neospace-loom-ready' }, 'https://loom.ibm.io')
-    }
-  } catch {
-    /* cross-origin opener may throw */
-  }
+  // Re-ping after init — opener may have missed early ready signals
+  pingLoomReady()
 
   const fromQuery = String(route.query.compose || '') === 'loom'
   if (fromQuery) {
-    persistLoomShare({
+    const share = {
       story: typeof route.query.story === 'string' ? route.query.story : '',
       text: typeof route.query.text === 'string' ? route.query.text : '',
-    })
+    }
+    persistLoomShare(share)
     await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })
-  }
 
-  // Give Loom a moment to postMessage the PNG before falling back to link-only
-  await new Promise((r) => setTimeout(r, 900))
-
-  if (!composeHandoff.hasPending) {
-    const loomPayload = readPersistedLoomShare()
-    if (loomPayload && (loomPayload.story || loomPayload.text || loomPayload.imageDataUrl)) {
-      if (!instancesStore.isAuthenticated) {
-        persistLoomShare(loomPayload)
-        if (route.path !== '/login') await router.replace('/login')
-      } else {
-        await composeHandoff.ingestStored(loomPayload)
-        if (route.path !== '/') await router.replace('/')
+    // Story URL is authoritative (KV-backed .img). Don't wait on postMessage.
+    if (!instancesStore.isAuthenticated) {
+      persistLoomShare(share)
+      if (route.path !== '/login') await router.replace('/login')
+    } else {
+      await composeHandoff.ingestStored(share)
+      loomShareAccepted = composeHandoff.hasPending
+      if (route.path !== '/') await router.replace('/')
+    }
+  } else {
+    // Give optional postMessage a short window when we weren't opened via query
+    await new Promise((r) => setTimeout(r, 1200))
+    if (!composeHandoff.hasPending && !loomShareAccepted) {
+      const loomPayload = readPersistedLoomShare()
+      if (loomPayload && (loomPayload.story || loomPayload.text || loomPayload.imageDataUrl)) {
+        if (!instancesStore.isAuthenticated) {
+          persistLoomShare(loomPayload)
+          if (route.path !== '/login') await router.replace('/login')
+        } else {
+          await composeHandoff.ingestStored(loomPayload)
+          if (route.path !== '/') await router.replace('/')
+        }
       }
     }
   }
@@ -196,9 +243,9 @@ const closeMobileMenu = () => {
       'neo-layout--thread': isThreadRoute,
     }"
   >
-    <Teleport to="head" v-if="themeStore.isChaosMode && themeStore.userCustomCSS">
+    <Teleport to="head" v-if="themeStore.isChaosMode && themeStore.safeCustomCSS">
       <component :is="'style'" id="neospace-chaos-dynamic">
-        {{ themeStore.userCustomCSS }}
+        {{ themeStore.safeCustomCSS }}
       </component>
     </Teleport>
 

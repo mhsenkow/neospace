@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
  * Leave-a-note FAB → GitHub issue (same pattern as loom.ibm.io FeedbackNotes)
+ * Mobile: centered modal that tracks visualViewport so the keyboard doesn't bury inputs.
  */
 
 import {
@@ -25,8 +26,15 @@ const shot = ref<string | null>(null)
 const busy = ref(false)
 const toast = ref<string | null>(null)
 const fileRef = ref<HTMLInputElement | null>(null)
+const titleRef = ref<HTMLInputElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+const overlayRef = ref<HTMLElement | null>(null)
+
+/** visualViewport offset — keeps the sheet in the visible area above the keyboard */
+const viewportStyle = ref<Record<string, string>>({})
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+let scrollLockY = 0
 
 const showToast = (msg: string) => {
   toast.value = msg
@@ -42,6 +50,61 @@ const reset = () => {
   kind.value = 'ux'
   shot.value = null
   if (fileRef.value) fileRef.value.value = ''
+}
+
+const syncViewport = () => {
+  if (typeof window === 'undefined') return
+  const vv = window.visualViewport
+  if (!vv) {
+    viewportStyle.value = {
+      top: '0px',
+      left: '0px',
+      width: '100%',
+      height: '100%',
+    }
+    return
+  }
+  // Position overlay to the *visible* viewport (above soft keyboard)
+  viewportStyle.value = {
+    top: `${vv.offsetTop}px`,
+    left: `${vv.offsetLeft}px`,
+    width: `${vv.width}px`,
+    height: `${vv.height}px`,
+  }
+}
+
+const lockScroll = () => {
+  if (typeof document === 'undefined') return
+  scrollLockY = window.scrollY || 0
+  document.documentElement.style.overflow = 'hidden'
+  document.body.style.overflow = 'hidden'
+  document.body.style.position = 'fixed'
+  document.body.style.inset = '0'
+  document.body.style.width = '100%'
+}
+
+const unlockScroll = () => {
+  if (typeof document === 'undefined') return
+  document.documentElement.style.overflow = ''
+  document.body.style.overflow = ''
+  document.body.style.position = ''
+  document.body.style.inset = ''
+  document.body.style.width = ''
+  window.scrollTo(0, scrollLockY)
+}
+
+const onFocusField = (e: FocusEvent) => {
+  const el = e.target as HTMLElement | null
+  if (!el || !panelRef.value) return
+  // After keyboard animates, scroll the focused field into the panel's visible area
+  window.setTimeout(() => {
+    syncViewport()
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, 300)
+}
+
+const close = () => {
+  open.value = false
 }
 
 const onUpload = async (file: File | undefined) => {
@@ -68,7 +131,7 @@ const submit = async () => {
     showToast('Note filed as a GitHub issue')
     window.open(url, '_blank', 'noopener,noreferrer')
     reset()
-    open.value = false
+    close()
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     const fallback = getGitHubNewIssueUrl(fullTitle, fullBody)
@@ -83,8 +146,43 @@ const submit = async () => {
   }
 }
 
+const onKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && open.value) {
+    e.preventDefault()
+    close()
+  }
+}
+
+watch(open, async (isOpen) => {
+  if (typeof window === 'undefined') return
+  if (isOpen) {
+    syncViewport()
+    lockScroll()
+    window.visualViewport?.addEventListener('resize', syncViewport)
+    window.visualViewport?.addEventListener('scroll', syncViewport)
+    window.addEventListener('resize', syncViewport)
+    await nextTick()
+    titleRef.value?.focus({ preventScroll: true })
+  } else {
+    unlockScroll()
+    window.visualViewport?.removeEventListener('resize', syncViewport)
+    window.visualViewport?.removeEventListener('scroll', syncViewport)
+    window.removeEventListener('resize', syncViewport)
+    viewportStyle.value = {}
+  }
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+
 onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
+  window.removeEventListener('keydown', onKeydown)
+  window.visualViewport?.removeEventListener('resize', syncViewport)
+  window.visualViewport?.removeEventListener('scroll', syncViewport)
+  window.removeEventListener('resize', syncViewport)
+  if (open.value) unlockScroll()
 })
 </script>
 
@@ -106,16 +204,18 @@ onUnmounted(() => {
     <Transition name="notes">
       <div
         v-if="open"
+        ref="overlayRef"
         class="notes-overlay"
+        :style="viewportStyle"
         role="dialog"
         aria-modal="true"
-        aria-label="Leave a note"
-        @click.self="open = false"
+        aria-labelledby="neospace-notes-title"
+        @click.self="close"
       >
-        <div class="notes-panel">
+        <div ref="panelRef" class="notes-panel">
           <header class="notes-panel__header">
-            <h2>Leave a note</h2>
-            <button type="button" class="notes-panel__close" aria-label="Close" @click="open = false">×</button>
+            <h2 id="neospace-notes-title">Leave a note</h2>
+            <button type="button" class="notes-panel__close" aria-label="Close" @click="close">×</button>
           </header>
 
           <p class="notes-panel__lede">
@@ -136,11 +236,15 @@ onUnmounted(() => {
           </div>
 
           <input
+            ref="titleRef"
             v-model="title"
             type="text"
             class="notes-input"
             placeholder="Short title"
-            autofocus
+            enterkeyhint="next"
+            autocomplete="off"
+            autocorrect="on"
+            @focus="onFocusField"
             @keydown.enter.prevent="submit"
           />
 
@@ -149,6 +253,8 @@ onUnmounted(() => {
             class="notes-textarea"
             placeholder="What happened / what would help…"
             rows="4"
+            enterkeyhint="done"
+            @focus="onFocusField"
           />
 
           <div class="notes-shot-row">
@@ -171,7 +277,7 @@ onUnmounted(() => {
           <img v-if="shot" :src="shot" alt="Screenshot preview" class="notes-preview" />
 
           <div class="notes-actions">
-            <button type="button" class="notes-cancel" @click="open = false">Cancel</button>
+            <button type="button" class="notes-cancel" @click="close">Cancel</button>
             <button
               type="button"
               class="notes-submit"
@@ -225,34 +331,35 @@ onUnmounted(() => {
 
 .notes-overlay {
   position: fixed;
-  inset: 0;
   z-index: 1100;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
-  padding: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(3px);
-
-  @media (min-width: 640px) {
-    align-items: center;
-    padding: 1rem;
-  }
+  box-sizing: border-box;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  /* Fallback when visualViewport style isn't applied yet */
+  inset: 0;
+  overscroll-behavior: contain;
 }
 
 .notes-panel {
-  width: 100%;
-  max-width: 26rem;
-  padding: 1.125rem 1.125rem calc(1.125rem + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 26rem);
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 1.125rem;
   background: var(--neo-bg-card);
   border: 1px solid var(--neo-border-color);
-  border-radius: 16px 16px 0 0;
-  box-shadow: 0 12px 40px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
-
-  @media (min-width: 640px) {
-    border-radius: 10px;
-    padding: 1.25rem;
-  }
+  border-radius: 12px;
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--neo-text-primary) 22%, transparent);
 }
 
 .notes-panel__header {
@@ -260,20 +367,21 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  flex-shrink: 0;
   margin-bottom: 0.35rem;
 
   h2 {
     margin: 0;
-    font-size: 0.9375rem;
+    font-size: 1rem;
     font-weight: 600;
     color: var(--neo-text-primary);
   }
 }
 
 .notes-panel__close {
-  width: 1.75rem;
-  height: 1.75rem;
-  font-size: 1.25rem;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.35rem;
   line-height: 1;
   color: var(--neo-text-muted);
   background: transparent;
@@ -289,6 +397,7 @@ onUnmounted(() => {
 
 .notes-panel__lede {
   margin: 0 0 0.75rem;
+  flex-shrink: 0;
   font-size: 0.75rem;
   line-height: 1.45;
   color: var(--neo-text-muted);
@@ -298,12 +407,13 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  flex-shrink: 0;
   margin-bottom: 0.75rem;
 }
 
 .notes-kind {
-  padding: 0.3rem 0.55rem;
-  font-size: 0.6875rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--neo-text-muted);
   background: transparent;
@@ -322,13 +432,15 @@ onUnmounted(() => {
 .notes-textarea {
   width: 100%;
   margin-bottom: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  font-size: 0.8125rem;
+  padding: 0.7rem 0.75rem;
+  /* ≥16px avoids iOS auto-zoom on focus */
+  font-size: 1rem;
   color: var(--neo-text-primary);
   background: var(--neo-bg-primary);
   border: 1px solid var(--neo-border-color-dark);
-  border-radius: 4px;
+  border-radius: 6px;
   outline: none;
+  box-sizing: border-box;
 
   &:focus {
     border-color: var(--neo-accent);
@@ -341,8 +453,10 @@ onUnmounted(() => {
 
 .notes-textarea {
   min-height: 5.5rem;
+  max-height: 12rem;
   resize: vertical;
   line-height: 1.45;
+  flex: 0 1 auto;
 }
 
 .notes-file {
@@ -358,12 +472,13 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  flex-shrink: 0;
   margin-bottom: 0.5rem;
 }
 
 .notes-shot-btn {
-  padding: 0.3rem 0.55rem;
-  font-size: 0.6875rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
   color: var(--neo-text-secondary);
   border: 1px solid var(--neo-border-color);
   border-radius: 4px;
@@ -376,7 +491,7 @@ onUnmounted(() => {
 }
 
 .notes-shot-clear {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--neo-text-muted);
   background: none;
   border: none;
@@ -389,9 +504,11 @@ onUnmounted(() => {
 
 .notes-preview {
   display: block;
-  max-height: 7rem;
+  max-height: 6rem;
   width: auto;
+  max-width: 100%;
   margin-bottom: 0.75rem;
+  flex-shrink: 0;
   border-radius: 4px;
   border: 1px solid var(--neo-border-color);
   object-fit: contain;
@@ -402,12 +519,15 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-  padding-top: 0.25rem;
+  flex-shrink: 0;
+  padding-top: 0.35rem;
+  /* Keep actions reachable above home indicator when keyboard is closed */
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 .notes-cancel {
-  padding: 0.45rem 0.75rem;
-  font-size: 0.8125rem;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.875rem;
   color: var(--neo-text-secondary);
   background: transparent;
   border: none;
@@ -421,8 +541,8 @@ onUnmounted(() => {
 }
 
 .notes-submit {
-  padding: 0.45rem 0.85rem;
-  font-size: 0.8125rem;
+  padding: 0.55rem 0.95rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--neo-text-on-accent, #fafaf8);
   background: var(--neo-accent);
@@ -466,7 +586,7 @@ onUnmounted(() => {
   transition: opacity 0.18s ease;
 
   .notes-panel {
-    transition: transform 0.18s ease;
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease;
   }
 }
 
@@ -475,7 +595,8 @@ onUnmounted(() => {
   opacity: 0;
 
   .notes-panel {
-    transform: translateY(12px);
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
   }
 }
 

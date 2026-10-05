@@ -24,6 +24,8 @@ export interface ConnectedInstance {
     title?: string
     thumbnail?: string
     description?: string
+    /** From v2 instance configuration.statuses.max_characters */
+    maxCharacters?: number
   } | null
   isConnecting: boolean
   error: string | null
@@ -151,6 +153,13 @@ export const useInstancesStore = defineStore('instances', {
 
     userCustomCSS(): string {
       return extractCustomCSS(this.activeAccount?.user ?? null)
+    },
+
+    /** Status character limit for the active posting account (Mastodon default 500). */
+    statusMaxCharacters(): number {
+      const n = this.activeAccount?.instanceInfo?.maxCharacters
+      if (typeof n === 'number' && n >= 100 && n <= 100_000) return n
+      return 500
     },
 
     getInstanceById: (state) => (id: string): ConnectedInstance | undefined =>
@@ -297,6 +306,7 @@ export const useInstancesStore = defineStore('instances', {
           title: info.title,
           thumbnail: info.thumbnail?.url,
           description: info.description,
+          maxCharacters: info.configuration?.statuses?.maxCharacters,
         }
         instance.isConnecting = false
         instance.lastFetched = new Date().toISOString()
@@ -489,6 +499,19 @@ export const useInstancesStore = defineStore('instances', {
             })
             instance.user = await client.v1.accounts.verifyCredentials()
             instance.error = null
+            // Refresh compose limit when possible (older saved instances may lack it)
+            try {
+              const info = await client.v2.instance.fetch()
+              instance.instanceInfo = {
+                ...(instance.instanceInfo || {}),
+                title: info.title || instance.instanceInfo?.title,
+                thumbnail: info.thumbnail?.url || instance.instanceInfo?.thumbnail,
+                description: info.description || instance.instanceInfo?.description,
+                maxCharacters: info.configuration?.statuses?.maxCharacters,
+              }
+            } catch {
+              /* non-fatal */
+            }
           } catch (e: any) {
             if (e.status === 401 || e.status === 403) {
               instance.accessToken = null
