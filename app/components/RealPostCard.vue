@@ -826,7 +826,7 @@ onUnmounted(() => {
         </Transition>
 
         <!-- Thread teaser -->
-        <div v-if="hasReplies" class="status-footer-row">
+        <div v-if="hasReplies && !hideInlineReply" class="status-footer-row">
           <button
             class="status-thread-preview"
             @click="viewThread"

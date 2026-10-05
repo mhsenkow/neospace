@@ -103,7 +103,13 @@ useHead({
 </script>
 
 <template>
-  <div class="thread-page" :class="{ 'thread-page--can-reply': canReply && focusStatus }">
+  <div
+    class="thread-page"
+    :class="{
+      'thread-page--can-reply': canReply && focusStatus,
+      'thread-page--signin-hint': !canReply && focusStatus && !isLoading && !error,
+    }"
+  >
     <header class="thread-header">
       <button type="button" class="thread-back" @click="router.back()">← Back</button>
       <h1 class="thread-title">Thread</h1>
@@ -216,6 +222,10 @@ useHead({
     @media (min-width: 640px) {
       padding-bottom: calc(8.5rem + env(safe-area-inset-bottom, 0));
     }
+  }
+
+  &--signin-hint {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0));
   }
 }
 
