@@ -67,8 +67,9 @@ const getCategoryColor = (category: string) => {
     gaming: '#2f7d4a',
     social: '#a84c1e',
     news: '#3a6ea5',
+    trending: '#c45c26',
     local: '#757575',
-    other: '#757575'
+    other: '#757575',
   }
   return colors[category] || colors.other
 }
@@ -91,11 +92,11 @@ const getCategoryColor = (category: string) => {
       </p>
       <div class="group-card__meta">
         <span class="group-card__tag">#{{ group.tag }}</span>
-        <span 
+        <span
           class="group-card__category"
-          :style="{ color: getCategoryColor(group.category) }"
+          :style="{ color: getCategoryColor(group.trending ? 'trending' : group.category) }"
         >
-          {{ group.category }}
+          {{ group.trending ? 'trending' : group.category }}
         </span>
       </div>
     </div>

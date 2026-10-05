@@ -79,7 +79,8 @@ useHead({
         <p class="hero-kicker">Communities</p>
         <h1>Groups</h1>
         <p class="hero-subtitle">
-          Find your people. Join communities around topics you care about.
+          Groups are hashtags with a friendlier face. Browse curated picks, what’s
+          trending on your server, or search any tag — the range is as wide as the network.
         </p>
       </div>
     </header>
@@ -108,7 +109,7 @@ useHead({
             <input
               v-model="searchQuery"
               type="text"
-              placeholder="Search for groups or hashtags..."
+              placeholder="Any hashtag — try #baking, #horror, #vinyl…"
               class="search-input"
             />
             <span v-if="isSearching" class="search-loading">...</span>

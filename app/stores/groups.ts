@@ -11,6 +11,16 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, publicClient } from '~/composables/useMasto'
 
+export type GroupCategory =
+  | 'tech'
+  | 'creative'
+  | 'gaming'
+  | 'social'
+  | 'news'
+  | 'local'
+  | 'trending'
+  | 'other'
+
 export interface Group {
   /** The hashtag (without #) - this is the group's unique ID */
   tag: string
@@ -21,13 +31,15 @@ export interface Group {
   /** Emoji icon for the group */
   icon: string
   /** Category for filtering */
-  category: 'tech' | 'creative' | 'gaming' | 'social' | 'news' | 'local' | 'other'
+  category: GroupCategory
   /** Is the current user a member (following the hashtag)? */
   isMember: boolean
   /** Number of posts using this hashtag (approximation) */
   postsCount?: number
   /** Whether this is a featured/suggested group */
   featured?: boolean
+  /** Live from instance trending tags */
+  trending?: boolean
 }
 
 interface GroupsState {
@@ -385,12 +397,47 @@ const FEATURED_GROUPS: Omit<Group, 'isMember'>[] = [
 // Category definitions
 export const GROUP_CATEGORIES = [
   { id: 'all', label: 'All Groups', emoji: '✨' },
+  { id: 'trending', label: 'Trending', emoji: '🔥' },
   { id: 'tech', label: 'Tech', emoji: '💻' },
   { id: 'creative', label: 'Creative', emoji: '🎨' },
   { id: 'gaming', label: 'Gaming', emoji: '🎮' },
   { id: 'social', label: 'Social', emoji: '💬' },
   { id: 'news', label: 'News', emoji: '📰' },
-  { id: 'other', label: 'Other', emoji: '🌈' }
+  { id: 'other', label: 'Other', emoji: '🌈' },
+]
+
+/** Rough bucket for live tags so they land somewhere useful */
+const CATEGORY_KEYWORDS: Array<{ category: GroupCategory; words: string[] }> = [
+  {
+    category: 'tech',
+    words: [
+      'tech', 'linux', 'foss', 'opensource', 'privacy', 'security', 'coding', 'programming',
+      'python', 'javascript', 'webdev', 'ai', 'ml', 'selfhost', 'nixos', 'android', 'ios',
+      'fediverse', 'mastodon', 'activitypub', 'infosec', 'cyber',
+    ],
+  },
+  {
+    category: 'creative',
+    words: [
+      'art', 'photo', 'music', 'book', 'write', 'poem', 'design', 'film', 'movie', 'craft',
+      'draw', 'paint', 'illustration', 'animation', 'mastoart', 'nature', 'landscape',
+    ],
+  },
+  {
+    category: 'gaming',
+    words: ['game', 'gaming', 'gamedev', 'steam', 'nintendo', 'playstation', 'xbox', 'rpg', 'indie'],
+  },
+  {
+    category: 'social',
+    words: [
+      'cat', 'dog', 'food', 'cook', 'garden', 'travel', 'parent', 'lgbt', 'disability',
+      'mentalhealth', 'introduction', 'ask', 'help', 'friend',
+    ],
+  },
+  {
+    category: 'news',
+    words: ['news', 'politics', 'climate', 'science', 'world', 'election', 'breaking'],
+  },
 ]
 
 export const useGroupsStore = defineStore('groups', {
@@ -418,10 +465,21 @@ export const useGroupsStore = defineStore('groups', {
       return state.groups.filter(g => g.featured)
     },
 
-    /** Get groups by category */
+    /** Get groups by category — unjoined first so discovery isn't buried under Leave */
     getByCategory: (state) => (category: string): Group[] => {
-      if (category === 'all') return state.groups
-      return state.groups.filter(g => g.category === category)
+      const list =
+        category === 'all'
+          ? state.groups
+          : category === 'trending'
+            ? state.groups.filter((g) => g.trending || g.category === 'trending')
+            : state.groups.filter((g) => g.category === category)
+
+      return [...list].sort((a, b) => {
+        if (a.isMember !== b.isMember) return a.isMember ? 1 : -1
+        if (!!a.trending !== !!b.trending) return a.trending ? -1 : 1
+        if (!!a.featured !== !!b.featured) return a.featured ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
     },
 
     /** Get a specific group by tag */
@@ -449,26 +507,92 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     /**
-     * Initialize groups - load featured groups and check membership
+     * Initialize groups - curated + live trending hashtags from your server
      */
     async initializeGroups() {
       this.isLoading = true
       this.error = null
 
       try {
-        // Start with featured groups
-        this.groups = FEATURED_GROUPS.map(g => ({ ...g, isMember: false }))
+        this.groups = FEATURED_GROUPS.map((g) => ({ ...g, isMember: false, trending: false }))
 
-        // If authenticated, fetch followed tags to determine membership
         const instancesStore = useInstancesStore()
-        if (instancesStore.isAuthenticated) {
-          await this.fetchFollowedTags()
-        }
+        await Promise.all([
+          this.fetchTrendingTags(),
+          instancesStore.isAuthenticated ? this.fetchFollowedTags() : Promise.resolve(),
+        ])
       } catch (e: any) {
         this.error = e.message || 'Failed to initialize groups'
         console.error('Groups init error:', e)
       } finally {
         this.isLoading = false
+      }
+    },
+
+    guessCategory(tag: string): GroupCategory {
+      const lower = tag.toLowerCase()
+      for (const bucket of CATEGORY_KEYWORDS) {
+        if (bucket.words.some((w) => lower.includes(w))) return bucket.category
+      }
+      return 'other'
+    },
+
+    /**
+     * Pull whatever is hot on the instance — the wide / "scary" range of real hashtags
+     */
+    async fetchTrendingTags() {
+      try {
+        const instancesStore = useInstancesStore()
+        const client = instancesStore.isAuthenticated
+          ? this.getClient()
+          : this.getPublicClient()
+
+        // Mastodon caps around 20 per page; walk a few pages for breadth
+        const seen = new Set(this.groups.map((g) => g.tag.toLowerCase()))
+        let offset = 0
+        const pageSize = 20
+        const maxPages = 3
+
+        for (let page = 0; page < maxPages; page++) {
+          const tags = await client.v1.trends.tags.list({
+            limit: pageSize,
+            offset,
+          })
+          if (!tags?.length) break
+
+          for (const tag of tags) {
+            const name = tag.name
+            const key = name.toLowerCase()
+            if (seen.has(key)) {
+              // Mark existing curated groups as also trending
+              const existing = this.groups.find((g) => g.tag.toLowerCase() === key)
+              if (existing) existing.trending = true
+              continue
+            }
+            seen.add(key)
+
+            const uses =
+              tag.history?.reduce((sum, day) => sum + Number(day.uses || 0), 0) || undefined
+
+            this.groups.push({
+              tag: name,
+              name: this.formatTagAsName(name),
+              description: `Live on the network — #${name}`,
+              icon: '🔥',
+              category: this.guessCategory(name),
+              isMember: false,
+              featured: false,
+              trending: true,
+              postsCount: uses,
+            })
+          }
+
+          if (tags.length < pageSize) break
+          offset += pageSize
+        }
+      } catch (e: any) {
+        // Trending is best-effort; curated list still works
+        console.warn('Trending tags unavailable:', e?.message || e)
       }
     },
 
@@ -647,37 +771,75 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     /**
-     * Search/discover groups by hashtag
+     * Search/discover groups by hashtag — any tag on the network can be a group
      */
     async searchGroups(query: string) {
-      if (!query.trim()) return []
+      const q = query.trim().replace(/^#/, '')
+      if (!q) return []
 
       try {
-        const client = this.getPublicClient()
-        // Search for hashtags
+        const instancesStore = useInstancesStore()
+        const client = instancesStore.isAuthenticated
+          ? this.getClient()
+          : this.getPublicClient()
+
         const results = await client.v2.search.fetch({
-          q: query,
+          q,
           type: 'hashtags',
-          limit: 10
+          limit: 20,
         })
 
-        // Convert to groups
-        return results.hashtags.map(tag => {
-          const existing = this.groups.find(g => g.tag.toLowerCase() === tag.name.toLowerCase())
+        const mapped = results.hashtags.map((tag) => {
+          const existing = this.groups.find(
+            (g) => g.tag.toLowerCase() === tag.name.toLowerCase(),
+          )
           if (existing) return existing
 
           return {
             tag: tag.name,
             name: this.formatTagAsName(tag.name),
+            description: `Join #${tag.name} as a group`,
             icon: '🏷️',
-            category: 'other' as const,
+            category: this.guessCategory(tag.name),
             isMember: false,
-            featured: false
+            featured: false,
+            trending: false,
           }
         })
+
+        // Always offer an exact-match join for whatever they typed
+        const exact = q.toLowerCase()
+        if (!mapped.some((g) => g.tag.toLowerCase() === exact)) {
+          const existing = this.groups.find((g) => g.tag.toLowerCase() === exact)
+          mapped.unshift(
+            existing || {
+              tag: q,
+              name: this.formatTagAsName(q),
+              description: `Start following #${q}`,
+              icon: '➕',
+              category: this.guessCategory(q),
+              isMember: false,
+              featured: false,
+              trending: false,
+            },
+          )
+        }
+
+        return mapped
       } catch (e: any) {
         console.error('Group search error:', e)
-        return []
+        return [
+          {
+            tag: q,
+            name: this.formatTagAsName(q),
+            description: `Start following #${q}`,
+            icon: '➕',
+            category: this.guessCategory(q) as GroupCategory,
+            isMember: false,
+            featured: false,
+            trending: false,
+          },
+        ]
       }
     },
 
