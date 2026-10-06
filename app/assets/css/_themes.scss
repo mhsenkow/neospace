@@ -48,13 +48,21 @@
   --neo-bg-hover: #{$hair};
   --neo-bg-active: #{$rule};
 
+  // Emphasis ladder (loud → quiet): primary → secondary → tertiary → quaternary
   --neo-text-primary: #{$ink};
   --neo-text-secondary: #{$mute};
-  --neo-text-muted: #{$mute};
-  --neo-text-disabled: color-mix(in srgb, #{$mute} 70%, #{$bg});
+  --neo-text-tertiary: color-mix(in srgb, #{$mute} 72%, #{$bg});
+  --neo-text-quaternary: color-mix(in srgb, #{$mute} 42%, #{$bg});
+  --neo-text-muted: var(--neo-text-tertiary);
+  --neo-text-disabled: color-mix(in srgb, #{$mute} 55%, #{$bg});
   --neo-text-inverse: #{$bg};
   --neo-text-link: #{$accent};
   --neo-text-link-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
+
+  // Interactive chrome (icon controls, column headers, quiet UI)
+  --neo-chrome-fg: var(--neo-text-tertiary);
+  --neo-chrome-fg-strong: var(--neo-text-secondary);
+  --neo-chrome-label: var(--neo-text-primary);
 
   --neo-accent: #{$accent};
   --neo-accent-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});

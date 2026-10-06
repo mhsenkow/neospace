@@ -330,6 +330,8 @@ ul, ol {
 }
 
 // Button Component
+// Emphasis: primary → secondary → tertiary → quaternary (loud → quiet).
+// Chrome/icon controls should default to tertiary; recessed surfaces use quaternary.
 .neo-btn {
   display: inline-flex;
   align-items: center;
@@ -368,6 +370,42 @@ ul, ol {
       border-color: var(--neo-border-color-dark);
     }
   }
+
+  // Quiet labeled control — readable, not loud
+  &--tertiary {
+    background-color: transparent;
+    color: var(--neo-text-tertiary);
+    border: 1px solid transparent;
+
+    &:hover:not(:disabled) {
+      background-color: var(--neo-bg-tertiary);
+      color: var(--neo-text-secondary);
+      border-color: var(--neo-border-color);
+    }
+
+    &:disabled {
+      color: var(--neo-text-quaternary);
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+  }
+
+  // Whisper control — for recessed / non-focused chrome
+  &--quaternary {
+    background-color: transparent;
+    color: var(--neo-text-quaternary);
+    border: 1px solid transparent;
+
+    &:hover:not(:disabled) {
+      background-color: var(--neo-bg-hover);
+      color: var(--neo-text-tertiary);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+  }
   
   &--ghost {
     background-color: transparent;
@@ -380,6 +418,15 @@ ul, ol {
       border-color: color-mix(in srgb, var(--neo-accent) 35%, transparent);
     }
   }
+
+  // Square icon affordance — compose with --tertiary / --quaternary
+  &--icon {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    gap: 0;
+    flex-shrink: 0;
+  }
   
   &--chaos {
     background: linear-gradient(135deg, #c45c26, #8338ec, #3a86ff);
@@ -391,6 +438,57 @@ ul, ol {
     &:hover {
       filter: brightness(1.05);
     }
+  }
+}
+
+// Chrome surface: sets local emphasis for nested icon controls / labels.
+// Default = tertiary (focused). --recessed = quaternary whisper; hover lifts back.
+.neo-chrome {
+  --neo-chrome-fg: var(--neo-text-tertiary);
+  --neo-chrome-fg-strong: var(--neo-text-secondary);
+  --neo-chrome-label: var(--neo-text-primary);
+
+  &--recessed {
+    --neo-chrome-fg: var(--neo-text-quaternary);
+    --neo-chrome-fg-strong: var(--neo-text-tertiary);
+    --neo-chrome-label: var(--neo-text-tertiary);
+  }
+
+  &--recessed:hover,
+  &--recessed:focus-within {
+    --neo-chrome-fg: var(--neo-text-tertiary);
+    --neo-chrome-fg-strong: var(--neo-text-secondary);
+    --neo-chrome-label: var(--neo-text-primary);
+  }
+}
+
+// Icon/control that follows the nearest .neo-chrome emphasis
+.neo-chrome-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: var(--neo-radius-chrome, var(--neo-radius-sm));
+  background: transparent;
+  color: var(--neo-chrome-fg);
+  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
+
+  &:hover:not(:disabled) {
+    background: var(--neo-bg-tertiary);
+    color: var(--neo-chrome-fg-strong);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &--danger:hover:not(:disabled) {
+    background: var(--neo-danger-soft);
+    color: var(--neo-danger);
   }
 }
 
@@ -472,6 +570,8 @@ ul, ol {
 .neo-text {
   &--muted { color: var(--neo-text-muted); }
   &--secondary { color: var(--neo-text-secondary); }
+  &--tertiary { color: var(--neo-text-tertiary); }
+  &--quaternary { color: var(--neo-text-quaternary); }
   &--accent { color: var(--neo-accent); }
   &--sm { font-size: var(--neo-font-size-sm); }
   &--lg { font-size: var(--neo-font-size-lg); }

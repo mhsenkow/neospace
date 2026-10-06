@@ -88,30 +88,12 @@ const moveColumnRight = (index: number) => {
   withActivePreserved(() => columnsStore.moveColumn(index, index + 1))
 }
 
-const onTabDragStart = (e: DragEvent, columnId: string) => {
-  e.dataTransfer?.setData('text/plain', columnId)
-  e.dataTransfer?.setData('application/x-neospace-column', columnId)
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-  draggingColumnId.value = columnId
-}
-
-const onTabDragOver = (e: DragEvent, columnId: string) => {
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  onColumnDragOver(columnId)
-}
-
-const onTabDrop = (e: DragEvent, toColumnId: string) => {
-  e.preventDefault()
-  const fromId =
-    e.dataTransfer?.getData('application/x-neospace-column') ||
-    e.dataTransfer?.getData('text/plain')
-  if (fromId) onColumnDrop(fromId, toColumnId)
-}
-
 const closeAddMenu = (e: MouseEvent) => {
   const target = e.target as HTMLElement
-  if (!target.closest('.add-column-panel')) {
+  if (
+    !target.closest('.add-column-panel') &&
+    !target.closest('.mobile-feed-tabs')
+  ) {
     addMenuOpen.value = false
   }
 }
@@ -120,6 +102,9 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   columnsStore.addColumn(feedType, groupTag)
   addMenuOpen.value = false
   addGroupsExpanded.value = false
+  nextTick(() => {
+    scrollToColumn(columnsStore.columns.length - 1)
+  })
 }
 
 const scrollToColumn = (index: number) => {
@@ -151,6 +136,17 @@ watch(
   },
 )
 
+// Reload feeds when switching accounts (per-account + profile sync)
+watch(
+  () => instancesStore.activeAccountId,
+  (id, prev) => {
+    if (id === prev) return
+    columnsStore.initialize()
+    activeColumnIndex.value = 0
+    nextTick(() => scrollToColumn(0))
+  },
+)
+
 onMounted(async () => {
   await instancesStore.initialize()
   columnsStore.initialize()
@@ -161,17 +157,6 @@ onMounted(async () => {
 
   if (instancesStore.userCustomCSS) {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
-  }
-
-  // If user is authenticated and first column is 'local', switch to 'home'
-  const firstCol = columnsStore.columns[0]
-  if (
-    firstCol &&
-    instancesStore.hasAuthenticatedInstance &&
-    columnsStore.columns.length === 1 &&
-    firstCol.feedType === 'local'
-  ) {
-    columnsStore.updateColumnFeedType(firstCol.id, 'home')
   }
 
   document.addEventListener('click', closeAddMenu)
@@ -186,33 +171,72 @@ useHead({ title: 'Home | NeoSpace' })
 
 <template>
   <div class="columns-page" :class="{ 'columns-page--multi': columnsStore.isMultiColumn }">
-    <!-- Mobile feed tabs: swipe or tap between columns -->
-    <nav
-      v-if="columnsStore.isMultiColumn"
-      class="mobile-feed-tabs"
-      aria-label="Feeds"
-    >
-      <button
-        v-for="(label, idx) in columnTabLabels"
-        :key="columnsStore.columns[idx]!.id"
-        type="button"
-        class="mobile-feed-tabs__tab"
-        :class="{
-          'mobile-feed-tabs__tab--active': activeColumnIndex === idx,
-          'mobile-feed-tabs__tab--dragging': draggingColumnId === columnsStore.columns[idx]!.id,
-          'mobile-feed-tabs__tab--drop-target': dropTargetColumnId === columnsStore.columns[idx]!.id,
-        }"
-        :aria-current="activeColumnIndex === idx ? 'true' : undefined"
-        draggable="true"
-        title="Drag to reorder"
-        @click="scrollToColumn(idx)"
-        @dragstart="onTabDragStart($event, columnsStore.columns[idx]!.id)"
-        @dragend="onColumnDragEnd"
-        @dragover="onTabDragOver($event, columnsStore.columns[idx]!.id)"
-        @drop="onTabDrop($event, columnsStore.columns[idx]!.id)"
-      >
-        {{ label }}
-      </button>
+    <!-- Mobile: always show feed strip + add (swipe the columns below) -->
+    <nav class="mobile-feed-tabs" aria-label="Feeds">
+      <div class="mobile-feed-tabs__scroller">
+        <button
+          v-for="(label, idx) in columnTabLabels"
+          :key="columnsStore.columns[idx]!.id"
+          type="button"
+          class="mobile-feed-tabs__tab neo-btn neo-btn--tertiary"
+          :class="{
+            'mobile-feed-tabs__tab--active': activeColumnIndex === idx,
+            'mobile-feed-tabs__tab--recessed': activeColumnIndex !== idx,
+          }"
+          :aria-current="activeColumnIndex === idx ? 'true' : undefined"
+          @click="scrollToColumn(idx)"
+        >
+          {{ label }}
+        </button>
+      </div>
+
+      <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
+        <button
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__add-btn"
+          :title="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+          aria-label="Add feed"
+          @click="addMenuOpen = !addMenuOpen"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+
+        <Transition name="add-menu">
+          <div v-if="addMenuOpen" class="add-column-menu add-column-menu--mobile">
+            <span class="add-column-menu__title">Add Feed</span>
+            <button class="add-column-menu__item" @click="addColumn('home')">For You</button>
+            <button class="add-column-menu__item" @click="addColumn('local')">Local</button>
+            <button class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+            <template v-if="groupsStore.joinedGroups.length > 0">
+              <div class="add-column-menu__divider"></div>
+              <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+                <span>Groups</span>
+                <svg :class="{ 'rotated': addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addGroupsExpanded">
+                <button
+                  v-for="group in groupsStore.joinedGroups"
+                  :key="group.tag"
+                  class="add-column-menu__item add-column-menu__item--group"
+                  @click="addColumn('group', group.tag)"
+                >
+                  <span class="add-column-menu__group-icon">{{ group.icon }}</span>
+                  {{ group.name }}
+                </button>
+              </template>
+            </template>
+            <span class="add-column-menu__hint">
+              {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }}
+              <template v-if="instancesStore.isAuthenticated"> · syncs to your profile</template>
+            </span>
+          </div>
+        </Transition>
+      </div>
     </nav>
 
     <div
@@ -228,6 +252,7 @@ useHead({ title: 'Home | NeoSpace' })
         :is-last="idx === columnsStore.columns.length - 1"
         :can-remove="columnsStore.canRemoveColumn"
         :can-reorder="columnsStore.isMultiColumn"
+        :recessed="columnsStore.isMultiColumn && activeColumnIndex !== idx"
         :dragging="draggingColumnId === column.id"
         :drop-target="dropTargetColumnId === column.id"
         @remove="columnsStore.removeColumn(column.id)"
@@ -241,7 +266,7 @@ useHead({ title: 'Home | NeoSpace' })
       />
     </div>
 
-    <!-- Add Column Panel -->
+    <!-- Desktop Add Column Panel -->
     <div
       v-if="columnsStore.canAddColumn"
       class="add-column-panel"
@@ -249,7 +274,8 @@ useHead({ title: 'Home | NeoSpace' })
       @click.stop
     >
       <button
-        class="add-column-btn"
+        type="button"
+        class="neo-btn neo-btn--tertiary neo-btn--icon add-column-btn"
         :title="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
         @click="addMenuOpen = !addMenuOpen"
       >
@@ -285,7 +311,6 @@ useHead({ title: 'Home | NeoSpace' })
             Federated
           </button>
 
-          <!-- Joined Groups -->
           <template v-if="groupsStore.joinedGroups.length > 0">
             <div class="add-column-menu__divider"></div>
             <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
@@ -307,7 +332,10 @@ useHead({ title: 'Home | NeoSpace' })
             </template>
           </template>
 
-          <span class="add-column-menu__hint">{{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns</span>
+          <span class="add-column-menu__hint">
+            {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns
+            <template v-if="instancesStore.isAuthenticated"> · syncs to profile</template>
+          </span>
         </div>
       </Transition>
     </div>
@@ -336,6 +364,24 @@ useHead({ title: 'Home | NeoSpace' })
   &:not(.columns-page--multi) {
     @media (min-width: 1024px) {
       justify-content: center;
+    }
+  }
+
+  // Desktop multi: every column whispers until hovered (ignore mobile active index)
+  &--multi {
+    @media (min-width: 1024px) {
+      :deep(.timeline-column.neo-chrome) {
+        --neo-chrome-fg: var(--neo-text-quaternary);
+        --neo-chrome-fg-strong: var(--neo-text-tertiary);
+        --neo-chrome-label: var(--neo-text-tertiary);
+      }
+
+      :deep(.timeline-column.neo-chrome:hover),
+      :deep(.timeline-column.neo-chrome:focus-within) {
+        --neo-chrome-fg: var(--neo-text-tertiary);
+        --neo-chrome-fg-strong: var(--neo-text-secondary);
+        --neo-chrome-label: var(--neo-text-primary);
+      }
     }
   }
 }
@@ -370,8 +416,10 @@ useHead({ title: 'Home | NeoSpace' })
 
   // Mobile: full-width snap carousel — swipe left/right between feeds
   @media (max-width: 1023px) {
+    width: 100%;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
     scrollbar-width: none;
 
     &::-webkit-scrollbar {
@@ -380,6 +428,7 @@ useHead({ title: 'Home | NeoSpace' })
 
     :deep(.timeline-column) {
       flex: 0 0 100%;
+      width: 100%;
       min-width: 100%;
       max-width: 100%;
       scroll-snap-align: start;
@@ -395,53 +444,68 @@ useHead({ title: 'Home | NeoSpace' })
 .mobile-feed-tabs {
   display: none;
   flex-shrink: 0;
+  align-items: center;
   gap: 0.25rem;
-  padding: 0.375rem 0.75rem;
-  overflow-x: auto;
-  scrollbar-width: none;
+  padding: 0.375rem 0.5rem 0.375rem 0.75rem;
   border-bottom: 1px solid var(--neo-border-color);
   background: var(--neo-bg-primary);
-  -webkit-overflow-scrolling: touch;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
+  position: relative;
+  z-index: 20;
 
   @media (max-width: 1023px) {
     display: flex;
   }
 
+  &__scroller {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    gap: 0.25rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  &__add {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  &__add-btn {
+    width: 34px;
+    height: 34px;
+  }
+
   &__tab {
     flex-shrink: 0;
     max-width: 10rem;
+    height: auto;
+    min-height: 0;
     padding: 0.375rem 0.75rem;
     font-size: 0.8125rem;
     font-weight: 600;
-    color: var(--neo-text-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     border-radius: 8px;
-    cursor: grab;
-    transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+
+    &--recessed {
+      color: var(--neo-text-quaternary);
+      background: transparent;
+      border-color: transparent;
+    }
 
     &--active {
-      color: var(--neo-text-primary);
+      color: var(--neo-text-secondary);
       background: var(--neo-bg-tertiary);
-    }
-
-    &--dragging {
-      opacity: 0.45;
-    }
-
-    &--drop-target {
-      color: var(--neo-text-primary);
-      background: color-mix(in srgb, var(--neo-accent) 18%, var(--neo-bg-tertiary));
-      box-shadow: inset 0 -2px 0 var(--neo-accent);
+      border-color: transparent;
     }
 
     &:active {
-      cursor: grabbing;
       transform: scale(0.97);
     }
   }
@@ -473,19 +537,9 @@ useHead({ title: 'Home | NeoSpace' })
 }
 
 .add-column-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  color: var(--neo-text-muted);
-  transition: all 0.15s ease;
-
-  &:hover {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
-  }
 }
 
 .add-column-menu {
@@ -499,6 +553,12 @@ useHead({ title: 'Home | NeoSpace' })
   box-shadow: var(--neo-shadow-xl);
   padding: 0.5rem;
   z-index: 50;
+
+  &--mobile {
+    top: calc(100% + 0.35rem);
+    right: 0;
+    left: auto;
+  }
 
   &__title {
     display: block;
@@ -602,5 +662,9 @@ useHead({ title: 'Home | NeoSpace' })
 .add-menu-leave-to {
   opacity: 0;
   transform: scale(0.95) translateX(4px);
+}
+.add-column-menu--mobile.add-menu-enter-from,
+.add-column-menu--mobile.add-menu-leave-to {
+  transform: scale(0.95) translateY(-4px);
 }
 </style>

@@ -21,6 +21,11 @@ interface Props {
   /** Highlight when another column is dragged over this one */
   dropTarget?: boolean
   dragging?: boolean
+  /**
+   * Quieter chrome (quaternary) when this column isn't the focused one.
+   * Cleared on hover / focus-within via .neo-chrome.
+   */
+  recessed?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -28,6 +33,7 @@ const props = withDefaults(defineProps<Props>(), {
   canReorder: false,
   dropTarget: false,
   dragging: false,
+  recessed: false,
 })
 const emit = defineEmits<{
   remove: []
@@ -524,8 +530,9 @@ onUnmounted(() => {
 </script>
 <template>
   <div
-    class="timeline-column"
+    class="timeline-column neo-chrome"
     :class="{
+      'neo-chrome--recessed': recessed,
       'timeline-column--drop-target': dropTarget,
       'timeline-column--dragging': dragging,
     }"
@@ -537,7 +544,7 @@ onUnmounted(() => {
       <button
         v-if="canReorder"
         type="button"
-        class="column-drag-handle"
+        class="neo-chrome-btn column-drag-handle"
         draggable="true"
         title="Drag to reorder"
         aria-label="Drag to reorder column"
@@ -565,7 +572,7 @@ onUnmounted(() => {
       <div v-if="canReorder" class="column-reorder">
         <button
           type="button"
-          class="column-reorder__btn"
+          class="neo-chrome-btn"
           title="Move left"
           aria-label="Move column left"
           :disabled="isFirst"
@@ -577,7 +584,7 @@ onUnmounted(() => {
         </button>
         <button
           type="button"
-          class="column-reorder__btn"
+          class="neo-chrome-btn"
           title="Move right"
           aria-label="Move column right"
           :disabled="isLast"
@@ -589,7 +596,14 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <button v-if="canRemove" class="column-close" @click="emit('remove')" title="Remove column">
+      <button
+        v-if="canRemove"
+        type="button"
+        class="neo-chrome-btn neo-chrome-btn--danger column-close"
+        title="Remove column"
+        aria-label="Remove column"
+        @click="emit('remove')"
+      >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
@@ -820,21 +834,8 @@ onUnmounted(() => {
 }
 
 .column-drag-handle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 30px;
-  border-radius: 4px;
-  color: var(--neo-text-muted);
   cursor: grab;
   touch-action: none;
-
-  &:hover {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
-  }
 
   &:active {
     cursor: grabbing;
@@ -846,27 +847,6 @@ onUnmounted(() => {
   align-items: center;
   margin-left: auto;
   gap: 0.125rem;
-
-  &__btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 30px;
-    border-radius: 4px;
-    color: var(--neo-text-muted);
-    transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
-
-    &:hover:not(:disabled) {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
-    }
-
-    &:disabled {
-      opacity: 0.3;
-      cursor: not-allowed;
-    }
-  }
 }
 
 .column-new-pill {
@@ -927,37 +907,21 @@ onUnmounted(() => {
 .column-feed-label {
   font-size: 0.9375rem;
   font-weight: 600;
-  color: var(--neo-text-primary);
+  color: var(--neo-chrome-label);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+  transition: color var(--neo-transition-fast);
 }
 
 .column-feed-chevron {
-  color: var(--neo-text-muted);
-  transition: transform 0.2s ease;
+  color: var(--neo-chrome-fg);
+  transition: transform 0.2s ease, color var(--neo-transition-fast);
   flex-shrink: 0;
 
   &--open {
     transform: rotate(180deg);
-  }
-}
-
-.column-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  border-radius: 4px;
-  color: var(--neo-text-muted);
-  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
-
-  &:hover {
-    background: var(--neo-danger-soft);
-    color: var(--neo-danger);
   }
 }
 
@@ -1075,6 +1039,8 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  // Let horizontal swipes bubble to the mobile feed carousel
+  touch-action: pan-y;
   scrollbar-width: thin;
   scrollbar-color: var(--neo-text-muted) transparent;
 
