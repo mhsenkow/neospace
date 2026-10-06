@@ -16,13 +16,60 @@ interface Props {
   column: ColumnConfig
   canRemove: boolean
   isFirst: boolean
+  isLast?: boolean
+  canReorder?: boolean
+  /** Highlight when another column is dragged over this one */
+  dropTarget?: boolean
+  dragging?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  isLast: false,
+  canReorder: false,
+  dropTarget: false,
+  dragging: false,
+})
 const emit = defineEmits<{
   remove: []
   'update-feed-type': [feedType: ColumnFeedType, groupTag?: string]
+  'column-drag-start': [columnId: string]
+  'column-drag-end': []
+  'column-drag-over': [columnId: string]
+  'column-drop': [fromColumnId: string]
+  'move-left': []
+  'move-right': []
 }>()
+
+const onColumnDragStart = (e: DragEvent) => {
+  if (!props.canReorder) return
+  e.dataTransfer?.setData('text/plain', props.column.id)
+  e.dataTransfer?.setData('application/x-neospace-column', props.column.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  emit('column-drag-start', props.column.id)
+}
+
+const onColumnDragEnd = () => {
+  emit('column-drag-end')
+}
+
+const onColumnDragOver = (e: DragEvent) => {
+  if (!props.canReorder) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  emit('column-drag-over', props.column.id)
+}
+
+const onColumnDrop = (e: DragEvent) => {
+  if (!props.canReorder) return
+  e.preventDefault()
+  const fromId =
+    e.dataTransfer?.getData('application/x-neospace-column') ||
+    e.dataTransfer?.getData('text/plain')
+  if (fromId && fromId !== props.column.id) {
+    emit('column-drop', fromId)
+  }
+  emit('column-drag-end')
+}
 
 const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
@@ -476,14 +523,70 @@ onUnmounted(() => {
 })
 </script>
 <template>
-  <div class="timeline-column">
+  <div
+    class="timeline-column"
+    :class="{
+      'timeline-column--drop-target': dropTarget,
+      'timeline-column--dragging': dragging,
+    }"
+    @dragover="onColumnDragOver"
+    @drop="onColumnDrop"
+  >
     <!-- Column Header -->
     <div class="column-header">
+      <button
+        v-if="canReorder"
+        type="button"
+        class="column-drag-handle"
+        draggable="true"
+        title="Drag to reorder"
+        aria-label="Drag to reorder column"
+        @click.stop
+        @dragstart="onColumnDragStart"
+        @dragend="onColumnDragEnd"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="9" cy="6" r="1.5" />
+          <circle cx="15" cy="6" r="1.5" />
+          <circle cx="9" cy="12" r="1.5" />
+          <circle cx="15" cy="12" r="1.5" />
+          <circle cx="9" cy="18" r="1.5" />
+          <circle cx="15" cy="18" r="1.5" />
+        </svg>
+      </button>
+
       <div class="column-feed-select" @click.stop="onFeedHeaderClick">
         <span class="column-feed-label">{{ feedLabel }}</span>
         <svg class="column-feed-chevron" :class="{ 'column-feed-chevron--open': feedMenuOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <polyline points="6 9 12 15 18 9" />
         </svg>
+      </div>
+
+      <div v-if="canReorder" class="column-reorder">
+        <button
+          type="button"
+          class="column-reorder__btn"
+          title="Move left"
+          aria-label="Move column left"
+          :disabled="isFirst"
+          @click="emit('move-left')"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="column-reorder__btn"
+          title="Move right"
+          aria-label="Move column right"
+          :disabled="isLast"
+          @click="emit('move-right')"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
       </div>
 
       <button v-if="canRemove" class="column-close" @click="emit('remove')" title="Remove column">
@@ -684,23 +787,86 @@ onUnmounted(() => {
   min-width: 280px;
   border-right: 1px solid var(--neo-border-color);
   position: relative;
+  transition: opacity 0.15s ease, background 0.15s ease;
 
   &:last-of-type {
     border-right: none;
+  }
+
+  &--dragging {
+    opacity: 0.45;
+  }
+
+  &--drop-target {
+    background: color-mix(in srgb, var(--neo-accent) 6%, transparent);
+
+    .column-header {
+      box-shadow: inset 3px 0 0 var(--neo-accent);
+    }
   }
 }
 
 .column-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 0.75rem;
+  gap: 0.25rem;
+  padding: 0 0.5rem 0 0.35rem;
   height: 48px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--neo-border-color);
   background: var(--neo-bg-primary);
   position: relative;
   z-index: 10;
+}
+
+.column-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 30px;
+  border-radius: 4px;
+  color: var(--neo-text-muted);
+  cursor: grab;
+  touch-action: none;
+
+  &:hover {
+    background: var(--neo-bg-tertiary);
+    color: var(--neo-text-primary);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.column-reorder {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 0.125rem;
+
+  &__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 30px;
+    border-radius: 4px;
+    color: var(--neo-text-muted);
+    transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
+
+    &:hover:not(:disabled) {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
+    }
+
+    &:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+  }
 }
 
 .column-new-pill {
@@ -746,6 +912,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.375rem;
+  min-width: 0;
   padding: 0.375rem 0.5rem;
   border-radius: 4px;
   cursor: pointer;
@@ -781,6 +948,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 30px;
   height: 30px;
   border-radius: 4px;

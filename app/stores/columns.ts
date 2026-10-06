@@ -89,6 +89,33 @@ export const useColumnsStore = defineStore('columns', {
       }
     },
 
+    /** Reorder columns; persists. Indices are clamped to the current list. */
+    moveColumn(fromIndex: number, toIndex: number) {
+      const len = this.columns.length
+      if (len < 2) return
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= len ||
+        toIndex >= len
+      ) {
+        return
+      }
+      const next = [...this.columns]
+      const [col] = next.splice(fromIndex, 1)
+      if (!col) return
+      next.splice(toIndex, 0, col)
+      this.columns = next
+      this.saveToStorage()
+    },
+
+    moveColumnById(columnId: string, toIndex: number) {
+      const fromIndex = this.columns.findIndex(c => c.id === columnId)
+      if (fromIndex === -1) return
+      this.moveColumn(fromIndex, toIndex)
+    },
+
     initialize() {
       this.loadFromStorage()
     },

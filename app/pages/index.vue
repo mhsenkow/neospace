@@ -22,6 +22,8 @@ const addMenuOpen = ref(false)
 const addGroupsExpanded = ref(false)
 const columnsContainer = ref<HTMLElement | null>(null)
 const activeColumnIndex = ref(0)
+const draggingColumnId = ref<string | null>(null)
+const dropTargetColumnId = ref<string | null>(null)
 
 const FEED_LABELS: Record<string, string> = {
   home: 'For You',
@@ -38,6 +40,74 @@ const columnTabLabels = computed(() =>
     return FEED_LABELS[column.feedType] ?? column.feedType
   }),
 )
+
+/** Keep the active mobile feed glued to the same column id across reorders */
+const withActivePreserved = (fn: () => void) => {
+  const activeId = columnsStore.columns[activeColumnIndex.value]?.id
+  fn()
+  if (!activeId) return
+  const next = columnsStore.columns.findIndex(c => c.id === activeId)
+  if (next !== -1) activeColumnIndex.value = next
+}
+
+const reorderToIndex = (fromColumnId: string, toIndex: number) => {
+  withActivePreserved(() => {
+    columnsStore.moveColumnById(fromColumnId, toIndex)
+  })
+}
+
+const onColumnDragStart = (columnId: string) => {
+  draggingColumnId.value = columnId
+}
+
+const onColumnDragEnd = () => {
+  draggingColumnId.value = null
+  dropTargetColumnId.value = null
+}
+
+const onColumnDragOver = (columnId: string) => {
+  if (draggingColumnId.value && draggingColumnId.value !== columnId) {
+    dropTargetColumnId.value = columnId
+  }
+}
+
+const onColumnDrop = (fromColumnId: string, toColumnId: string) => {
+  const toIndex = columnsStore.columns.findIndex(c => c.id === toColumnId)
+  if (toIndex === -1) return
+  reorderToIndex(fromColumnId, toIndex)
+  onColumnDragEnd()
+}
+
+const moveColumnLeft = (index: number) => {
+  if (index <= 0) return
+  withActivePreserved(() => columnsStore.moveColumn(index, index - 1))
+}
+
+const moveColumnRight = (index: number) => {
+  if (index >= columnsStore.columns.length - 1) return
+  withActivePreserved(() => columnsStore.moveColumn(index, index + 1))
+}
+
+const onTabDragStart = (e: DragEvent, columnId: string) => {
+  e.dataTransfer?.setData('text/plain', columnId)
+  e.dataTransfer?.setData('application/x-neospace-column', columnId)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  draggingColumnId.value = columnId
+}
+
+const onTabDragOver = (e: DragEvent, columnId: string) => {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  onColumnDragOver(columnId)
+}
+
+const onTabDrop = (e: DragEvent, toColumnId: string) => {
+  e.preventDefault()
+  const fromId =
+    e.dataTransfer?.getData('application/x-neospace-column') ||
+    e.dataTransfer?.getData('text/plain')
+  if (fromId) onColumnDrop(fromId, toColumnId)
+}
 
 const closeAddMenu = (e: MouseEvent) => {
   const target = e.target as HTMLElement
@@ -127,9 +197,19 @@ useHead({ title: 'Home | NeoSpace' })
         :key="columnsStore.columns[idx]!.id"
         type="button"
         class="mobile-feed-tabs__tab"
-        :class="{ 'mobile-feed-tabs__tab--active': activeColumnIndex === idx }"
+        :class="{
+          'mobile-feed-tabs__tab--active': activeColumnIndex === idx,
+          'mobile-feed-tabs__tab--dragging': draggingColumnId === columnsStore.columns[idx]!.id,
+          'mobile-feed-tabs__tab--drop-target': dropTargetColumnId === columnsStore.columns[idx]!.id,
+        }"
         :aria-current="activeColumnIndex === idx ? 'true' : undefined"
+        draggable="true"
+        title="Drag to reorder"
         @click="scrollToColumn(idx)"
+        @dragstart="onTabDragStart($event, columnsStore.columns[idx]!.id)"
+        @dragend="onColumnDragEnd"
+        @dragover="onTabDragOver($event, columnsStore.columns[idx]!.id)"
+        @drop="onTabDrop($event, columnsStore.columns[idx]!.id)"
       >
         {{ label }}
       </button>
@@ -145,9 +225,19 @@ useHead({ title: 'Home | NeoSpace' })
         :key="column.id"
         :column="column"
         :is-first="idx === 0"
+        :is-last="idx === columnsStore.columns.length - 1"
         :can-remove="columnsStore.canRemoveColumn"
+        :can-reorder="columnsStore.isMultiColumn"
+        :dragging="draggingColumnId === column.id"
+        :drop-target="dropTargetColumnId === column.id"
         @remove="columnsStore.removeColumn(column.id)"
         @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
+        @column-drag-start="onColumnDragStart"
+        @column-drag-end="onColumnDragEnd"
+        @column-drag-over="onColumnDragOver"
+        @column-drop="(fromId) => onColumnDrop(fromId, column.id)"
+        @move-left="moveColumnLeft(idx)"
+        @move-right="moveColumnRight(idx)"
       />
     </div>
 
@@ -332,14 +422,26 @@ useHead({ title: 'Home | NeoSpace' })
     overflow: hidden;
     text-overflow: ellipsis;
     border-radius: 8px;
-    transition: color 0.15s ease, background 0.15s ease;
+    cursor: grab;
+    transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
 
     &--active {
       color: var(--neo-text-primary);
       background: var(--neo-bg-tertiary);
     }
 
+    &--dragging {
+      opacity: 0.45;
+    }
+
+    &--drop-target {
+      color: var(--neo-text-primary);
+      background: color-mix(in srgb, var(--neo-accent) 18%, var(--neo-bg-tertiary));
+      box-shadow: inset 0 -2px 0 var(--neo-accent);
+    }
+
     &:active {
+      cursor: grabbing;
       transform: scale(0.97);
     }
   }
