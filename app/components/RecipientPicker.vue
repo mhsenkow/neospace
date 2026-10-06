@@ -70,7 +70,7 @@ onUnmounted(() => clear())
           class="recipient-picker__row"
           @click="pick(account)"
         >
-          <img :src="account.avatar" :alt="" class="recipient-picker__avatar" />
+          <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
           <span class="recipient-picker__meta">
             <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
             <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
@@ -91,7 +91,7 @@ onUnmounted(() => clear())
           class="recipient-picker__row"
           @click="pick(account)"
         >
-          <img :src="account.avatar" :alt="" class="recipient-picker__avatar" />
+          <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
           <span class="recipient-picker__meta">
             <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
             <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
