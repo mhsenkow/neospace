@@ -20,7 +20,8 @@ interface ColumnsState {
 }
 
 const STORAGE_KEY = 'neospace_columns'
-const MAX_COLUMNS = 4
+/** Max independent timeline columns (desktop strip + mobile swipe) */
+export const MAX_COLUMNS = 8
 
 const generateId = () => Math.random().toString(36).substring(2, 10)
 
@@ -31,6 +32,7 @@ export const useColumnsStore = defineStore('columns', {
 
   getters: {
     columnCount: (state): number => state.columns.length,
+    maxColumns: (): number => MAX_COLUMNS,
     canAddColumn: (state): boolean => state.columns.length < MAX_COLUMNS,
     canRemoveColumn: (state): boolean => state.columns.length > 1,
     isMultiColumn: (state): boolean => state.columns.length > 1,

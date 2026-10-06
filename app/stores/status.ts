@@ -129,6 +129,25 @@ export const useStatusStore = defineStore('status', {
       }
     },
 
+    /** Update alt text after upload (Mastodon PUT /api/v1/media/:id). */
+    async updateMediaDescription(mediaId: string, description: string): Promise<void> {
+      const instances = useInstancesStore()
+      if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
+        return
+      }
+      try {
+        const form = new FormData()
+        form.append('description', description)
+        await fetch(`${instances.instanceUrl}/api/v1/media/${encodeURIComponent(mediaId)}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${instances.accessToken}` },
+          body: form,
+        })
+      } catch (e) {
+        console.warn('Failed to update media description:', e)
+      }
+    },
+
     async resolveStatus(statusUrl: string): Promise<string | null> {
       try {
         const client = this.getReadClient()

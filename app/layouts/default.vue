@@ -199,21 +199,6 @@ watch(
 )
 
 watch(
-  () => route.path,
-  (path) => {
-    if (path === '/notifications') {
-      // Visiting the page counts as catching up
-      nextTick(() => {
-        if (notificationsStore.notifications[0]?.id) {
-          notificationsStore.persistLastRead(notificationsStore.notifications[0].id)
-          notificationsStore.unreadCount = 0
-        }
-      })
-    }
-  },
-)
-
-watch(
   () => [
     settingsStore.localPreferences.theme,
     settingsStore.localPreferences.ui,

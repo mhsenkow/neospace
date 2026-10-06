@@ -1,9 +1,10 @@
 /**
- * Shared compose media attachments — drag/drop, paste, upload, previews.
+ * Shared compose media attachments — drag/drop, paste, upload, previews, alt text.
  */
 
 import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
+import { CHART_ALT_MAX } from '~/utils/loomHandoff'
 
 export interface ComposeAttachment {
   localId: string
@@ -12,6 +13,8 @@ export interface ComposeAttachment {
   remoteId: string | null
   uploading: boolean
   error: string | null
+  /** Accessibility description sent to Mastodon as media description */
+  description: string
 }
 
 const MAX_ATTACHMENTS = 4
@@ -27,6 +30,7 @@ export function useComposeMedia() {
   const attachments = ref<ComposeAttachment[]>([])
   const isDragging = ref(false)
   let dragDepth = 0
+  const altTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   const isUploading = computed(() => attachments.value.some((a) => a.uploading))
   const hasMedia = computed(() => attachments.value.length > 0)
@@ -47,6 +51,11 @@ export function useComposeMedia() {
   }
 
   const removeAttachment = (localId: string) => {
+    const timer = altTimers.get(localId)
+    if (timer) {
+      clearTimeout(timer)
+      altTimers.delete(localId)
+    }
     const idx = attachments.value.findIndex((a) => a.localId === localId)
     if (idx === -1) return
     const [gone] = attachments.value.splice(idx, 1)
@@ -54,6 +63,8 @@ export function useComposeMedia() {
   }
 
   const clearAttachments = () => {
+    for (const t of altTimers.values()) clearTimeout(t)
+    altTimers.clear()
     revokeAll()
     attachments.value = []
   }
@@ -70,7 +81,10 @@ export function useComposeMedia() {
     const draft = patchAttachment(localId, { uploading: true, error: null })
     if (!draft) return
     try {
-      const remote = await statusStore.uploadMedia(draft.file)
+      const remote = await statusStore.uploadMedia(
+        draft.file,
+        draft.description.trim() || undefined,
+      )
       const current = attachments.value.find((a) => a.localId === localId)
       if (!current) return
       current.remoteId = remote.id
@@ -89,16 +103,25 @@ export function useComposeMedia() {
     }
   }
 
-  const addFiles = async (files: FileList | File[] | null | undefined) => {
+  /**
+   * @param descriptions Optional parallel alt-text hints (e.g. Loom chart title).
+   */
+  const addFiles = async (
+    files: FileList | File[] | null | undefined,
+    descriptions?: (string | null | undefined)[],
+  ) => {
     if (!files || files.length === 0) return
     const list = Array.from(files)
     const room = MAX_ATTACHMENTS - attachments.value.length
     if (room <= 0) return
 
     const accepted: ComposeAttachment[] = []
+    let descIdx = 0
     for (const file of list.slice(0, room)) {
       if (!ACCEPT.test(file.type)) continue
       if (file.size > MAX_FILE_BYTES) continue
+      const hint = descriptions?.[descIdx]
+      descIdx += 1
       accepted.push({
         localId: uid(),
         file,
@@ -106,6 +129,7 @@ export function useComposeMedia() {
         remoteId: null,
         uploading: true,
         error: null,
+        description: (hint || '').trim().slice(0, CHART_ALT_MAX),
       })
     }
 
@@ -118,6 +142,25 @@ export function useComposeMedia() {
     const draft = attachments.value.find((a) => a.localId === localId)
     if (!draft || draft.uploading) return
     await uploadOne(localId)
+  }
+
+  const setDescription = (localId: string, value: string) => {
+    const draft = patchAttachment(localId, {
+      description: value.slice(0, CHART_ALT_MAX),
+    })
+    if (!draft?.remoteId) return
+
+    const prev = altTimers.get(localId)
+    if (prev) clearTimeout(prev)
+    altTimers.set(
+      localId,
+      setTimeout(() => {
+        altTimers.delete(localId)
+        const current = attachments.value.find((a) => a.localId === localId)
+        if (!current?.remoteId) return
+        void statusStore.updateMediaDescription(current.remoteId, current.description.trim())
+      }, 450),
+    )
   }
 
   const onDragEnter = (e: DragEvent) => {
@@ -162,6 +205,8 @@ export function useComposeMedia() {
   }
 
   onUnmounted(() => {
+    for (const t of altTimers.values()) clearTimeout(t)
+    altTimers.clear()
     revokeAll()
   })
 
@@ -174,10 +219,12 @@ export function useComposeMedia() {
     allReady,
     canAddMore,
     maxAttachments: MAX_ATTACHMENTS,
+    altMax: CHART_ALT_MAX,
     addFiles,
     retryUpload,
     removeAttachment,
     clearAttachments,
+    setDescription,
     onDragEnter,
     onDragLeave,
     onDragOver,

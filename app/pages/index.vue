@@ -2,13 +2,15 @@
 /**
  * Home Page - Multi-column TweetDeck-style layout
  *
- * Supports 1-4 independent timeline columns, each with its own
+ * Supports 1-8 independent timeline columns, each with its own
  * feed type, scroll position, and data. Column config is persisted.
+ * Desktop: equal-flex columns with a min width + horizontal scroll.
+ * Mobile: full-width scroll-snap carousel (swipe left/right).
  */
 
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
-import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
+import { useColumnsStore, MAX_COLUMNS, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 
 const themeStore = useThemeStore()
@@ -18,6 +20,24 @@ const groupsStore = useGroupsStore()
 
 const addMenuOpen = ref(false)
 const addGroupsExpanded = ref(false)
+const columnsContainer = ref<HTMLElement | null>(null)
+const activeColumnIndex = ref(0)
+
+const FEED_LABELS: Record<string, string> = {
+  home: 'For You',
+  local: 'Local',
+  federated: 'Federated',
+}
+
+const columnTabLabels = computed(() =>
+  columnsStore.columns.map((column) => {
+    if (column.feedType === 'group' && column.groupTag) {
+      const group = groupsStore.getGroup(column.groupTag)
+      return group ? `${group.icon} ${group.name}` : `#${column.groupTag}`
+    }
+    return FEED_LABELS[column.feedType] ?? column.feedType
+  }),
+)
 
 const closeAddMenu = (e: MouseEvent) => {
   const target = e.target as HTMLElement
@@ -31,6 +51,35 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   addMenuOpen.value = false
   addGroupsExpanded.value = false
 }
+
+const scrollToColumn = (index: number) => {
+  const el = columnsContainer.value
+  if (!el) return
+  const col = el.children[index] as HTMLElement | undefined
+  if (!col) return
+  el.scrollTo({ left: col.offsetLeft, behavior: 'smooth' })
+  activeColumnIndex.value = index
+}
+
+const onColumnsScroll = () => {
+  const el = columnsContainer.value
+  if (!el || el.clientWidth <= 0) return
+  // Mobile carousel: each column is full width
+  const index = Math.round(el.scrollLeft / el.clientWidth)
+  activeColumnIndex.value = Math.min(
+    Math.max(index, 0),
+    columnsStore.columns.length - 1,
+  )
+}
+
+watch(
+  () => columnsStore.columnCount,
+  (count) => {
+    if (activeColumnIndex.value >= count) {
+      activeColumnIndex.value = Math.max(0, count - 1)
+    }
+  },
+)
 
 onMounted(async () => {
   await instancesStore.initialize()
@@ -67,7 +116,30 @@ useHead({ title: 'Home | NeoSpace' })
 
 <template>
   <div class="columns-page" :class="{ 'columns-page--multi': columnsStore.isMultiColumn }">
-    <div class="columns-container">
+    <!-- Mobile feed tabs: swipe or tap between columns -->
+    <nav
+      v-if="columnsStore.isMultiColumn"
+      class="mobile-feed-tabs"
+      aria-label="Feeds"
+    >
+      <button
+        v-for="(label, idx) in columnTabLabels"
+        :key="columnsStore.columns[idx]!.id"
+        type="button"
+        class="mobile-feed-tabs__tab"
+        :class="{ 'mobile-feed-tabs__tab--active': activeColumnIndex === idx }"
+        :aria-current="activeColumnIndex === idx ? 'true' : undefined"
+        @click="scrollToColumn(idx)"
+      >
+        {{ label }}
+      </button>
+    </nav>
+
+    <div
+      ref="columnsContainer"
+      class="columns-container"
+      @scroll.passive="onColumnsScroll"
+    >
       <TimelineColumn
         v-for="(column, idx) in columnsStore.columns"
         :key="column.id"
@@ -88,7 +160,7 @@ useHead({ title: 'Home | NeoSpace' })
     >
       <button
         class="add-column-btn"
-        :title="`Add column (${columnsStore.columnCount}/4)`"
+        :title="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
         @click="addMenuOpen = !addMenuOpen"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -145,7 +217,7 @@ useHead({ title: 'Home | NeoSpace' })
             </template>
           </template>
 
-          <span class="add-column-menu__hint">{{ columnsStore.columnCount }}/4 columns</span>
+          <span class="add-column-menu__hint">{{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns</span>
         </div>
       </Transition>
     </div>
@@ -166,6 +238,7 @@ useHead({ title: 'Home | NeoSpace' })
 
   // Mobile: fill viewport minus header + nav
   @media (max-width: 1023px) {
+    flex-direction: column;
     height: calc(100vh - 112px - env(safe-area-inset-bottom, 0px));
   }
 
@@ -181,24 +254,93 @@ useHead({ title: 'Home | NeoSpace' })
   display: flex;
   flex: 1;
   height: 100%;
-  overflow: hidden;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 
   // Single column: cap width for readability
   .columns-page:not(.columns-page--multi) & {
     @media (min-width: 1024px) {
       max-width: 620px;
+      overflow-x: hidden;
+
+      :deep(.timeline-column) {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
     }
   }
 
-  // Multi-column: fill available space
+  // Multi-column: fill available space; columns keep a readable min-width and scroll
   .columns-page--multi & {
     max-width: none;
   }
 
-  // Mobile: only show first column
+  // Mobile: full-width snap carousel — swipe left/right between feeds
   @media (max-width: 1023px) {
-    :deep(.timeline-column:not(:first-child)) {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
       display: none;
+    }
+
+    :deep(.timeline-column) {
+      flex: 0 0 100%;
+      min-width: 100%;
+      max-width: 100%;
+      scroll-snap-align: start;
+      scroll-snap-stop: always;
+      border-right: none;
+    }
+  }
+}
+
+// ========================================
+// Mobile feed tabs
+// ========================================
+.mobile-feed-tabs {
+  display: none;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  padding: 0.375rem 0.75rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-primary);
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  @media (max-width: 1023px) {
+    display: flex;
+  }
+
+  &__tab {
+    flex-shrink: 0;
+    max-width: 10rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-radius: 8px;
+    transition: color 0.15s ease, background 0.15s ease;
+
+    &--active {
+      color: var(--neo-text-primary);
+      background: var(--neo-bg-tertiary);
+    }
+
+    &:active {
+      transform: scale(0.97);
     }
   }
 }

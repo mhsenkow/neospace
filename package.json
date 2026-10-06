@@ -11,6 +11,8 @@
     "generate": "nuxt generate && node scripts/spa-fallback.mjs",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "cf:preview": "npm run generate && wrangler pages dev",
     "cf:deploy": "npm run generate && wrangler pages deploy --commit-dirty=true"
   },
@@ -23,6 +25,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "vitest": "^2.1.9",
     "wrangler": "^4.147.0"
   }
 }

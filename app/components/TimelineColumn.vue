@@ -10,6 +10,7 @@ import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import type { ColumnConfig, ColumnFeedType } from '~/stores/columns'
 import { publicClient } from '~/composables/useMasto'
+import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 
 interface Props {
   column: ColumnConfig
@@ -69,6 +70,93 @@ const feedLabel = computed(() => {
 const canShowHome = computed(() => instancesStore.hasAuthenticatedInstance)
 
 const joinedGroups = computed(() => groupsStore.joinedGroups)
+
+const browsingHost = computed(() => {
+  const preferred =
+    instancesStore.activeAccount?.url ||
+    instancesStore.instances[0]?.url ||
+    resolvePublicInstanceUrl()
+  return hostnameOf(preferred) || 'this server'
+})
+
+/** Guest browsing only auth-gated hosts (e.g. mastodon.social) with no token */
+const isGatedGuestBrowse = computed(() => {
+  if (instancesStore.hasAuthenticatedInstance) return false
+  const targets = instancesStore.instances.length
+    ? instancesStore.instances
+    : [{ url: resolvePublicInstanceUrl(), accessToken: null as string | null }]
+  return targets.every((i) => !i.accessToken && isAuthGatedPublicHost(i.url))
+})
+
+const isLoginRequiredError = computed(() => {
+  const msg = (error.value || '').toLowerCase()
+  return (
+    msg.includes('requires login') ||
+    msg.includes('authenticated') ||
+    msg.includes('sign in') ||
+    isGatedGuestBrowse.value
+  )
+})
+
+type EmptyAction = { to: string; label: string; primary?: boolean }
+
+const emptyState = computed((): {
+  icon: string
+  title: string
+  body: string
+  actions: EmptyAction[]
+} => {
+  const authed = instancesStore.hasAuthenticatedInstance
+  const feed = props.column.feedType
+
+  if (!authed && isGatedGuestBrowse.value) {
+    return {
+      icon: '🔒',
+      title: 'This feed needs a sign-in',
+      body: `${browsingHost.value} hides its public timeline until you log in. Sign in, or explore a server that still shows public posts.`,
+      actions: [
+        { to: '/login', label: 'Sign in', primary: true },
+        { to: '/explore', label: 'Explore servers' },
+      ],
+    }
+  }
+
+  if (!authed) {
+    return {
+      icon: '📭',
+      title: 'No posts yet',
+      body: 'Explore servers to watch public posts, or sign in to see your home feed.',
+      actions: [
+        { to: '/explore', label: 'Explore', primary: true },
+        { to: '/login', label: 'Sign in' },
+      ],
+    }
+  }
+
+  if (feed === 'home') {
+    return {
+      icon: '✨',
+      title: 'Your feed is quiet',
+      body: 'Follow people or explore servers to fill this column.',
+      actions: [{ to: '/explore', label: 'Explore servers', primary: true }],
+    }
+  }
+
+  return {
+    icon: '📭',
+    title: 'No posts yet',
+    body: 'Try another timeline, or find a different server to watch.',
+    actions: [{ to: '/explore', label: 'Explore', primary: true }],
+  }
+})
+
+const errorActions = computed((): EmptyAction[] => {
+  if (!isLoginRequiredError.value) return []
+  return [
+    { to: '/login', label: 'Sign in', primary: true },
+    { to: '/explore', label: 'Explore servers' },
+  ]
+})
 
 const closeFeedMenu = (e: MouseEvent) => {
   const target = e.target as HTMLElement
@@ -512,22 +600,52 @@ onUnmounted(() => {
 
       <!-- Error -->
       <div v-else-if="error" class="column-state column-state--error">
-        <span>&#x26A0;&#xFE0F;</span>
+        <span>{{ isLoginRequiredError ? '🔒' : '⚠️' }}</span>
+        <p class="column-state__title">
+          {{ isLoginRequiredError ? 'Sign in to see this feed' : 'Couldn’t load posts' }}
+        </p>
         <p>{{ error }}</p>
-        <button class="column-retry" @click="fetchTimeline(true)">Retry</button>
+        <div v-if="errorActions.length" class="column-state__actions">
+          <NuxtLink
+            v-for="action in errorActions"
+            :key="action.to + action.label"
+            :to="action.to"
+            class="neo-btn neo-btn--sm"
+            :class="action.primary ? 'neo-btn--primary' : 'neo-btn--ghost'"
+          >
+            {{ action.label }}
+          </NuxtLink>
+        </div>
+        <button v-else class="column-retry" @click="fetchTimeline(true)">Retry</button>
       </div>
 
       <!-- Login prompt for home when not authenticated -->
       <div v-else-if="column.feedType === 'home' && !canShowHome" class="column-state">
-        <span>&#x1F511;</span>
-        <p>Log in to see your feed</p>
-        <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Log In</NuxtLink>
+        <span>🔑</span>
+        <p class="column-state__title">Log in to see your feed</p>
+        <p>Your home timeline needs a Mastodon account.</p>
+        <div class="column-state__actions">
+          <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in</NuxtLink>
+          <NuxtLink to="/explore" class="neo-btn neo-btn--ghost neo-btn--sm">Explore</NuxtLink>
+        </div>
       </div>
 
-      <!-- Empty -->
+      <!-- Empty / first-run -->
       <div v-else-if="statuses.length === 0" class="column-state">
-        <span>&#x1F4ED;</span>
-        <p>No posts yet</p>
+        <span>{{ emptyState.icon }}</span>
+        <p class="column-state__title">{{ emptyState.title }}</p>
+        <p>{{ emptyState.body }}</p>
+        <div v-if="emptyState.actions.length" class="column-state__actions">
+          <NuxtLink
+            v-for="action in emptyState.actions"
+            :key="action.to + action.label"
+            :to="action.to"
+            class="neo-btn neo-btn--sm"
+            :class="action.primary ? 'neo-btn--primary' : 'neo-btn--ghost'"
+          >
+            {{ action.label }}
+          </NuxtLink>
+        </div>
       </div>
 
       <!-- Posts -->
@@ -559,11 +677,11 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .timeline-column {
-  flex: 1;
+  flex: 1 0 280px;
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-width: 0;
+  min-width: 280px;
   border-right: 1px solid var(--neo-border-color);
   position: relative;
 
@@ -825,8 +943,26 @@ onUnmounted(() => {
   }
 
   p {
+    max-width: 28ch;
     color: var(--neo-text-muted);
     font-size: 0.875rem;
+    line-height: 1.45;
+  }
+
+  &__title {
+    margin: 0;
+    max-width: none !important;
+    font-size: 1rem !important;
+    font-weight: 600;
+    color: var(--neo-text-primary) !important;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
   }
 
   &__spinner {

@@ -8,16 +8,22 @@
  */
 
 import { defineStore } from 'pinia'
+import {
+  LOOM_ORIGINS,
+  STORY_PUBLIC_NOTICE,
+  lineageBlurb,
+  storyBase,
+  suggestedChartAlt,
+} from '~/utils/loomHandoff'
 
 export type ComposeHandoffDraft = {
   text: string
   files: File[]
+  /** Parallel to files — suggested alt text for accessibility */
+  descriptions: (string | null)[]
   notice: string | null
 }
 
-const LOOM_ORIGINS = new Set(['https://loom.ibm.io', 'https://loom-storyteller.mhsenkow.workers.dev'])
-const LOOM_STORY_RE =
-  /^https:\/\/(loom\.ibm\.io|loom-storyteller\.mhsenkow\.workers\.dev)\/s\/([a-z0-9]{8,16})\/?$/i
 const STORAGE_KEY = 'neospace_loom_share_v1'
 
 type StoredShare = {
@@ -26,18 +32,6 @@ type StoredShare = {
   /** data URL for the chart image (optional; story fetch is preferred) */
   imageDataUrl?: string
   imageName?: string
-}
-
-function storyIdFromUrl(url: string): string | null {
-  const m = url.trim().match(LOOM_STORY_RE)
-  return m?.[2] ?? null
-}
-
-function storyBase(url: string): string | null {
-  const id = storyIdFromUrl(url)
-  if (!id) return null
-  const u = new URL(url)
-  return `${u.origin}/s/${id}`
 }
 
 async function fetchAsFile(url: string, filename: string, typeHint?: string): Promise<File | null> {
@@ -64,23 +58,6 @@ async function fetchStoryImage(base: string, filename: string): Promise<File | n
   return null
 }
 
-function lineageBlurb(data: unknown): string | null {
-  if (!data || typeof data !== 'object') return null
-  const o = data as Record<string, unknown>
-  const source = o.source as { label?: string; url?: string } | undefined
-  const cols = Array.isArray(o.columns) ? o.columns.length : 0
-  const rows =
-    typeof o.totalRows === 'number' ? o.totalRows : Array.isArray(o.rows) ? o.rows.length : 0
-  const truncated = !!o.truncated
-  const captured = typeof o.capturedAt === 'string' ? o.capturedAt.slice(0, 10) : null
-  const bits: string[] = []
-  if (source?.label) bits.push(`Source: ${source.label}`)
-  if (rows) bits.push(`${rows.toLocaleString()} rows${truncated ? ' (sample)' : ''}`)
-  if (cols) bits.push(`${cols} columns`)
-  if (captured) bits.push(`captured ${captured}`)
-  return bits.length ? `Data lineage · ${bits.join(' · ')}` : null
-}
-
 async function fileFromDataUrl(dataUrl: string, name: string): Promise<File | null> {
   try {
     const res = await fetch(dataUrl)
@@ -100,6 +77,13 @@ function bufferToDataUrl(buffer: ArrayBuffer, type: string): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
   }
   return `data:${type};base64,${btoa(binary)}`
+}
+
+function handoffNotice(hasImage: boolean): string {
+  if (!hasImage) {
+    return 'Caption ready — chart image missing; try Post to NeoSpace again from Loom'
+  }
+  return `Chart + lineage loaded. Add alt text, then post. ${STORY_PUBLIC_NOTICE}`
 }
 
 export function persistLoomShare(share: StoredShare) {
@@ -207,6 +191,11 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
           lines.push('', base)
         }
 
+        const text = lines.join('\n').trim()
+        const descriptions = files.length
+          ? [suggestedChartAlt({ caption: text, lineage: lineageLine })]
+          : []
+
         const key = `${share.story || ''}|${share.text || ''}|${files.length ? 'img' : 'noimg'}`
         // Don't replace an image draft with a later text-only one
         if (
@@ -219,11 +208,10 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
 
         this.lastIngestKey = key
         this.pending = {
-          text: lines.join('\n').trim(),
+          text,
           files,
-          notice: files.length
-            ? 'Chart image + lineage loaded from Loom — review and post'
-            : 'Caption ready — chart image missing; try Post to NeoSpace again from Loom',
+          descriptions,
+          notice: handoffNotice(files.length > 0),
         }
         return true
       } catch (e: any) {
@@ -285,11 +273,13 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         this.error = null
         try {
           const file = new File([data.image.buffer], imageName, { type: imageType })
+          const text = (share.text || '').trim()
           this.lastIngestKey = key
           this.pending = {
-            text: (share.text || '').trim(),
+            text,
             files: [file],
-            notice: 'Chart image loaded from Loom — review and post',
+            descriptions: [suggestedChartAlt({ caption: text })],
+            notice: handoffNotice(true),
           }
           return true
         } finally {

@@ -58,10 +58,12 @@ const {
   allReady,
   canAddMore,
   maxAttachments,
+  altMax,
   addFiles,
   removeAttachment,
   clearAttachments,
   retryUpload,
+  setDescription,
   onDragEnter,
   onDragLeave,
   onDragOver,
@@ -186,13 +188,13 @@ const applyHandoff = async () => {
   // Replace any prior handoff media so retries don't stack duplicates
   if (draft.files.length) {
     clearAttachments()
-    await addFiles(draft.files)
+    await addFiles(draft.files, draft.descriptions)
   }
   handoffNotice.value = draft.notice
   if (handoffNotice.value) {
     window.setTimeout(() => {
       handoffNotice.value = null
-    }, 5000)
+    }, 9000)
   }
   await nextTick()
   textareaRef.value?.focus()
@@ -286,7 +288,7 @@ onMounted(() => {
         <img
           v-if="item.file.type.startsWith('image/')"
           :src="item.previewUrl"
-          alt=""
+          :alt="item.description || ''"
           class="compose-media__thumb"
         />
         <div v-else class="compose-media__video">
@@ -314,6 +316,19 @@ onMounted(() => {
         >
           ×
         </button>
+        <label class="compose-media__alt">
+          <span class="compose-media__alt-label">Alt text</span>
+          <textarea
+            class="compose-media__alt-input"
+            rows="2"
+            :maxlength="altMax"
+            :disabled="isPosting || item.uploading"
+            :value="item.description"
+            placeholder="Describe this image for screen readers"
+            @input="setDescription(item.localId, ($event.target as HTMLTextAreaElement).value)"
+            @click.stop
+          />
+        </label>
       </div>
     </div>
 
@@ -520,16 +535,19 @@ onMounted(() => {
 }
 
 .compose-media {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .compose-media__item {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 0.65rem;
+  align-items: start;
   position: relative;
-  aspect-ratio: 1;
+  padding: 0.5rem;
   border-radius: var(--neo-radius-md);
-  overflow: hidden;
   background: var(--neo-bg-tertiary);
   border: 1px solid var(--neo-border-color);
 
@@ -542,10 +560,11 @@ onMounted(() => {
 }
 
 .compose-media__thumb {
-  width: 100%;
-  height: 100%;
+  width: 96px;
+  height: 96px;
   object-fit: cover;
   display: block;
+  border-radius: calc(var(--neo-radius-md) - 2px);
 }
 
 .compose-media__video {
@@ -554,10 +573,12 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 0.25rem;
-  width: 100%;
-  height: 100%;
+  width: 96px;
+  height: 96px;
   padding: 0.5rem;
   font-size: 1.25rem;
+  border-radius: calc(var(--neo-radius-md) - 2px);
+  background: var(--neo-bg-secondary);
 }
 
 .compose-media__video-name {
@@ -572,7 +593,10 @@ onMounted(() => {
 
 .compose-media__overlay {
   position: absolute;
-  inset: 0;
+  left: 0.5rem;
+  top: 0.5rem;
+  width: 96px;
+  height: 96px;
   display: grid;
   place-items: center;
   padding: 0.35rem;
@@ -582,6 +606,7 @@ onMounted(() => {
   color: var(--neo-text-primary);
   background: color-mix(in srgb, var(--neo-bg-card) 55%, transparent);
   backdrop-filter: blur(2px);
+  border-radius: calc(var(--neo-radius-md) - 2px);
 
   &--error {
     color: var(--neo-danger);
@@ -590,8 +615,8 @@ onMounted(() => {
 
 .compose-media__remove {
   position: absolute;
-  top: 0.25rem;
-  right: 0.25rem;
+  top: 0.35rem;
+  left: calc(0.5rem + 96px - 1.65rem);
   width: 1.5rem;
   height: 1.5rem;
   display: grid;
@@ -603,6 +628,7 @@ onMounted(() => {
   border: none;
   border-radius: 50%;
   cursor: pointer;
+  z-index: 1;
 
   &:hover {
     background: rgba(0, 0, 0, 0.85);
@@ -611,6 +637,48 @@ onMounted(() => {
   &:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+}
+
+.compose-media__alt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.compose-media__alt-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--neo-text-muted);
+}
+
+.compose-media__alt-input {
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.45rem 0.55rem;
+  font-family: var(--neo-font-family-ui);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--neo-text-primary);
+  background: var(--neo-bg-card);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-md);
+  resize: vertical;
+
+  &:focus {
+    outline: none;
+    border-color: var(--neo-accent);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+  }
+
+  &::placeholder {
+    color: var(--neo-text-disabled);
   }
 }
 

@@ -1,13 +1,24 @@
 import { defineStore } from 'pinia'
-import type { mastodon } from 'masto'
+import { createRestAPIClient, type mastodon } from 'masto'
 import { useInstancesStore } from './instances'
-import { activeClient } from '~/composables/useMasto'
+import { activeClient, clientFor } from '~/composables/useMasto'
 
-export type NotificationFilterType = 'all' | 'mention' | 'favourite' | 'reblog' | 'follow' | 'poll' | 'status' | 'update'
+export type NotificationFilterType =
+  | 'all'
+  | 'mention'
+  | 'favourite'
+  | 'reblog'
+  | 'follow'
+  | 'poll'
+  | 'status'
+  | 'update'
 
 export type SortOrder = 'newest' | 'oldest'
 
 export interface ExtendedNotification extends mastodon.v1.Notification {
+  /** Stable list key across accounts (instanceId:id) */
+  _key: string
+  _instanceId: string
   _instanceUrl?: string
 }
 
@@ -17,11 +28,13 @@ interface NotificationsState {
   isLoadingMore: boolean
   error: string | null
   hasMore: boolean
-  maxId: string | null
+  /** Per-instance max_id cursors for load-more */
+  cursors: Record<string, string>
   filter: NotificationFilterType
   sortOrder: SortOrder
   unreadCount: number
-  lastReadId: string | null
+  /** Per-account last-read notification ids */
+  lastReadByInstance: Record<string, string>
 }
 
 const FILTER_TO_TYPES: Record<NotificationFilterType, string[] | undefined> = {
@@ -35,7 +48,21 @@ const FILTER_TO_TYPES: Record<NotificationFilterType, string[] | undefined> = {
   update: ['update'],
 }
 
-const LAST_READ_KEY = 'neospace_notif_last_read'
+const LAST_READ_KEY = 'neospace_notif_last_read_v2'
+const LEGACY_LAST_READ_KEY = 'neospace_notif_last_read'
+
+function tagNotification(
+  n: mastodon.v1.Notification,
+  instanceId: string,
+  instanceUrl: string,
+): ExtendedNotification {
+  return {
+    ...n,
+    _key: `${instanceId}:${n.id}`,
+    _instanceId: instanceId,
+    _instanceUrl: instanceUrl,
+  }
+}
 
 export const useNotificationsStore = defineStore('notifications', {
   state: (): NotificationsState => ({
@@ -44,11 +71,11 @@ export const useNotificationsStore = defineStore('notifications', {
     isLoadingMore: false,
     error: null,
     hasMore: true,
-    maxId: null,
+    cursors: {},
     filter: 'all',
     sortOrder: 'newest',
     unreadCount: 0,
-    lastReadId: null,
+    lastReadByInstance: {},
   }),
 
   getters: {
@@ -65,7 +92,7 @@ export const useNotificationsStore = defineStore('notifications', {
       if (state.filter !== 'all') {
         const types = FILTER_TO_TYPES[state.filter]
         if (types) {
-          items = items.filter(n => types.includes(n.type))
+          items = items.filter((n) => types.includes(n.type))
         }
       }
 
@@ -120,62 +147,94 @@ export const useNotificationsStore = defineStore('notifications', {
       if (typeof window === 'undefined') return
       try {
         const saved = localStorage.getItem(LAST_READ_KEY)
-        if (saved) this.lastReadId = saved
+        if (saved) {
+          const parsed = JSON.parse(saved) as Record<string, string>
+          if (parsed && typeof parsed === 'object') {
+            this.lastReadByInstance = parsed
+            return
+          }
+        }
+        // Migrate single-id legacy key onto the active account once
+        const legacy = localStorage.getItem(LEGACY_LAST_READ_KEY)
+        if (legacy) {
+          const instances = useInstancesStore()
+          const activeId = instances.activeAccount?.id
+          if (activeId) {
+            this.lastReadByInstance = { [activeId]: legacy }
+            this.persistLastReadMap()
+          }
+          localStorage.removeItem(LEGACY_LAST_READ_KEY)
+        }
       } catch {
         // ignore
       }
     },
 
-    persistLastRead(id: string | null) {
-      this.lastReadId = id
-      if (typeof window === 'undefined' || !id) return
+    persistLastReadMap() {
+      if (typeof window === 'undefined') return
       try {
-        localStorage.setItem(LAST_READ_KEY, id)
+        localStorage.setItem(LAST_READ_KEY, JSON.stringify(this.lastReadByInstance))
       } catch {
         // ignore
       }
+    },
+
+    persistLastRead(instanceId: string, id: string) {
+      this.lastReadByInstance = { ...this.lastReadByInstance, [instanceId]: id }
+      this.persistLastReadMap()
     },
 
     recomputeUnread() {
-      if (!this.lastReadId) {
-        this.unreadCount = 0
-        return
+      let total = 0
+      for (const n of this.notifications) {
+        const last = this.lastReadByInstance[n._instanceId]
+        if (!last || n.id > last) total += 1
       }
-      this.unreadCount = this.notifications.filter((n) => n.id > this.lastReadId!).length
+      // First visit per account: don't explode badge — seed from loaded list tops
+      this.unreadCount = total
     },
 
     /**
-     * Lightweight badge refresh — used from layout without loading the full page.
+     * Lightweight badge refresh — polls every authenticated account.
      */
     async refreshUnreadBadge() {
       const instances = useInstancesStore()
-      if (!instances.hasAuthenticatedInstance) {
+      const authed = instances.authenticatedInstances
+      if (!authed.length) {
         this.unreadCount = 0
         return
       }
 
       this.loadLastRead()
-      const client = this.getClient()
-      if (!client) return
+      let total = 0
+      const map = { ...this.lastReadByInstance }
 
-      try {
-        const items = await client.v1.notifications.list({ limit: 40 } as any)
-        if (!items.length) {
-          this.unreadCount = 0
-          return
-        }
+      await Promise.all(
+        authed.map(async (inst) => {
+          try {
+            const client = createRestAPIClient({
+              url: inst.url,
+              accessToken: inst.accessToken!,
+            })
+            const items = await client.v1.notifications.list({ limit: 40 } as any)
+            if (!items.length) return
 
-        // First visit: treat current stack as read so badge doesn't explode
-        if (!this.lastReadId) {
-          this.persistLastRead(items[0].id)
-          this.unreadCount = 0
-          return
-        }
+            const last = map[inst.id]
+            if (!last) {
+              // First visit: treat current stack as read so badge doesn't explode
+              map[inst.id] = items[0]!.id
+              return
+            }
+            total += items.filter((n) => n.id > last).length
+          } catch (e) {
+            console.warn(`Unread badge refresh failed for ${inst.url}:`, e)
+          }
+        }),
+      )
 
-        this.unreadCount = items.filter((n) => n.id > this.lastReadId!).length
-      } catch (e) {
-        console.warn('Unread badge refresh failed:', e)
-      }
+      this.lastReadByInstance = map
+      this.persistLastReadMap()
+      this.unreadCount = total
     },
 
     async fetchNotifications(refresh = false) {
@@ -183,12 +242,13 @@ export const useNotificationsStore = defineStore('notifications', {
 
       if (refresh) {
         this.notifications = []
-        this.maxId = null
+        this.cursors = {}
         this.hasMore = true
       }
 
-      const client = this.getClient()
-      if (!client) {
+      const instances = useInstancesStore()
+      const authed = instances.authenticatedInstances
+      if (!authed.length) {
         this.error = 'Please log in to view notifications'
         return
       }
@@ -198,19 +258,49 @@ export const useNotificationsStore = defineStore('notifications', {
       this.error = null
 
       try {
-        const params: Record<string, unknown> = { limit: 30 }
+        const batches = await Promise.all(
+          authed.map(async (inst) => {
+            try {
+              const client = createRestAPIClient({
+                url: inst.url,
+                accessToken: inst.accessToken!,
+              })
+              const items = await client.v1.notifications.list({ limit: 30 } as any)
+              if (items.length && !this.lastReadByInstance[inst.id]) {
+                this.persistLastRead(inst.id, items[0]!.id)
+              }
+              return {
+                instanceId: inst.id,
+                instanceUrl: inst.url,
+                items,
+              }
+            } catch (e: any) {
+              console.warn(`Notifications fetch failed for ${inst.url}:`, e)
+              return { instanceId: inst.id, instanceUrl: inst.url, items: [] as mastodon.v1.Notification[] }
+            }
+          }),
+        )
 
-        const items = await client.v1.notifications.list(params as any)
+        const merged: ExtendedNotification[] = []
+        const nextCursors: Record<string, string> = {}
+        let anyFull = false
 
-        this.notifications = items.map(n => ({ ...n } as ExtendedNotification))
-
-        if (items.length > 0) {
-          this.maxId = items[items.length - 1].id
-          if (!this.lastReadId) {
-            this.persistLastRead(items[0].id)
+        for (const batch of batches) {
+          for (const n of batch.items) {
+            merged.push(tagNotification(n, batch.instanceId, batch.instanceUrl))
           }
+          if (batch.items.length > 0) {
+            nextCursors[batch.instanceId] = batch.items[batch.items.length - 1]!.id
+          }
+          if (batch.items.length >= 30) anyFull = true
         }
-        this.hasMore = items.length >= 30
+
+        merged.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )
+        this.notifications = merged
+        this.cursors = nextCursors
+        this.hasMore = anyFull
         this.recomputeUnread()
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch notifications'
@@ -221,27 +311,61 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     async loadMore() {
-      if (this.isLoadingMore || !this.hasMore || !this.maxId) return
+      if (this.isLoadingMore || !this.hasMore) return
+      const instances = useInstancesStore()
+      const authed = instances.authenticatedInstances
+      if (!authed.length) return
 
-      const client = this.getClient()
-      if (!client) return
+      const withCursor = authed.filter((i) => this.cursors[i.id])
+      if (!withCursor.length) {
+        this.hasMore = false
+        return
+      }
 
       this.isLoadingMore = true
 
       try {
-        const params: Record<string, unknown> = {
-          limit: 30,
-          max_id: this.maxId,
+        const batches = await Promise.all(
+          withCursor.map(async (inst) => {
+            try {
+              const client = createRestAPIClient({
+                url: inst.url,
+                accessToken: inst.accessToken!,
+              })
+              const items = await client.v1.notifications.list({
+                limit: 30,
+                max_id: this.cursors[inst.id],
+              } as any)
+              return { instanceId: inst.id, instanceUrl: inst.url, items }
+            } catch (e) {
+              console.warn(`Load more notifications failed for ${inst.url}:`, e)
+              return { instanceId: inst.id, instanceUrl: inst.url, items: [] as mastodon.v1.Notification[] }
+            }
+          }),
+        )
+
+        const seen = new Set(this.notifications.map((n) => n._key))
+        let anyFull = false
+        const nextCursors = { ...this.cursors }
+
+        for (const batch of batches) {
+          for (const n of batch.items) {
+            const tagged = tagNotification(n, batch.instanceId, batch.instanceUrl)
+            if (!seen.has(tagged._key)) {
+              this.notifications.push(tagged)
+              seen.add(tagged._key)
+            }
+          }
+          if (batch.items.length > 0) {
+            nextCursors[batch.instanceId] = batch.items[batch.items.length - 1]!.id
+          } else {
+            delete nextCursors[batch.instanceId]
+          }
+          if (batch.items.length >= 30) anyFull = true
         }
 
-        const items = await client.v1.notifications.list(params as any)
-
-        if (items.length > 0) {
-          const newItems = items.map(n => ({ ...n } as ExtendedNotification))
-          this.notifications.push(...newItems)
-          this.maxId = items[items.length - 1].id
-        }
-        this.hasMore = items.length >= 30
+        this.cursors = nextCursors
+        this.hasMore = anyFull && Object.keys(nextCursors).length > 0
       } catch (e: any) {
         console.error('Load more notifications error:', e)
       } finally {
@@ -258,45 +382,73 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     async markAllRead() {
-      const client = this.getClient()
-      if (!client) return
-
-      try {
-        const topId = this.notifications[0]?.id
-        await (client.v1.markers as any).create({
-          notifications: { lastReadId: topId },
-        })
-        if (topId) this.persistLastRead(topId)
-        this.unreadCount = 0
-      } catch (e) {
-        console.warn('Failed to mark notifications as read:', e)
-        // Still clear locally so the badge isn't stuck
-        const topId = this.notifications[0]?.id
-        if (topId) this.persistLastRead(topId)
-        this.unreadCount = 0
+      const instances = useInstancesStore()
+      const byInstance = new Map<string, string>()
+      for (const n of this.notifications) {
+        if (!byInstance.has(n._instanceId)) {
+          byInstance.set(n._instanceId, n.id)
+        }
       }
+
+      await Promise.all(
+        [...byInstance.entries()].map(async ([instanceId, topId]) => {
+          try {
+            const client = clientFor(instanceId)
+            await (client.v1.markers as any).create({
+              notifications: { lastReadId: topId },
+            })
+          } catch (e) {
+            console.warn(`Failed to mark notifications read on ${instanceId}:`, e)
+          }
+          this.persistLastRead(instanceId, topId)
+        }),
+      )
+
+      // Also seed accounts with no loaded notifs from authenticated list
+      for (const inst of instances.authenticatedInstances) {
+        if (!this.lastReadByInstance[inst.id] && byInstance.has(inst.id)) {
+          /* already persisted above */
+        }
+      }
+
+      this.unreadCount = 0
     },
 
-    async dismissNotification(id: string) {
-      const client = this.getClient()
-      if (!client) return
+    async dismissNotification(keyOrId: string) {
+      const notif =
+        this.notifications.find((n) => n._key === keyOrId) ||
+        this.notifications.find((n) => n.id === keyOrId)
+      if (!notif) return
 
       try {
-        await client.v1.notifications.$select(id).dismiss()
-        this.notifications = this.notifications.filter(n => n.id !== id)
+        const client = clientFor(notif._instanceId)
+        await client.v1.notifications.$select(notif.id).dismiss()
+        this.notifications = this.notifications.filter((n) => n._key !== notif._key)
+        this.recomputeUnread()
       } catch (e) {
         console.error('Failed to dismiss notification:', e)
       }
     },
 
     async clearAll() {
-      const client = this.getClient()
-      if (!client) return
+      const instances = useInstancesStore()
+      const authed = instances.authenticatedInstances
+      if (!authed.length) return
 
       try {
-        await client.v1.notifications.clear()
+        await Promise.all(
+          authed.map(async (inst) => {
+            try {
+              const client = clientFor(inst.id)
+              await client.v1.notifications.clear()
+            } catch (e) {
+              console.warn(`Failed to clear notifications on ${inst.url}:`, e)
+            }
+          }),
+        )
         this.notifications = []
         this.unreadCount = 0
+        this.cursors = {}
       } catch (e) {
         console.error('Failed to clear notifications:', e)
       }

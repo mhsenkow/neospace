@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useNotificationsStore, type NotificationFilterType, type SortOrder } from '~/stores/notifications'
+import { useNotificationsStore, type ExtendedNotification, type NotificationFilterType, type SortOrder } from '~/stores/notifications'
 import { useInstancesStore } from '~/stores/instances'
 import type { mastodon } from 'masto'
 
@@ -65,6 +65,17 @@ const handleDismiss = (id: string) => {
   notificationsStore.dismissNotification(id)
 }
 
+const showAccountHost = computed(() => instancesStore.authenticatedInstances.length > 1)
+
+const hostLabel = (url?: string) => {
+  if (!url) return ''
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url.replace(/^https?:\/\//, '')
+  }
+}
+
 const formatTime = (dateString: string) => {
   const date = new Date(dateString)
   const now = new Date()
@@ -82,7 +93,11 @@ const formatTime = (dateString: string) => {
 
 const router = useRouter()
 
-const openNotification = (notif: mastodon.v1.Notification) => {
+const openNotification = (notif: ExtendedNotification) => {
+  if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
+    instancesStore.setActiveAccount(notif._instanceId)
+  }
+
   // Follows → profile; everything else with a status → in-app thread
   if (notif.type === 'follow' || notif.type === 'follow_request') {
     const acct = notif.account?.acct
@@ -304,7 +319,7 @@ onBeforeUnmount(() => {
           <div class="notif-group__items">
             <div
               v-for="notif in grouped[group]"
-              :key="notif.id"
+              :key="notif._key"
               class="notif-item"
               :class="'notif-item--' + notif.type"
               role="button"
@@ -334,6 +349,10 @@ onBeforeUnmount(() => {
                       {{ notif.account.displayName || notif.account.username }}
                     </strong>
                     <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
+                    <span
+                      v-if="showAccountHost && notif._instanceUrl"
+                      class="notif-item__host"
+                    >· {{ hostLabel(notif._instanceUrl) }}</span>
                   </p>
                   <time class="notif-item__time" :datetime="notif.createdAt">
                     {{ formatTime(notif.createdAt) }}
@@ -360,7 +379,7 @@ onBeforeUnmount(() => {
               </div>
 
               <!-- Dismiss -->
-              <button class="notif-item__dismiss" title="Dismiss" @click.stop="handleDismiss(notif.id)">
+              <button class="notif-item__dismiss" title="Dismiss" @click.stop="handleDismiss(notif._key)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -842,6 +861,12 @@ onBeforeUnmount(() => {
 
   &__action {
     color: var(--neo-text-secondary);
+    font-weight: 400;
+  }
+
+  &__host {
+    color: var(--neo-text-muted);
+    font-size: 0.8125rem;
     font-weight: 400;
   }
 
