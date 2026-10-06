@@ -20,6 +20,8 @@ const props = withDefaults(
     compact?: boolean
     /** Prefill (e.g. @acct) — applied once on mount */
     initialText?: string
+    /** Override default posting visibility (e.g. direct for DMs) */
+    initialVisibility?: 'public' | 'unlisted' | 'private' | 'direct'
   }>(),
   {
     placeholder: 'Share something — or drop a photo here',
@@ -40,7 +42,7 @@ const handoffStore = useComposeHandoffStore()
 const content = ref(props.initialText || '')
 const spoilerText = ref('')
 const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
-  settingsStore.defaultVisibility,
+  props.initialVisibility || settingsStore.defaultVisibility,
 )
 const showCW = ref(settingsStore.defaultSensitive)
 const isPosting = ref(false)

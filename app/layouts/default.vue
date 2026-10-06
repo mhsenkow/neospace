@@ -7,6 +7,8 @@ import { useThemeStore } from '~/stores/theme'
 import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
+import { useConversationsStore } from '~/stores/conversations'
+import { useComposeSheetStore } from '~/stores/composeSheet'
 import {
   useComposeHandoffStore,
   LOOM_ORIGINS,
@@ -19,6 +21,8 @@ const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
+const conversationsStore = useConversationsStore()
+const composeSheet = useComposeSheetStore()
 const composeHandoff = useComposeHandoffStore()
 const { open: openAccounts } = useAccountsManager()
 const router = useRouter()
@@ -27,6 +31,15 @@ const route = useRoute()
 const mobileMenuOpen = ref(false)
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
+const messagesBadge = computed(() => conversationsStore.badgeLabel)
+
+const openCompose = () => {
+  if (!instancesStore.isAuthenticated) {
+    router.push('/login')
+    return
+  }
+  composeSheet.show()
+}
 
 /** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
 const isThreadRoute = computed(() => route.path.startsWith('/status/'))
@@ -106,8 +119,12 @@ onMounted(async () => {
       })
       if (!instancesStore.isAuthenticated) {
         await router.replace('/login')
-      } else if (route.path !== '/') {
-        await router.replace('/')
+      } else {
+        if (route.path !== '/') await router.replace('/')
+        // Mobile: open + sheet so the feed stays clean
+        if (window.matchMedia('(max-width: 1023px)').matches) {
+          composeSheet.show()
+        }
       }
     })()
   }
@@ -131,6 +148,7 @@ onMounted(async () => {
 
   if (instancesStore.hasAuthenticatedInstance) {
     notificationsStore.refreshUnreadBadge()
+    conversationsStore.refreshUnreadBadge()
   }
 
   // Re-ping after init — opener may have missed early ready signals
@@ -153,6 +171,7 @@ onMounted(async () => {
       await composeHandoff.ingestStored(share)
       loomShareAccepted = composeHandoff.hasPending
       if (route.path !== '/') await router.replace('/')
+      if (window.matchMedia('(max-width: 1023px)').matches) composeSheet.show()
     }
   } else {
     // Give optional postMessage a short window when we weren't opened via query
@@ -166,6 +185,7 @@ onMounted(async () => {
         } else {
           await composeHandoff.ingestStored(loomPayload)
           if (route.path !== '/') await router.replace('/')
+          if (window.matchMedia('(max-width: 1023px)').matches) composeSheet.show()
         }
       }
     }
@@ -258,6 +278,18 @@ const closeMobileMenu = () => {
             <path d="M23 21v-2a4 4 0 00-3-3.87" />
             <path d="M16 3.13a4 4 0 010 7.75" />
           </svg>
+        </NuxtLink>
+        <NuxtLink
+          v-if="instancesStore.hasAuthenticatedInstance"
+          to="/messages"
+          class="sidebar__link sidebar__link--badge"
+          :class="{ active: route.path === '/messages' }"
+          title="Messages"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/messages' ? 2 : 1.5">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" :fill="route.path === '/messages' ? 'currentColor' : 'none'" />
+          </svg>
+          <span v-if="messagesBadge" class="nav-badge" :aria-label="`${messagesBadge} unread`">{{ messagesBadge }}</span>
         </NuxtLink>
         <NuxtLink
           v-if="instancesStore.hasAuthenticatedInstance"
@@ -365,8 +397,17 @@ const closeMobileMenu = () => {
 
         <nav class="mobile-sidebar__nav">
           <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
-          <NuxtLink to="/groups" class="mobile-sidebar__link" @click="closeMobileMenu">Groups</NuxtLink>
           <NuxtLink to="/explore" class="mobile-sidebar__link" @click="closeMobileMenu">Explore</NuxtLink>
+          <NuxtLink to="/groups" class="mobile-sidebar__link" @click="closeMobileMenu">Groups</NuxtLink>
+          <NuxtLink
+            v-if="instancesStore.hasAuthenticatedInstance"
+            to="/messages"
+            class="mobile-sidebar__link"
+            @click="closeMobileMenu"
+          >
+            Messages
+            <span v-if="messagesBadge" class="nav-badge nav-badge--inline">{{ messagesBadge }}</span>
+          </NuxtLink>
           <NuxtLink
             v-if="instancesStore.hasAuthenticatedInstance"
             to="/notifications"
@@ -421,23 +462,41 @@ const closeMobileMenu = () => {
       <slot />
     </main>
 
+    <!-- Threads-style: Home · Explore · + · Notifications · Messages/Account -->
     <nav v-if="showMobileNav" class="mobile-nav" aria-label="Mobile">
-      <NuxtLink to="/" class="mobile-nav__item" :class="{ active: route.path === '/' }">
+      <NuxtLink to="/" class="mobile-nav__item" :class="{ active: route.path === '/' }" aria-label="Home">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/' ? 2 : 1.5">
           <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" :fill="route.path === '/' ? 'currentColor' : 'none'" />
         </svg>
       </NuxtLink>
-      <NuxtLink to="/explore" class="mobile-nav__item" :class="{ active: route.path === '/explore' }">
+
+      <NuxtLink to="/explore" class="mobile-nav__item" :class="{ active: route.path === '/explore' }" aria-label="Explore">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/explore' ? 2 : 1.5">
           <circle cx="11" cy="11" r="8" />
           <path d="M21 21l-4.35-4.35" />
         </svg>
       </NuxtLink>
+
+      <button
+        type="button"
+        class="mobile-nav__item mobile-nav__compose"
+        aria-label="New post"
+        @click="openCompose"
+      >
+        <span class="mobile-nav__compose-mark">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </span>
+      </button>
+
       <NuxtLink
         v-if="instancesStore.hasAuthenticatedInstance"
         to="/notifications"
         class="mobile-nav__item mobile-nav__item--badge"
         :class="{ active: route.path === '/notifications' }"
+        aria-label="Notifications"
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/notifications' ? 2 : 1.5">
           <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -445,7 +504,13 @@ const closeMobileMenu = () => {
         </svg>
         <span v-if="notifBadge" class="nav-badge">{{ notifBadge }}</span>
       </NuxtLink>
-      <NuxtLink to="/groups" class="mobile-nav__item" :class="{ active: route.path.startsWith('/groups') }">
+      <NuxtLink
+        v-else
+        to="/groups"
+        class="mobile-nav__item"
+        :class="{ active: route.path.startsWith('/groups') }"
+        aria-label="Groups"
+      >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path.startsWith('/groups') ? 2 : 1.5">
           <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
           <circle cx="9" cy="7" r="4" />
@@ -453,10 +518,23 @@ const closeMobileMenu = () => {
           <path d="M16 3.13a4 4 0 010 7.75" />
         </svg>
       </NuxtLink>
-      <div v-if="instancesStore.isAuthenticated" class="mobile-nav__item mobile-nav__item--avatar">
+
+      <NuxtLink
+        v-if="instancesStore.hasAuthenticatedInstance"
+        to="/messages"
+        class="mobile-nav__item mobile-nav__item--badge"
+        :class="{ active: route.path === '/messages' }"
+        aria-label="Messages"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/messages' ? 2 : 1.5">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" :fill="route.path === '/messages' ? 'currentColor' : 'none'" />
+        </svg>
+        <span v-if="messagesBadge" class="nav-badge">{{ messagesBadge }}</span>
+      </NuxtLink>
+      <div v-else-if="instancesStore.isAuthenticated" class="mobile-nav__item mobile-nav__item--avatar">
         <AccountSwitcher compact />
       </div>
-      <NuxtLink v-else to="/login" class="mobile-nav__item" :class="{ active: route.path === '/login' }">
+      <NuxtLink v-else to="/login" class="mobile-nav__item" :class="{ active: route.path === '/login' }" aria-label="Sign in">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
           <circle cx="12" cy="7" r="4" />
@@ -464,6 +542,7 @@ const closeMobileMenu = () => {
       </NuxtLink>
     </nav>
 
+    <ComposeSheet />
     <InstanceManager />
     <FeedbackNotes v-if="!isThreadRoute" />
     <SettingsModal />
@@ -678,11 +757,11 @@ const closeMobileMenu = () => {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 52px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-around;
-  padding: 0 0.75rem;
+  padding: 0 0.5rem;
   padding-bottom: env(safe-area-inset-bottom, 0);
   background: color-mix(in srgb, var(--neo-bg-primary) 92%, transparent);
   backdrop-filter: blur(8px);
@@ -697,13 +776,16 @@ const closeMobileMenu = () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
-    color: var(--neo-text-muted);
+    width: 48px;
+    height: 48px;
+    color: var(--neo-text-tertiary);
     text-decoration: none;
+    background: transparent;
+    border: none;
     border-radius: 4px;
     transition: color var(--neo-transition-fast), background-color var(--neo-transition-fast);
     position: relative;
+    cursor: pointer;
 
     &.active {
       color: var(--neo-accent);
@@ -713,6 +795,26 @@ const closeMobileMenu = () => {
     &--avatar {
       padding: 4px;
     }
+  }
+
+  &__compose {
+    color: var(--neo-text-inverse);
+
+    &:active .mobile-nav__compose-mark {
+      transform: scale(0.94);
+    }
+  }
+
+  &__compose-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--neo-accent);
+    color: var(--neo-text-on-accent, var(--neo-text-inverse));
+    transition: transform 0.12s ease, background 0.12s ease;
   }
 
   &__avatar {

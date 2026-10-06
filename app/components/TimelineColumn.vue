@@ -692,8 +692,11 @@ onUnmounted(() => {
 
     <!-- Scrollable Content -->
     <div class="column-scroll" ref="scrollContainer">
-      <!-- Compose (first column only, when authenticated) -->
-      <div v-if="isFirst && instancesStore.isAuthenticated" class="column-compose">
+      <!-- Compose: desktop first column only — mobile uses center + sheet -->
+      <div
+        v-if="isFirst && instancesStore.isAuthenticated"
+        class="column-compose column-compose--desktop-only"
+      >
         <RealComposeBox @posted="onComposePosted" />
       </div>
 
@@ -1089,6 +1092,12 @@ onUnmounted(() => {
 .column-compose {
   padding: 0.75rem;
   border-bottom: 1px solid var(--neo-border-color);
+
+  &--desktop-only {
+    @media (max-width: 1023px) {
+      display: none;
+    }
+  }
 }
 
 .column-state {
