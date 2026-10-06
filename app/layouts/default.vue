@@ -369,9 +369,29 @@ const closeMobileMenu = () => {
         </svg>
       </button>
       <div class="mobile-header__logo">NeoSpace</div>
-      <button class="mobile-header__btn" @click="cycleTheme" :aria-label="`Theme ${currentThemeLabel}`" type="button" :title="`Theme: ${currentThemeLabel}`">
-        <span class="mobile-header__theme-swatch" aria-hidden="true"></span>
-      </button>
+      <div class="mobile-header__actions">
+        <NuxtLink
+          to="/explore"
+          class="mobile-header__btn"
+          :class="{ 'mobile-header__btn--active': route.path === '/explore' }"
+          aria-label="Search"
+          title="Search"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+        </NuxtLink>
+        <button
+          class="mobile-header__btn"
+          @click="cycleTheme"
+          :aria-label="`Theme ${currentThemeLabel}`"
+          type="button"
+          :title="`Theme: ${currentThemeLabel}`"
+        >
+          <span class="mobile-header__theme-swatch" aria-hidden="true"></span>
+        </button>
+      </div>
     </header>
 
     <SuiteMenu />
@@ -462,7 +482,7 @@ const closeMobileMenu = () => {
       <slot />
     </main>
 
-    <!-- Threads-style: Home · Explore · + · Notifications · Messages/Account -->
+    <!-- Threads-style: Home · Messages · + · Activity · Profile -->
     <nav v-if="showMobileNav" class="mobile-nav" aria-label="Mobile">
       <NuxtLink to="/" class="mobile-nav__item" :class="{ active: route.path === '/' }" aria-label="Home">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/' ? 2 : 1.5">
@@ -470,10 +490,27 @@ const closeMobileMenu = () => {
         </svg>
       </NuxtLink>
 
-      <NuxtLink to="/explore" class="mobile-nav__item" :class="{ active: route.path === '/explore' }" aria-label="Explore">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/explore' ? 2 : 1.5">
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.35-4.35" />
+      <NuxtLink
+        v-if="instancesStore.hasAuthenticatedInstance"
+        to="/messages"
+        class="mobile-nav__item mobile-nav__item--badge"
+        :class="{ active: route.path === '/messages' }"
+        aria-label="Messages"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/messages' ? 2 : 1.5">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" :fill="route.path === '/messages' ? 'currentColor' : 'none'" />
+        </svg>
+        <span v-if="messagesBadge" class="nav-badge">{{ messagesBadge }}</span>
+      </NuxtLink>
+      <NuxtLink
+        v-else
+        to="/login"
+        class="mobile-nav__item"
+        :class="{ active: route.path === '/login' }"
+        aria-label="Messages"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         </svg>
       </NuxtLink>
 
@@ -521,20 +558,32 @@ const closeMobileMenu = () => {
 
       <NuxtLink
         v-if="instancesStore.hasAuthenticatedInstance"
-        to="/messages"
-        class="mobile-nav__item mobile-nav__item--badge"
-        :class="{ active: route.path === '/messages' }"
-        aria-label="Messages"
+        to="/profile"
+        class="mobile-nav__item mobile-nav__item--avatar"
+        :class="{ active: route.path === '/profile' && !route.query.user }"
+        aria-label="Profile"
+        title="Your profile"
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="route.path === '/messages' ? 2 : 1.5">
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" :fill="route.path === '/messages' ? 'currentColor' : 'none'" />
-        </svg>
-        <span v-if="messagesBadge" class="nav-badge">{{ messagesBadge }}</span>
+        <img
+          v-if="instancesStore.userAvatar"
+          :src="instancesStore.userAvatar"
+          :alt="instancesStore.userDisplayName || 'Profile'"
+          class="mobile-nav__avatar"
+        />
+        <span v-else class="mobile-nav__avatar mobile-nav__avatar--placeholder">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+        </span>
       </NuxtLink>
-      <div v-else-if="instancesStore.isAuthenticated" class="mobile-nav__item mobile-nav__item--avatar">
-        <AccountSwitcher compact />
-      </div>
-      <NuxtLink v-else to="/login" class="mobile-nav__item" :class="{ active: route.path === '/login' }" aria-label="Sign in">
+      <NuxtLink
+        v-else
+        to="/login"
+        class="mobile-nav__item"
+        :class="{ active: route.path === '/login' }"
+        aria-label="Sign in"
+      >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
           <circle cx="12" cy="7" r="4" />
@@ -716,6 +765,12 @@ const closeMobileMenu = () => {
     display: none;
   }
 
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+  }
+
   &__btn {
     width: 40px;
     height: 40px;
@@ -727,10 +782,16 @@ const closeMobileMenu = () => {
     color: var(--neo-text-primary);
     cursor: pointer;
     border-radius: 4px;
-    transition: background-color var(--neo-transition-fast);
+    text-decoration: none;
+    transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
     &:hover {
       background: var(--neo-bg-hover);
+    }
+
+    &--active {
+      color: var(--neo-accent);
+      background: var(--neo-accent-soft);
     }
   }
 
@@ -794,6 +855,11 @@ const closeMobileMenu = () => {
 
     &--avatar {
       padding: 4px;
+
+      &.active .mobile-nav__avatar {
+        border-color: var(--neo-accent);
+        box-shadow: 0 0 0 1.5px var(--neo-accent);
+      }
     }
   }
 
