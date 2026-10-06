@@ -107,6 +107,8 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   })
 }
 
+const feedTabsScroller = ref<HTMLElement | null>(null)
+
 const scrollToColumn = (index: number) => {
   const el = columnsContainer.value
   if (!el) return
@@ -114,6 +116,20 @@ const scrollToColumn = (index: number) => {
   if (!col) return
   el.scrollTo({ left: col.offsetLeft, behavior: 'smooth' })
   activeColumnIndex.value = index
+  nextTick(() => {
+    const tab = feedTabsScroller.value?.children[index] as HTMLElement | undefined
+    tab?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  })
+}
+
+const goPrevFeed = () => {
+  if (activeColumnIndex.value <= 0) return
+  scrollToColumn(activeColumnIndex.value - 1)
+}
+
+const goNextFeed = () => {
+  if (activeColumnIndex.value >= columnsStore.columns.length - 1) return
+  scrollToColumn(activeColumnIndex.value + 1)
 }
 
 const onColumnsScroll = () => {
@@ -171,9 +187,9 @@ useHead({ title: 'Home | NeoSpace' })
 
 <template>
   <div class="columns-page" :class="{ 'columns-page--multi': columnsStore.isMultiColumn }">
-    <!-- Mobile: always show feed strip + add (swipe the columns below) -->
+    <!-- Mobile: feed strip + thumb-zone prev/next + add -->
     <nav class="mobile-feed-tabs" aria-label="Feeds">
-      <div class="mobile-feed-tabs__scroller">
+      <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
         <button
           v-for="(label, idx) in columnTabLabels"
           :key="columnsStore.columns[idx]!.id"
@@ -190,52 +206,79 @@ useHead({ title: 'Home | NeoSpace' })
         </button>
       </div>
 
-      <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
+      <div class="mobile-feed-tabs__thumb">
         <button
+          v-if="columnsStore.isMultiColumn"
           type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__add-btn"
-          :title="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
-          aria-label="Add feed"
-          @click="addMenuOpen = !addMenuOpen"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
+          aria-label="Previous feed"
+          :disabled="activeColumnIndex <= 0"
+          @click="goPrevFeed"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <button
+          v-if="columnsStore.isMultiColumn"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
+          aria-label="Next feed"
+          :disabled="activeColumnIndex >= columnsStore.columns.length - 1"
+          @click="goNextFeed"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="9 18 15 12 9 6" />
           </svg>
         </button>
 
-        <Transition name="add-menu">
-          <div v-if="addMenuOpen" class="add-column-menu add-column-menu--mobile">
-            <span class="add-column-menu__title">Add Feed</span>
-            <button class="add-column-menu__item" @click="addColumn('home')">For You</button>
-            <button class="add-column-menu__item" @click="addColumn('local')">Local</button>
-            <button class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
-            <template v-if="groupsStore.joinedGroups.length > 0">
-              <div class="add-column-menu__divider"></div>
-              <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
-                <span>Groups</span>
-                <svg :class="{ 'rotated': addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="addGroupsExpanded">
-                <button
-                  v-for="group in groupsStore.joinedGroups"
-                  :key="group.tag"
-                  class="add-column-menu__item add-column-menu__item--group"
-                  @click="addColumn('group', group.tag)"
-                >
-                  <span class="add-column-menu__group-icon">{{ group.icon }}</span>
-                  {{ group.name }}
+        <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
+          <button
+            type="button"
+            class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__add-btn"
+            :title="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+            aria-label="Add feed"
+            @click="addMenuOpen = !addMenuOpen"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+
+          <Transition name="add-menu">
+            <div v-if="addMenuOpen" class="add-column-menu add-column-menu--mobile">
+              <span class="add-column-menu__title">Add Feed</span>
+              <button class="add-column-menu__item" @click="addColumn('home')">For You</button>
+              <button class="add-column-menu__item" @click="addColumn('local')">Local</button>
+              <button class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+              <template v-if="groupsStore.joinedGroups.length > 0">
+                <div class="add-column-menu__divider"></div>
+                <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+                  <span>Groups</span>
+                  <svg :class="{ 'rotated': addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
                 </button>
+                <template v-if="addGroupsExpanded">
+                  <button
+                    v-for="group in groupsStore.joinedGroups"
+                    :key="group.tag"
+                    class="add-column-menu__item add-column-menu__item--group"
+                    @click="addColumn('group', group.tag)"
+                  >
+                    <span class="add-column-menu__group-icon">{{ group.icon }}</span>
+                    {{ group.name }}
+                  </button>
+                </template>
               </template>
-            </template>
-            <span class="add-column-menu__hint">
-              {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }}
-              <template v-if="instancesStore.isAuthenticated"> · syncs to your profile</template>
-            </span>
-          </div>
-        </Transition>
+              <span class="add-column-menu__hint">
+                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }}
+                <template v-if="instancesStore.isAuthenticated"> · syncs to your profile</template>
+              </span>
+            </div>
+          </Transition>
+        </div>
       </div>
     </nav>
 
@@ -445,8 +488,8 @@ useHead({ title: 'Home | NeoSpace' })
   display: none;
   flex-shrink: 0;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.375rem 0.5rem 0.375rem 0.75rem;
+  gap: 0.35rem;
+  padding: 0.45rem 0.4rem 0.45rem 0.65rem;
   border-bottom: 1px solid var(--neo-border-color);
   background: var(--neo-bg-primary);
   position: relative;
@@ -460,7 +503,7 @@ useHead({ title: 'Home | NeoSpace' })
     display: flex;
     flex: 1;
     min-width: 0;
-    gap: 0.25rem;
+    gap: 0.35rem;
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -470,23 +513,36 @@ useHead({ title: 'Home | NeoSpace' })
     }
   }
 
+  // Right-edge thumb cluster: prev / next / add
+  &__thumb {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.15rem;
+  }
+
+  &__jump,
+  &__add-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  &__jump:disabled {
+    opacity: 0.28;
+  }
+
   &__add {
     position: relative;
     flex-shrink: 0;
   }
 
-  &__add-btn {
-    width: 34px;
-    height: 34px;
-  }
-
   &__tab {
     flex-shrink: 0;
-    max-width: 10rem;
+    max-width: 11rem;
     height: auto;
-    min-height: 0;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
+    min-height: 44px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.875rem;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;

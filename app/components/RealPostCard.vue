@@ -722,26 +722,10 @@ onUnmounted(() => {
           <p class="status-poll-info">{{ displayStatus.poll.votesCount }} votes · {{ displayStatus.poll.expired ? 'Closed' : 'Open' }}</p>
         </div>
 
-        <!-- Actions -->
+        <!-- Actions: on mobile, like sits in the right thumb zone -->
         <footer class="status-actions">
           <button
-            class="status-action"
-            :class="{
-              'status-action--liked': displayStatus.favourited,
-              'status-action--pop': likePop,
-            }"
-            :disabled="isFavouriting"
-            aria-label="Like"
-            @click="handleFavourite"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" :fill="displayStatus.favourited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
-              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-            </svg>
-            <span v-if="displayStatus.favouritesCount" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
-          </button>
-
-          <button
-            class="status-action"
+            class="status-action status-action--reply"
             :class="{ 'status-action--replying': isReplying }"
             aria-label="Reply"
             @click="handleReply"
@@ -753,7 +737,7 @@ onUnmounted(() => {
           </button>
 
           <button
-            class="status-action"
+            class="status-action status-action--boost"
             :class="{ 'status-action--boosted': displayStatus.reblogged }"
             :disabled="isBoosting"
             aria-label="Repost"
@@ -766,7 +750,7 @@ onUnmounted(() => {
             <span v-if="displayStatus.reblogsCount" class="status-action__count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
           </button>
 
-          <button class="status-action" aria-label="Share" @click="handleShare">
+          <button class="status-action status-action--share" aria-label="Share" @click="handleShare">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
             </svg>
@@ -788,6 +772,22 @@ onUnmounted(() => {
               <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
           </a>
+
+          <button
+            class="status-action status-action--like"
+            :class="{
+              'status-action--liked': displayStatus.favourited,
+              'status-action--pop': likePop,
+            }"
+            :disabled="isFavouriting"
+            aria-label="Like"
+            @click="handleFavourite"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" :fill="displayStatus.favourited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
+              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+            </svg>
+            <span v-if="displayStatus.favouritesCount" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
+          </button>
         </footer>
 
         <!-- Inline Reply Composer -->
@@ -1337,7 +1337,7 @@ onUnmounted(() => {
 .status-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.15rem;
   margin-top: 0.5rem;
   margin-left: -0.35rem;
@@ -1398,6 +1398,34 @@ onUnmounted(() => {
 
   &--pop svg {
     animation: like-pop 0.32s ease;
+  }
+
+  // One-handed mobile: heart in the right thumb zone, bigger target
+  @media (max-width: 1023px) {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0.5rem 0.55rem;
+
+    &--like {
+      margin-left: auto;
+      min-width: 52px;
+      padding-left: 0.75rem;
+      padding-right: 0.65rem;
+      color: var(--neo-text-tertiary);
+
+      svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      &.status-action--liked {
+        color: var(--neo-accent);
+      }
+    }
+
+    &--external {
+      display: none;
+    }
   }
 
   // Boosted = success green (instrument, not Twitter)

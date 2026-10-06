@@ -849,6 +849,33 @@ onUnmounted(() => {
   gap: 0.125rem;
 }
 
+// Mobile: less chrome in the header — jump feeds via tabs / ‹ › instead
+@media (max-width: 1023px) {
+  .column-drag-handle,
+  .column-reorder {
+    display: none;
+  }
+
+  .column-header {
+    height: 44px;
+    padding: 0 0.35rem 0 0.5rem;
+  }
+
+  .column-feed-select {
+    min-height: 40px;
+    flex: 1;
+  }
+
+  .column-feed-label {
+    max-width: none;
+    font-size: 1rem;
+  }
+
+  .column-close {
+    margin-left: auto;
+  }
+}
+
 .column-new-pill {
   position: sticky;
   top: 0.75rem;
