@@ -62,9 +62,11 @@ const openConversation = async (c: mastodon.v1.Conversation) => {
 }
 
 const startNewMessage = () => {
+  // Pick from following / search first — don't make people invent @handles
   composeSheet.show({
+    pickRecipient: true,
     visibility: 'direct',
-    placeholder: 'Message @someone… (only they can see it)',
+    title: 'New message',
   })
 }
 
@@ -99,7 +101,7 @@ useHead({ title: 'Messages | NeoSpace' })
         </button>
       </div>
       <p class="messages-header__hint">
-        Direct messages on Mastodon — only mentioned people can see them.
+        Private notes to people you follow (or search). Only they can see them.
       </p>
     </header>
 
@@ -125,9 +127,9 @@ useHead({ title: 'Messages | NeoSpace' })
     <div v-else-if="!conversationsStore.conversations.length" class="messages-state">
       <span>💬</span>
       <p class="messages-state__title">No messages yet</p>
-      <p>Start a direct post with @mentions — it'll show up here.</p>
+      <p>Pick someone you follow — no need to remember their full @handle.</p>
       <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="startNewMessage">
-        New message
+        Message someone
       </button>
     </div>
 

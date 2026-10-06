@@ -8,6 +8,7 @@ import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
+import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 import type { mastodon } from 'masto'
 
 const props = withDefaults(
@@ -108,9 +109,71 @@ const resetForm = () => {
   content.value = props.inReplyToId && props.initialText ? props.initialText : ''
   spoilerText.value = ''
   showCW.value = settingsStore.defaultSensitive
-  visibility.value = settingsStore.defaultVisibility
+  visibility.value = props.initialVisibility || settingsStore.defaultVisibility
   clearAttachments()
   error.value = null
+  closeMentions()
+}
+
+/** @-mention autocomplete */
+const {
+  results: mentionResults,
+  isSearching: mentionSearching,
+  search: searchMentions,
+  clear: clearMentions,
+} = useAccountSearch()
+const mentionOpen = ref(false)
+const mentionIndex = ref(0)
+const mentionAt = ref(-1)
+
+const closeMentions = () => {
+  mentionOpen.value = false
+  mentionIndex.value = 0
+  mentionAt.value = -1
+  clearMentions()
+}
+
+const getMentionContext = () => {
+  const el = textareaRef.value
+  const caret = el?.selectionStart ?? content.value.length
+  const before = content.value.slice(0, caret)
+  const m = before.match(/(?:^|[\s([{“"'‘])@([a-zA-Z0-9_./-]*)$/)
+  if (!m) return null
+  const query = m[1] ?? ''
+  const start = before.length - query.length - 1
+  return { start, query, caret }
+}
+
+const syncMentions = () => {
+  if (!instancesStore.isAuthenticated) {
+    closeMentions()
+    return
+  }
+  const ctx = getMentionContext()
+  if (!ctx) {
+    closeMentions()
+    return
+  }
+  // Don't pop open on a lone @ with zero chars unless user is typing into a mention
+  mentionAt.value = ctx.start
+  mentionOpen.value = true
+  mentionIndex.value = 0
+  searchMentions(ctx.query)
+}
+
+const insertMention = (account: mastodon.v1.Account) => {
+  const ctx = getMentionContext()
+  if (!ctx) return
+  const handle = accountHandle(account)
+  const before = content.value.slice(0, ctx.start)
+  const after = content.value.slice(ctx.caret)
+  content.value = `${before}${handle} ${after}`
+  closeMentions()
+  nextTick(() => {
+    const pos = before.length + handle.length + 1
+    textareaRef.value?.focus()
+    textareaRef.value?.setSelectionRange(pos, pos)
+  })
 }
 
 watch(
@@ -171,10 +234,38 @@ const onFilePicked = async (e: Event) => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
+  if (mentionOpen.value && mentionResults.value.length) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      mentionIndex.value = (mentionIndex.value + 1) % mentionResults.value.length
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      mentionIndex.value =
+        (mentionIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length
+      return
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      const pick = mentionResults.value[mentionIndex.value]
+      if (pick) insertMention(pick)
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      closeMentions()
+      return
+    }
+  }
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault()
     handlePost()
   }
+}
+
+const onComposeInput = () => {
+  syncMentions()
 }
 
 const focusComposer = () => {
@@ -264,17 +355,48 @@ onMounted(() => {
       />
     </div>
 
-    <textarea
-      ref="textareaRef"
-      v-model="content"
-      class="compose-input neo-input"
-      :placeholder="placeholder"
-      :rows="compact ? 2 : 3"
-      :disabled="isPosting"
-      @paste="onPaste"
-      @keydown="onKeydown"
-      @click.stop
-    />
+    <div class="compose-input-wrap" @click.stop>
+      <textarea
+        ref="textareaRef"
+        v-model="content"
+        class="compose-input neo-input"
+        :placeholder="placeholder"
+        :rows="compact ? 2 : 3"
+        :disabled="isPosting"
+        @paste="onPaste"
+        @keydown="onKeydown"
+        @input="onComposeInput"
+        @click="syncMentions"
+        @keyup="syncMentions"
+      />
+
+      <div
+        v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+        class="compose-mentions"
+        role="listbox"
+        aria-label="Mention suggestions"
+      >
+        <p v-if="mentionSearching && !mentionResults.length" class="compose-mentions__status">
+          Looking up…
+        </p>
+        <button
+          v-for="(account, idx) in mentionResults"
+          :key="account.id"
+          type="button"
+          class="compose-mentions__item"
+          :class="{ 'compose-mentions__item--active': idx === mentionIndex }"
+          role="option"
+          :aria-selected="idx === mentionIndex"
+          @mousedown.prevent="insertMention(account)"
+        >
+          <img :src="account.avatar" alt="" class="compose-mentions__avatar" />
+          <span class="compose-mentions__meta">
+            <span class="compose-mentions__name">{{ account.displayName || account.username }}</span>
+            <span class="compose-mentions__acct">{{ accountHandle(account) }}</span>
+          </span>
+        </button>
+      </div>
+    </div>
 
     <!-- Media previews -->
     <div v-if="attachments.length" class="compose-media" @click.stop>
@@ -509,6 +631,81 @@ onMounted(() => {
 .compose-cw-input {
   background-color: var(--neo-bg-tertiary);
   border-color: var(--neo-warning);
+}
+
+.compose-input-wrap {
+  position: relative;
+}
+
+.compose-mentions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 10px;
+  box-shadow: var(--neo-shadow-lg);
+}
+
+.compose-mentions__status {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+}
+
+.compose-mentions__item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  min-height: 48px;
+
+  &:hover,
+  &--active {
+    background: var(--neo-bg-tertiary);
+  }
+}
+
+.compose-mentions__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.compose-mentions__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.05rem;
+}
+
+.compose-mentions__name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--neo-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compose-mentions__acct {
+  font-size: 0.75rem;
+  color: var(--neo-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .compose-input {

@@ -1,15 +1,20 @@
 <script setup lang="ts">
 /**
- * Full-screen / bottom compose sheet for mobile (+ tab).
+ * Full-screen / bottom compose sheet for mobile (+ tab) and DM recipient pick.
  */
 
 import { useComposeSheetStore } from '~/stores/composeSheet'
+import { accountHandle } from '~/composables/useAccountSearch'
 import type { mastodon } from 'masto'
 
 const sheet = useComposeSheetStore()
 
 const onPosted = (_status: mastodon.v1.Status) => {
   sheet.hide()
+}
+
+const onPick = (account: mastodon.v1.Account) => {
+  sheet.continueWithRecipient(accountHandle(account))
 }
 
 const onKeydown = (e: KeyboardEvent) => {
@@ -39,27 +44,34 @@ onUnmounted(() => {
         class="compose-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="New post"
+        :aria-label="sheet.pickRecipient ? 'Choose who to message' : 'New post'"
       >
         <button type="button" class="compose-sheet__backdrop" aria-label="Close" @click="sheet.hide()" />
         <div class="compose-sheet__panel">
-          <header class="compose-sheet__header">
-            <button type="button" class="compose-sheet__close neo-btn neo-btn--tertiary" @click="sheet.hide()">
-              Cancel
-            </button>
-            <span class="compose-sheet__title">New post</span>
-            <span class="compose-sheet__spacer" />
-          </header>
-          <div class="compose-sheet__body">
-            <RealComposeBox
-              :key="sheet.instanceKey"
-              :initial-text="sheet.initialText || undefined"
-              :initial-visibility="sheet.initialVisibility || undefined"
-              :placeholder="sheet.placeholder || undefined"
-              title="What's new?"
-              @posted="onPosted"
-            />
-          </div>
+          <RecipientPicker
+            v-if="sheet.pickRecipient"
+            @select="onPick"
+            @cancel="sheet.hide()"
+          />
+          <template v-else>
+            <header class="compose-sheet__header">
+              <button type="button" class="compose-sheet__close neo-btn neo-btn--tertiary" @click="sheet.hide()">
+                Cancel
+              </button>
+              <span class="compose-sheet__title">{{ sheet.title || 'New post' }}</span>
+              <span class="compose-sheet__spacer" />
+            </header>
+            <div class="compose-sheet__body">
+              <RealComposeBox
+                :key="sheet.instanceKey"
+                :initial-text="sheet.initialText || undefined"
+                :initial-visibility="sheet.initialVisibility || undefined"
+                :placeholder="sheet.placeholder || undefined"
+                :title="sheet.title || undefined"
+                @posted="onPosted"
+              />
+            </div>
+          </template>
         </div>
       </div>
     </Transition>
@@ -97,16 +109,19 @@ onUnmounted(() => {
   flex-direction: column;
   width: 100%;
   max-height: min(92vh, 100%);
+  min-height: min(70vh, 520px);
   background: var(--neo-bg-primary);
   border-radius: 16px 16px 0 0;
   border: 1px solid var(--neo-border-color);
   border-bottom: none;
   box-shadow: var(--neo-shadow-xl);
   padding-bottom: env(safe-area-inset-bottom, 0);
+  overflow: hidden;
 
   @media (min-width: 1024px) {
     max-width: 560px;
     max-height: min(80vh, 720px);
+    min-height: 420px;
     border-radius: 12px;
     border-bottom: 1px solid var(--neo-border-color);
     padding-bottom: 0;
@@ -146,6 +161,8 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 0.75rem;
   -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-height: 0;
 }
 
 .compose-sheet-enter-active,
@@ -163,6 +180,15 @@ onUnmounted(() => {
 
   .compose-sheet__panel {
     transform: translateY(100%);
+  }
+}
+
+@media (min-width: 1024px) {
+  .compose-sheet-enter-from,
+  .compose-sheet-leave-to {
+    .compose-sheet__panel {
+      transform: translateY(12px) scale(0.98);
+    }
   }
 }
 </style>
