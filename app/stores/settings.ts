@@ -10,15 +10,30 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { useThemeStore } from './theme'
 import { activeClient } from '~/composables/useMasto'
-import type { NeoFontId, NeoFontSizeId, NeoThemeId, NeoUiId } from '~/utils/appearance'
+import type {
+  NeoDensityId,
+  NeoFontId,
+  NeoFontSizeId,
+  NeoLineId,
+  NeoRadiusId,
+  NeoThemeId,
+  NeoUiId,
+} from '~/utils/appearance'
 import {
   applyAppearance,
+  normalizeDensity,
   normalizeFont,
+  normalizeLine,
+  normalizeRadius,
   normalizeTheme,
   normalizeUi,
+  nextDensity,
+  nextLine,
+  nextRadius,
   nextTheme,
   nextUi,
 } from '~/utils/appearance'
+import { ensureFontsLoaded } from '~/utils/loadFonts'
 
 // Settings categories for the sidebar
 export interface SettingsCategory {
@@ -29,13 +44,13 @@ export interface SettingsCategory {
 }
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
-  { id: 'profile', label: 'Profile', icon: '👤', description: 'Your public profile information' },
-  { id: 'privacy', label: 'Privacy & Safety', icon: '🔒', description: 'Control who can see your content' },
-  { id: 'notifications', label: 'Notifications', icon: '🔔', description: 'Manage your notification preferences' },
-  { id: 'appearance', label: 'Appearance', icon: '🎨', description: 'Customize how NeoSpace looks' },
-  { id: 'posting', label: 'Posting Defaults', icon: '✍️', description: 'Default settings for new posts' },
-  { id: 'filters', label: 'Filters', icon: '🚫', description: 'Content filters and muted words' },
-  { id: 'account', label: 'Account', icon: '⚙️', description: 'Account settings and data' },
+  { id: 'profile', label: 'Profile', icon: 'user', description: 'Your public profile information' },
+  { id: 'privacy', label: 'Privacy & Safety', icon: 'lock', description: 'Control who can see your content' },
+  { id: 'notifications', label: 'Notifications', icon: 'bell', description: 'Manage your notification preferences' },
+  { id: 'appearance', label: 'Appearance', icon: 'palette', description: 'Customize how NeoSpace looks' },
+  { id: 'posting', label: 'Posting Defaults', icon: 'pen', description: 'Default settings for new posts' },
+  { id: 'filters', label: 'Filters', icon: 'ban', description: 'Content filters and muted words' },
+  { id: 'account', label: 'Account', icon: 'settings', description: 'Account settings and data' },
 ]
 
 // Mastodon preferences structure
@@ -66,10 +81,18 @@ interface SettingsState {
     ui: NeoUiId
     font: NeoFontId
     fontSize: NeoFontSizeId
+    radius: NeoRadiusId
+    density: NeoDensityId
+    line: NeoLineId
     reduceMotion: boolean
+    /** @deprecated use density === 'dense'; kept in sync for older prefs */
     compactMode: boolean
     /** Apply custom CSS from your Mastodon profile fields (css / custom_css / theme / style / chaos_css) */
     customProfileCss: boolean
+    /** How Flip-mode post text is laid out */
+    flipTextAlign: 'left' | 'center' | 'right'
+    /** Type scale for Flip-mode text (esp. text-only slides) */
+    flipTextSize: 'reading' | 'large' | 'display'
     defaultVisibility: 'public' | 'unlisted' | 'private' | 'direct'
     defaultSensitive: boolean
   }
@@ -105,9 +128,14 @@ export const useSettingsStore = defineStore('settings', {
       ui: 'braun',
       font: 'sans',
       fontSize: 'medium',
+      radius: 'match',
+      density: 'cozy',
+      line: 'clean',
       reduceMotion: false,
       compactMode: false,
       customProfileCss: false,
+      flipTextAlign: 'center',
+      flipTextSize: 'large',
       defaultVisibility: 'public',
       defaultSensitive: false,
     },
@@ -224,9 +252,18 @@ export const useSettingsStore = defineStore('settings', {
             fontSize: (['small', 'medium', 'large'].includes(parsed.fontSize)
               ? parsed.fontSize
               : this.localPreferences.fontSize) as NeoFontSizeId,
+            radius: normalizeRadius(parsed.radius),
+            density: normalizeDensity(parsed.density, !!parsed.compactMode),
+            line: normalizeLine(parsed.line),
             reduceMotion: !!parsed.reduceMotion,
-            compactMode: !!parsed.compactMode,
+            compactMode: normalizeDensity(parsed.density, !!parsed.compactMode) === 'dense',
             customProfileCss: !!parsed.customProfileCss,
+            flipTextAlign: (['left', 'center', 'right'].includes(parsed.flipTextAlign)
+              ? parsed.flipTextAlign
+              : 'center') as SettingsState['localPreferences']['flipTextAlign'],
+            flipTextSize: (['reading', 'large', 'display'].includes(parsed.flipTextSize)
+              ? parsed.flipTextSize
+              : 'large') as SettingsState['localPreferences']['flipTextSize'],
             defaultVisibility: (['public', 'unlisted', 'private', 'direct'].includes(vis)
               ? vis
               : this.localPreferences.defaultVisibility) as SettingsState['localPreferences']['defaultVisibility'],
@@ -246,15 +283,15 @@ export const useSettingsStore = defineStore('settings', {
         ui: this.localPreferences.ui,
         font: this.localPreferences.font,
         fontSize: this.localPreferences.fontSize,
+        radius: this.localPreferences.radius,
+        density: this.localPreferences.density,
+        line: this.localPreferences.line,
       })
+      ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
       if (typeof document !== 'undefined') {
         document.documentElement.classList.toggle(
           'reduce-motion',
           this.localPreferences.reduceMotion,
-        )
-        document.documentElement.classList.toggle(
-          'compact-mode',
-          this.localPreferences.compactMode,
         )
       }
     },
@@ -459,6 +496,10 @@ export const useSettingsStore = defineStore('settings', {
         theme: normalizeTheme(data.theme ?? this.localPreferences.theme),
         ui: normalizeUi(data.ui ?? this.localPreferences.ui),
         font: normalizeFont(data.font ?? this.localPreferences.font),
+        radius: normalizeRadius(data.radius ?? this.localPreferences.radius),
+        density: normalizeDensity(data.density ?? this.localPreferences.density),
+        line: normalizeLine(data.line ?? this.localPreferences.line),
+        compactMode: normalizeDensity(data.density ?? this.localPreferences.density) === 'dense',
       }
       this.saveLocalPreferences()
       this.applyLocalAppearance()
@@ -477,6 +518,24 @@ export const useSettingsStore = defineStore('settings', {
     cycleUi() {
       const upcoming = nextUi(this.localPreferences.ui)
       this.updateAppearance({ ui: upcoming })
+      return upcoming
+    },
+
+    cycleRadius() {
+      const upcoming = nextRadius(this.localPreferences.radius)
+      this.updateAppearance({ radius: upcoming })
+      return upcoming
+    },
+
+    cycleDensity() {
+      const upcoming = nextDensity(this.localPreferences.density)
+      this.updateAppearance({ density: upcoming })
+      return upcoming
+    },
+
+    cycleLine() {
+      const upcoming = nextLine(this.localPreferences.line)
+      this.updateAppearance({ line: upcoming })
       return upcoming
     },
     

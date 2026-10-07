@@ -13,6 +13,13 @@ import {
   resolvePublicInstanceUrl,
   DEFAULT_PUBLIC_INSTANCE,
 } from '../app/utils/instances'
+import {
+  buildInsightsReport,
+  insightDaysToCsv,
+  insightPostsToCsv,
+  statusToInsightRow,
+} from '../app/utils/insights'
+import { buildInsightsExport } from '../app/utils/loomExport'
 
 describe('loom handoff story URLs', () => {
   it('parses loom.ibm.io story ids', () => {
@@ -101,5 +108,78 @@ describe('instance helpers', () => {
   it('falls back away from gated preferred hosts for guest browse', () => {
     expect(resolvePublicInstanceUrl('https://mastodon.social')).toBe(DEFAULT_PUBLIC_INSTANCE)
     expect(resolvePublicInstanceUrl('https://fosstodon.org')).toBe('https://fosstodon.org')
+  })
+})
+
+describe('insights aggregation', () => {
+  const now = new Date('2026-10-06T15:00:00Z')
+
+  const statuses = [
+    {
+      id: '1',
+      createdAt: '2026-10-05T14:00:00Z',
+      favouritesCount: 10,
+      reblogsCount: 2,
+      repliesCount: 1,
+      quotesCount: 0,
+      visibility: 'public',
+      language: 'en',
+      content: '<p>Hello <a href="#">#cats</a></p>',
+      tags: [{ name: 'cats' }],
+      mediaAttachments: [{ id: 'm1' }],
+    },
+    {
+      id: '2',
+      createdAt: '2026-10-04T09:00:00Z',
+      favouritesCount: 3,
+      reblogsCount: 0,
+      repliesCount: 4,
+      content: '<p>Reply</p>',
+      inReplyToId: '99',
+      tags: [{ name: 'cats' }, { name: 'tech' }],
+    },
+    {
+      id: '3',
+      createdAt: '2026-09-01T12:00:00Z',
+      favouritesCount: 100,
+      content: '<p>Too old</p>',
+    },
+  ]
+
+  it('maps status fields into insight rows', () => {
+    const row = statusToInsightRow(statuses[0]!)
+    expect(row.engagement).toBe(13)
+    expect(row.has_media).toBe(1)
+    expect(row.tags).toBe('cats')
+    expect(row.kind).toBe('original')
+  })
+
+  it('windows statuses and builds daily series + top tags', () => {
+    const report = buildInsightsReport({
+      account: { acct: 'neo@example.com', followersCount: 12, statusesCount: 40 },
+      statuses,
+      windowDays: 30,
+      now,
+    })
+    expect(report.totals.posts).toBe(2)
+    expect(report.totals.engagement).toBe(13 + 7)
+    expect(report.byDay).toHaveLength(30)
+    expect(report.topTags[0]?.name).toBe('cats')
+    expect(insightPostsToCsv(report.posts)).toContain('engagement')
+    expect(insightDaysToCsv(report.byDay).split('\n').length).toBe(31)
+  })
+
+  it('builds Loom export files with preferred area chart', () => {
+    const report = buildInsightsReport({
+      account: { acct: 'neo@example.com' },
+      statuses,
+      windowDays: 7,
+      now,
+    })
+    const pack = buildInsightsExport(report)
+    expect(pack.files).toHaveLength(3)
+    expect(pack.preferred.kind).toBe('area')
+    expect(pack.preferred.xField).toBe('date')
+    expect(pack.preferred.yField).toBe('engagement')
   })
 })

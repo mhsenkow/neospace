@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NeoSpace">
+  <rect width="512" height="512" rx="96" fill="#1a1a18"/>
+  <rect x="36" y="36" width="440" height="440" rx="72" fill="none" stroke="#f2f2f0" stroke-width="10" opacity="0.18"/>
+  <text
+    x="256"
+    y="298"
+    text-anchor="middle"
+    font-family="IBM Plex Sans, system-ui, sans-serif"
+    font-size="196"
+    font-weight="600"
+    letter-spacing="-8"
+    fill="#f2f2f0"
+  >NS</text>
+</svg>

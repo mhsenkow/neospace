@@ -64,9 +64,9 @@ const stopWatching = (instance: ConnectedInstance) => {
   }
 }
 
-const removeAccount = (instance: ConnectedInstance) => {
+const removeAccount = async (instance: ConnectedInstance) => {
   if (confirm(`Remove ${handleOf(instance)} from NeoSpace? You’ll be signed out of this server.`)) {
-    instancesStore.removeInstance(instance.id)
+    await instancesStore.removeAccount(instance.id)
   }
 }
 
@@ -107,7 +107,8 @@ const isActive = (instance: ConnectedInstance) =>
             <div>
               <h2 id="accounts-title">Accounts &amp; Servers</h2>
               <p class="accounts-lede">
-                Sign in to post. Watch servers to browse public posts without an account.
+                NeoSpace keeps every server login under one session. Your main profile is the home identity;
+                other accounts are linked for posting and For You merges their home feeds.
               </p>
             </div>
             <button type="button" class="accounts-close" aria-label="Close" @click="closeAndReset">
@@ -123,7 +124,7 @@ const isActive = (instance: ConnectedInstance) =>
               <div class="accounts-section__head">
                 <h3>Signed in</h3>
                 <button type="button" class="accounts-link-btn" @click="addAccount">
-                  + Add account
+                  + Link server
                 </button>
               </div>
 
@@ -152,6 +153,10 @@ const isActive = (instance: ConnectedInstance) =>
                       <span class="account-row__name">
                         {{ instance.user?.displayName || instance.user?.username }}
                       </span>
+                      <span
+                        v-if="instance.id === instancesStore.primaryAccount?.id"
+                        class="account-row__badge account-row__badge--main"
+                      >Main</span>
                       <span v-if="isActive(instance)" class="account-row__badge">Posting as</span>
                     </div>
                     <span class="account-row__handle">{{ handleOf(instance) }}</span>
@@ -456,6 +461,11 @@ const isActive = (instance: ConnectedInstance) =>
     background: color-mix(in srgb, var(--neo-accent) 16%, transparent);
     padding: 0.15rem 0.4rem;
     border-radius: 3px;
+
+    &--main {
+      color: var(--neo-text-secondary);
+      background: var(--neo-bg-tertiary);
+    }
   }
 
   &__handle,

@@ -26,6 +26,8 @@ export function sanitizeProfileCss(raw: string): string {
   css = css.replace(/data\s*:\s*text\/html/gi, '/* blocked data:text/html */')
   // data: URLs in url() can still be HTML/SVG; allow only image data URLs
   css = css.replace(/url\s*\(\s*(['"]?)\s*data\s*:(?!image\/)/gi, 'url($1/* blocked data: */')
+  // Remote url() can exfiltrate via background/font requests — strip all http(s) urls
+  css = css.replace(/url\s*\(\s*(['"]?)\s*https?:[^)]+\)/gi, '/* blocked remote url() */')
 
   return css.trim()
 }

@@ -27,6 +27,14 @@ export type NeoUiId =
 
 export type NeoFontId = 'sans' | 'serif' | 'book' | 'mono' | 'dyslexic'
 export type NeoFontSizeId = 'small' | 'medium' | 'large'
+/** Corner system — match follows chrome/theme; others override --neo-radius-* */
+export type NeoRadiusId =
+  | 'match'
+  | 'sharp'
+  | 'business'
+  | 'soft'
+  | 'bubble'
+  | 'jagged'
 
 export interface ThemeOption {
   id: Exclude<NeoThemeId, 'auto'>
@@ -106,6 +114,47 @@ export const FONT_SIZE_OPTIONS: { id: NeoFontSizeId; label: string }[] = [
   { id: 'medium', label: 'Medium' },
   { id: 'large', label: 'Large' },
 ]
+
+export const RADIUS_OPTIONS: { id: NeoRadiusId; label: string; desc: string }[] = [
+  { id: 'match', label: 'Match', desc: 'Follow chrome / theme corners' },
+  { id: 'sharp', label: 'Sharp', desc: 'Hard edges · zero radius' },
+  { id: 'business', label: 'Business', desc: 'Modest rounding · product UI' },
+  { id: 'soft', label: 'Soft', desc: 'Cartoony · generous curves' },
+  { id: 'bubble', label: 'Bubble', desc: 'Super round · pill-forward' },
+  { id: 'jagged', label: 'Jagged', desc: 'Irregular · stamp / torn corners' },
+]
+
+export const RADIUS_CYCLE: NeoRadiusId[] = [
+  'match',
+  'sharp',
+  'business',
+  'soft',
+  'bubble',
+  'jagged',
+]
+
+/** Spacing density — roomy / cozy (default) / dense (ex-compact) */
+export type NeoDensityId = 'roomy' | 'cozy' | 'dense'
+
+export const DENSITY_OPTIONS: { id: NeoDensityId; label: string; desc: string }[] = [
+  { id: 'roomy', label: 'Roomy', desc: 'Airy cards · more breathing room' },
+  { id: 'cozy', label: 'Cozy', desc: 'Default spacing' },
+  { id: 'dense', label: 'Dense', desc: 'Jam the screen · tighter chrome' },
+]
+
+export const DENSITY_CYCLE: NeoDensityId[] = ['roomy', 'cozy', 'dense']
+
+/** Outline character for cards / chrome */
+export type NeoLineId = 'clean' | 'ink' | 'crayon' | 'dashed'
+
+export const LINE_OPTIONS: { id: NeoLineId; label: string; desc: string }[] = [
+  { id: 'clean', label: 'Clean', desc: 'Hairline solids' },
+  { id: 'ink', label: 'Ink', desc: 'Heavier · slight press' },
+  { id: 'crayon', label: 'Crayon', desc: 'Soft wobbly outlines' },
+  { id: 'dashed', label: 'Dashed', desc: 'Sketch / notebook' },
+]
+
+export const LINE_CYCLE: NeoLineId[] = ['clean', 'ink', 'crayon', 'dashed']
 
 /** Body type stacks — chrome × font (wordcount TYPE_FACES_WEB) */
 export const TYPE_FACES: Record<NeoUiId, Record<NeoFontId, string>> = {
@@ -207,6 +256,40 @@ export function normalizeFont(raw: string | null | undefined): NeoFontId {
   return 'sans'
 }
 
+export function normalizeRadius(raw: string | null | undefined): NeoRadiusId {
+  if (raw && RADIUS_CYCLE.includes(raw as NeoRadiusId)) return raw as NeoRadiusId
+  return 'match'
+}
+
+export function nextRadius(current: NeoRadiusId): NeoRadiusId {
+  const idx = RADIUS_CYCLE.indexOf(normalizeRadius(current))
+  return RADIUS_CYCLE[(idx + 1) % RADIUS_CYCLE.length]!
+}
+
+export function normalizeDensity(
+  raw: string | null | undefined,
+  legacyCompact?: boolean,
+): NeoDensityId {
+  if (raw && DENSITY_CYCLE.includes(raw as NeoDensityId)) return raw as NeoDensityId
+  if (legacyCompact) return 'dense'
+  return 'cozy'
+}
+
+export function nextDensity(current: NeoDensityId): NeoDensityId {
+  const idx = DENSITY_CYCLE.indexOf(normalizeDensity(current))
+  return DENSITY_CYCLE[(idx + 1) % DENSITY_CYCLE.length]!
+}
+
+export function normalizeLine(raw: string | null | undefined): NeoLineId {
+  if (raw && LINE_CYCLE.includes(raw as NeoLineId)) return raw as NeoLineId
+  return 'clean'
+}
+
+export function nextLine(current: NeoLineId): NeoLineId {
+  const idx = LINE_CYCLE.indexOf(normalizeLine(current))
+  return LINE_CYCLE[(idx + 1) % LINE_CYCLE.length]!
+}
+
 export function resolveTheme(theme: NeoThemeId): Exclude<NeoThemeId, 'auto'> {
   if (theme !== 'auto') return theme
   if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -231,6 +314,9 @@ export function applyAppearance(opts: {
   ui?: NeoUiId
   font?: NeoFontId
   fontSize?: NeoFontSizeId
+  radius?: NeoRadiusId
+  density?: NeoDensityId
+  line?: NeoLineId
 }) {
   if (typeof document === 'undefined') return
   const root = document.documentElement
@@ -239,9 +325,17 @@ export function applyAppearance(opts: {
 
   const ui = normalizeUi(opts.ui)
   const font = normalizeFont(opts.font)
+  const radius = normalizeRadius(opts.radius)
+  const density = normalizeDensity(opts.density)
+  const line = normalizeLine(opts.line)
   root.setAttribute('data-ui', ui)
   root.setAttribute('data-font', font)
+  root.setAttribute('data-radius', radius)
+  root.setAttribute('data-density', density)
+  root.setAttribute('data-line', line)
   if (opts.fontSize) root.setAttribute('data-font-size', opts.fontSize)
+  // Legacy class some CSS still keys off
+  root.classList.toggle('compact-mode', density === 'dense')
 
   const typeStack = TYPE_FACES[ui][font]
   const uiStack = UI_FONTS[ui]

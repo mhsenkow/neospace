@@ -33,13 +33,30 @@ export function activeClient(): mastodon.rest.Client {
   })
 }
 
-/** Public (optionally authenticated) client for browsing */
+/**
+ * Public (optionally authenticated) client for browsing.
+ * If the preferred host has a token, use it as-is — even on auth-gated hosts
+ * (mastodon.social etc.). Guest remap to fosstodon only applies when unauthenticated.
+ */
 export function publicClient(url?: string | null): mastodon.rest.Client {
   const store = useInstancesStore()
   const preferred =
     url ||
     store.activeAccount?.url ||
-    store.instances[0]?.url
+    store.instances[0]?.url ||
+    null
+
+  if (preferred) {
+    const preferredUrl = preferred.replace(/\/+$/, '')
+    const authed = store.getInstanceByUrl(preferredUrl)
+    if (authed?.accessToken) {
+      return createRestAPIClient({
+        url: preferredUrl,
+        accessToken: authed.accessToken,
+      })
+    }
+  }
+
   const resolved = resolvePublicInstanceUrl(preferred)
   const matching = store.getInstanceByUrl(resolved)
   return createRestAPIClient({

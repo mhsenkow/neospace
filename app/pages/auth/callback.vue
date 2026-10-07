@@ -34,15 +34,23 @@ onMounted(async () => {
   try {
     status.value = 'Finishing up…'
     instancesStore.loadFromStorage()
-    await instancesStore.completeAuth(code)
+    const wasAdd =
+      typeof window !== 'undefined' &&
+      sessionStorage.getItem('neospace_auth_add') === '1'
+    await instancesStore.completeAuth(code, (route.query.state as string) || null)
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('neospace_auth_add')
+    }
 
     if (instancesStore.userCustomCSS) {
       themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
     }
 
-    status.value = 'You’re in — opening NeoSpace…'
+    status.value = wasAdd
+      ? 'Account linked — opening your profile…'
+      : 'You’re in — opening NeoSpace…'
     await new Promise((r) => setTimeout(r, 400))
-    await router.replace('/')
+    await router.replace(wasAdd ? '/profile?linked=1' : '/')
   } catch (e: any) {
     error.value = friendlyAuthError(e.message || 'Authentication failed')
   }

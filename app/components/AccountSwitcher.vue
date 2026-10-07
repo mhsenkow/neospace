@@ -1,153 +1,180 @@
 <script setup lang="ts">
 /**
- * Avatar account switcher — posting-as + manage accounts.
+ * Avatar trigger for the Threads-style account switcher sheet.
+ * Sheet lives in AccountSwitcherSheet (mounted once in the layout).
  */
 
-import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
-import { useAccountsManager } from '~/composables/useAccountsManager'
+import { useInstancesStore } from '~/stores/instances'
+import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
 
 const props = withDefaults(
   defineProps<{
     compact?: boolean
+    /** mobile bottom nav vs desktop sidebar */
+    placement?: 'sidebar' | 'nav'
   }>(),
-  { compact: false },
+  { compact: false, placement: 'sidebar' },
 )
 
 const instancesStore = useInstancesStore()
-const { open: openAccounts } = useAccountsManager()
+const { isOpen: menuOpen, open: openMenu, toggle: toggleMenu } = useAccountSwitcher()
 const route = useRoute()
 const router = useRouter()
 
-const menuOpen = ref(false)
-const rootRef = ref<HTMLElement | null>(null)
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let pendingNavTimer: ReturnType<typeof setTimeout> | null = null
+let longPressFired = false
+let lastTapAt = 0
 
 const accounts = computed(() => instancesStore.authenticatedInstances)
 const multi = computed(() => accounts.value.length > 1)
+const isNav = computed(() => props.placement === 'nav')
 
-const handleOf = (instance: ConnectedInstance) => {
-  const acct = instance.user?.acct || instance.user?.username || ''
-  const host = instance.url.replace(/^https?:\/\//, '')
-  if (acct.includes('@')) return `@${acct}`
-  return `@${acct}@${host}`
+const peekAccounts = computed(() => {
+  if (!multi.value) return []
+  const activeId = instancesStore.activeAccount?.id
+  return accounts.value.filter((a) => a.id !== activeId).slice(0, 2)
+})
+
+const goProfile = () => {
+  router.push('/profile')
 }
 
-const closeMenu = () => {
-  menuOpen.value = false
-}
-
-const toggleMenu = () => {
-  menuOpen.value = !menuOpen.value
-}
-
-const selectAccount = async (id: string) => {
-  instancesStore.setActiveAccount(id)
-  closeMenu()
-  // If viewing own profile, reload so the switched account shows
+const cycleAccount = async () => {
+  if (!multi.value) return
+  instancesStore.cycleActiveAccount()
   if (route.path === '/profile' && !route.query.user) {
     const { useProfileStore } = await import('~/stores/profile')
     await useProfileStore().fetchProfile()
   }
 }
 
-const goProfile = () => {
-  closeMenu()
-  router.push('/profile')
+const onTriggerClick = (e: MouseEvent) => {
+  if (longPressFired) {
+    longPressFired = false
+    e.preventDefault()
+    return
+  }
+
+  // Nav + multi: delay profile so double-tap can cycle; single tap → profile
+  // Long-press opens the sheet (Threads pattern)
+  if (isNav.value && multi.value) {
+    const now = Date.now()
+    if (now - lastTapAt < 320) {
+      lastTapAt = 0
+      if (pendingNavTimer) {
+        clearTimeout(pendingNavTimer)
+        pendingNavTimer = null
+      }
+      e.preventDefault()
+      void cycleAccount()
+      return
+    }
+    lastTapAt = now
+    if (pendingNavTimer) clearTimeout(pendingNavTimer)
+    pendingNavTimer = setTimeout(() => {
+      pendingNavTimer = null
+      goProfile()
+    }, 320)
+    return
+  }
+
+  if (isNav.value) {
+    goProfile()
+    return
+  }
+
+  // Sidebar: tap opens switcher sheet
+  toggleMenu()
 }
 
-const manage = () => {
-  closeMenu()
-  openAccounts()
+const clearLongPress = () => {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
 }
 
-const addAccount = () => {
-  closeMenu()
-  router.push('/login?add=1')
+const onPointerDown = () => {
+  longPressFired = false
+  clearLongPress()
+  longPressTimer = setTimeout(() => {
+    longPressFired = true
+    if (pendingNavTimer) {
+      clearTimeout(pendingNavTimer)
+      pendingNavTimer = null
+    }
+    openMenu()
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(12)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 380)
 }
 
-const onDocClick = (e: MouseEvent) => {
-  if (!rootRef.value?.contains(e.target as Node)) closeMenu()
-}
+const onPointerUp = () => clearLongPress()
+const onPointerLeave = () => clearLongPress()
 
-watch(menuOpen, (open) => {
-  if (open) document.addEventListener('click', onDocClick)
-  else document.removeEventListener('click', onDocClick)
+onUnmounted(() => {
+  clearLongPress()
+  if (pendingNavTimer) clearTimeout(pendingNavTimer)
 })
-
-onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
 
 <template>
-  <div ref="rootRef" class="acct-switch" :class="{ 'acct-switch--compact': compact }">
+  <div
+    class="acct-switch"
+    :class="{
+      'acct-switch--compact': compact || isNav,
+      'acct-switch--nav': isNav,
+    }"
+  >
     <button
       type="button"
       class="acct-switch__trigger"
       :class="{ active: route.path === '/profile' || menuOpen }"
-      :title="multi ? 'Switch account' : 'Account'"
+      :title="
+        multi
+          ? 'Profile · hold to switch accounts · double-tap to cycle'
+          : 'Profile'
+      "
+      :aria-label="multi ? 'Profile, hold to switch accounts' : 'Profile'"
       :aria-expanded="menuOpen"
-      aria-haspopup="menu"
-      @click="toggleMenu"
+      aria-haspopup="dialog"
+      @click="onTriggerClick"
+      @pointerdown="onPointerDown"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerLeave"
+      @pointerleave="onPointerLeave"
+      @contextmenu.prevent="openMenu"
     >
-      <img
-        v-if="instancesStore.userAvatar"
-        :src="instancesStore.userAvatar"
-        :alt="instancesStore.userDisplayName"
-        class="acct-switch__avatar"
-      />
-      <div v-else class="acct-switch__avatar acct-switch__avatar--placeholder">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-          <circle cx="12" cy="7" r="4" />
-        </svg>
-      </div>
-      <span v-if="multi" class="acct-switch__dot" aria-hidden="true" />
-    </button>
-
-    <Transition name="acct-menu">
-      <div v-if="menuOpen" class="acct-switch__menu" role="menu">
-        <div class="acct-switch__posting">
-          <span class="acct-switch__posting-label">Posting as</span>
-          <span class="acct-switch__posting-handle">
-            {{ instancesStore.activeAccount ? handleOf(instancesStore.activeAccount) : '—' }}
-          </span>
+      <span class="acct-switch__stack" aria-hidden="true">
+        <img
+          v-for="(peek, i) in peekAccounts"
+          :key="peek.id"
+          :src="peek.user?.avatar"
+          alt=""
+          class="acct-switch__avatar acct-switch__avatar--peek"
+          :style="{ '--peek-i': i }"
+        />
+        <img
+          v-if="instancesStore.userAvatar"
+          :src="instancesStore.userAvatar"
+          :alt="instancesStore.userDisplayName"
+          class="acct-switch__avatar"
+        />
+        <div v-else class="acct-switch__avatar acct-switch__avatar--placeholder">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
         </div>
-
-        <button
-          v-for="account in accounts"
-          :key="account.id"
-          type="button"
-          class="acct-switch__item"
-          :class="{ 'acct-switch__item--active': account.id === instancesStore.activeAccount?.id }"
-          role="menuitem"
-          @click="selectAccount(account.id)"
-        >
-          <img
-            v-if="account.user?.avatar"
-            :src="account.user.avatar"
-            alt=""
-            class="acct-switch__item-avatar"
-          />
-          <div class="acct-switch__item-text">
-            <span class="acct-switch__item-name">
-              {{ account.user?.displayName || account.user?.username }}
-            </span>
-            <span class="acct-switch__item-handle">{{ handleOf(account) }}</span>
-          </div>
-          <span v-if="account.id === instancesStore.activeAccount?.id" class="acct-switch__check" aria-hidden="true">✓</span>
-        </button>
-
-        <div class="acct-switch__divider" />
-
-        <button type="button" class="acct-switch__item acct-switch__item--action" role="menuitem" @click="goProfile">
-          View profile
-        </button>
-        <button type="button" class="acct-switch__item acct-switch__item--action" role="menuitem" @click="addAccount">
-          Add account
-        </button>
-        <button type="button" class="acct-switch__item acct-switch__item--action" role="menuitem" @click="manage">
-          Accounts &amp; servers
-        </button>
-      </div>
-    </Transition>
+      </span>
+      <span v-if="multi" class="acct-switch__count" aria-hidden="true">{{ accounts.length }}</span>
+    </button>
   </div>
 </template>
 
@@ -158,12 +185,16 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 .acct-switch__trigger {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 4px;
   border: none;
   border-radius: 50%;
   background: transparent;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  user-select: none;
   transition: background-color var(--neo-transition-fast);
 
   &:hover,
@@ -176,6 +207,28 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   }
 }
 
+.acct-switch--nav .acct-switch__trigger {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+
+  &.active {
+    background: var(--neo-accent-soft);
+  }
+}
+
+.acct-switch__stack {
+  position: relative;
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.acct-switch--nav .acct-switch__stack {
+  width: 26px;
+  height: 26px;
+}
+
 .acct-switch__avatar {
   width: 28px;
   height: 28px;
@@ -183,153 +236,56 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   object-fit: cover;
   border: 1.5px solid transparent;
   display: block;
+  position: relative;
+  z-index: 1;
+  background: var(--neo-bg-tertiary);
+
+  .acct-switch--nav & {
+    width: 26px;
+    height: 26px;
+  }
+
+  &--peek {
+    position: absolute;
+    z-index: 0;
+    top: calc(-2px - (var(--peek-i, 0) * 2px));
+    left: calc(7px + (var(--peek-i, 0) * 5px));
+    width: 22px;
+    height: 22px;
+    opacity: calc(0.9 - (var(--peek-i, 0) * 0.15));
+    border-color: var(--neo-bg-primary);
+    box-shadow: 0 0 0 1px var(--neo-bg-primary);
+
+    .acct-switch--nav & {
+      width: 20px;
+      height: 20px;
+      left: calc(6px + (var(--peek-i, 0) * 4px));
+    }
+  }
 
   &--placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--neo-bg-tertiary);
     color: var(--neo-text-muted);
   }
 }
 
-.acct-switch__dot {
+.acct-switch__count {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--neo-accent);
-  border: 1.5px solid var(--neo-bg-secondary);
-}
-
-.acct-switch__menu {
-  position: absolute;
-  left: calc(100% + 0.5rem);
-  bottom: 0;
-  z-index: 200;
-  width: 16.5rem;
-  padding: 0.5rem;
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--neo-text-primary) 14%, transparent);
-}
-
-.acct-switch--compact .acct-switch__menu {
-  left: auto;
   right: 0;
-  bottom: calc(100% + 0.5rem);
-}
-
-.acct-switch__posting {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.4rem 0.55rem 0.55rem;
-}
-
-.acct-switch__posting-label {
-  font-size: 0.625rem;
+  bottom: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--neo-accent);
+  color: var(--neo-text-on-accent, #fff);
+  border: 1.5px solid var(--neo-bg-primary);
+  font-size: 0.5625rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--neo-text-muted);
-}
-
-.acct-switch__posting-handle {
-  font-size: 0.75rem;
-  color: var(--neo-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.acct-switch__item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.45rem 0.55rem;
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  color: var(--neo-text-primary);
-
-  &:hover {
-    background: var(--neo-bg-hover);
-  }
-
-  &--active {
-    background: var(--neo-accent-soft);
-  }
-
-  &--action {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--neo-text-secondary);
-
-    &:hover {
-      color: var(--neo-text-primary);
-    }
-  }
-}
-
-.acct-switch__item-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.acct-switch__item-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.acct-switch__item-name {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.acct-switch__item-handle {
-  font-size: 0.6875rem;
-  color: var(--neo-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.acct-switch__check {
-  flex-shrink: 0;
-  font-size: 0.75rem;
-  color: var(--neo-accent);
-  font-weight: 700;
-}
-
-.acct-switch__divider {
-  height: 1px;
-  margin: 0.35rem 0;
-  background: var(--neo-border-color);
-}
-
-.acct-menu-enter-active,
-.acct-menu-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.acct-menu-enter-from,
-.acct-menu-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
+  line-height: 11px;
+  text-align: center;
+  z-index: 2;
 }
 </style>

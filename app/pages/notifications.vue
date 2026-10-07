@@ -2,9 +2,14 @@
 import { useNotificationsStore, type ExtendedNotification, type NotificationFilterType, type SortOrder } from '~/stores/notifications'
 import { useInstancesStore } from '~/stores/instances'
 import type { mastodon } from 'masto'
+import { stripHtml } from '~/utils/sanitizeHtml'
+import { notifIconName, notifLabel } from '~/utils/notifHelpers'
+import type { NeoIconName } from '~/utils/neoIcons'
 
 const notificationsStore = useNotificationsStore()
 const instancesStore = useInstancesStore()
+const route = useRoute()
+const router = useRouter()
 
 const scrollContainer = ref<HTMLElement | null>(null)
 const loadTrigger = ref<HTMLElement | null>(null)
@@ -16,14 +21,31 @@ const canView = computed(() =>
   instancesStore.hasAuthenticatedInstance
 )
 
-const filters: { key: NotificationFilterType; label: string; icon: string }[] = [
-  { key: 'all', label: 'All', icon: '🔔' },
-  { key: 'mention', label: 'Mentions', icon: '💬' },
-  { key: 'favourite', label: 'Likes', icon: '❤️' },
-  { key: 'reblog', label: 'Boosts', icon: '🔁' },
-  { key: 'follow', label: 'Follows', icon: '👤' },
-  { key: 'poll', label: 'Polls', icon: '📊' },
-  { key: 'update', label: 'Edits', icon: '✏️' },
+const FILTER_KEYS: NotificationFilterType[] = [
+  'all',
+  'mention',
+  'favourite',
+  'reblog',
+  'follow',
+  'poll',
+  'update',
+]
+
+const applyFilterFromRoute = () => {
+  const raw = String(route.query.filter || '')
+  if (FILTER_KEYS.includes(raw as NotificationFilterType)) {
+    notificationsStore.setFilter(raw as NotificationFilterType)
+  }
+}
+
+const filters: { key: NotificationFilterType; label: string; icon: NeoIconName }[] = [
+  { key: 'all', label: 'All', icon: 'bell' },
+  { key: 'mention', label: 'Mentions', icon: 'mention' },
+  { key: 'favourite', label: 'Likes', icon: 'heart' },
+  { key: 'reblog', label: 'Boosts', icon: 'reblog' },
+  { key: 'follow', label: 'Follows', icon: 'user' },
+  { key: 'poll', label: 'Polls', icon: 'poll' },
+  { key: 'update', label: 'Edits', icon: 'edit' },
 ]
 
 const sortOptions: { key: SortOrder; label: string }[] = [
@@ -39,6 +61,10 @@ const visibleGroups = computed(() =>
 
 const selectFilter = (key: NotificationFilterType) => {
   notificationsStore.setFilter(key)
+  const query = { ...route.query }
+  if (key === 'all') delete query.filter
+  else query.filter = key
+  router.replace({ query })
 }
 
 const selectSort = (key: SortOrder) => {
@@ -91,14 +117,24 @@ const formatTime = (dateString: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-const router = useRouter()
-
-const openNotification = (notif: ExtendedNotification) => {
+const ensureNotifAccount = (notif: ExtendedNotification) => {
   if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
     instancesStore.setActiveAccount(notif._instanceId)
   }
+}
 
-  // Follows → profile; everything else with a status → in-app thread
+/** Avatar / name → their profile (e.g. who liked your comment) */
+const openNotifProfile = (notif: ExtendedNotification, e?: Event) => {
+  e?.stopPropagation()
+  ensureNotifAccount(notif)
+  const acct = notif.account?.acct
+  if (acct) router.push({ path: '/profile', query: { user: acct } })
+}
+
+/** Body / preview → the post (or profile for follows) */
+const openNotification = (notif: ExtendedNotification) => {
+  ensureNotifAccount(notif)
+
   if (notif.type === 'follow' || notif.type === 'follow_request') {
     const acct = notif.account?.acct
     if (acct) {
@@ -123,41 +159,6 @@ const openNotification = (notif: ExtendedNotification) => {
   }
 }
 
-const notifIcon = (type: string) => {
-  switch (type) {
-    case 'mention': return '💬'
-    case 'favourite': return '❤️'
-    case 'reblog': return '🔁'
-    case 'follow': return '👤'
-    case 'follow_request': return '🔒'
-    case 'poll': return '📊'
-    case 'status': return '📝'
-    case 'update': return '✏️'
-    default: return '🔔'
-  }
-}
-
-const notifLabel = (type: string) => {
-  switch (type) {
-    case 'mention': return 'mentioned you'
-    case 'favourite': return 'liked your post'
-    case 'reblog': return 'boosted your post'
-    case 'follow': return 'followed you'
-    case 'follow_request': return 'requested to follow you'
-    case 'poll': return 'poll ended'
-    case 'status': return 'posted'
-    case 'update': return 'edited a post'
-    default: return 'notification'
-  }
-}
-
-const stripHtml = (html: string) => {
-  if (typeof document === 'undefined') return html.replace(/<[^>]*>/g, '')
-  const tmp = document.createElement('div')
-  tmp.innerHTML = html
-  return tmp.textContent || tmp.innerText || ''
-}
-
 const previewText = (status?: mastodon.v1.Status | null) => {
   if (!status?.content) return ''
   const text = stripHtml(status.content).replace(/\s+/g, ' ').trim()
@@ -172,6 +173,7 @@ const closeDropdowns = (e: MouseEvent) => {
 }
 
 onMounted(async () => {
+  applyFilterFromRoute()
   if (canView.value) {
     await notificationsStore.fetchNotifications(true)
     await notificationsStore.markAllRead()
@@ -192,6 +194,13 @@ onMounted(async () => {
   document.addEventListener('click', closeDropdowns)
 })
 
+watch(
+  () => route.query.filter,
+  () => {
+    applyFilterFromRoute()
+  },
+)
+
 onBeforeUnmount(() => {
   observer?.disconnect()
   document.removeEventListener('click', closeDropdowns)
@@ -202,10 +211,10 @@ onBeforeUnmount(() => {
   <div class="notif-page" ref="scrollContainer">
     <!-- Not authenticated -->
     <div v-if="!canView" class="notif-empty">
-      <div class="notif-empty__icon">🔒</div>
-      <h2 class="notif-empty__title">Sign in to see notifications</h2>
-      <p class="notif-empty__desc">Log in to your Mastodon account to view mentions, likes, boosts, and follows.</p>
-      <NuxtLink to="/login" class="notif-empty__cta">Sign In</NuxtLink>
+      <div class="notif-empty__icon"><NeoIcon name="lock" :size="32" :stroke="1.5" /></div>
+      <h2 class="notif-empty__title">Notifications</h2>
+      <p class="notif-empty__desc">Sign in to see activity.</p>
+      <NuxtLink to="/login" class="notif-empty__cta">Sign in</NuxtLink>
     </div>
 
     <!-- Main content -->
@@ -217,8 +226,10 @@ onBeforeUnmount(() => {
           <div class="notif-header__actions">
             <!-- Refresh -->
             <button
+              type="button"
               class="notif-icon-btn"
               title="Refresh"
+              aria-label="Refresh notifications"
               :disabled="notificationsStore.isLoading"
               @click="handleRefresh"
             >
@@ -230,7 +241,14 @@ onBeforeUnmount(() => {
 
             <!-- Sort -->
             <div class="sort-menu">
-              <button class="notif-icon-btn" title="Sort" @click.stop="sortMenuOpen = !sortMenuOpen">
+              <button
+                type="button"
+                class="notif-icon-btn"
+                title="Sort"
+                aria-label="Sort notifications"
+                :aria-expanded="sortMenuOpen"
+                @click.stop="sortMenuOpen = !sortMenuOpen"
+              >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="16" y2="12" /><line x1="4" y1="18" x2="12" y2="18" />
                 </svg>
@@ -250,7 +268,14 @@ onBeforeUnmount(() => {
 
             <!-- More actions -->
             <div class="actions-menu">
-              <button class="notif-icon-btn" title="More actions" @click.stop="actionsMenuOpen = !actionsMenuOpen">
+              <button
+                type="button"
+                class="notif-icon-btn"
+                title="More actions"
+                aria-label="More notification actions"
+                :aria-expanded="actionsMenuOpen"
+                @click.stop="actionsMenuOpen = !actionsMenuOpen"
+              >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
                 </svg>
@@ -266,15 +291,17 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Filter pills -->
-        <div class="notif-filters">
+        <div class="notif-filters" role="toolbar" aria-label="Filter notifications">
           <button
             v-for="f in filters"
             :key="f.key"
+            type="button"
             class="notif-filter-pill"
             :class="{ active: notificationsStore.filter === f.key }"
+            :aria-pressed="notificationsStore.filter === f.key"
             @click="selectFilter(f.key)"
           >
-            <span class="notif-filter-pill__icon">{{ f.icon }}</span>
+            <span class="notif-filter-pill__icon" aria-hidden="true"><NeoIcon :name="f.icon" :size="15" :stroke="2" /></span>
             <span class="notif-filter-pill__label">{{ f.label }}</span>
           </button>
         </div>
@@ -293,14 +320,16 @@ onBeforeUnmount(() => {
 
       <!-- Error -->
       <div v-else-if="notificationsStore.error" class="notif-error">
-        <div class="notif-error__icon">⚠️</div>
+        <div class="notif-error__icon"><NeoIcon name="alert" :size="28" :stroke="1.75" /></div>
         <p>{{ notificationsStore.error }}</p>
         <button class="notif-error__retry" @click="handleRefresh">Try again</button>
       </div>
 
       <!-- Empty state -->
       <div v-else-if="notificationsStore.filteredNotifications.length === 0 && !notificationsStore.isLoading" class="notif-empty">
-        <div class="notif-empty__icon">{{ notificationsStore.filter === 'all' ? '✨' : '🔍' }}</div>
+        <div class="notif-empty__icon">
+          <NeoIcon :name="notificationsStore.filter === 'all' ? 'sparkle' : 'search'" :size="32" :stroke="1.5" />
+        </div>
         <h2 class="notif-empty__title">
           {{ notificationsStore.filter === 'all' ? 'All caught up!' : 'Nothing here' }}
         </h2>
@@ -317,74 +346,108 @@ onBeforeUnmount(() => {
         <div v-for="group in visibleGroups" :key="group" class="notif-group">
           <div class="notif-group__label">{{ group }}</div>
           <div class="notif-group__items">
-            <div
+            <article
               v-for="notif in grouped[group]"
               :key="notif._key"
               class="notif-item"
               :class="'notif-item--' + notif.type"
-              role="button"
-              tabindex="0"
-              @click="openNotification(notif)"
-              @keydown.enter="openNotification(notif)"
             >
               <!-- Type icon badge -->
-              <div class="notif-item__type-badge">
-                {{ notifIcon(notif.type) }}
+              <div class="notif-item__type-badge" aria-hidden="true">
+                <NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" />
               </div>
 
-              <!-- Avatar -->
-              <div class="notif-item__avatar" v-if="notif.account">
+              <!-- Avatar → profile -->
+              <button
+                v-if="notif.account"
+                type="button"
+                class="notif-item__avatar"
+                :aria-label="`Open ${notif.account.displayName || notif.account.username}'s profile`"
+                @click="openNotifProfile(notif)"
+              >
                 <img
                   :src="notif.account.avatar"
-                  :alt="notif.account.displayName || notif.account.username"
+                  alt=""
                   loading="lazy"
                 />
-              </div>
+              </button>
 
-              <!-- Content -->
+              <!-- Content: name → profile; rest → post -->
               <div class="notif-item__body">
                 <div class="notif-item__headline">
                   <p class="notif-item__who">
-                    <strong v-if="notif.account" class="notif-item__name">
+                    <button
+                      v-if="notif.account"
+                      type="button"
+                      class="notif-item__name"
+                      @click="openNotifProfile(notif)"
+                    >
                       {{ notif.account.displayName || notif.account.username }}
-                    </strong>
-                    <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
-                    <span
-                      v-if="showAccountHost && notif._instanceUrl"
-                      class="notif-item__host"
-                    >· {{ hostLabel(notif._instanceUrl) }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="notif-item__action-btn"
+                      @click="openNotification(notif)"
+                    >
+                      <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
+                      <span
+                        v-if="showAccountHost && notif._instanceUrl"
+                        class="notif-item__host"
+                      >· {{ hostLabel(notif._instanceUrl) }}</span>
+                    </button>
                   </p>
                   <time class="notif-item__time" :datetime="notif.createdAt">
                     {{ formatTime(notif.createdAt) }}
                   </time>
                 </div>
 
-                <p v-if="previewText(notif.status)" class="notif-item__preview">
-                  {{ previewText(notif.status) }}
-                </p>
+                <button
+                  v-if="previewText(notif.status) || notif.status?.mediaAttachments?.length"
+                  type="button"
+                  class="notif-item__open"
+                  :aria-label="`Open post: ${notifLabel(notif.type)}`"
+                  @click="openNotification(notif)"
+                >
+                  <p v-if="previewText(notif.status)" class="notif-item__preview">
+                    {{ previewText(notif.status) }}
+                  </p>
 
-                <!-- Media thumbnails -->
-                <div v-if="notif.status?.mediaAttachments?.length" class="notif-item__media">
-                  <img
-                    v-for="(media, idx) in notif.status.mediaAttachments.slice(0, 3)"
-                    :key="idx"
-                    :src="media.previewUrl ?? media.url ?? undefined"
-                    class="notif-item__media-thumb"
-                    loading="lazy"
-                  />
-                  <span v-if="(notif.status.mediaAttachments?.length ?? 0) > 3" class="notif-item__media-more">
-                    +{{ (notif.status.mediaAttachments?.length ?? 0) - 3 }}
-                  </span>
-                </div>
+                  <div v-if="notif.status?.mediaAttachments?.length" class="notif-item__media">
+                    <img
+                      v-for="(media, idx) in notif.status.mediaAttachments.slice(0, 3)"
+                      :key="idx"
+                      :src="media.previewUrl ?? media.url ?? undefined"
+                      class="notif-item__media-thumb"
+                      alt=""
+                      loading="lazy"
+                    />
+                    <span v-if="(notif.status.mediaAttachments?.length ?? 0) > 3" class="notif-item__media-more">
+                      +{{ (notif.status.mediaAttachments?.length ?? 0) - 3 }}
+                    </span>
+                  </div>
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="notif-item__open notif-item__open--bare"
+                  :aria-label="`Open ${notifLabel(notif.type)}`"
+                  @click="openNotification(notif)"
+                >
+                  <span class="sr-only">Open</span>
+                </button>
               </div>
 
               <!-- Dismiss -->
-              <button class="notif-item__dismiss" title="Dismiss" @click.stop="handleDismiss(notif._key)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+              <button
+                type="button"
+                class="notif-item__dismiss"
+                aria-label="Dismiss notification"
+                title="Dismiss"
+                @click="handleDismiss(notif._key)"
+              >
+                <NeoIcon name="x" :size="14" :stroke="2" />
               </button>
-            </div>
+            </article>
           </div>
         </div>
 
@@ -458,8 +521,8 @@ onBeforeUnmount(() => {
 
   &__title {
     margin: 0;
-    font-size: clamp(1.375rem, 3vw, 1.75rem);
-    font-weight: 700;
+    font-size: 1.5rem;
+    font-weight: 650;
     color: var(--neo-text-primary);
     letter-spacing: -0.03em;
     line-height: 1.15;
@@ -793,7 +856,6 @@ onBeforeUnmount(() => {
   background: transparent;
   transition: background-color 0.15s;
   position: relative;
-  cursor: pointer;
 
   &:hover {
     background: var(--neo-bg-hover);
@@ -803,34 +865,46 @@ onBeforeUnmount(() => {
     }
   }
 
-  &:focus-visible {
-    outline: 2px solid var(--neo-accent);
-    outline-offset: -2px;
+  &:focus-within {
+    background: var(--neo-bg-hover);
   }
 
   &__type-badge {
     width: 1.25rem;
-    padding-top: 0.7rem;
-    font-size: 0.8125rem;
-    line-height: 1;
-    text-align: center;
+    padding-top: 0.55rem;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    color: var(--neo-text-muted);
     flex-shrink: 0;
   }
 
   &__avatar {
+    position: relative;
+    z-index: 1;
     flex-shrink: 0;
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: none;
     border-radius: 50%;
     overflow: hidden;
     background: var(--neo-bg-tertiary);
     margin-top: 0.125rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
 
     img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
+      pointer-events: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
     }
   }
 
@@ -854,14 +928,76 @@ onBeforeUnmount(() => {
   }
 
   &__name {
+    display: inline;
+    padding: 0;
+    margin: 0 0.35rem 0 0;
+    border: none;
+    background: transparent;
     color: var(--neo-text-primary);
+    font: inherit;
     font-weight: 700;
-    margin-right: 0.35rem;
+    cursor: pointer;
+    text-align: left;
+    -webkit-tap-highlight-color: transparent;
+
+    &:hover,
+    &:focus-visible {
+      text-decoration: underline;
+      outline: none;
+    }
   }
 
   &__action {
     color: var(--neo-text-secondary);
     font-weight: 400;
+  }
+
+  &__action-btn {
+    display: inline;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+
+    &:hover .notif-item__action,
+    &:focus-visible .notif-item__action {
+      text-decoration: underline;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
+  }
+
+  &__open {
+    display: block;
+    width: 100%;
+    margin: 0.375rem 0 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 6px;
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+    }
+
+    &--bare {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      margin: 0;
+      opacity: 0;
+    }
   }
 
   &__host {
@@ -879,7 +1015,7 @@ onBeforeUnmount(() => {
   }
 
   &__preview {
-    margin: 0.375rem 0 0;
+    margin: 0;
     padding: 0.5rem 0.625rem;
     font-size: 0.875rem;
     color: var(--neo-text-primary);
@@ -917,15 +1053,16 @@ onBeforeUnmount(() => {
 
   &__dismiss {
     position: absolute;
-    top: 0.625rem;
-    right: 0.25rem;
+    top: 0.5rem;
+    right: 0.15rem;
+    z-index: 2;
     opacity: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--neo-radius-sm, 4px);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
     border: 1px solid transparent;
     background: var(--neo-bg-secondary);
     color: var(--neo-text-secondary);
@@ -939,7 +1076,7 @@ onBeforeUnmount(() => {
     }
 
     @media (hover: none) {
-      opacity: 1;
+      opacity: 0.7;
     }
   }
 }

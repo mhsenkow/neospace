@@ -133,7 +133,7 @@ useHead({
     <!-- Header -->
     <header class="group-header" :style="{ '--category-color': getCategoryColor(displayGroup.category) }">
       <button class="back-btn" @click="goBack">
-        <span>←</span>
+        <NeoIcon name="chevron-left" :size="18" :stroke="2" />
         <span>All Groups</span>
       </button>
 
@@ -158,7 +158,10 @@ useHead({
             @click="handleLeave"
           >
             <span v-if="isLeaving">Leaving...</span>
-            <span v-else>✓ Joined</span>
+            <span v-else class="action-btn__joined">
+              <NeoIcon name="check" :size="14" :stroke="2.5" />
+              Joined
+            </span>
           </button>
           <button
             v-else
@@ -196,9 +199,8 @@ useHead({
     <!-- Timeline -->
     <section class="group-timeline">
       <!-- Loading State -->
-      <div v-if="groupsStore.isLoadingTimeline" class="timeline-loading">
-        <div class="loading-spinner">🌀</div>
-        <p>Loading group posts...</p>
+      <div v-if="groupsStore.isLoadingTimeline" class="timeline-loading" aria-busy="true">
+        <FunLoader fill label="Loading group posts" />
       </div>
 
       <!-- Error State -->
@@ -486,6 +488,13 @@ useHead({
   }
 }
 
+.action-btn__joined {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
 .header-decoration {
   position: absolute;
   inset: 0;
@@ -562,17 +571,25 @@ useHead({
 .timeline-loading,
 .timeline-error,
 .timeline-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
   text-align: center;
-  padding: 2.5rem 1.5rem;
+  min-height: min(55dvh, 28rem);
+  padding: 1.25rem;
   color: var(--neo-text-muted);
+  box-sizing: border-box;
 
   @media (min-width: 480px) {
-    padding: 3rem 2rem;
+    padding: 1.5rem;
   }
+}
 
-  @media (min-width: 768px) {
-    padding: 4rem 2rem;
-  }
+.timeline-error,
+.timeline-empty {
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .loading-spinner {

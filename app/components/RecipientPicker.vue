@@ -33,12 +33,12 @@ onUnmounted(() => clear())
 </script>
 
 <template>
-  <div class="recipient-picker" role="dialog" aria-label="Choose who to message">
+  <div class="recipient-picker" aria-labelledby="recipient-picker-title">
     <header class="recipient-picker__header">
       <button type="button" class="neo-btn neo-btn--tertiary recipient-picker__cancel" @click="emit('cancel')">
         Cancel
       </button>
-      <h2 class="recipient-picker__title">Message someone</h2>
+      <h2 id="recipient-picker-title" class="recipient-picker__title">Message someone</h2>
       <span class="recipient-picker__spacer" />
     </header>
 
@@ -47,7 +47,9 @@ onUnmounted(() => clear())
     </p>
 
     <div class="recipient-picker__search">
+      <label class="sr-only" for="recipient-search-input">Search people</label>
       <input
+        id="recipient-search-input"
         v-model="query"
         type="search"
         class="neo-input recipient-picker__input"
@@ -82,7 +84,11 @@ onUnmounted(() => clear())
         <p class="recipient-picker__section">People you follow</p>
         <p v-if="isLoadingFollowing" class="recipient-picker__status">Loading…</p>
         <p v-else-if="!following.length" class="recipient-picker__status">
-          Follow people on Explore, then they'll show up here.
+          You’re not following anyone yet.
+          <NuxtLink to="/explore?tab=people" class="recipient-picker__link" @click="emit('cancel')">
+            Find people
+          </NuxtLink>
+          — then they’ll show up here.
         </p>
         <button
           v-for="account in following"
@@ -180,6 +186,17 @@ onUnmounted(() => clear())
   font-size: 0.875rem;
   color: var(--neo-text-muted);
   text-align: center;
+  line-height: 1.45;
+}
+
+.recipient-picker__link {
+  color: var(--neo-accent);
+  font-weight: 600;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .recipient-picker__row {

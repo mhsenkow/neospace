@@ -9,6 +9,7 @@ import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient } from '~/composables/useMasto'
+import { stripHtml } from '~/utils/sanitizeHtml'
 
 interface ProfileState {
   // Viewed profile (can be self or other user)
@@ -130,8 +131,8 @@ export const useProfileStore = defineStore('profile', {
         // Initialize edit form with current values
         this.initEditForm()
 
-        // Fetch statuses
-        await this.fetchStatuses(true)
+        // Fetch statuses (Threads-style: originals first)
+        await this.fetchStatuses(true, { excludeReplies: true })
         await this.fetchPinnedStatuses()
 
       } catch (e: any) {
@@ -158,7 +159,7 @@ export const useProfileStore = defineStore('profile', {
         if (results) {
           this.viewedProfile = results
           this.initEditForm()
-          await this.fetchStatuses(true)
+          await this.fetchStatuses(true, { excludeReplies: true })
           await this.fetchPinnedStatuses()
         } else {
           this.error = 'User not found'
@@ -174,7 +175,7 @@ export const useProfileStore = defineStore('profile', {
     /**
      * Fetch user's statuses
      */
-    async fetchStatuses(refresh = false) {
+    async fetchStatuses(refresh = false, opts?: { excludeReplies?: boolean; onlyMedia?: boolean }) {
       if (!this.viewedProfile) return
 
       if (refresh) {
@@ -191,9 +192,10 @@ export const useProfileStore = defineStore('profile', {
         const statuses = await client.v1.accounts.$select(this.viewedProfile.id).statuses.list({
           limit: 20,
           maxId: this.maxStatusId || undefined,
-          excludeReplies: false,
+          excludeReplies: opts?.excludeReplies ?? false,
           excludeReblogs: false,
-        })
+          onlyMedia: opts?.onlyMedia ?? false,
+        } as any)
 
         if (refresh) {
           this.statuses = statuses
@@ -237,20 +239,15 @@ export const useProfileStore = defineStore('profile', {
     initEditForm() {
       if (!this.viewedProfile) return
 
-      // Strip HTML from bio for editing
-      const tempDiv = typeof document !== 'undefined' ? document.createElement('div') : null
-      let plainBio = this.viewedProfile.note || ''
-      if (tempDiv) {
-        tempDiv.innerHTML = plainBio
-        plainBio = tempDiv.textContent || tempDiv.innerText || ''
-      }
+      // Strip HTML from bio for editing (no innerHTML — avoids XSS sinks)
+      const plainBio = stripHtml(this.viewedProfile.note || '')
 
       this.editForm = {
         displayName: this.viewedProfile.displayName || '',
         note: plainBio,
         fields: this.viewedProfile.fields?.map(f => ({
           name: f.name,
-          value: f.value.replace(/<[^>]*>/g, ''), // Strip HTML from field values
+          value: stripHtml(f.value || ''),
         })) || [],
         avatar: null,
         header: null,

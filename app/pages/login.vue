@@ -19,6 +19,14 @@ const pickerRef = ref<{ setError: (msg: string | null) => void } | null>(null)
 /** Adding another account while already signed in */
 const isAddMode = computed(() => route.query.add === '1' || route.query.add === 'true')
 
+const mainHandle = computed(() => {
+  const main = instancesStore.primaryAccount || instancesStore.activeAccount
+  if (!main?.user) return null
+  const acct = main.user.acct || main.user.username
+  const host = main.url.replace(/^https?:\/\//, '')
+  return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
+})
+
 onMounted(async () => {
   await instancesStore.initialize()
   settingsStore.loadLocalPreferences()
@@ -34,6 +42,10 @@ const startLogin = async (url: string) => {
   pickerRef.value?.setError(null)
 
   try {
+    if (typeof window !== 'undefined') {
+      if (isAddMode.value) sessionStorage.setItem('neospace_auth_add', '1')
+      else sessionStorage.removeItem('neospace_auth_add')
+    }
     const authUrl = await instancesStore.loginWithInstance(url)
     await new Promise((r) => setTimeout(r, 280))
     window.location.href = authUrl
@@ -61,19 +73,20 @@ definePageMeta({
       <header class="login__brand">
         <span class="login__mark" aria-hidden="true">NS</span>
         <h1 class="login__wordmark">
-          {{ isAddMode ? 'Add another account' : 'Sign in to NeoSpace' }}
+          {{ isAddMode ? 'Link a server' : 'Sign in' }}
         </h1>
         <p class="login__lede">
           <template v-if="isAddMode">
-            Pick another Mastodon server you have an account on.
-            We’ll send you there to approve NeoSpace, then bring you back.
+            <template v-if="mainHandle">
+              Linked under <strong>{{ mainHandle }}</strong>.
+            </template>
+            Choose another server to add.
           </template>
           <template v-else>
-            Pick the Mastodon server where you already have an account.
-            We’ll send you there to approve NeoSpace, then bring you back.
+            Choose your server. Approve NeoSpace, then you’re in.
           </template>
         </p>
-        <NuxtLink v-if="isAddMode" to="/" class="login__back">← Back to NeoSpace</NuxtLink>
+        <NuxtLink v-if="isAddMode" to="/profile" class="login__back">← Back to profile</NuxtLink>
       </header>
 
       <div v-if="isConnecting" class="login__connecting" role="status" aria-live="polite">
@@ -85,7 +98,7 @@ definePageMeta({
       <template v-else>
         <ServerPicker
           ref="pickerRef"
-          submit-label="Sign in on this server"
+          :submit-label="isAddMode ? 'Link this server' : 'Sign in on this server'"
           @select="startLogin"
         />
 

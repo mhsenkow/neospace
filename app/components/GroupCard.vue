@@ -13,10 +13,13 @@ import { useInstancesStore } from '~/stores/instances'
 interface Props {
   group: Group
   compact?: boolean
+  /** Threads-style discovery tile for horizontal rails */
+  tile?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  compact: false
+  compact: false,
+  tile: false,
 })
 
 const emit = defineEmits<{
@@ -78,7 +81,11 @@ const getCategoryColor = (category: string) => {
 <template>
   <article 
     class="group-card" 
-    :class="{ 'group-card--compact': compact, 'group-card--member': group.isMember }"
+    :class="{
+      'group-card--compact': compact,
+      'group-card--tile': tile,
+      'group-card--member': group.isMember,
+    }"
     @click="handleView"
   >
     <div class="group-card__icon" :style="{ backgroundColor: getCategoryColor(group.category) + '20' }">
@@ -87,10 +94,13 @@ const getCategoryColor = (category: string) => {
     
     <div class="group-card__content">
       <h3 class="group-card__name">{{ group.name }}</h3>
-      <p v-if="!compact && group.description" class="group-card__description">
+      <p v-if="!compact && !tile && group.description" class="group-card__description">
         {{ group.description }}
       </p>
-      <div class="group-card__meta">
+      <p v-else-if="tile" class="group-card__tagline">
+        {{ group.trending ? 'Trending' : `#${group.tag}` }}
+      </p>
+      <div v-if="!tile" class="group-card__meta">
         <span class="group-card__tag">#{{ group.tag }}</span>
         <span
           class="group-card__category"
@@ -109,7 +119,7 @@ const getCategoryColor = (category: string) => {
         @click="handleLeave"
       >
         <span v-if="isLeaving">...</span>
-        <span v-else>Leave</span>
+        <span v-else>{{ tile ? 'Joined' : 'Leave' }}</span>
       </button>
       <button
         v-else
@@ -124,8 +134,8 @@ const getCategoryColor = (category: string) => {
     </div>
 
     <!-- Member badge -->
-    <div v-if="group.isMember" class="group-card__badge">
-      <span>✓</span>
+    <div v-if="group.isMember && !tile" class="group-card__badge">
+      <NeoIcon name="check" :size="12" :stroke="2.5" />
     </div>
   </article>
 </template>
@@ -187,6 +197,74 @@ const getCategoryColor = (category: string) => {
 
     .group-card__actions {
       display: none;
+    }
+  }
+
+  &--tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    width: 9.5rem;
+    flex: 0 0 auto;
+    padding: 1rem 0.75rem 0.85rem;
+    gap: 0.65rem;
+    height: auto;
+    scroll-snap-align: start;
+
+    .group-card__icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+    }
+
+    .group-card__emoji {
+      font-size: 1.75rem;
+    }
+
+    .group-card__content {
+      width: 100%;
+    }
+
+    .group-card__name {
+      font-size: 0.8125rem;
+      margin: 0 0 0.2rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .group-card__tagline {
+      margin: 0;
+      font-size: 0.6875rem;
+      color: var(--neo-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .group-card__meta {
+      display: none;
+    }
+
+    .group-card__actions {
+      width: 100%;
+      align-self: stretch;
+    }
+
+    .group-card__btn {
+      width: 100%;
+      min-height: 32px;
+      padding: 0.3rem 0.5rem;
+      font-size: 0.75rem;
+      border-radius: 999px;
+    }
+
+    .group-card__btn--leave {
+      background: transparent;
+      color: var(--neo-text-muted);
+      border-color: var(--neo-border-color);
     }
   }
 

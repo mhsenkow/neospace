@@ -10,13 +10,16 @@
 
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
-import { useColumnsStore, MAX_COLUMNS, type ColumnFeedType } from '~/stores/columns'
+import { useColumnsStore, MAX_COLUMNS, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
+import { useSettingsStore } from '~/stores/settings'
 
 const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
+const settingsStore = useSettingsStore()
+const router = useRouter()
 
 const addMenuOpen = ref(false)
 const addGroupsExpanded = ref(false)
@@ -25,10 +28,30 @@ const activeColumnIndex = ref(0)
 const draggingColumnId = ref<string | null>(null)
 const dropTargetColumnId = ref<string | null>(null)
 
+/** Mobile-only edge slides: Settings → Profile → feeds → Communities */
+const MOBILE_CAROUSEL_MQ = '(max-width: 1023px)'
+const EDGE_LEFT = 2
+const EDGE_RIGHT = 1
+const isMobileUi = ref(false)
+const carouselSlideIndex = ref(0)
+let portalActionLock = false
+let mobileMq: MediaQueryList | null = null
+
+const slideCount = computed(() => {
+  const feeds = columnsStore.columns.length
+  return isMobileUi.value ? EDGE_LEFT + feeds + EDGE_RIGHT : feeds
+})
+
+const feedSlideOffset = computed(() => (isMobileUi.value ? EDGE_LEFT : 0))
+
 const FEED_LABELS: Record<string, string> = {
   home: 'For You',
   local: 'Local',
   federated: 'Federated',
+  profile: 'Profile',
+  search: 'Search',
+  notifications: 'Notifications',
+  messages: 'Messages',
 }
 
 const columnTabLabels = computed(() =>
@@ -99,48 +122,290 @@ const closeAddMenu = (e: MouseEvent) => {
 }
 
 const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
-  columnsStore.addColumn(feedType, groupTag)
+  const id = columnsStore.addColumn(feedType, groupTag)
   addMenuOpen.value = false
   addGroupsExpanded.value = false
   nextTick(() => {
-    scrollToColumn(columnsStore.columns.length - 1)
+    const idx = id
+      ? columnsStore.columns.findIndex((c) => c.id === id)
+      : columnsStore.columns.length - 1
+    if (idx >= 0) scrollToColumn(idx)
   })
 }
 
 const feedTabsScroller = ref<HTMLElement | null>(null)
 
-const scrollToColumn = (index: number) => {
+const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
+
+const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') => {
   const el = columnsContainer.value
   if (!el) return
-  const col = el.children[index] as HTMLElement | undefined
-  if (!col) return
-  el.scrollTo({ left: col.offsetLeft, behavior: 'smooth' })
-  activeColumnIndex.value = index
+  const idx = clamp(slideIndex, 0, Math.max(0, el.children.length - 1))
+  const child = el.children[idx] as HTMLElement | undefined
+  if (!child) return
+  el.scrollTo({ left: child.offsetLeft, behavior })
+  carouselSlideIndex.value = idx
+}
+
+const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth') => {
   nextTick(() => {
-    const tab = feedTabsScroller.value?.children[index] as HTMLElement | undefined
-    tab?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    const tab = feedTabsScroller.value?.children[columnIndex] as HTMLElement | undefined
+    tab?.scrollIntoView({ behavior, inline: 'center', block: 'nearest' })
   })
 }
 
+const scrollToColumn = (index: number, behavior: ScrollBehavior = 'smooth') => {
+  const colIdx = clamp(index, 0, Math.max(0, columnsStore.columns.length - 1))
+  activeColumnIndex.value = colIdx
+  scrollToSlide(colIdx + feedSlideOffset.value, behavior)
+  syncTabIntoView(colIdx, behavior)
+}
+
+const openPortal = async (kind: 'settings' | 'profile' | 'communities') => {
+  if (portalActionLock) return
+  portalActionLock = true
+  try {
+    if (kind === 'settings') {
+      settingsStore.open()
+      scrollToColumn(0, 'smooth')
+      return
+    }
+    // Park on nearest feed so Back lands on a real column
+    if (kind === 'profile') {
+      scrollToColumn(0, 'auto')
+      await router.push(instancesStore.isAuthenticated ? '/profile' : '/login')
+      return
+    }
+    scrollToColumn(Math.max(0, columnsStore.columns.length - 1), 'auto')
+    await router.push('/groups')
+  } finally {
+    // Allow another edge settle after navigation/modal settles
+    window.setTimeout(() => {
+      portalActionLock = false
+    }, 400)
+  }
+}
+
+const settleCarousel = (slideIndex: number, behavior: ScrollBehavior = 'smooth') => {
+  const feeds = columnsStore.columns.length
+  if (!isMobileUi.value) {
+    scrollToColumn(clamp(slideIndex, 0, Math.max(0, feeds - 1)), behavior)
+    return
+  }
+
+  const maxSlide = EDGE_LEFT + feeds + EDGE_RIGHT - 1
+  const idx = clamp(slideIndex, 0, maxSlide)
+
+  if (idx === 0) {
+    void openPortal('settings')
+    return
+  }
+  if (idx === 1) {
+    void openPortal('profile')
+    return
+  }
+  if (idx >= EDGE_LEFT + feeds) {
+    void openPortal('communities')
+    return
+  }
+  scrollToColumn(idx - EDGE_LEFT, behavior)
+}
+
 const goPrevFeed = () => {
+  if (isMobileUi.value) {
+    settleCarousel(carouselSlideIndex.value - 1)
+    return
+  }
   if (activeColumnIndex.value <= 0) return
   scrollToColumn(activeColumnIndex.value - 1)
 }
 
 const goNextFeed = () => {
+  if (isMobileUi.value) {
+    settleCarousel(carouselSlideIndex.value + 1)
+    return
+  }
   if (activeColumnIndex.value >= columnsStore.columns.length - 1) return
   scrollToColumn(activeColumnIndex.value + 1)
+}
+
+const removeActiveColumn = () => {
+  const col = columnsStore.columns[activeColumnIndex.value]
+  if (!col || !columnsStore.canRemoveColumn) return
+  const nextIdx = Math.min(activeColumnIndex.value, columnsStore.columnCount - 2)
+  columnsStore.removeColumn(col.id)
+  nextTick(() => {
+    if (nextIdx >= 0) scrollToColumn(nextIdx)
+  })
+}
+
+const activeViewMode = computed(
+  () => columnsStore.columns[activeColumnIndex.value]?.viewMode || 'flow',
+)
+
+const toggleActiveViewMode = () => {
+  const col = columnsStore.columns[activeColumnIndex.value]
+  if (!col) return
+  columnsStore.toggleColumnViewMode(col.id)
 }
 
 const onColumnsScroll = () => {
   const el = columnsContainer.value
   if (!el || el.clientWidth <= 0) return
-  // Mobile carousel: each column is full width
   const index = Math.round(el.scrollLeft / el.clientWidth)
-  activeColumnIndex.value = Math.min(
-    Math.max(index, 0),
-    columnsStore.columns.length - 1,
-  )
+  carouselSlideIndex.value = index
+
+  const feeds = columnsStore.columns.length
+  if (!isMobileUi.value) {
+    activeColumnIndex.value = clamp(index, 0, Math.max(0, feeds - 1))
+    return
+  }
+
+  // Only remap tab highlight while parked on a real feed
+  if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
+    activeColumnIndex.value = index - EDGE_LEFT
+  }
+}
+
+/** Trackpad / snap settle onto an edge portal (gesture path calls settleCarousel itself) */
+const onCarouselScrollEnd = () => {
+  if (!isMobileUi.value || carouselGesture || portalActionLock) return
+  const idx = carouselSlideIndex.value
+  const feeds = columnsStore.columns.length
+  if (idx <= 1 || idx >= EDGE_LEFT + feeds) {
+    settleCarousel(idx)
+  }
+}
+
+/**
+ * Chrome Android latches touches to nested `.column-scroll` (touch-action: pan-y),
+ * so horizontal feed swipes never reach the snap carousel — trackpads still work
+ * via wheel. Axis-lock here and drive scrollLeft ourselves on clear horizontal intent.
+ */
+const AXIS_LOCK_PX = 12
+const FLICK_VX = 0.4 // px/ms
+
+type CarouselGesture = {
+  id: number
+  startX: number
+  startY: number
+  startScroll: number
+  locked: null | 'x' | 'y'
+  lastX: number
+  lastT: number
+  vx: number
+}
+
+let carouselGesture: CarouselGesture | null = null
+
+const onCarouselTouchStart = (e: TouchEvent) => {
+  if (!isMobileUi.value || e.touches.length !== 1) return
+  const el = columnsContainer.value
+  // Edge portals mean swipe works even with a single feed
+  if (!el || columnsStore.columns.length < 1) return
+  const t = e.touches[0]!
+  const target = e.target as HTMLElement | null
+  if (target?.closest('input, textarea, select, [contenteditable="true"], .mobile-feed-tabs')) {
+    return
+  }
+  const now = performance.now()
+  carouselGesture = {
+    id: t.identifier,
+    startX: t.clientX,
+    startY: t.clientY,
+    startScroll: el.scrollLeft,
+    locked: null,
+    lastX: t.clientX,
+    lastT: now,
+    vx: 0,
+  }
+}
+
+const onCarouselTouchMove = (e: TouchEvent) => {
+  const g = carouselGesture
+  if (!g) return
+  const el = columnsContainer.value
+  if (!el) return
+  const t =
+    Array.from(e.touches).find((c) => c.identifier === g.id) ??
+    Array.from(e.changedTouches).find((c) => c.identifier === g.id)
+  if (!t) return
+
+  const dx = t.clientX - g.startX
+  const dy = t.clientY - g.startY
+  const now = performance.now()
+
+  if (!g.locked) {
+    if (Math.abs(dx) < AXIS_LOCK_PX && Math.abs(dy) < AXIS_LOCK_PX) return
+    g.locked = Math.abs(dx) > Math.abs(dy) * 1.05 ? 'x' : 'y'
+    if (g.locked === 'x') {
+      el.style.scrollSnapType = 'none'
+      el.classList.add('columns-container--swiping')
+    }
+  }
+
+  if (g.locked !== 'x') return
+
+  e.preventDefault()
+  const dt = Math.max(1, now - g.lastT)
+  g.vx = (t.clientX - g.lastX) / dt
+  g.lastX = t.clientX
+  g.lastT = now
+  const max = el.scrollWidth - el.clientWidth
+  el.scrollLeft = Math.max(0, Math.min(max, g.startScroll - dx))
+}
+
+const finishCarouselGesture = (e: TouchEvent) => {
+  const g = carouselGesture
+  if (!g) return
+  const ended = Array.from(e.changedTouches).some((c) => c.identifier === g.id)
+  if (!ended) return
+
+  const el = columnsContainer.value
+  const wasX = g.locked === 'x'
+  const vx = g.vx
+  carouselGesture = null
+  if (!el || !wasX) return
+
+  el.style.scrollSnapType = ''
+  el.classList.remove('columns-container--swiping')
+
+  const w = el.clientWidth || 1
+  let index = Math.round(el.scrollLeft / w)
+  if (vx < -FLICK_VX) index += 1
+  else if (vx > FLICK_VX) index -= 1
+  index = clamp(index, 0, Math.max(0, slideCount.value - 1))
+  settleCarousel(index)
+}
+
+const bindCarouselGestures = () => {
+  const el = columnsContainer.value
+  if (!el) return
+  el.addEventListener('touchstart', onCarouselTouchStart, { passive: true, capture: true })
+  el.addEventListener('touchmove', onCarouselTouchMove, { passive: false, capture: true })
+  el.addEventListener('touchend', finishCarouselGesture, { passive: true, capture: true })
+  el.addEventListener('touchcancel', finishCarouselGesture, { passive: true, capture: true })
+  el.addEventListener('scrollend', onCarouselScrollEnd)
+}
+
+const unbindCarouselGestures = () => {
+  const el = columnsContainer.value
+  if (!el) return
+  el.removeEventListener('touchstart', onCarouselTouchStart, true)
+  el.removeEventListener('touchmove', onCarouselTouchMove, true)
+  el.removeEventListener('touchend', finishCarouselGesture, true)
+  el.removeEventListener('touchcancel', finishCarouselGesture, true)
+  el.removeEventListener('scrollend', onCarouselScrollEnd)
+  el.style.scrollSnapType = ''
+  el.classList.remove('columns-container--swiping')
+  carouselGesture = null
+}
+
+const syncMobileUi = () => {
+  const next = !!mobileMq?.matches
+  if (next === isMobileUi.value) return
+  isMobileUi.value = next
+  nextTick(() => scrollToColumn(activeColumnIndex.value, 'auto'))
 }
 
 watch(
@@ -149,6 +414,7 @@ watch(
     if (activeColumnIndex.value >= count) {
       activeColumnIndex.value = Math.max(0, count - 1)
     }
+    nextTick(() => scrollToColumn(activeColumnIndex.value, 'auto'))
   },
 )
 
@@ -159,7 +425,7 @@ watch(
     if (id === prev) return
     columnsStore.initialize()
     activeColumnIndex.value = 0
-    nextTick(() => scrollToColumn(0))
+    nextTick(() => scrollToColumn(0, 'auto'))
   },
 )
 
@@ -167,26 +433,46 @@ onMounted(async () => {
   await instancesStore.initialize()
   columnsStore.initialize()
 
-  if (instancesStore.isAuthenticated) {
-    groupsStore.initializeGroups()
-  }
+  // Discover groups for everyone (menu Suggested + /groups hub)
+  groupsStore.initializeGroups()
 
   if (instancesStore.userCustomCSS) {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   }
 
   document.addEventListener('click', closeAddMenu)
+
+  mobileMq = window.matchMedia(MOBILE_CAROUSEL_MQ)
+  isMobileUi.value = mobileMq.matches
+  mobileMq.addEventListener('change', syncMobileUi)
+
+  nextTick(() => {
+    bindCarouselGestures()
+    // Edge slides sit left of feeds — jump to first feed without animating through Settings
+    scrollToColumn(activeColumnIndex.value, 'auto')
+  })
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeAddMenu)
+  unbindCarouselGestures()
+  mobileMq?.removeEventListener('change', syncMobileUi)
+  mobileMq = null
 })
 
 useHead({ title: 'Home | NeoSpace' })
 </script>
 
 <template>
-  <div class="columns-page" :class="{ 'columns-page--multi': columnsStore.isMultiColumn }">
+  <div
+    class="columns-page"
+    :class="{
+      'columns-page--multi': columnsStore.isMultiColumn && !columnsStore.focusedColumnId,
+      'columns-page--packed': columnsStore.deskDensity === 'packed',
+      'columns-page--roomy': columnsStore.deskDensity === 'roomy',
+      'columns-page--focus': !!columnsStore.focusedColumnId && !isMobileUi,
+    }"
+  >
     <!-- Mobile: feed strip + thumb-zone prev/next + add -->
     <nav class="mobile-feed-tabs" aria-label="Feeds">
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
@@ -207,12 +493,30 @@ useHead({ title: 'Home | NeoSpace' })
       </div>
 
       <div class="mobile-feed-tabs__thumb">
+        <!-- Quiet Flow ↔ Flip for the active feed -->
         <button
-          v-if="columnsStore.isMultiColumn"
+          type="button"
+          class="mobile-feed-tabs__mode"
+          :class="{ 'mobile-feed-tabs__mode--flip': activeViewMode === 'flip' }"
+          :aria-label="activeViewMode === 'flip' ? 'Flip — tap for Flow' : 'Flow — tap for Flip'"
+          :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
+          @click="toggleActiveViewMode"
+        >
+          <span class="mode-glyph" aria-hidden="true">
+            <span class="mode-glyph__flow">
+              <i /><i /><i />
+            </span>
+            <span class="mode-glyph__flip" />
+          </span>
+        </button>
+
+        <!-- Jump arrows when multi-feed or edge portals exist -->
+        <button
+          v-if="columnsStore.columnCount >= 2 || isMobileUi"
           type="button"
           class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Previous feed"
-          :disabled="activeColumnIndex <= 0"
+          aria-label="Previous"
+          :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
           @click="goPrevFeed"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -220,15 +524,29 @@ useHead({ title: 'Home | NeoSpace' })
           </svg>
         </button>
         <button
-          v-if="columnsStore.isMultiColumn"
+          v-if="columnsStore.columnCount >= 2 || isMobileUi"
           type="button"
           class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Next feed"
-          :disabled="activeColumnIndex >= columnsStore.columns.length - 1"
+          aria-label="Next"
+          :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
           @click="goNextFeed"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+
+        <button
+          v-if="columnsStore.canRemoveColumn"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
+          aria-label="Remove this feed"
+          title="Remove this feed"
+          @click="removeActiveColumn"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
 
@@ -252,6 +570,19 @@ useHead({ title: 'Home | NeoSpace' })
               <button class="add-column-menu__item" @click="addColumn('home')">For You</button>
               <button class="add-column-menu__item" @click="addColumn('local')">Local</button>
               <button class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+              <div class="add-column-menu__divider"></div>
+              <button class="add-column-menu__item" @click="addColumn('search')">Search</button>
+              <button class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                class="add-column-menu__item"
+                @click="addColumn('notifications')"
+              >Notifications</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                class="add-column-menu__item"
+                @click="addColumn('messages')"
+              >Messages</button>
               <template v-if="groupsStore.joinedGroups.length > 0">
                 <div class="add-column-menu__divider"></div>
                 <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
@@ -287,26 +618,91 @@ useHead({ title: 'Home | NeoSpace' })
       class="columns-container"
       @scroll.passive="onColumnsScroll"
     >
-      <TimelineColumn
-        v-for="(column, idx) in columnsStore.columns"
-        :key="column.id"
-        :column="column"
-        :is-first="idx === 0"
-        :is-last="idx === columnsStore.columns.length - 1"
-        :can-remove="columnsStore.canRemoveColumn"
-        :can-reorder="columnsStore.isMultiColumn"
-        :recessed="columnsStore.isMultiColumn && activeColumnIndex !== idx"
-        :dragging="draggingColumnId === column.id"
-        :drop-target="dropTargetColumnId === column.id"
-        @remove="columnsStore.removeColumn(column.id)"
-        @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
-        @column-drag-start="onColumnDragStart"
-        @column-drag-end="onColumnDragEnd"
-        @column-drag-over="onColumnDragOver"
-        @column-drop="(fromId) => onColumnDrop(fromId, column.id)"
-        @move-left="moveColumnLeft(idx)"
-        @move-right="moveColumnRight(idx)"
-      />
+      <!-- Mobile edge: keep swiping left → Profile, then Settings -->
+      <aside
+        v-if="isMobileUi"
+        class="feed-portal"
+        aria-label="Settings"
+      >
+        <h2 class="feed-portal__title">Settings</h2>
+        <p class="feed-portal__body">Appearance and defaults.</p>
+        <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('settings')">
+          Open
+        </button>
+      </aside>
+
+      <aside
+        v-if="isMobileUi"
+        class="feed-portal"
+        aria-label="Profile"
+      >
+        <h2 class="feed-portal__title">Profile</h2>
+        <p class="feed-portal__body">
+          {{ instancesStore.isAuthenticated ? 'Your posts and follows.' : 'Sign in to continue.' }}
+        </p>
+        <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('profile')">
+          {{ instancesStore.isAuthenticated ? 'Open' : 'Sign in' }}
+        </button>
+      </aside>
+
+      <template v-for="(column, idx) in columnsStore.columns" :key="column.id">
+        <TimelineColumn
+          v-if="isTimelineFeed(column.feedType)"
+          :class="{ 'board-col--hidden': !!columnsStore.focusedColumnId && columnsStore.focusedColumnId !== column.id && !isMobileUi }"
+          :column="column"
+          :is-first="idx === 0"
+          :is-last="idx === columnsStore.columns.length - 1"
+          :can-remove="columnsStore.canRemoveColumn"
+          :can-reorder="columnsStore.isMultiColumn"
+          :recessed="columnsStore.isMultiColumn && activeColumnIndex !== idx"
+          :dragging="draggingColumnId === column.id"
+          :drop-target="dropTargetColumnId === column.id"
+          :focused="columnsStore.focusedColumnId === column.id"
+          @remove="columnsStore.removeColumn(column.id)"
+          @focus="columnsStore.toggleColumnFocus(column.id)"
+          @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
+          @column-drag-start="onColumnDragStart"
+          @column-drag-end="onColumnDragEnd"
+          @column-drag-over="onColumnDragOver"
+          @column-drop="(fromId) => onColumnDrop(fromId, column.id)"
+          @move-left="moveColumnLeft(idx)"
+          @move-right="moveColumnRight(idx)"
+        />
+        <PanelColumn
+          v-else
+          :class="{ 'board-col--hidden': !!columnsStore.focusedColumnId && columnsStore.focusedColumnId !== column.id && !isMobileUi }"
+          :column="column"
+          :is-first="idx === 0"
+          :is-last="idx === columnsStore.columns.length - 1"
+          :can-remove="columnsStore.canRemoveColumn"
+          :can-reorder="columnsStore.isMultiColumn"
+          :recessed="columnsStore.isMultiColumn && activeColumnIndex !== idx"
+          :dragging="draggingColumnId === column.id"
+          :drop-target="dropTargetColumnId === column.id"
+          :focused="columnsStore.focusedColumnId === column.id"
+          @remove="columnsStore.removeColumn(column.id)"
+          @focus="columnsStore.toggleColumnFocus(column.id)"
+          @column-drag-start="onColumnDragStart"
+          @column-drag-end="onColumnDragEnd"
+          @column-drag-over="onColumnDragOver"
+          @column-drop="(fromId) => onColumnDrop(fromId, column.id)"
+          @move-left="moveColumnLeft(idx)"
+          @move-right="moveColumnRight(idx)"
+        />
+      </template>
+
+      <!-- Mobile edge: past the last feed → find communities -->
+      <aside
+        v-if="isMobileUi"
+        class="feed-portal"
+        aria-label="Find communities"
+      >
+        <h2 class="feed-portal__title">Groups</h2>
+        <p class="feed-portal__body">Communities and tags.</p>
+        <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('communities')">
+          Browse
+        </button>
+      </aside>
     </div>
 
     <!-- Desktop Add Column Panel -->
@@ -354,6 +750,43 @@ useHead({ title: 'Home | NeoSpace' })
             Federated
           </button>
 
+          <div class="add-column-menu__divider"></div>
+          <button class="add-column-menu__item" @click="addColumn('search')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            Search
+          </button>
+          <button class="add-column-menu__item" @click="addColumn('profile')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            Profile
+          </button>
+          <button
+            v-if="instancesStore.hasAuthenticatedInstance"
+            class="add-column-menu__item"
+            @click="addColumn('notifications')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 01-3.46 0" />
+            </svg>
+            Notifications
+          </button>
+          <button
+            v-if="instancesStore.hasAuthenticatedInstance"
+            class="add-column-menu__item"
+            @click="addColumn('messages')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+            Messages
+          </button>
+
           <template v-if="groupsStore.joinedGroups.length > 0">
             <div class="add-column-menu__divider"></div>
             <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
@@ -397,10 +830,13 @@ useHead({ title: 'Home | NeoSpace' })
     width: calc(100% + 4rem);
   }
 
-  // Mobile: fill viewport minus header + nav
+  // Mobile: fill viewport minus header + nav (keep height stable while scrolling)
   @media (max-width: 1023px) {
     flex-direction: column;
-    height: calc(100vh - 112px - env(safe-area-inset-bottom, 0px));
+    height: calc(
+      100dvh - var(--neo-mobile-chrome-top, 52px) - var(--neo-mobile-nav-h, 56px) -
+        env(safe-area-inset-bottom, 0px)
+    );
   }
 
   // Single column mode on desktop: center the content
@@ -413,14 +849,17 @@ useHead({ title: 'Home | NeoSpace' })
   // Desktop multi: every column whispers until hovered (ignore mobile active index)
   &--multi {
     @media (min-width: 1024px) {
-      :deep(.timeline-column.neo-chrome) {
+      :deep(.timeline-column.neo-chrome),
+      :deep(.panel-column.neo-chrome) {
         --neo-chrome-fg: var(--neo-text-quaternary);
         --neo-chrome-fg-strong: var(--neo-text-tertiary);
         --neo-chrome-label: var(--neo-text-tertiary);
       }
 
       :deep(.timeline-column.neo-chrome:hover),
-      :deep(.timeline-column.neo-chrome:focus-within) {
+      :deep(.timeline-column.neo-chrome:focus-within),
+      :deep(.panel-column.neo-chrome:hover),
+      :deep(.panel-column.neo-chrome:focus-within) {
         --neo-chrome-fg: var(--neo-text-tertiary);
         --neo-chrome-fg-strong: var(--neo-text-secondary);
         --neo-chrome-label: var(--neo-text-primary);
@@ -445,7 +884,8 @@ useHead({ title: 'Home | NeoSpace' })
       max-width: 620px;
       overflow-x: hidden;
 
-      :deep(.timeline-column) {
+      :deep(.timeline-column),
+      :deep(.panel-column) {
         flex: 1 1 auto;
         min-width: 0;
       }
@@ -462,6 +902,8 @@ useHead({ title: 'Home | NeoSpace' })
     width: 100%;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
+    // pan-y alone on nested feeds blocks Chrome Android from ever scrolling this;
+    // JS axis-lock (bindCarouselGestures) drives horizontal. Keep both here as fallback.
     touch-action: pan-x pan-y;
     scrollbar-width: none;
 
@@ -469,7 +911,14 @@ useHead({ title: 'Home | NeoSpace' })
       display: none;
     }
 
-    :deep(.timeline-column) {
+    &--swiping {
+      scroll-snap-type: none;
+      cursor: grabbing;
+    }
+
+    :deep(.timeline-column),
+    :deep(.panel-column),
+    .feed-portal {
       flex: 0 0 100%;
       width: 100%;
       min-width: 100%;
@@ -478,6 +927,98 @@ useHead({ title: 'Home | NeoSpace' })
       scroll-snap-stop: always;
       border-right: none;
     }
+  }
+
+  @media (min-width: 1024px) {
+    // Packed: share the row, but never crush past a readable width.
+    // Wide desks: up to 6 across; narrower: step down to 4, then scroll.
+    .columns-page--multi.columns-page--packed & {
+      overflow-x: auto;
+      scroll-snap-type: x proximity;
+
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 1 1 0;
+        min-width: max(280px, calc(100% / 6));
+        max-width: none;
+        scroll-snap-align: start;
+      }
+    }
+
+    @media (max-width: 1599px) {
+      .columns-page--multi.columns-page--packed & {
+        :deep(.timeline-column),
+        :deep(.panel-column) {
+          min-width: max(300px, 25%);
+        }
+      }
+    }
+
+    .columns-page--multi.columns-page--roomy & {
+      overflow-x: auto;
+
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 0 0 30%;
+        min-width: 320px;
+        max-width: 520px;
+      }
+    }
+  }
+}
+
+:deep(.board-col--hidden) {
+  display: none !important;
+}
+
+.feed-portal {
+  display: none;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1.75rem 5rem;
+  background:
+    radial-gradient(
+      ellipse 70% 45% at 20% 35%,
+      color-mix(in srgb, var(--neo-accent) 10%, transparent),
+      transparent 70%
+    ),
+    var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+
+  @media (max-width: 1023px) {
+    display: flex;
+  }
+
+  &__kicker {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  &__body {
+    margin: 0;
+    max-width: 22rem;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--neo-text-secondary);
+  }
+
+  &__cta {
+    margin-top: 0.5rem;
   }
 }
 
@@ -489,10 +1030,11 @@ useHead({ title: 'Home | NeoSpace' })
   flex-shrink: 0;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.45rem 0.4rem 0.45rem 0.65rem;
+  padding: 0.35rem 0.35rem 0.35rem 0.55rem;
   border-bottom: 1px solid var(--neo-border-color);
   background: var(--neo-bg-primary);
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 20;
 
   @media (max-width: 1023px) {
@@ -522,7 +1064,8 @@ useHead({ title: 'Home | NeoSpace' })
   }
 
   &__jump,
-  &__add-btn {
+  &__add-btn,
+  &__mode {
     width: 44px;
     height: 44px;
   }
@@ -531,6 +1074,92 @@ useHead({ title: 'Home | NeoSpace' })
     opacity: 0.28;
   }
 
+  // Surreptitious Flow / Flip — reads as chrome until you notice
+  &__mode {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--neo-text-quaternary);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 0.18s ease, background 0.18s ease;
+
+    &:active {
+      transform: scale(0.96);
+    }
+
+    &--flip {
+      color: var(--neo-text-tertiary);
+    }
+
+    &:hover,
+    &:focus-visible {
+      color: var(--neo-text-secondary);
+      background: var(--neo-bg-tertiary);
+    }
+  }
+}
+
+.mode-glyph {
+  position: relative;
+  width: 18px;
+  height: 16px;
+  display: block;
+
+  &__flow,
+  &__flip {
+    position: absolute;
+    inset: 0;
+    transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  &__flow {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    opacity: 1;
+    transform: scale(1);
+
+    i {
+      display: block;
+      height: 2px;
+      border-radius: 1px;
+      background: currentColor;
+    }
+
+    i:nth-child(1) { width: 100%; }
+    i:nth-child(2) { width: 78%; }
+    i:nth-child(3) { width: 92%; }
+  }
+
+  &__flip {
+    width: 11px;
+    height: 15px;
+    margin: 0 auto;
+    left: 0;
+    right: 0;
+    border: 1.75px solid currentColor;
+    border-radius: 3px;
+    opacity: 0;
+    transform: scale(0.86);
+  }
+}
+
+.mobile-feed-tabs__mode--flip .mode-glyph {
+  .mode-glyph__flow {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+
+  .mode-glyph__flip {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.mobile-feed-tabs {
   &__add {
     position: relative;
     flex-shrink: 0;

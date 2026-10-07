@@ -10,6 +10,7 @@ import {
   prepareScreenshot,
   type FeedbackKind,
 } from '~/utils/feedback'
+import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
 
 const KINDS: { id: FeedbackKind; label: string }[] = [
   { id: 'ux', label: 'UX' },
@@ -18,7 +19,7 @@ const KINDS: { id: FeedbackKind; label: string }[] = [
   { id: 'other', label: 'Other' },
 ]
 
-const open = ref(false)
+const { open } = useFeedbackNotes()
 const kind = ref<FeedbackKind>('ux')
 const title = ref('')
 const body = ref('')
@@ -146,12 +147,10 @@ const submit = async () => {
   }
 }
 
-const onKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && open.value) {
-    e.preventDefault()
-    close()
-  }
-}
+useFocusTrap(overlayRef, open, {
+  onEscape: () => close(),
+  initialFocus: 'input, textarea, .notes-panel__close',
+})
 
 watch(open, async (isOpen) => {
   if (typeof window === 'undefined') return
@@ -161,8 +160,6 @@ watch(open, async (isOpen) => {
     window.visualViewport?.addEventListener('resize', syncViewport)
     window.visualViewport?.addEventListener('scroll', syncViewport)
     window.addEventListener('resize', syncViewport)
-    await nextTick()
-    titleRef.value?.focus({ preventScroll: true })
   } else {
     unlockScroll()
     window.visualViewport?.removeEventListener('resize', syncViewport)
@@ -172,13 +169,8 @@ watch(open, async (isOpen) => {
   }
 })
 
-onMounted(() => {
-  window.addEventListener('keydown', onKeydown)
-})
-
 onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
-  window.removeEventListener('keydown', onKeydown)
   window.visualViewport?.removeEventListener('resize', syncViewport)
   window.visualViewport?.removeEventListener('scroll', syncViewport)
   window.removeEventListener('resize', syncViewport)
@@ -215,27 +207,33 @@ onUnmounted(() => {
         <div ref="panelRef" class="notes-panel">
           <header class="notes-panel__header">
             <h2 id="neospace-notes-title">Leave a note</h2>
-            <button type="button" class="notes-panel__close" aria-label="Close" @click="close">×</button>
+            <button type="button" class="notes-panel__close" aria-label="Close" @click="close">
+              <NeoIcon name="x" :size="16" :stroke="2" />
+            </button>
           </header>
 
           <p class="notes-panel__lede">
             Files as a GitHub issue on NeoSpace — bugs, UX, ideas.
           </p>
 
-          <div class="notes-kinds">
+          <div class="notes-kinds" role="radiogroup" aria-label="Note type">
             <button
               v-for="k in KINDS"
               :key="k.id"
               type="button"
+              role="radio"
               class="notes-kind"
               :class="{ 'notes-kind--active': kind === k.id }"
+              :aria-checked="kind === k.id"
               @click="kind = k.id"
             >
               {{ k.label }}
             </button>
           </div>
 
+          <label class="sr-only" for="neospace-note-title">Title</label>
           <input
+            id="neospace-note-title"
             ref="titleRef"
             v-model="title"
             type="text"
@@ -244,11 +242,15 @@ onUnmounted(() => {
             enterkeyhint="next"
             autocomplete="off"
             autocorrect="on"
+            required
+            aria-required="true"
             @focus="onFocusField"
             @keydown.enter.prevent="submit"
           />
 
+          <label class="sr-only" for="neospace-note-body">Details</label>
           <textarea
+            id="neospace-note-body"
             v-model="body"
             class="notes-textarea"
             placeholder="What happened / what would help…"
@@ -322,10 +324,9 @@ onUnmounted(() => {
     outline: none;
   }
 
+  /* Desktop: note lives in the sidebar footer */
   @media (min-width: 1024px) {
-    bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
-    width: 2.25rem;
-    height: 2.25rem;
+    display: none;
   }
 }
 
@@ -381,8 +382,9 @@ onUnmounted(() => {
 .notes-panel__close {
   width: 2rem;
   height: 2rem;
-  font-size: 1.35rem;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--neo-text-muted);
   background: transparent;
   border: none;

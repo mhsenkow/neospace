@@ -236,6 +236,12 @@ body {
   overflow-x: hidden; // Prevent horizontal scroll
   font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
   font-variant-ligatures: common-ligatures contextual;
+
+  // iOS: fixed attachment + nested overflow scroll paints black mid-gesture
+  @media (max-width: 1023px) {
+    background-attachment: scroll;
+    background-image: none;
+  }
 }
 
 // Global media overflow protection
@@ -426,6 +432,15 @@ ul, ol {
     padding: 0;
     gap: 0;
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    .neo-icon,
+    svg {
+      display: block;
+      margin: 0 auto;
+    }
   }
   
   &--chaos {
@@ -492,6 +507,58 @@ ul, ol {
   }
 }
 
+// Immediate hover labels for icon-only controls (native title is too slow/easy to miss)
+@media (hover: hover) and (pointer: fine) {
+  .neo-tip[aria-label],
+  .neo-chrome-btn[aria-label],
+  .subview-chrome__btn[aria-label],
+  .status-action[aria-label],
+  .sidebar__foot-btn[aria-label] {
+    position: relative;
+
+    &::after {
+      content: attr(aria-label);
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%) translateY(-2px);
+      padding: 0.28rem 0.5rem;
+      border-radius: 6px;
+      background: var(--neo-bg-elevated, var(--neo-bg-secondary));
+      color: var(--neo-text-primary);
+      border: 1px solid var(--neo-border-color);
+      box-shadow: var(--neo-shadow-md);
+      font-size: 0.75rem;
+      font-weight: 550;
+      line-height: 1.2;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      z-index: var(--neo-z-tooltip);
+      transition: opacity 0.12s ease, transform 0.12s ease;
+    }
+
+    &:hover::after,
+    &:focus-visible::after {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
+  // Footer icons sit on the viewport edge — tip upward
+  .sidebar__foot-btn[aria-label]::after {
+    top: auto;
+    bottom: calc(100% + 6px);
+    transform: translateX(-50%) translateY(2px);
+  }
+
+  .sidebar__foot-btn[aria-label]:hover::after,
+  .sidebar__foot-btn[aria-label]:focus-visible::after {
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 @keyframes gradient-shift {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -520,7 +587,8 @@ ul, ol {
   background-color: var(--neo-bg-secondary);
   color: var(--neo-text-primary);
   border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
-  border-radius: var(--neo-radius-md);
+  /* Cap so theme “bubble” radii never clip typed glyphs */
+  border-radius: min(12px, var(--neo-radius-md));
   transition: border-color var(--neo-transition), box-shadow var(--neo-transition), background-color var(--neo-transition);
   box-sizing: border-box;
   
@@ -644,7 +712,7 @@ body.chaos-active::after {
 // MOBILE OPTIMIZATIONS
 // ============================================
 
-// Safe area insets for notched devices
+// Safe area insets for notched devices + installed PWA
 @supports (padding: max(0px)) {
   body {
     padding-left: env(safe-area-inset-left);
@@ -655,13 +723,145 @@ body.chaos-active::after {
 // Disable pull-to-refresh and overscroll effects
 html {
   overscroll-behavior: none;
+  // Avoid iOS text-size inflation in standalone / landscape
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
-// Better tap targets on mobile
+// Better tap targets on mobile — chrome controls, not every inline link
 @media (max-width: 1023px) {
-  button, a, [role="button"] {
+  button,
+  [role="button"],
+  .neo-btn,
+  .neo-chrome-btn,
+  .mobile-nav__item,
+  .mobile-header__btn,
+  .sidebar__link,
+  .status-action,
+  .status-avatar-link,
+  .notif-item__avatar,
+  .notif-icon-btn,
+  .compose-tool,
+  .compose-submit,
+  .chat-composer__attach,
+  .chat-composer__send {
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
+  }
+
+  // Inline text links keep natural size; still skip 300ms delay
+  a, button, [role="button"], input, textarea, select, label {
+    touch-action: manipulation;
+  }
+
+  // Author names / chips: taller hit strip without forcing square min-width
+  .status-author,
+  .notif-item__name,
+  .row-btn__name {
+    min-height: 36px;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+// Installed PWA (Pixel home screen / Chrome app window)
+@media (display-mode: standalone), (display-mode: minimal-ui) {
+  html {
+    // Status bar sits over content; chrome already uses safe-area insets
+    min-height: 100dvh;
+  }
+
+  body {
+    min-height: 100dvh;
+    // Prevent rubber-band revealing browser chrome that isn't there
+    overscroll-behavior-y: none;
+  }
+}
+
+// ============================================
+// ACCESSIBILITY
+// ============================================
+
+.sr-only,
+.neo-sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  padding: 0.65rem 1rem;
+  background: var(--neo-accent);
+  color: var(--neo-text-on-accent, var(--neo-text-inverse, #fff));
+  font-weight: 700;
+  font-size: 0.9375rem;
+  text-decoration: none;
+  border-radius: 0 0 var(--neo-radius-md) 0;
+  transform: translateY(-120%);
+  transition: transform 0.15s ease;
+
+  &:focus,
+  &:focus-visible {
+    transform: translateY(0);
+    outline: 3px solid var(--neo-text-primary);
+    outline-offset: 2px;
+  }
+}
+
+// Keyboard focus — never rely on mouse-only hover cues
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--neo-accent);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--neo-accent);
+  outline-offset: 2px;
+}
+
+.neo-input:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--neo-accent);
+  outline-offset: 1px;
+  border-color: var(--neo-accent);
+}
+
+// Dialog open: stop background scroll (complement to per-sheet overflow locks)
+html.neo-dialog-open,
+html.neo-dialog-open body {
+  overflow: hidden;
+}
+
+// Reduced motion — OS preference (in-app setting toggles html.reduce-motion below)
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -678,6 +878,44 @@ html.reduce-motion *::after {
   scroll-behavior: auto !important;
 }
 
+/* Density sets (also keeps .compact-mode as alias for dense) */
+html[data-density='roomy'] {
+  --neo-spacing-2: 0.5rem;
+  --neo-spacing-3: 0.75rem;
+  --neo-spacing-4: 1.1rem;
+  --neo-spacing-6: 1.65rem;
+  --neo-spacing-8: 2.25rem;
+
+  .neo-card {
+    padding: 1.35rem;
+  }
+
+  .status-card,
+  .compose.neo-card {
+    padding: 1.15rem 1.25rem;
+  }
+
+  .column-compose {
+    margin-bottom: 1.15rem;
+  }
+
+  .compose-input {
+    min-height: 5.5rem;
+  }
+
+  .messages-row__main {
+    padding-top: 1.05rem;
+    padding-bottom: 1.05rem;
+  }
+
+  .sidebar--rail .sidebar__link,
+  .sidebar--rail .sidebar__row {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+html[data-density='dense'],
 html.compact-mode {
   --neo-spacing-2: 0.25rem;
   --neo-spacing-3: 0.35rem;
@@ -692,18 +930,28 @@ html.compact-mode {
 
   .status-card,
   .compose.neo-card {
-    padding: 0.65rem 0.75rem;
+    padding: 0.55rem 0.7rem;
   }
 
   .column-compose {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
   }
 
   .compose-input {
-    min-height: 3.5rem;
+    min-height: 3.25rem;
   }
 
-  .sidebar__link {
+  .messages-row__main {
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .column-posts {
+    gap: 0.2rem;
+  }
+
+  .sidebar--rail .sidebar__link,
+  .sidebar--rail .sidebar__row {
     width: 40px;
     height: 40px;
   }

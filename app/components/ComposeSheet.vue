@@ -8,17 +8,40 @@ import { accountHandle } from '~/composables/useAccountSearch'
 import type { mastodon } from 'masto'
 
 const sheet = useComposeSheetStore()
+const panelRef = ref<HTMLElement | null>(null)
+const sheetOpen = computed(() => sheet.open)
 
-const onPosted = (_status: mastodon.v1.Status) => {
-  sheet.hide()
+useFocusTrap(panelRef, sheetOpen, {
+  onEscape: () => sheet.hide(),
+  initialFocus: '.compose-sheet__close, textarea, .compose-input',
+})
+
+const onPosted = (status: mastodon.v1.Status) => {
+  sheet.posted(status)
 }
 
-const onPick = (account: mastodon.v1.Account) => {
+const ariaLabel = computed(() => {
+  if (sheet.pickRecipient) return 'Choose who to message'
+  if (sheet.inReplyToId) return 'Reply'
+  if (sheet.quoteUrl) return 'Quote'
+  return 'New post'
+})
+
+const onPick = async (account: mastodon.v1.Account) => {
+  const { useConversationsStore } = await import('~/stores/conversations')
+  const conversations = useConversationsStore()
+  const router = useRouter()
+  if (!conversations.conversations.length) {
+    await conversations.fetchConversations({ quiet: true })
+  }
+  const existing = conversations.findDirectWith(account.id)
+  if (existing?.lastStatus?.id) {
+    if (existing.unread) await conversations.markRead(existing.id)
+    sheet.hide()
+    await router.push(`/status/${existing.lastStatus.id}`)
+    return
+  }
   sheet.continueWithRecipient(accountHandle(account))
-}
-
-const onKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && sheet.open) sheet.hide()
 }
 
 watch(
@@ -29,9 +52,7 @@ watch(
   },
 )
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
   if (typeof document !== 'undefined') document.body.style.overflow = ''
 })
 </script>
@@ -41,10 +62,11 @@ onUnmounted(() => {
     <Transition name="compose-sheet">
       <div
         v-if="sheet.open"
+        ref="panelRef"
         class="compose-sheet"
         role="dialog"
         aria-modal="true"
-        :aria-label="sheet.pickRecipient ? 'Choose who to message' : 'New post'"
+        :aria-label="ariaLabel"
       >
         <button type="button" class="compose-sheet__backdrop" aria-label="Close" @click="sheet.hide()" />
         <div class="compose-sheet__panel">
@@ -62,12 +84,31 @@ onUnmounted(() => {
               <span class="compose-sheet__spacer" />
             </header>
             <div class="compose-sheet__body">
+              <article v-if="sheet.contextPost" class="compose-sheet__context">
+                <img
+                  v-if="sheet.contextPost.avatar"
+                  :src="sheet.contextPost.avatar"
+                  alt=""
+                  class="compose-sheet__context-avatar"
+                />
+                <div class="compose-sheet__context-body">
+                  <p class="compose-sheet__context-meta">
+                    <strong>{{ sheet.contextPost.name }}</strong>
+                    <span>@{{ sheet.contextPost.handle }}</span>
+                  </p>
+                  <p class="compose-sheet__context-text">{{ sheet.contextPost.text }}</p>
+                </div>
+              </article>
               <RealComposeBox
                 :key="sheet.instanceKey"
                 :initial-text="sheet.initialText || undefined"
                 :initial-visibility="sheet.initialVisibility || undefined"
+                :initial-group-tag="sheet.groupTag || undefined"
                 :placeholder="sheet.placeholder || undefined"
                 :title="sheet.title || undefined"
+                :in-reply-to-id="sheet.inReplyToId || undefined"
+                :quote-url="sheet.quoteUrl || undefined"
+                :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
                 @posted="onPosted"
               />
             </div>
@@ -108,8 +149,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: min(92vh, 100%);
-  min-height: min(70vh, 520px);
+  max-height: min(92dvh, 100%);
+  min-height: min(72dvh, 560px);
   background: var(--neo-bg-primary);
   border-radius: 16px 16px 0 0;
   border: 1px solid var(--neo-border-color);
@@ -121,7 +162,7 @@ onUnmounted(() => {
   @media (min-width: 1024px) {
     max-width: 560px;
     max-height: min(80vh, 720px);
-    min-height: 420px;
+    min-height: min(70vh, 560px);
     border-radius: 12px;
     border-bottom: 1px solid var(--neo-border-color);
     padding-bottom: 0;
@@ -158,11 +199,89 @@ onUnmounted(() => {
 }
 
 .compose-sheet__body {
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
-  padding: 0.75rem;
+  padding: 0.85rem 0.85rem 0.65rem;
+  padding-bottom: max(0.85rem, env(safe-area-inset-bottom, 0px));
   -webkit-overflow-scrolling: touch;
   flex: 1;
   min-height: 0;
+
+  :deep(.compose) {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    padding: 0;
+  }
+
+  :deep(.compose-input-wrap) {
+    flex: 1;
+    min-height: 10rem;
+  }
+
+  :deep(.compose-input) {
+    flex: 1;
+    min-height: 10rem;
+    max-height: none;
+    font-size: 1.0625rem;
+    line-height: 1.45;
+  }
+
+  :deep(.compose-footer) {
+    margin-top: auto;
+  }
+}
+
+.compose-sheet__context {
+  display: flex;
+  gap: 0.65rem;
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
+}
+
+.compose-sheet__context-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.compose-sheet__context-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.compose-sheet__context-meta {
+  margin: 0 0 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+
+  strong {
+    color: var(--neo-text-primary);
+    font-weight: 600;
+  }
+}
+
+.compose-sheet__context-text {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--neo-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .compose-sheet-enter-active,

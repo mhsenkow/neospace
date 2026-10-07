@@ -15,6 +15,8 @@ const props = withDefaults(
   defineProps<{
     /** When set, posts as a reply to this status */
     inReplyToId?: string
+    /** Append this URL when quoting (fediverse-friendly quote) */
+    quoteUrl?: string
     placeholder?: string
     title?: string
     /** Slimmer chrome for sticky thread reply bars */
@@ -23,11 +25,19 @@ const props = withDefaults(
     initialText?: string
     /** Override default posting visibility (e.g. direct for DMs) */
     initialVisibility?: 'public' | 'unlisted' | 'private' | 'direct'
+    /** Threads-style group/hashtag to tag on post */
+    initialGroupTag?: string | null
+    /**
+     * Absorb Loom / cross-app handoff drafts.
+     * Only one visible composer should accept — mobile sheet vs desktop column.
+     */
+    acceptHandoff?: boolean
   }>(),
   {
-    placeholder: 'Share something — or drop a photo here',
+    placeholder: "What's new?",
     title: "What's new?",
     compact: false,
+    acceptHandoff: true,
   },
 )
 
@@ -51,6 +61,17 @@ const error = ref<string | null>(null)
 const handoffNotice = ref<string | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const composeFocused = ref(false)
+const selectedGroupTag = ref<string | null>(
+  props.initialGroupTag ? props.initialGroupTag.replace(/^#/, '') : null,
+)
+
+/** Locked private message compose — don't let people accidentally go public */
+const isDirectCompose = computed(
+  () => props.initialVisibility === 'direct' || visibility.value === 'direct',
+)
+
+const showGroupPicker = computed(() => !isDirectCompose.value && !props.compact)
 
 const {
   attachments,
@@ -74,14 +95,35 @@ const {
   onPaste,
 } = useComposeMedia()
 
+/** Threads pill: stay one row until you engage */
+const compactExpanded = computed(
+  () =>
+    !props.compact ||
+    composeFocused.value ||
+    !!content.value.trim() ||
+    hasMedia.value ||
+    showCW.value ||
+    !!error.value ||
+    !!handoffNotice.value,
+)
+
 const maxLength = computed(() => instancesStore.statusMaxCharacters)
 
+const groupTagSuffix = computed(() => {
+  const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
+  if (!tag) return ''
+  const already = new RegExp(`(?:^|\\s)#${tag}\\b`, 'i').test(content.value)
+  return already ? '' : ` #${tag}`
+})
+
+const effectiveMaxLength = computed(() => maxLength.value - groupTagSuffix.value.length)
 const characterCount = computed(() => content.value.length)
-const isOverLimit = computed(() => characterCount.value > maxLength.value)
+const isOverLimit = computed(() => characterCount.value > effectiveMaxLength.value)
 const canPost = computed(() => {
   const hasText = content.value.trim().length > 0
+  const hasQuote = !!props.quoteUrl
   return (
-    (hasText || hasMedia.value) &&
+    (hasText || hasMedia.value || hasQuote) &&
     !isOverLimit.value &&
     !isPosting.value &&
     !isUploading.value &&
@@ -98,11 +140,20 @@ const postingAs = computed(() => {
   return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
 })
 
+const canSwitchPostingAccount = computed(
+  () => instancesStore.authenticatedInstances.length > 1,
+)
+
+const cyclePostingAccount = () => {
+  if (!canSwitchPostingAccount.value) return
+  instancesStore.cycleActiveAccount()
+}
+
 const visibilityOptions = [
-  { value: 'public', label: 'Public', icon: '🌍' },
-  { value: 'unlisted', label: 'Unlisted', icon: '🔓' },
-  { value: 'private', label: 'Followers', icon: '🔒' },
-  { value: 'direct', label: 'Mentioned', icon: '✉️' },
+  { value: 'public', label: 'Public' },
+  { value: 'unlisted', label: 'Unlisted' },
+  { value: 'private', label: 'Followers' },
+  { value: 'direct', label: 'Mentioned' },
 ] as const
 
 const resetForm = () => {
@@ -110,6 +161,9 @@ const resetForm = () => {
   spoilerText.value = ''
   showCW.value = settingsStore.defaultSensitive
   visibility.value = props.initialVisibility || settingsStore.defaultVisibility
+  selectedGroupTag.value = props.initialGroupTag
+    ? props.initialGroupTag.replace(/^#/, '')
+    : null
   clearAttachments()
   error.value = null
   closeMentions()
@@ -194,8 +248,19 @@ const handlePost = async () => {
   error.value = null
 
   try {
-    const status = await statusStore.postStatus(content.value, {
-      visibility: visibility.value,
+    let body = content.value
+    const quote = props.quoteUrl?.trim()
+    if (quote && !body.includes(quote)) {
+      body = `${body.trim()}\n\n${quote}`
+    }
+    const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
+    if (tag) {
+      const hasTag = new RegExp(`(?:^|\\s)#${tag}\\b`, 'i').test(body)
+      if (!hasTag) body = `${body.trim()} #${tag}`.trim()
+    }
+
+    const status = await statusStore.postStatus(body, {
+      visibility: props.initialVisibility === 'direct' ? 'direct' : visibility.value,
       spoilerText: showCW.value ? spoilerText.value : undefined,
       mediaIds: mediaIds.value,
       sensitive: showCW.value || undefined,
@@ -273,11 +338,20 @@ const focusComposer = () => {
 }
 
 const applyHandoff = async () => {
-  // Only the main home compose absorbs Loom shares — not reply bars
-  if (props.inReplyToId || props.compact || !handoffStore.hasPending) return
+  // Only the active composer absorbs Loom shares — not reply bars / hidden mounts
+  if (
+    !props.acceptHandoff ||
+    props.inReplyToId ||
+    !handoffStore.hasPending
+  ) {
+    return
+  }
   const draft = handoffStore.take()
   if (!draft) return
-  if (draft.text) content.value = draft.text
+  // Prefer handoff text; keep existing if user already typed and draft is media-only
+  if (draft.text && (!content.value.trim() || draft.files.length)) {
+    content.value = draft.text
+  }
   // Replace any prior handoff media so retries don't stack duplicates
   if (draft.files.length) {
     clearAttachments()
@@ -290,8 +364,20 @@ const applyHandoff = async () => {
     }, 9000)
   }
   await nextTick()
-  textareaRef.value?.focus()
-  textareaRef.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const ta = textareaRef.value
+  if (ta) {
+    ta.focus()
+    const len = content.value.length
+    ta.setSelectionRange(len, len)
+    ta.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+  // After media attaches, keep chart + caption in view above the keyboard / Post bar
+  if (draft.files.length) {
+    await nextTick()
+    document
+      .querySelector('.compose-sheet .compose-media, .compose-media')
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
 }
 
 watch(
@@ -316,7 +402,11 @@ onMounted(() => {
 <template>
   <div
     class="compose neo-card"
-    :class="{ 'compose--dragging': isDragging, 'compose--compact': compact }"
+    :class="{
+      'compose--dragging': isDragging,
+      'compose--compact': compact,
+      'compose--expanded': compactExpanded,
+    }"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
     @dragover="onDragOver"
@@ -328,22 +418,151 @@ onMounted(() => {
       class="compose-drop"
       aria-hidden="true"
     >
-      <span class="compose-drop__icon">📷</span>
+      <span class="compose-drop__icon"><NeoIcon name="image" :size="36" :stroke="1.5" /></span>
       <span class="compose-drop__label">Drop photos to add</span>
     </div>
 
-    <div class="compose-header" @click.stop>
+    <!-- Threads pill: avatar · What's new? · Post -->
+    <div v-if="compact" class="compose-pill" @click.stop>
       <img
         v-if="instancesStore.userAvatar"
         :src="instancesStore.userAvatar"
         :alt="instancesStore.userDisplayName"
         class="compose-avatar neo-avatar"
       />
-      <div class="compose-heading">
-        <span class="compose-title">{{ title }}</span>
-        <span v-if="postingAs && !compact" class="compose-as">Posting as {{ postingAs }}</span>
+      <div class="compose-input-wrap">
+        <textarea
+          ref="textareaRef"
+          v-model="content"
+          class="compose-input neo-input"
+          :placeholder="placeholder"
+          rows="1"
+          :disabled="isPosting"
+          :aria-label="title || placeholder || 'Write a post'"
+          @focus="composeFocused = true"
+          @blur="composeFocused = false"
+          @paste="onPaste"
+          @keydown="onKeydown"
+          @input="onComposeInput"
+          @click="syncMentions"
+          @keyup="syncMentions"
+        />
+        <div
+          v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+          class="compose-mentions"
+          role="listbox"
+          aria-label="Mention suggestions"
+        >
+          <p v-if="mentionSearching && !mentionResults.length" class="compose-mentions__status">
+            Looking up…
+          </p>
+          <button
+            v-for="(account, idx) in mentionResults"
+            :key="account.id"
+            type="button"
+            class="compose-mentions__item"
+            :class="{ 'compose-mentions__item--active': idx === mentionIndex }"
+            role="option"
+            :aria-selected="idx === mentionIndex"
+            @mousedown.prevent="insertMention(account)"
+          >
+            <img :src="account.avatar" alt="" class="compose-mentions__avatar" />
+            <span class="compose-mentions__meta">
+              <span class="compose-mentions__name">{{ account.displayName || account.username }}</span>
+              <span class="compose-mentions__acct">{{ accountHandle(account) }}</span>
+            </span>
+          </button>
+        </div>
       </div>
+      <button
+        type="button"
+        class="compose-submit neo-btn neo-btn--primary"
+        :disabled="!canPost"
+        :title="isUploading ? 'Waiting for uploads…' : 'Post (⌘↵)'"
+        @click="handlePost"
+      >
+        <span v-if="isPosting">Posting…</span>
+        <span v-else-if="isUploading">…</span>
+        <span v-else>Post</span>
+      </button>
     </div>
+
+    <template v-else>
+      <div v-if="!inReplyToId && !quoteUrl" class="compose-header" @click.stop>
+        <img
+          v-if="instancesStore.userAvatar"
+          :src="instancesStore.userAvatar"
+          :alt="instancesStore.userDisplayName"
+          class="compose-avatar neo-avatar"
+        />
+        <div class="compose-heading">
+          <div class="compose-title-row">
+            <button
+              v-if="canSwitchPostingAccount"
+              type="button"
+              class="compose-title compose-title--btn"
+              title="Switch account"
+              aria-label="Switch posting account"
+              @click="cyclePostingAccount"
+            >
+              {{ instancesStore.userDisplayName || postingAs || 'You' }}
+            </button>
+            <span v-else class="compose-title">
+              {{ instancesStore.userDisplayName || postingAs || title }}
+            </span>
+            <ComposeGroupPicker
+              v-if="showGroupPicker"
+              v-model="selectedGroupTag"
+              inline
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="compose-input-wrap" @click.stop>
+        <textarea
+          ref="textareaRef"
+          v-model="content"
+          class="compose-input neo-input"
+          :placeholder="placeholder"
+          :rows="3"
+          :disabled="isPosting"
+          :aria-label="title || placeholder || 'Write a post'"
+          @paste="onPaste"
+          @keydown="onKeydown"
+          @input="onComposeInput"
+          @click="syncMentions"
+          @keyup="syncMentions"
+        />
+
+        <div
+          v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+          class="compose-mentions"
+          role="listbox"
+          aria-label="Mention suggestions"
+        >
+          <p v-if="mentionSearching && !mentionResults.length" class="compose-mentions__status">
+            Looking up…
+          </p>
+          <button
+            v-for="(account, idx) in mentionResults"
+            :key="account.id"
+            type="button"
+            class="compose-mentions__item"
+            :class="{ 'compose-mentions__item--active': idx === mentionIndex }"
+            role="option"
+            :aria-selected="idx === mentionIndex"
+            @mousedown.prevent="insertMention(account)"
+          >
+            <img :src="account.avatar" alt="" class="compose-mentions__avatar" />
+            <span class="compose-mentions__meta">
+              <span class="compose-mentions__name">{{ account.displayName || account.username }}</span>
+              <span class="compose-mentions__acct">{{ accountHandle(account) }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </template>
 
     <div v-if="showCW" class="compose-cw" @click.stop>
       <input
@@ -351,51 +570,9 @@ onMounted(() => {
         type="text"
         class="compose-cw-input neo-input"
         placeholder="Content warning"
+        aria-label="Content warning"
         :disabled="isPosting"
       />
-    </div>
-
-    <div class="compose-input-wrap" @click.stop>
-      <textarea
-        ref="textareaRef"
-        v-model="content"
-        class="compose-input neo-input"
-        :placeholder="placeholder"
-        :rows="compact ? 2 : 3"
-        :disabled="isPosting"
-        @paste="onPaste"
-        @keydown="onKeydown"
-        @input="onComposeInput"
-        @click="syncMentions"
-        @keyup="syncMentions"
-      />
-
-      <div
-        v-if="mentionOpen && (mentionResults.length || mentionSearching)"
-        class="compose-mentions"
-        role="listbox"
-        aria-label="Mention suggestions"
-      >
-        <p v-if="mentionSearching && !mentionResults.length" class="compose-mentions__status">
-          Looking up…
-        </p>
-        <button
-          v-for="(account, idx) in mentionResults"
-          :key="account.id"
-          type="button"
-          class="compose-mentions__item"
-          :class="{ 'compose-mentions__item--active': idx === mentionIndex }"
-          role="option"
-          :aria-selected="idx === mentionIndex"
-          @mousedown.prevent="insertMention(account)"
-        >
-          <img :src="account.avatar" alt="" class="compose-mentions__avatar" />
-          <span class="compose-mentions__meta">
-            <span class="compose-mentions__name">{{ account.displayName || account.username }}</span>
-            <span class="compose-mentions__acct">{{ accountHandle(account) }}</span>
-          </span>
-        </button>
-      </div>
     </div>
 
     <!-- Media previews -->
@@ -438,7 +615,7 @@ onMounted(() => {
           :disabled="isPosting"
           @click="removeAttachment(item.localId)"
         >
-          ×
+          <NeoIcon name="x" :size="12" :stroke="2.5" />
         </button>
         <label class="compose-media__alt">
           <span class="compose-media__alt-label">Alt text</span>
@@ -458,9 +635,14 @@ onMounted(() => {
 
     <div v-if="handoffNotice" class="compose-handoff" role="status">{{ handoffNotice }}</div>
 
-    <div v-if="error" class="compose-error" @click.stop>{{ error }}</div>
+    <div
+      v-if="error"
+      class="compose-error"
+      role="alert"
+      @click.stop
+    >{{ error }}</div>
 
-    <div class="compose-footer" @click.stop>
+    <div v-if="!compact || compactExpanded" class="compose-footer" @click.stop>
       <div class="compose-tools">
         <input
           ref="fileInputRef"
@@ -478,11 +660,7 @@ onMounted(() => {
           :disabled="!canAddMore || isPosting"
           @click="openFilePicker"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="M21 15l-5-5L5 21" />
-          </svg>
+          <NeoIcon name="image" :size="18" :stroke="1.75" />
         </button>
         <button
           type="button"
@@ -490,48 +668,70 @@ onMounted(() => {
           :class="{ 'compose-tool--active': showCW }"
           aria-label="Content warning"
           title="Content warning"
+          :aria-pressed="showCW"
           :disabled="isPosting"
           @click="toggleCW"
         >
           CW
         </button>
 
-        <div class="compose-visibility">
-          <select v-model="visibility" class="compose-visibility-select" :disabled="isPosting">
+        <div v-if="!isDirectCompose" class="compose-visibility">
+          <select
+            v-model="visibility"
+            class="compose-visibility-select"
+            :disabled="isPosting"
+            aria-label="Post visibility"
+          >
             <option v-for="opt in visibilityOptions" :key="opt.value" :value="opt.value">
-              {{ opt.icon }} {{ opt.label }}
+              {{ opt.label }}
             </option>
           </select>
         </div>
+        <span v-else class="compose-visibility-lock" title="Only mentioned people can see this">
+          <NeoIcon name="lock" :size="14" :stroke="2" />
+          Private
+        </span>
 
         <span v-if="hasMedia" class="compose-media-count">
           {{ attachments.length }}/{{ maxAttachments }}
         </span>
       </div>
 
-      <div class="compose-actions">
+      <div v-if="!compact" class="compose-actions">
         <span
           class="compose-counter"
           :class="{
-            'compose-counter--warning': characterCount > maxLength * 0.9,
+            'compose-counter--warning': characterCount > effectiveMaxLength * 0.9,
             'compose-counter--error': isOverLimit,
           }"
+          :aria-live="isOverLimit ? 'assertive' : 'off'"
         >
-          {{ characterCount }}/{{ maxLength }}
+          <span class="sr-only" v-if="isOverLimit">Character limit exceeded. </span>
+          {{ characterCount }}/{{ effectiveMaxLength }}
         </span>
 
         <button
           type="button"
           class="compose-submit neo-btn neo-btn--primary"
           :disabled="!canPost"
-          :title="isUploading ? 'Waiting for uploads…' : 'Post (⌘↵)'"
+          :title="isUploading ? 'Waiting for uploads…' : isDirectCompose ? 'Send (⌘↵)' : 'Post (⌘↵)'"
           @click="handlePost"
         >
-          <span v-if="isPosting">Posting…</span>
+          <span v-if="isPosting">{{ isDirectCompose ? 'Sending…' : 'Posting…' }}</span>
           <span v-else-if="isUploading">Uploading…</span>
-          <span v-else>Post</span>
+          <span v-else>{{ isDirectCompose ? 'Send' : 'Post' }}</span>
         </button>
       </div>
+      <span
+        v-else
+        class="compose-counter"
+        :class="{
+          'compose-counter--warning': characterCount > effectiveMaxLength * 0.9,
+          'compose-counter--error': isOverLimit,
+        }"
+      >
+        {{ characterCount }}/{{ effectiveMaxLength }}
+      </span>
     </div>
   </div>
 </template>
@@ -544,26 +744,135 @@ onMounted(() => {
   gap: 0.75rem;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  /* Don't clip textarea glyphs against rounded card corners */
+  overflow: visible;
   box-sizing: border-box;
   cursor: text;
 
   &--dragging {
+    overflow: hidden;
     border-color: var(--neo-accent);
     background: color-mix(in srgb, var(--neo-accent) 6%, var(--neo-bg-card));
   }
 
   &--compact {
-    gap: 0.5rem;
-    padding: 0.75rem;
+    gap: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    /* Avoid clipping multiline text against rounded corners */
+    overflow: visible;
 
-    .compose-title {
-      font-size: 0.875rem;
+    .compose-pill {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      padding: 0.4rem 0.45rem 0.4rem 0.5rem;
+      border: 1px solid var(--neo-border-color);
+      border-radius: 12px;
+      background: var(--neo-bg-card, var(--neo-bg-secondary));
+      transition:
+        border-radius 0.18s ease,
+        border-color 0.18s ease,
+        background-color 0.18s ease,
+        padding 0.18s ease;
+    }
+
+    .compose-avatar {
+      width: 32px;
+      height: 32px;
+      margin-top: 0.1rem;
+    }
+
+    .compose-input-wrap {
+      flex: 1;
+      min-width: 0;
     }
 
     .compose-input {
-      min-height: 2.5rem;
+      min-height: 0;
+      padding: 0.35rem 0;
+      border: none;
+      background: transparent;
+      box-shadow: none;
       font-size: 0.9375rem;
+      line-height: 1.35;
+      resize: none;
+      field-sizing: content;
+      max-height: 6.5rem;
+
+      &:focus {
+        outline: none;
+      }
+    }
+
+    .compose-submit {
+      flex-shrink: 0;
+      align-self: flex-start;
+      margin-top: 0.05rem;
+      min-height: 32px;
+      padding: 0.3rem 0.85rem;
+      border-radius: 10px;
+      font-size: 0.8125rem;
+    }
+
+    .compose-counter {
+      margin-left: auto;
+      font-size: 0.75rem;
+      color: var(--neo-text-muted);
+    }
+  }
+
+  /* Expanded: one shell so the rule is a seam, not a floating stroke */
+  &--compact.compose--expanded {
+    gap: 0;
+    padding: 0.5rem 0.6rem 0.4rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: 12px;
+    background: var(--neo-bg-card, var(--neo-bg-secondary));
+    box-shadow: none;
+    overflow: visible;
+
+    .compose-pill {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      padding: 0.05rem 0 0.5rem;
+    }
+
+    .compose-cw {
+      margin: 0 0 0.45rem;
+    }
+
+    .compose-cw-input {
+      border-radius: 10px;
+    }
+
+    .compose-media {
+      margin: 0 0 0.45rem;
+    }
+
+    .compose-error,
+    .compose-handoff {
+      margin: 0 0 0.45rem;
+    }
+
+    .compose-footer {
+      margin-top: 0;
+      padding: 0.4rem 0 0.05rem;
+      border-top: 1px solid color-mix(in srgb, var(--neo-border-color) 85%, transparent);
+    }
+
+    .compose-visibility-select {
+      border-radius: 10px;
+    }
+  }
+
+  &--compact:not(.compose--expanded) {
+    .compose-footer {
+      display: none;
     }
   }
 }
@@ -596,15 +905,25 @@ onMounted(() => {
 
 .compose-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
   cursor: default;
+  flex-shrink: 0;
 }
 
 .compose-heading {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.compose-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
   min-width: 0;
 }
 
@@ -616,16 +935,70 @@ onMounted(() => {
 
 .compose-title {
   font-family: var(--neo-font-family-ui);
-  font-weight: 600;
+  font-size: 0.9375rem;
+  font-weight: 650;
   color: var(--neo-text-primary);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &--btn {
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+
+    &:hover {
+      color: var(--neo-accent);
+    }
+  }
 }
 
 .compose-as {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
   font-size: 0.75rem;
   color: var(--neo-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+
+  &--switch {
+    cursor: pointer;
+    color: var(--neo-text-secondary);
+
+    &:hover {
+      color: var(--neo-accent);
+    }
+  }
+
+  &__hint {
+    flex-shrink: 0;
+    padding: 0.05rem 0.35rem;
+    border-radius: 999px;
+    background: var(--neo-bg-tertiary);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+  }
 }
 
 .compose-cw-input {
@@ -635,6 +1008,10 @@ onMounted(() => {
 
 .compose-input-wrap {
   position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .compose-mentions {
@@ -710,14 +1087,17 @@ onMounted(() => {
 
 .compose-input {
   resize: none;
-  min-height: 5.5rem;
-  max-height: 16rem;
+  flex: 1;
+  min-height: 8rem;
+  max-height: none;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
   border: none;
   background: transparent;
-  padding: 0.25rem 0;
+  /* Horizontal inset so text clears rounded corners / bubble radius */
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
   font-size: 1.0625rem;
   line-height: 1.45;
   field-sizing: content;
@@ -906,6 +1286,8 @@ onMounted(() => {
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
+  flex-shrink: 0;
+  margin-top: auto;
   padding-top: 0.35rem;
   border-top: 1px solid var(--neo-border-color);
   cursor: default;
@@ -963,6 +1345,18 @@ onMounted(() => {
 
 .compose-visibility {
   margin-left: 0.25rem;
+}
+
+.compose-visibility-lock {
+  margin-left: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+  white-space: nowrap;
+  padding: 0 0.35rem;
 }
 
 .compose-visibility-select {

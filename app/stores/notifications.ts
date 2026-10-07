@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { createRestAPIClient, type mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, clientFor } from '~/composables/useMasto'
+import { logWarn } from '~/utils/log'
 
 export type NotificationFilterType =
   | 'all'
@@ -227,7 +228,7 @@ export const useNotificationsStore = defineStore('notifications', {
             }
             total += items.filter((n) => n.id > last).length
           } catch (e) {
-            console.warn(`Unread badge refresh failed for ${inst.url}:`, e)
+            logWarn(`Unread badge refresh failed for ${inst.url}:`, e)
           }
         }),
       )
@@ -275,7 +276,7 @@ export const useNotificationsStore = defineStore('notifications', {
                 items,
               }
             } catch (e: any) {
-              console.warn(`Notifications fetch failed for ${inst.url}:`, e)
+              logWarn(`Notifications fetch failed for ${inst.url}:`, e)
               return { instanceId: inst.id, instanceUrl: inst.url, items: [] as mastodon.v1.Notification[] }
             }
           }),
@@ -338,7 +339,7 @@ export const useNotificationsStore = defineStore('notifications', {
               } as any)
               return { instanceId: inst.id, instanceUrl: inst.url, items }
             } catch (e) {
-              console.warn(`Load more notifications failed for ${inst.url}:`, e)
+              logWarn(`Load more notifications failed for ${inst.url}:`, e)
               return { instanceId: inst.id, instanceUrl: inst.url, items: [] as mastodon.v1.Notification[] }
             }
           }),
@@ -398,7 +399,7 @@ export const useNotificationsStore = defineStore('notifications', {
               notifications: { lastReadId: topId },
             })
           } catch (e) {
-            console.warn(`Failed to mark notifications read on ${instanceId}:`, e)
+            logWarn(`Failed to mark notifications read on ${instanceId}:`, e)
           }
           this.persistLastRead(instanceId, topId)
         }),
@@ -442,7 +443,7 @@ export const useNotificationsStore = defineStore('notifications', {
               const client = clientFor(inst.id)
               await client.v1.notifications.clear()
             } catch (e) {
-              console.warn(`Failed to clear notifications on ${inst.url}:`, e)
+              logWarn(`Failed to clear notifications on ${inst.url}:`, e)
             }
           }),
         )

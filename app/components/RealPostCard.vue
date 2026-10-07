@@ -2,26 +2,67 @@
 import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
+import { useSettingsStore } from '~/stores/settings'
+import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeSheet'
 import { activeClient, clientFor } from '~/composables/useMasto'
+import { sanitizeDisplayName, sanitizeStatusHtml } from '~/utils/sanitizeHtml'
 
 interface Props {
   status: mastodon.v1.Status
   /** When true, skip per-card inline reply (thread page has sticky composer) */
   hideInlineReply?: boolean
+  /** flow = list card, flip = full-bleed snap slide */
+  variant?: 'flow' | 'flip'
+  /**
+   * Progressive disclosure: open profile in the parent column first
+   * instead of jumping to the full /profile route.
+   */
+  columnProfile?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   hideInlineReply: false,
+  variant: 'flow',
+  columnProfile: false,
 })
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
+  'open-profile': [acct: string]
 }>()
+
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
+const settingsStore = useSettingsStore()
+const composeSheet = useComposeSheetStore()
+const router = useRouter()
+
+/** Column peels first; only leave the board when columnProfile is off. */
+const openProfileInColumn = (acct: string | undefined | null, e?: Event) => {
+  if (!acct) return
+  e?.preventDefault()
+  e?.stopPropagation()
+  const handle = acct.replace(/^@/, '')
+  if (props.columnProfile) {
+    emit('open-profile', handle)
+    return
+  }
+  router.push({ path: '/profile', query: { user: handle } })
+}
 
 const displayStatus = computed(() => props.status.reblog || props.status)
+const safeDisplayName = computed(() =>
+  sanitizeDisplayName(displayStatus.value.account.displayName || displayStatus.value.account.username),
+)
+const safeContent = computed(() => sanitizeStatusHtml(displayStatus.value.content || ''))
 const isReblog = computed(() => !!props.status.reblog)
 const reblogger = computed(() => isReblog.value ? props.status.account : null)
+const isFlip = computed(() => props.variant === 'flip')
+const flipMedia = computed(() => {
+  const media = displayStatus.value.mediaAttachments || []
+  return media.find((m) => m.type === 'image' || m.type === 'gifv' || m.type === 'video') || null
+})
+const flipAlign = computed(() => settingsStore.localPreferences.flipTextAlign || 'center')
+const flipSize = computed(() => settingsStore.localPreferences.flipTextSize || 'large')
 
 const isFavouriting = ref(false)
 const isBoosting = ref(false)
@@ -31,24 +72,47 @@ const isMuting = ref(false)
 const isBlocking = ref(false)
 const showCopiedToast = ref(false)
 const showReplyToast = ref(false)
+const showBoostToast = ref(false)
 const likePop = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
+const shareOpen = ref(false)
+const boostOpen = ref(false)
 
-const isReplying = ref(false)
-const replyText = ref('')
-const isPostingReply = ref(false)
-const replyError = ref<string | null>(null)
-const replyTextarea = ref<HTMLTextAreaElement | null>(null)
-
-/** Media lightbox */
 const lightbox = ref<{ src: string; alt: string } | null>(null)
+const lightboxOpen = computed(() => !!lightbox.value)
+const lightboxRef = ref<HTMLElement | null>(null)
+const prefersReducedMotion = ref(false)
+
+useFocusTrap(lightboxRef, lightboxOpen, {
+  onEscape: () => {
+    lightbox.value = null
+  },
+  initialFocus: '.status-lightbox__close',
+})
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  const sync = () => {
+    prefersReducedMotion.value =
+      mq.matches || document.documentElement.classList.contains('reduce-motion')
+  }
+  sync()
+  mq.addEventListener?.('change', sync)
+  onUnmounted(() => mq.removeEventListener?.('change', sync))
+})
 
 /** Long-post collapse (Threads-style see more, without engagement bait) */
 const contentExpanded = ref(false)
 const plainLength = computed(() =>
   (displayStatus.value.content || '').replace(/<[^>]*>/g, '').length,
 )
-const isLongPost = computed(() => plainLength.value > 320)
+/** Tighter clamp on mobile so media starts higher in the viewport */
+const isLongPost = computed(() => {
+  const mobile =
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
+  return plainLength.value > (mobile ? 220 : 320)
+})
 
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 
@@ -58,8 +122,6 @@ const isOwnPost = computed(() => {
   return displayStatus.value.account.id === user.id ||
     displayStatus.value.account.acct === user.acct
 })
-
-const router = useRouter()
 
 const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
 
@@ -73,6 +135,11 @@ const accountProfileTo = computed(() => {
   const acct = displayStatus.value.account?.acct
   if (!acct) return null
   return { path: '/profile', query: { user: acct } }
+})
+
+const rebloggerProfileTo = computed(() => {
+  if (!instancesStore.isAuthenticated || !reblogger.value?.acct) return null
+  return { path: '/profile', query: { user: reblogger.value.acct } }
 })
 
 let _resolvedIdCache: string | null = null
@@ -121,7 +188,7 @@ const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: s
     } catch { /* bad URL, fall through to resolve */ }
   }
 
-  // Foreign instance — resolve the URL to get a local ID on our instance
+  // Foreign / remapped feed — resolve the URL to a local ID on our instance
   if (url) {
     const localId = await statusStore.resolveStatus(url)
     if (localId) {
@@ -131,9 +198,7 @@ const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: s
     }
   }
 
-  // Last resort: try the raw ID on the primary client (might work for federated posts)
-  _resolvedClientCache = primaryClient
-  _resolvedIdCache = status.id
+  // Don't cache last-resort raw ids — they often 404 across instances
   return { client: primaryClient, id: status.id }
 }
 
@@ -186,6 +251,9 @@ const handleFavourite = async () => {
     }
   } catch (e) {
     console.error('Favourite error:', e)
+    // Drop cached client/id — last-resort foreign ids often fail once
+    _resolvedClientCache = null
+    _resolvedIdCache = null
     displayStatus.value.favourited = !displayStatus.value.favourited
     displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
   } finally {
@@ -194,23 +262,41 @@ const handleFavourite = async () => {
 }
 
 const handleBoost = async () => {
+  if (!canInteract.value) {
+    router.push('/login')
+    return
+  }
+  // Already boosted — tap un-reposts. Otherwise open Threads-style Repost / Quote sheet.
+  if (displayStatus.value.reblogged) {
+    await toggleBoost(false)
+    return
+  }
+  boostOpen.value = true
+}
+
+const toggleBoost = async (wantBoost: boolean) => {
   if (!canInteract.value || isBoosting.value) return
+  if (displayStatus.value.reblogged === wantBoost) return
 
   isBoosting.value = true
-  displayStatus.value.reblogged = !displayStatus.value.reblogged
-  displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
+  displayStatus.value.reblogged = wantBoost
+  displayStatus.value.reblogsCount += wantBoost ? 1 : -1
 
   try {
     const ctx = await getActionContext()
     if (!ctx) throw new Error('Not authenticated')
 
-    if (displayStatus.value.reblogged) {
+    if (wantBoost) {
       await ctx.client.v1.statuses.$select(ctx.id).reblog()
+      showBoostToast.value = true
+      setTimeout(() => { showBoostToast.value = false }, 2200)
     } else {
       await ctx.client.v1.statuses.$select(ctx.id).unreblog()
     }
   } catch (e) {
     console.error('Boost error:', e)
+    _resolvedClientCache = null
+    _resolvedIdCache = null
     displayStatus.value.reblogged = !displayStatus.value.reblogged
     displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
   } finally {
@@ -218,100 +304,147 @@ const handleBoost = async () => {
   }
 }
 
-const handleReply = () => {
-  if (props.hideInlineReply) {
-    // On thread page the sticky bar is the composer — focus it instead
-    const bar = document.querySelector('.thread-reply-bar textarea') as HTMLTextAreaElement | null
-    bar?.focus()
-    return
-  }
-  if (!canInteract.value) {
-    if (statusUrl.value) {
-      window.open(statusUrl.value, '_blank')
-    }
-    return
-  }
-  isReplying.value = !isReplying.value
-  replyError.value = null
-  if (isReplying.value) {
-    const acct = displayStatus.value.account.acct
-    replyText.value = `@${acct} `
-    nextTick(() => {
-      replyTextarea.value?.focus()
-      const len = replyText.value.length
-      replyTextarea.value?.setSelectionRange(len, len)
-    })
+const stripStatusHtml = (html: string) =>
+  (html || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim()
+
+const contextFromStatus = (): ComposeContextPost => {
+  const s = displayStatus.value
+  return {
+    id: s.id,
+    name: s.account.displayName || s.account.username,
+    handle: s.account.acct,
+    avatar: s.account.avatar,
+    text: stripStatusHtml(s.content).slice(0, 280),
+    url: statusUrl.value,
   }
 }
 
-const submitReply = async () => {
-  const text = replyText.value.trim()
-  if (!text || isPostingReply.value) return
+const requireAuth = () => {
+  if (canInteract.value) return true
+  router.push('/login')
+  return false
+}
 
-  isPostingReply.value = true
-  replyError.value = null
-
-  try {
-    const ctx = await getActionContext()
-    if (!ctx) throw new Error('Not authenticated')
-
-    await ctx.client.v1.statuses.create({
-      status: text,
-      inReplyToId: ctx.id,
-      visibility: displayStatus.value.visibility as any,
-    }).then((created) => {
-      isReplying.value = false
-      replyText.value = ''
+const openReplyComposer = async () => {
+  if (!requireAuth()) return
+  const ctx = await getActionContext()
+  if (!ctx) {
+    if (statusUrl.value) window.open(statusUrl.value, '_blank')
+    return
+  }
+  const handle = displayStatus.value.account.acct
+  const isDm = displayStatus.value.visibility === 'direct'
+  composeSheet.show({
+    title: isDm ? 'Message' : 'Reply',
+    placeholder: isDm ? `Message @${handle}…` : `Reply to @${handle}…`,
+    initialText: `@${handle} `,
+    inReplyToId: ctx.id,
+    visibility: isDm ? 'direct' : undefined,
+    contextPost: contextFromStatus(),
+    onPosted: (created) => {
       displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
       emit('replied', created)
       showReplyToast.value = true
       setTimeout(() => { showReplyToast.value = false }, 3500)
-    })
-  } catch (e: any) {
-    console.error('Reply error:', e)
-    replyError.value = e.message || 'Failed to post reply'
-  } finally {
-    isPostingReply.value = false
-  }
+    },
+  })
 }
 
-const cancelReply = () => {
-  isReplying.value = false
-  replyText.value = ''
-  replyError.value = null
-}
-
-const autoResize = (e: Event) => {
-  const el = e.target as HTMLTextAreaElement
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
-}
-
-const handleShare = async () => {
+const openQuoteComposer = async () => {
+  if (!requireAuth()) return
   const url = statusUrl.value
   if (!url) return
+  composeSheet.show({
+    title: 'Quote',
+    placeholder: 'Add a comment…',
+    initialText: '',
+    quoteUrl: url,
+    contextPost: contextFromStatus(),
+  })
+}
 
-  if (navigator.share) {
-    try {
-      await navigator.share({
-        text: displayStatus.value.content?.replace(/<[^>]*>/g, '').slice(0, 200),
-        url,
-      })
-      return
-    } catch (e: any) {
-      if (e.name === 'AbortError') return
-    }
-  }
+const handleReply = () => {
+  void openReplyComposer()
+}
 
+const copyLink = async () => {
+  const url = statusUrl.value
+  if (!url) return
   try {
     await navigator.clipboard.writeText(url)
     showCopiedToast.value = true
     setTimeout(() => { showCopiedToast.value = false }, 2000)
   } catch {
-    // fallback: prompt
     prompt('Copy this link:', url)
   }
 }
+
+const handleShare = () => {
+  shareOpen.value = true
+}
+
+const onShareSelect = async (id: string) => {
+  shareOpen.value = false
+  if (id === 'copy') {
+    await copyLink()
+    return
+  }
+  if (id === 'system') {
+    const url = statusUrl.value
+    if (!url || !navigator.share) return
+    try {
+      await navigator.share({
+        text: stripStatusHtml(displayStatus.value.content).slice(0, 200),
+        url,
+      })
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') await copyLink()
+    }
+    return
+  }
+  if (id === 'quote') {
+    void openQuoteComposer()
+    return
+  }
+  if (id === 'original' && statusUrl.value) {
+    window.open(statusUrl.value, '_blank', 'noopener,noreferrer')
+  }
+}
+
+const onBoostSelect = (id: string) => {
+  boostOpen.value = false
+  if (id === 'repost') void toggleBoost(true)
+  if (id === 'quote') void openQuoteComposer()
+}
+
+const shareActions = computed(() => {
+  const items: { id: string; label: string; hint?: string }[] = [
+    { id: 'copy', label: 'Copy link', hint: 'Share the original post URL' },
+  ]
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    items.push({ id: 'system', label: 'Share via…', hint: 'Messages, apps, and more' })
+  }
+  if (canInteract.value) {
+    items.push({ id: 'quote', label: 'Quote', hint: 'Post with your comment' })
+  }
+  if (statusUrl.value) {
+    items.push({ id: 'original', label: 'Open original', hint: 'View on the author’s server' })
+  }
+  return items
+})
+
+const boostActions = computed(() => [
+  { id: 'repost', label: 'Repost', hint: 'Share to your followers' },
+  { id: 'quote', label: 'Quote', hint: 'Add your own comment' },
+])
 
 // ========================================
 // Menu
@@ -469,19 +602,9 @@ const closeLightbox = () => {
   lightbox.value = null
 }
 
-const onLightboxKey = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') closeLightbox()
-}
-
 watch(lightbox, (val) => {
   if (typeof document === 'undefined') return
-  if (val) {
-    document.addEventListener('keydown', onLightboxKey)
-    document.body.style.overflow = 'hidden'
-  } else {
-    document.removeEventListener('keydown', onLightboxKey)
-    document.body.style.overflow = ''
-  }
+  document.body.style.overflow = val ? 'hidden' : ''
 })
 
 watch(isMenuOpen, async (open) => {
@@ -495,20 +618,33 @@ watch(isMenuOpen, async (open) => {
 
 onUnmounted(() => {
   document.removeEventListener('click', closeMenu)
-  document.removeEventListener('keydown', onLightboxKey)
   document.body.style.overflow = ''
 })
 </script>
 
 <template>
-  <article class="status-card" :class="{ 'status-card--menu-open': isMenuOpen }">
+  <article
+    class="status-card"
+    :class="{
+      'status-card--menu-open': isMenuOpen,
+      'status-card--flip': isFlip,
+      'status-card--flip-media': isFlip && !!flipMedia,
+      [`status-card--flip-align-${flipAlign}`]: isFlip,
+      [`status-card--flip-size-${flipSize}`]: isFlip,
+    }"
+  >
     <!-- Reblog indicator -->
-    <div v-if="isReblog" class="status-reblog">
-      <svg class="status-reblog-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" />
-        <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" />
-      </svg>
-      <span class="status-reblog-text">
+    <div v-if="isReblog && !isFlip" class="status-reblog">
+      <NeoIcon name="reblog" :size="14" :stroke="2" />
+      <button
+        v-if="rebloggerProfileTo || (columnProfile && reblogger?.acct)"
+        type="button"
+        class="status-reblog-text status-reblog-text--link"
+        @click="openProfileInColumn(reblogger?.acct, $event)"
+      >
+        {{ reblogger!.displayName || reblogger!.username }} reposted
+      </button>
+      <span v-else class="status-reblog-text">
         {{ reblogger!.displayName || reblogger!.username }} reposted
       </span>
     </div>
@@ -516,13 +652,21 @@ onUnmounted(() => {
     <div class="status-main">
       <!-- Avatar Column -->
       <div class="status-avatar-col">
-        <NuxtLink v-if="accountProfileTo" :to="accountProfileTo" class="status-avatar-link">
+        <button
+          v-if="columnProfile || accountProfileTo"
+          type="button"
+          class="status-avatar-link"
+          :aria-label="`Open ${displayStatus.account.displayName || displayStatus.account.username}`"
+          @click="openProfileInColumn(displayStatus.account.acct, $event)"
+        >
           <img
             :src="displayStatus.account.avatar"
             :alt="displayStatus.account.displayName || displayStatus.account.username"
             class="status-avatar"
+            loading="lazy"
+            decoding="async"
           />
-        </NuxtLink>
+        </button>
         <a
           v-else
           :href="displayStatus.account.url"
@@ -534,6 +678,8 @@ onUnmounted(() => {
             :src="displayStatus.account.avatar"
             :alt="displayStatus.account.displayName || displayStatus.account.username"
             class="status-avatar"
+            loading="lazy"
+            decoding="async"
           />
         </a>
         <div v-if="hasReplies" class="status-thread-line"></div>
@@ -543,9 +689,14 @@ onUnmounted(() => {
       <div class="status-content-col">
         <!-- Header: username + time + menu -->
         <header class="status-header">
-          <NuxtLink v-if="accountProfileTo" :to="accountProfileTo" class="status-author">
-            <span class="status-display-name" v-html="displayStatus.account.displayName || displayStatus.account.username" />
-          </NuxtLink>
+          <button
+            v-if="columnProfile || accountProfileTo"
+            type="button"
+            class="status-author"
+            @click="openProfileInColumn(displayStatus.account.acct, $event)"
+          >
+            <span class="status-display-name" v-html="safeDisplayName" />
+          </button>
           <a
             v-else
             :href="displayStatus.account.url"
@@ -553,9 +704,9 @@ onUnmounted(() => {
             rel="noopener noreferrer"
             class="status-author"
           >
-            <span class="status-display-name" v-html="displayStatus.account.displayName || displayStatus.account.username" />
+            <span class="status-display-name" v-html="safeDisplayName" />
           </a>
-          <a :href="statusUrl || '#'" target="_blank" class="status-time">
+          <a :href="statusUrl || '#'" target="_blank" rel="noopener noreferrer" class="status-time">
             <time :datetime="displayStatus.createdAt">{{ formatDate(displayStatus.createdAt) }}</time>
           </a>
           <div class="status-menu-container" ref="menuRef">
@@ -649,7 +800,7 @@ onUnmounted(() => {
         <!-- Content Warning / Spoiler -->
         <details v-if="displayStatus.spoilerText" class="status-cw">
           <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
-          <div class="status-content status-content--clickable" v-html="displayStatus.content" @click="onContentClick" />
+          <div class="status-content status-content--clickable" v-html="safeContent" @click="onContentClick" />
         </details>
 
         <!-- Regular Content -->
@@ -657,7 +808,7 @@ onUnmounted(() => {
           <div
             class="status-content status-content--clickable"
             :class="{ 'status-content--clamped': isLongPost && !contentExpanded }"
-            v-html="displayStatus.content"
+            v-html="safeContent"
             @click="onContentClick"
           />
           <button
@@ -691,7 +842,7 @@ onUnmounted(() => {
               :src="media.url ?? undefined"
               :poster="media.previewUrl ?? undefined"
               controls
-              :autoplay="media.type === 'gifv'"
+              :autoplay="media.type === 'gifv' && !prefersReducedMotion"
               :loop="media.type === 'gifv'"
               :muted="media.type === 'gifv'"
               class="status-media-video"
@@ -725,105 +876,53 @@ onUnmounted(() => {
         <!-- Actions: on mobile, like sits in the right thumb zone -->
         <footer class="status-actions">
           <button
-            class="status-action status-action--reply"
-            :class="{ 'status-action--replying': isReplying }"
+            class="status-action status-action--reply neo-tip"
             aria-label="Reply"
-            @click="handleReply"
+            title="Reply"
+            @click.stop="handleReply"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
-            </svg>
+            <NeoIcon name="message" :size="20" :stroke="1.5" />
             <span v-if="displayStatus.repliesCount" class="status-action__count">{{ formatNumber(displayStatus.repliesCount) }}</span>
           </button>
 
           <button
-            class="status-action status-action--boost"
+            class="status-action status-action--boost neo-tip"
             :class="{ 'status-action--boosted': displayStatus.reblogged }"
             :disabled="isBoosting"
-            aria-label="Repost"
-            @click="handleBoost"
+            :aria-label="displayStatus.reblogged ? 'Undo repost' : 'Repost'"
+            :title="displayStatus.reblogged ? 'Undo repost' : 'Repost'"
+            :aria-pressed="!!displayStatus.reblogged"
+            @click.stop="handleBoost"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" />
-              <path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" />
-            </svg>
+            <NeoIcon name="reblog" :size="20" :stroke="1.5" />
             <span v-if="displayStatus.reblogsCount" class="status-action__count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
           </button>
 
-          <button class="status-action status-action--share" aria-label="Share" @click="handleShare">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" />
-            </svg>
+          <button
+            class="status-action status-action--share neo-tip"
+            aria-label="Share"
+            title="Share"
+            @click.stop="handleShare"
+          >
+            <NeoIcon name="share" :size="20" :stroke="1.5" />
           </button>
 
-          <a
-            v-if="statusUrl"
-            :href="statusUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="status-action status-action--external"
-            title="View on original instance"
-            aria-label="View on original instance"
-            @click.stop
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </a>
-
           <button
-            class="status-action status-action--like"
+            class="status-action status-action--like neo-tip"
             :class="{
               'status-action--liked': displayStatus.favourited,
               'status-action--pop': likePop,
             }"
             :disabled="isFavouriting"
-            aria-label="Like"
-            @click="handleFavourite"
+            :aria-label="displayStatus.favourited ? 'Unlike' : 'Like'"
+            :title="displayStatus.favourited ? 'Unlike' : 'Like'"
+            :aria-pressed="!!displayStatus.favourited"
+            @click.stop="handleFavourite"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" :fill="displayStatus.favourited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
-              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-            </svg>
+            <NeoIcon name="heart" :size="20" :stroke="1.5" :filled="!!displayStatus.favourited" />
             <span v-if="displayStatus.favouritesCount" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
           </button>
         </footer>
-
-        <!-- Inline Reply Composer -->
-        <Transition name="reply-expand">
-          <div v-if="isReplying && !hideInlineReply" class="reply-composer">
-            <div class="reply-composer__input-row">
-              <img
-                v-if="instancesStore.currentUser?.avatar"
-                :src="instancesStore.currentUser.avatar"
-                class="reply-composer__avatar"
-                alt=""
-              />
-              <textarea
-                ref="replyTextarea"
-                v-model="replyText"
-                class="reply-composer__textarea"
-                placeholder="Write a reply..."
-                rows="1"
-                @input="autoResize"
-                @keydown.meta.enter="submitReply"
-                @keydown.ctrl.enter="submitReply"
-              />
-            </div>
-            <div v-if="replyError" class="reply-composer__error">{{ replyError }}</div>
-            <div class="reply-composer__actions">
-              <button class="reply-composer__cancel" @click="cancelReply">Cancel</button>
-              <button
-                class="reply-composer__submit"
-                :disabled="!replyText.trim() || isPostingReply"
-                @click="submitReply"
-              >
-                {{ isPostingReply ? 'Posting...' : 'Reply' }}
-              </button>
-            </div>
-          </div>
-        </Transition>
 
         <!-- Thread teaser -->
         <div v-if="hasReplies && !hideInlineReply" class="status-footer-row">
@@ -845,27 +944,45 @@ onUnmounted(() => {
     <!-- Copied Toast -->
     <Teleport to="body">
       <Transition name="toast-fade">
-        <div v-if="showCopiedToast" class="status-toast">Link copied</div>
+        <div v-if="showCopiedToast" class="status-toast" role="status" aria-live="polite">Link copied</div>
       </Transition>
       <Transition name="toast-fade">
-        <div v-if="showReplyToast" class="status-toast status-toast--action">
+        <div v-if="showBoostToast" class="status-toast" role="status" aria-live="polite">Reposted</div>
+      </Transition>
+      <Transition name="toast-fade">
+        <div v-if="showReplyToast" class="status-toast status-toast--action" role="status" aria-live="polite">
           <span>Reply posted</span>
           <button type="button" class="status-toast__btn" @click="openThread(); showReplyToast = false">
-            View thread
+            View
           </button>
         </div>
       </Transition>
+      <PostActionSheet
+        :open="shareOpen"
+        title="Share"
+        :actions="shareActions"
+        @select="onShareSelect"
+        @close="shareOpen = false"
+      />
+      <PostActionSheet
+        :open="boostOpen"
+        title="Repost"
+        :actions="boostActions"
+        @select="onBoostSelect"
+        @close="boostOpen = false"
+      />
       <Transition name="toast-fade">
         <div
           v-if="lightbox"
+          ref="lightboxRef"
           class="status-lightbox"
           role="dialog"
           aria-modal="true"
-          aria-label="Image"
+          :aria-label="lightbox.alt && lightbox.alt !== 'Image' ? lightbox.alt : 'Image'"
           @click.self="closeLightbox"
         >
           <button type="button" class="status-lightbox__close" aria-label="Close" @click="closeLightbox">
-            ×
+            <NeoIcon name="x" :size="18" :stroke="2" />
           </button>
           <img :src="lightbox.src" :alt="lightbox.alt" class="status-lightbox__img" />
           <p v-if="lightbox.alt && lightbox.alt !== 'Image'" class="status-lightbox__caption">
@@ -902,6 +1019,321 @@ onUnmounted(() => {
 
   @media (max-width: 1023px) {
     background: var(--neo-bg-secondary);
+    padding: 0.65rem 0.75rem;
+    // Solid paints only — backdrop-filter on scrolling cards blacks out iOS Safari
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  // Full-bleed Flip slide (TikTok-ish, still NeoSpace)
+  &--flip {
+    height: var(--flip-port, 100%);
+    min-height: var(--flip-port, 100%);
+    max-height: var(--flip-port, 100%);
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background: var(--neo-bg-primary);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+
+    .status-main {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      position: relative;
+    }
+
+    .status-avatar-col {
+      display: none;
+    }
+
+    .status-content-col {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .status-header {
+      order: 2;
+      padding: 0.65rem 4.25rem 0 1rem;
+      align-items: center;
+    }
+
+    .status-content-wrap,
+    .status-cw {
+      order: 3;
+      padding: 0.35rem 4.25rem 0.85rem 1rem;
+      max-height: 32%;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+    }
+
+    .status-content--clamped {
+      -webkit-line-clamp: 5;
+    }
+
+    .status-media {
+      order: 1;
+      flex: 1 1 auto;
+      min-height: 48%;
+      margin: 0;
+      border-radius: 0;
+      max-width: none;
+      background: var(--neo-bg-secondary);
+    }
+
+    .status-media-hit {
+      width: 100%;
+      height: 100%;
+      cursor: zoom-in;
+    }
+
+    .status-media-image,
+    .status-media-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      max-height: none;
+      border-radius: 0;
+    }
+
+    &.status-card--flip-media .status-content-wrap,
+    &.status-card--flip-media .status-header {
+      background: linear-gradient(
+        to top,
+        color-mix(in srgb, var(--neo-bg-primary) 92%, transparent) 0%,
+        color-mix(in srgb, var(--neo-bg-primary) 55%, transparent) 55%,
+        transparent 100%
+      );
+    }
+
+    // Text-only Flip — title-card; align/size from Settings → Appearance
+    &:not(.status-card--flip-media) {
+      --flip-align: center;
+      --flip-items: center;
+      --flip-pad-inline: 3.75rem 1.5rem;
+      --flip-type: 1.375rem;
+      --flip-leading: 1.35;
+      --flip-weight: 600;
+      --flip-max: 22rem;
+      --flip-clamp: 10;
+
+      background:
+        radial-gradient(
+          ellipse 80% 50% at 50% 42%,
+          color-mix(in srgb, var(--neo-accent) 8%, transparent),
+          transparent 70%
+        ),
+        var(--neo-bg-primary);
+
+      .status-media {
+        display: none;
+      }
+
+      .status-content-col {
+        justify-content: center;
+        padding: 2.5rem var(--flip-pad-inline) 5.5rem;
+      }
+
+      .status-header {
+        order: 1;
+        justify-content: var(--flip-items);
+        padding: 0 0 0.85rem;
+        text-align: var(--flip-align);
+
+        .status-author {
+          justify-content: var(--flip-items);
+        }
+
+        .status-display-name {
+          font-size: 0.9375rem;
+          font-weight: 600;
+          color: var(--neo-text-tertiary);
+        }
+
+        .status-time {
+          display: none;
+        }
+
+        .status-menu-container {
+          position: absolute;
+          right: 0.5rem;
+          top: 0.65rem;
+        }
+      }
+
+      .status-content-wrap,
+      .status-cw {
+        order: 2;
+        flex: 0 1 auto;
+        max-height: min(58%, 24rem);
+        mask-image: none;
+        padding: 0;
+        text-align: var(--flip-align);
+        display: flex;
+        flex-direction: column;
+        align-items: var(--flip-items);
+        justify-content: center;
+      }
+
+      .status-content {
+        font-size: var(--flip-type);
+        line-height: var(--flip-leading);
+        font-weight: var(--flip-weight);
+        letter-spacing: -0.02em;
+        color: var(--neo-text-primary);
+        width: 100%;
+        max-width: var(--flip-max);
+
+        :deep(p) {
+          margin-bottom: 0.65rem;
+
+          &:last-child {
+            margin-bottom: 0;
+          }
+        }
+      }
+
+      .status-content--clamped {
+        -webkit-line-clamp: var(--flip-clamp);
+        display: -webkit-box;
+      }
+
+      .status-see-more {
+        margin-top: 0.75rem;
+        font-size: 0.9375rem;
+        align-self: var(--flip-items);
+      }
+
+      .status-poll {
+        order: 3;
+        margin: 1rem 0 0;
+        width: 100%;
+        max-width: var(--flip-max);
+        text-align: left;
+      }
+
+      .status-actions {
+        bottom: 4.5rem;
+      }
+    }
+
+    // Sibling modifiers (status-card--flip + status-card--flip-align-*), not nested BEM
+    &:not(.status-card--flip-media).status-card--flip-align-left {
+      --flip-align: left;
+      --flip-items: flex-start;
+      --flip-pad-inline: 4.25rem 1.35rem;
+    }
+
+    &:not(.status-card--flip-media).status-card--flip-align-center {
+      --flip-align: center;
+      --flip-items: center;
+      --flip-pad-inline: 3.75rem 1.5rem;
+    }
+
+    &:not(.status-card--flip-media).status-card--flip-align-right {
+      --flip-align: right;
+      --flip-items: flex-end;
+      --flip-pad-inline: 4.25rem 1.35rem;
+    }
+
+    &:not(.status-card--flip-media).status-card--flip-size-reading {
+      --flip-type: 1.0625rem;
+      --flip-leading: 1.45;
+      --flip-weight: 500;
+      --flip-max: 26rem;
+      --flip-clamp: 14;
+    }
+
+    &:not(.status-card--flip-media).status-card--flip-size-large {
+      --flip-type: 1.375rem;
+      --flip-leading: 1.35;
+      --flip-weight: 600;
+      --flip-max: 22rem;
+      --flip-clamp: 10;
+    }
+
+    &:not(.status-card--flip-media).status-card--flip-size-display {
+      --flip-type: 1.75rem;
+      --flip-leading: 1.25;
+      --flip-weight: 700;
+      --flip-max: 18rem;
+      --flip-clamp: 7;
+    }
+
+    // Media Flip captions also honor alignment
+    &.status-card--flip-media.status-card--flip-align-left {
+      .status-header,
+      .status-content-wrap,
+      .status-cw {
+        text-align: left;
+      }
+
+      .status-header {
+        justify-content: flex-start;
+      }
+    }
+
+    &.status-card--flip-media.status-card--flip-align-right {
+      .status-header,
+      .status-content-wrap,
+      .status-cw {
+        text-align: right;
+      }
+
+      .status-header {
+        justify-content: flex-end;
+
+        .status-author {
+          justify-content: flex-end;
+        }
+      }
+    }
+
+    .status-poll {
+      order: 3;
+      margin: 0 4.25rem 0.5rem 1rem;
+    }
+
+    .status-actions {
+      position: absolute;
+      right: 0.35rem;
+      bottom: 5.5rem;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.2rem;
+      width: auto;
+      padding: 0;
+      z-index: 2;
+    }
+
+    .status-action {
+      margin-left: 0 !important;
+      min-width: 48px;
+      color: var(--neo-text-secondary);
+
+      &__count {
+        font-size: 0.6875rem;
+      }
+    }
+
+    .status-footer-row,
+    .reply-composer {
+      display: none;
+    }
+
+    .status-see-more {
+      color: var(--neo-accent);
+    }
   }
 }
 
@@ -923,6 +1355,26 @@ onUnmounted(() => {
 
   &-text {
     font-weight: 500;
+    color: inherit;
+    text-decoration: none;
+
+    &--link {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      color: inherit;
+      text-align: left;
+
+      &:hover {
+        color: var(--neo-text-primary);
+        text-decoration: underline;
+      }
+    }
   }
 }
 
@@ -949,8 +1401,26 @@ onUnmounted(() => {
 
 .status-avatar-link {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
   text-decoration: none;
+  border-radius: 50%;
+  -webkit-tap-highlight-color: transparent;
+  font: inherit;
+  color: inherit;
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
 }
 
 .status-avatar {
@@ -1001,6 +1471,15 @@ onUnmounted(() => {
   min-width: 0;
   flex: 1;
   overflow: hidden;
+  min-height: 32px;
+  padding: 0.15rem 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
 
   &:hover .status-display-name {
     text-decoration: underline;
@@ -1183,6 +1662,10 @@ onUnmounted(() => {
     -webkit-line-clamp: 6;
     -webkit-box-orient: vertical;
     overflow: hidden;
+
+    @media (max-width: 1023px) {
+      -webkit-line-clamp: 4;
+    }
   }
 
   :deep(p) {
@@ -1254,6 +1737,7 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .status-action--pop .neo-icon,
   .status-action--pop svg {
     animation: none;
   }
@@ -1335,6 +1819,7 @@ onUnmounted(() => {
 // Actions - pill-shaped buttons with proper sizing
 // ========================================
 .status-actions {
+  overflow: visible;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -1348,9 +1833,9 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.4rem 0.45rem;
-  min-height: 40px;
-  min-width: 40px;
+  padding: 0.45rem 0.5rem;
+  min-height: 44px;
+  min-width: 44px;
   justify-content: center;
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
@@ -1360,8 +1845,10 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.15s ease;
   line-height: 1;
+  -webkit-tap-highlight-color: transparent;
 
-  svg {
+  svg,
+  .neo-icon {
     width: 20px;
     height: 20px;
     flex-shrink: 0;
@@ -1400,27 +1887,39 @@ onUnmounted(() => {
     animation: like-pop 0.32s ease;
   }
 
-  // One-handed mobile: heart in the right thumb zone, bigger target
+  // One-handed mobile: heart in the right thumb zone, bigger targets
   @media (max-width: 1023px) {
     min-height: 48px;
     min-width: 48px;
-    padding: 0.5rem 0.55rem;
+    padding: 0.55rem 0.6rem;
+
+    svg {
+      width: 22px;
+      height: 22px;
+    }
 
     &--like {
       margin-left: auto;
-      min-width: 52px;
-      padding-left: 0.75rem;
-      padding-right: 0.65rem;
+      min-width: 56px;
+      padding-left: 0.85rem;
+      padding-right: 0.7rem;
       color: var(--neo-text-tertiary);
 
       svg {
-        width: 24px;
-        height: 24px;
+        width: 26px;
+        height: 26px;
       }
 
       &.status-action--liked {
         color: var(--neo-accent);
       }
+    }
+
+    &--boost .status-action__count,
+    &--reply .status-action__count {
+      // Quieter chrome — icon first; count only when meaningful
+      font-size: 0.6875rem;
+      opacity: 0.75;
     }
 
     &--external {

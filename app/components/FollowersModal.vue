@@ -1,9 +1,6 @@
 <script setup lang="ts">
 /**
- * Enhanced Followers/Following Modal
- * 
- * Shows followers/following with their recent post and quick actions
- * Inspired by Threads but better
+ * Followers / following modal with recent posts and quick actions.
  */
 
 import { ref, computed, watch } from 'vue'
@@ -25,6 +22,14 @@ const accounts = ref<mastodon.v1.Account[]>([])
 const recentPosts = ref<Record<string, mastodon.v1.Status | null>>({})
 const relationships = ref<Record<string, mastodon.v1.Relationship>>({})
 const loadingActions = ref<Record<string, boolean>>({})
+const modalRef = ref<HTMLElement | null>(null)
+
+useFocusTrap(modalRef, isOpen, {
+  onEscape: () => {
+    isOpen.value = false
+  },
+  initialFocus: '.close-btn',
+})
 
 // Pagination
 const nextPageUrl = ref<string | null>(null)
@@ -263,13 +268,27 @@ defineExpose({ open, close })
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="isOpen" class="followers-modal-overlay" @click.self="close">
+      <div
+        v-if="isOpen"
+        ref="modalRef"
+        class="followers-modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="followers-modal-title"
+        @click.self="close"
+      >
         <div class="followers-modal">
           <!-- Header with tabs -->
           <header class="modal-header">
-            <div class="modal-tabs">
+            <h2 id="followers-modal-title" class="sr-only">
+              {{ activeTab === 'followers' ? 'Followers' : 'Following' }}
+            </h2>
+            <div class="modal-tabs" role="tablist" aria-label="Followers or following">
               <button 
                 class="modal-tab"
+                role="tab"
+                type="button"
+                :aria-selected="activeTab === 'followers'"
                 :class="{ 'modal-tab--active': activeTab === 'followers' }"
                 @click="activeTab = 'followers'"
               >
@@ -277,6 +296,9 @@ defineExpose({ open, close })
               </button>
               <button 
                 class="modal-tab"
+                role="tab"
+                type="button"
+                :aria-selected="activeTab === 'following'"
                 :class="{ 'modal-tab--active': activeTab === 'following' }"
                 @click="activeTab = 'following'"
               >
@@ -294,14 +316,13 @@ defineExpose({ open, close })
           <!-- Content -->
           <div class="modal-content">
             <!-- Loading state -->
-            <div v-if="isLoading && accounts.length === 0" class="loading-state">
-              <span class="spinner">🌀</span>
-              <p>Loading...</p>
+            <div v-if="isLoading && accounts.length === 0" class="loading-state" aria-busy="true">
+              <FunLoader fill label="Loading" />
             </div>
 
             <!-- Empty state -->
             <div v-else-if="accounts.length === 0" class="empty-state">
-              <span>👤</span>
+              <NeoIcon name="user" :size="32" :stroke="1.5" />
               <p>{{ activeTab === 'followers' ? 'No followers yet' : 'Not following anyone yet' }}</p>
             </div>
 
@@ -314,12 +335,12 @@ defineExpose({ open, close })
               >
                 <!-- Account Info Row -->
                 <div class="account-row">
-                  <a :href="account.url" target="_blank" class="account-avatar">
+                  <a :href="account.url" target="_blank" rel="noopener noreferrer" class="account-avatar">
                     <img :src="account.avatar" :alt="account.displayName || account.username" />
                   </a>
                   
                   <div class="account-info">
-                    <a :href="account.url" target="_blank" class="account-name">
+                    <a :href="account.url" target="_blank" rel="noopener noreferrer" class="account-name">
                       {{ account.displayName || account.username }}
                       <span v-if="account.bot" class="bot-badge">🤖</span>
                     </a>
@@ -486,20 +507,23 @@ defineExpose({ open, close })
 .empty-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: 3rem;
+  gap: 0.75rem;
+  min-height: min(50dvh, 22rem);
+  padding: 1.25rem;
   text-align: center;
   color: var(--neo-text-muted);
-
-  span {
-    font-size: 2.5rem;
-    margin-bottom: 0.75rem;
-  }
+  box-sizing: border-box;
 
   p {
+    margin: 0;
     font-size: 0.9375rem;
   }
+}
+
+.empty-state {
+  align-items: center;
 }
 
 .spinner {

@@ -11,6 +11,9 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, publicClient } from '~/composables/useMasto'
 
+/** Prevent concurrent initializeGroups races that double-push trending tags */
+let groupsInitPromise: Promise<void> | null = null
+
 export type GroupCategory =
   | 'tech'
   | 'creative'
@@ -465,6 +468,55 @@ export const useGroupsStore = defineStore('groups', {
       return state.groups.filter(g => g.featured)
     },
 
+    /**
+     * Threads-style discovery picks: unjoined featured + trending, best first.
+     * Always dedupe by tag — concurrent inits can leave duplicates in state.
+     */
+    recommendedGroups: (state): Group[] => {
+      const seen = new Set<string>()
+      return [...state.groups]
+        .filter((g) => {
+          if (g.isMember || !(g.featured || g.trending)) return false
+          const key = g.tag.toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        .sort((a, b) => {
+          if (!!a.trending !== !!b.trending) return a.trending ? -1 : 1
+          if (!!a.featured !== !!b.featured) return a.featured ? -1 : 1
+          return (b.postsCount || 0) - (a.postsCount || 0)
+        })
+        .slice(0, 16)
+    },
+
+    /** Live trending tags from the active server (deduped) */
+    trendingGroups: (state): Group[] => {
+      const seen = new Set<string>()
+      const out: Group[] = []
+      for (const g of state.groups) {
+        if (!g.trending) continue
+        const key = g.tag.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(g)
+        if (out.length >= 12) break
+      }
+      return out
+    },
+
+    /** Featured curated picks only (for Suggested rail — avoid overlapping Trending) */
+    suggestedFeaturedGroups: (state): Group[] => {
+      const seen = new Set<string>()
+      return state.groups.filter((g) => {
+        if (!g.featured || g.isMember) return false
+        const key = g.tag.toLowerCase()
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }).slice(0, 16)
+    },
+
     /** Get groups by category — unjoined first so discovery isn't buried under Leave */
     getByCategory: (state) => (category: string): Group[] => {
       const list =
@@ -507,26 +559,63 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     /**
-     * Initialize groups - curated + live trending hashtags from your server
+     * Initialize groups - curated + live trending hashtags from your server.
+     * Single-flight so home + columns + menu can't race and double-push tags.
      */
     async initializeGroups() {
-      this.isLoading = true
-      this.error = null
+      if (groupsInitPromise) return groupsInitPromise
+
+      groupsInitPromise = (async () => {
+        this.isLoading = true
+        this.error = null
+
+        try {
+          this.groups = FEATURED_GROUPS.map((g) => ({ ...g, isMember: false, trending: false }))
+
+          const instancesStore = useInstancesStore()
+          await Promise.all([
+            this.fetchTrendingTags(),
+            instancesStore.isAuthenticated ? this.fetchFollowedTags() : Promise.resolve(),
+          ])
+          this.dedupeGroups()
+        } catch (e: any) {
+          this.error = e.message || 'Failed to initialize groups'
+          console.error('Groups init error:', e)
+        } finally {
+          this.isLoading = false
+        }
+      })()
 
       try {
-        this.groups = FEATURED_GROUPS.map((g) => ({ ...g, isMember: false, trending: false }))
-
-        const instancesStore = useInstancesStore()
-        await Promise.all([
-          this.fetchTrendingTags(),
-          instancesStore.isAuthenticated ? this.fetchFollowedTags() : Promise.resolve(),
-        ])
-      } catch (e: any) {
-        this.error = e.message || 'Failed to initialize groups'
-        console.error('Groups init error:', e)
+        await groupsInitPromise
       } finally {
-        this.isLoading = false
+        groupsInitPromise = null
       }
+    },
+
+    /** Collapse duplicate tags (prefer member + trending + featured flags) */
+    dedupeGroups() {
+      const byTag = new Map<string, Group>()
+      for (const g of this.groups) {
+        const key = g.tag.toLowerCase()
+        const prev = byTag.get(key)
+        if (!prev) {
+          byTag.set(key, { ...g })
+          continue
+        }
+        byTag.set(key, {
+          ...prev,
+          ...g,
+          isMember: prev.isMember || g.isMember,
+          featured: prev.featured || g.featured,
+          trending: prev.trending || g.trending,
+          postsCount: Math.max(prev.postsCount || 0, g.postsCount || 0) || prev.postsCount || g.postsCount,
+          description: prev.description || g.description,
+          icon: prev.featured ? prev.icon : g.icon,
+          name: prev.featured ? prev.name : g.name,
+        })
+      }
+      this.groups = Array.from(byTag.values())
     },
 
     guessCategory(tag: string): GroupCategory {
@@ -547,8 +636,6 @@ export const useGroupsStore = defineStore('groups', {
           ? this.getClient()
           : this.getPublicClient()
 
-        const seen = new Set(this.groups.map((g) => g.tag.toLowerCase()))
-
         // Mastodon trends/tags maxes out around 20 — still a live slice of the network
         const tags = await client.v1.trends.tags.list({ limit: 20 })
         if (!tags?.length) return
@@ -556,12 +643,15 @@ export const useGroupsStore = defineStore('groups', {
         for (const tag of tags) {
           const name = tag.name
           const key = name.toLowerCase()
-          if (seen.has(key)) {
-            const existing = this.groups.find((g) => g.tag.toLowerCase() === key)
-            if (existing) existing.trending = true
+          // Re-check after await — concurrent inits may have already pushed this tag
+          const existing = this.groups.find((g) => g.tag.toLowerCase() === key)
+          if (existing) {
+            existing.trending = true
+            const uses =
+              tag.history?.reduce((sum, day) => sum + Number(day.uses || 0), 0) || undefined
+            if (uses != null) existing.postsCount = uses
             continue
           }
-          seen.add(key)
 
           const uses =
             tag.history?.reduce((sum, day) => sum + Number(day.uses || 0), 0) || undefined
@@ -715,7 +805,17 @@ export const useGroupsStore = defineStore('groups', {
           limit: 20
         })
 
-        this.groupTimeline = statuses
+        // Prefer authed home so status ids match favourite/boost APIs
+        const account =
+          instancesStore.activeAccount ||
+          instancesStore.instances.find((i) => i.accessToken)
+        this.groupTimeline = account
+          ? statuses.map((s) => ({
+              ...s,
+              _instanceId: account.id,
+              _instanceUrl: account.url,
+            }))
+          : statuses
         
         if (statuses.length > 0) {
           this.maxId = statuses[statuses.length - 1].id
@@ -739,6 +839,7 @@ export const useGroupsStore = defineStore('groups', {
       this.isLoadingMore = true
 
       try {
+        const instancesStore = useInstancesStore()
         const client = this.getPublicClient()
         const statuses = await client.v1.timelines.tag.$select(this.currentGroupTag).list({
           maxId: this.maxId,
@@ -746,7 +847,17 @@ export const useGroupsStore = defineStore('groups', {
         })
 
         if (statuses.length > 0) {
-          this.groupTimeline = [...this.groupTimeline, ...statuses]
+          const account =
+            instancesStore.activeAccount ||
+            instancesStore.instances.find((i) => i.accessToken)
+          const tagged = account
+            ? statuses.map((s) => ({
+                ...s,
+                _instanceId: account.id,
+                _instanceUrl: account.url,
+              }))
+            : statuses
+          this.groupTimeline = [...this.groupTimeline, ...tagged]
           this.maxId = statuses[statuses.length - 1].id
         }
         

@@ -8,9 +8,18 @@
 import { defineStore } from 'pinia'
 import { createRestAPIClient, type mastodon } from 'masto'
 import {
+  beginOAuthChallenge,
+  consumeOAuthChallenge,
+  stashClientSecret,
+  readClientSecret,
+  clearClientSecret,
+} from '~/utils/oauthPkce'
+import { logError, logWarn } from '~/utils/log'
+import {
   DEFAULT_PUBLIC_INSTANCE,
   isAuthGatedPublicHost,
 } from '~/utils/instances'
+import { dedupeStatusesByIdentity } from '~/utils/statusIdentity'
 
 export interface ConnectedInstance {
   id: string
@@ -53,6 +62,8 @@ export interface InstanceApiInfo {
 interface MultiInstanceState {
   instances: ConnectedInstance[]
   activeAccountId: string | null
+  /** First / home identity for this NeoSpace session — other logins hang off it */
+  primaryAccountId: string | null
   activeInstanceFilter: string | null
   isLoading: boolean
   isInitialized: boolean
@@ -89,6 +100,7 @@ export const useInstancesStore = defineStore('instances', {
   state: (): MultiInstanceState => ({
     instances: [],
     activeAccountId: null,
+    primaryAccountId: null,
     activeInstanceFilter: null,
     isLoading: false,
     isInitialized: false,
@@ -110,6 +122,19 @@ export const useInstancesStore = defineStore('instances', {
 
     hasAuthenticatedInstance: (state): boolean =>
       state.instances.some((i) => i.accessToken && i.user),
+
+    /** Main NeoSpace identity — other server logins are linked under this session */
+    primaryAccount(state): ConnectedInstance | null {
+      if (state.primaryAccountId) {
+        const primary = state.instances.find(
+          (i) => i.id === state.primaryAccountId && i.accessToken && i.user,
+        )
+        if (primary) return primary
+      }
+      return (
+        state.instances.find((i) => i.accessToken && i.user) ?? null
+      )
+    },
 
     activeAccount(state): ConnectedInstance | null {
       if (state.activeAccountId) {
@@ -183,16 +208,36 @@ export const useInstancesStore = defineStore('instances', {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
           const data = JSON.parse(saved)
-          this.instances = (data.instances || []).map((i: ConnectedInstance) => ({
+          const raw = (data.instances || []).map((i: ConnectedInstance) => ({
             ...i,
+            clientSecret: null,
             isConnecting: false,
             error: null,
-          }))
+          })) as ConnectedInstance[]
+          // Collapse duplicate URLs (prefer authenticated + richer user)
+          const byUrl = new Map<string, ConnectedInstance>()
+          for (const inst of raw) {
+            const key = (inst.url || '').replace(/\/+$/, '').toLowerCase()
+            if (!key) continue
+            const prev = byUrl.get(key)
+            if (!prev) {
+              byUrl.set(key, inst)
+              continue
+            }
+            const prefer =
+              (!!inst.accessToken && !prev.accessToken) ||
+              (!!inst.user && !prev.user) ||
+              (!!inst.accessToken && !!prev.accessToken)
+            byUrl.set(key, prefer ? { ...prev, ...inst, url: prev.url } : prev)
+          }
+          this.instances = Array.from(byUrl.values())
           this.activeInstanceFilter = data.activeInstanceFilter || null
           this.activeAccountId = data.activeAccountId || null
+          this.primaryAccountId = data.primaryAccountId || null
+          this.ensurePrimaryAccount()
         }
       } catch (e) {
-        console.error('Failed to load instances from storage:', e)
+        logError('Failed to load instances from storage:', e)
       }
     },
 
@@ -200,19 +245,53 @@ export const useInstancesStore = defineStore('instances', {
       if (typeof window === 'undefined') return
 
       try {
+        // Never persist clientSecret — XSS would steal revoke ability + app credentials
         const toSave = {
           instances: this.instances.map((i) => ({
             ...i,
+            clientSecret: null,
             isConnecting: false,
             error: null,
           })),
           activeInstanceFilter: this.activeInstanceFilter,
           activeAccountId: this.activeAccountId,
+          primaryAccountId: this.primaryAccountId,
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
       } catch (e) {
-        console.error('Failed to save instances to storage:', e)
+        logError('Failed to save instances to storage:', e)
       }
+    },
+
+    /** Keep a stable "main" identity for the NeoSpace session */
+    ensurePrimaryAccount() {
+      const authed = this.authenticatedInstances
+      if (!authed.length) {
+        this.primaryAccountId = null
+        return
+      }
+      if (
+        !this.primaryAccountId ||
+        !authed.some((i) => i.id === this.primaryAccountId)
+      ) {
+        this.primaryAccountId = authed[0]!.id
+      }
+    },
+
+    setPrimaryAccount(instanceId: string) {
+      if (!this.authenticatedInstances.some((i) => i.id === instanceId)) return
+      this.primaryAccountId = instanceId
+      this.saveToStorage()
+    },
+
+    /** Threads-style quick swap through signed-in accounts */
+    cycleActiveAccount(): ConnectedInstance | null {
+      const authed = this.authenticatedInstances
+      if (authed.length < 2) return this.activeAccount
+      const idx = authed.findIndex((i) => i.id === this.activeAccount?.id)
+      const next = authed[(idx + 1) % authed.length]!
+      this.setActiveAccount(next.id)
+      return next
     },
 
     migrateLegacyAuth() {
@@ -254,11 +333,12 @@ export const useInstancesStore = defineStore('instances', {
         if (!this.activeAccountId && instance) {
           this.activeAccountId = instance.id
         }
+        this.ensurePrimaryAccount()
 
         this.saveToStorage()
         localStorage.removeItem(LEGACY_AUTH_KEY)
       } catch (e) {
-        console.warn('Failed to migrate legacy auth:', e)
+        logWarn('Failed to migrate legacy auth:', e)
       }
     },
 
@@ -326,6 +406,10 @@ export const useInstancesStore = defineStore('instances', {
         if (this.activeAccountId === instanceId) {
           this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
         }
+        if (this.primaryAccountId === instanceId) {
+          this.primaryAccountId = this.authenticatedInstances[0]?.id ?? null
+        }
+        this.ensurePrimaryAccount()
         this.saveToStorage()
       }
     },
@@ -360,7 +444,9 @@ export const useInstancesStore = defineStore('instances', {
         })
 
         instance.clientId = app.clientId ?? null
-        instance.clientSecret = app.clientSecret ?? null
+        // Keep secret in sessionStorage only — never long-term localStorage
+        instance.clientSecret = null
+        if (app.clientSecret) stashClientSecret(instanceId, app.clientSecret)
 
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('neospace_auth_instance_id', instanceId)
@@ -368,11 +454,16 @@ export const useInstancesStore = defineStore('instances', {
 
         this.saveToStorage()
 
+        const { state, codeChallenge } = await beginOAuthChallenge()
+
         const params = new URLSearchParams({
           client_id: instance.clientId!,
           redirect_uri: getRedirectUri(),
           response_type: 'code',
           scope: SCOPES,
+          state,
+          code_challenge: codeChallenge,
+          code_challenge_method: 'S256',
         })
 
         return `${instance.url}/oauth/authorize?${params.toString()}`
@@ -383,7 +474,7 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    async completeAuth(code: string) {
+    async completeAuth(code: string, stateFromQuery: string | null = null) {
       const instanceId =
         typeof window !== 'undefined'
           ? sessionStorage.getItem('neospace_auth_instance_id')
@@ -393,27 +484,38 @@ export const useInstancesStore = defineStore('instances', {
         throw new Error('No pending authentication')
       }
 
+      const challenge = consumeOAuthChallenge(stateFromQuery)
+      if (!challenge.ok) {
+        throw new Error(challenge.error || 'Invalid OAuth state')
+      }
+
       const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) throw new Error('Instance not found')
 
       instance.isConnecting = true
 
       try {
-        if (!instance.clientId || !instance.clientSecret) {
+        const clientSecret = readClientSecret(instanceId)
+        if (!instance.clientId || !clientSecret) {
           throw new Error('Missing OAuth credentials')
+        }
+
+        const tokenBody: Record<string, string> = {
+          client_id: instance.clientId,
+          client_secret: clientSecret,
+          redirect_uri: getRedirectUri(),
+          grant_type: 'authorization_code',
+          code,
+          scope: SCOPES,
+        }
+        if (challenge.codeVerifier) {
+          tokenBody.code_verifier = challenge.codeVerifier
         }
 
         const response = await fetch(`${instance.url}/oauth/token`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            client_id: instance.clientId,
-            client_secret: instance.clientSecret,
-            redirect_uri: getRedirectUri(),
-            grant_type: 'authorization_code',
-            code,
-            scope: SCOPES,
-          }),
+          body: JSON.stringify(tokenBody),
         })
 
         if (!response.ok) {
@@ -423,6 +525,7 @@ export const useInstancesStore = defineStore('instances', {
 
         const data = await response.json()
         instance.accessToken = data.access_token
+        instance.clientSecret = null
 
         const client = createRestAPIClient({
           url: instance.url,
@@ -434,6 +537,12 @@ export const useInstancesStore = defineStore('instances', {
         instance.error = null
 
         this.activeAccountId = instance.id
+        // First signed-in account becomes the session main; later adds stay linked under it
+        if (!this.primaryAccountId) {
+          this.primaryAccountId = instance.id
+        } else {
+          this.ensurePrimaryAccount()
+        }
 
         if (typeof window !== 'undefined') {
           sessionStorage.removeItem('neospace_auth_instance_id')
@@ -452,19 +561,20 @@ export const useInstancesStore = defineStore('instances', {
       const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) return
 
-      if (instance.accessToken && instance.clientId && instance.clientSecret) {
+      const clientSecret = instance.clientSecret || readClientSecret(instanceId)
+      if (instance.accessToken && instance.clientId && clientSecret) {
         try {
           await fetch(`${instance.url}/oauth/revoke`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               client_id: instance.clientId,
-              client_secret: instance.clientSecret,
+              client_secret: clientSecret,
               token: instance.accessToken,
             }),
           })
         } catch {
-          // Ignore
+          // Ignore — still clear local session
         }
       }
 
@@ -472,12 +582,22 @@ export const useInstancesStore = defineStore('instances', {
       instance.clientId = null
       instance.clientSecret = null
       instance.user = null
+      clearClientSecret(instanceId)
 
       if (this.activeAccountId === instanceId) {
         this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
       }
+      if (this.primaryAccountId === instanceId) {
+        this.primaryAccountId = this.authenticatedInstances[0]?.id ?? null
+      }
 
       this.saveToStorage()
+    },
+
+    /** Revoke tokens then drop the instance from NeoSpace */
+    async removeAccount(instanceId: string) {
+      await this.logoutInstance(instanceId)
+      this.removeInstance(instanceId)
     },
 
     /** Log out of the active account */
@@ -557,11 +677,12 @@ export const useInstancesStore = defineStore('instances', {
         try {
           await this.addInstance(DEFAULT_PUBLIC_INSTANCE)
         } catch {
-          console.warn('Failed to add default instance')
+          logWarn('Failed to add default instance')
         }
       }
 
       await this.verifyAllInstances()
+      this.ensurePrimaryAccount()
       this.isInitialized = true
     },
 
@@ -610,7 +731,7 @@ export const useInstancesStore = defineStore('instances', {
           }))
         } catch (e: any) {
           const message = e?.message || 'Failed to fetch'
-          console.warn(`Failed to fetch from ${instance.url}:`, e)
+          logWarn(`Failed to fetch from ${instance.url}:`, e)
           errors.push(`${instance.name}: ${message}`)
           return []
         }
@@ -631,7 +752,7 @@ export const useInstancesStore = defineStore('instances', {
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
 
-      return allStatuses
+      return dedupeStatusesByIdentity(allStatuses).slice(0, limit)
     },
 
     async fetchMergedHomeTimeline(
@@ -660,7 +781,7 @@ export const useInstancesStore = defineStore('instances', {
             _instanceUrl: instance.url,
           }))
         } catch (e) {
-          console.warn(`Failed to fetch home from ${instance.url}:`, e)
+          logWarn(`Failed to fetch home from ${instance.url}:`, e)
           return []
         }
       })
@@ -672,7 +793,7 @@ export const useInstancesStore = defineStore('instances', {
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
 
-      return allStatuses
+      return dedupeStatusesByIdentity(allStatuses).slice(0, Math.max(limit, limit * Math.max(1, authInstances.length)))
     },
 
     async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {
@@ -698,7 +819,7 @@ export const useInstancesStore = defineStore('instances', {
         this.previewInstanceInfo[domain] = apiInfo
         return apiInfo
       } catch (e) {
-        console.warn(`Failed to fetch instance info for ${domain}:`, e)
+        logWarn(`Failed to fetch instance info for ${domain}:`, e)
         return null
       }
     },

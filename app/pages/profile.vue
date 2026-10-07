@@ -10,15 +10,93 @@
 import { useProfileStore } from '~/stores/profile'
 import { useInstancesStore } from '~/stores/instances'
 import { useThemeStore } from '~/stores/theme'
-import { useAccountsManager } from '~/composables/useAccountsManager'
+import { useComposeSheetStore } from '~/stores/composeSheet'
 import type { mastodon } from 'masto'
+import {
+  sanitizeDisplayName,
+  sanitizeFieldHtml,
+  sanitizeStatusHtml,
+  stripHtml,
+} from '~/utils/sanitizeHtml'
+
+const INTERNAL_FIELD_NAMES = new Set([
+  'neospace_columns',
+  'css',
+  'custom_css',
+  'theme',
+  'style',
+  'chaos_css',
+])
+
+const normalizeFieldKey = (name: string) =>
+  name.toLowerCase().replace(/[^a-z_]/g, '')
+
+const extractHttpUrl = (raw: string): string | null => {
+  const plain = stripHtml(raw || '')
+  const hrefMatch = raw?.match(/href=["'](https?:\/\/[^"']+)["']/i)
+  if (hrefMatch?.[1]) return hrefMatch[1]
+  const bare = plain.match(/https?:\/\/[^\s<>"']+/i)
+  return bare?.[0] || null
+}
 
 const profileStore = useProfileStore()
 const instancesStore = useInstancesStore()
 const themeStore = useThemeStore()
-const { open: openAccounts } = useAccountsManager()
+const composeSheet = useComposeSheetStore()
+const { open: openAccountSwitcher } = useAccountSwitcher()
 const route = useRoute()
 const router = useRouter()
+
+const canSwitchAccounts = computed(
+  () =>
+    profileStore.isOwnProfile &&
+    !route.query.user &&
+    instancesStore.hasAuthenticatedInstance,
+)
+
+const safeProfileName = computed(() =>
+  sanitizeDisplayName(
+    profileStore.viewedProfile?.displayName || profileStore.viewedProfile?.username || '',
+  ),
+)
+const safeProfileNote = computed(() => sanitizeStatusHtml(profileStore.viewedProfile?.note || ''))
+
+type ProfileFieldToken = {
+  name: string
+  plainValue: string
+  safeValue: string
+  href: string | null
+  verifiedAt: string | null
+}
+
+const fieldTokens = computed((): ProfileFieldToken[] =>
+  (profileStore.viewedProfile?.fields || [])
+    .filter((f) => !INTERNAL_FIELD_NAMES.has(normalizeFieldKey(f.name || '')))
+    .map((f) => {
+      const plainValue = stripHtml(f.value || '')
+      return {
+        name: f.name || '',
+        plainValue,
+        safeValue: sanitizeFieldHtml(f.value || ''),
+        href: extractHttpUrl(f.value || ''),
+        verifiedAt: f.verifiedAt || null,
+      }
+    })
+    .filter((f) => f.name.trim() || f.plainValue.trim()),
+)
+
+const websiteFieldUrl = computed(() => {
+  const withUrl = fieldTokens.value.find((f) => f.href)
+  return withUrl?.href || null
+})
+
+const instanceProfileUrl = computed(() => profileStore.viewedProfile?.url || null)
+
+const chromeTitle = computed(() => {
+  const p = profileStore.viewedProfile
+  if (!p) return 'Profile'
+  return p.displayName || p.username || 'Profile'
+})
 
 // Followers modal ref
 const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void } | null>(null)
@@ -26,10 +104,88 @@ const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void 
 // Relationship state
 const relationship = ref<mastodon.v1.Relationship | null>(null)
 const isFollowLoading = ref(false)
+const profileTab = ref<'posts' | 'replies' | 'media' | 'insights'>('posts')
 
 // File input refs
 const avatarInput = ref<HTMLInputElement | null>(null)
 const headerInput = ref<HTMLInputElement | null>(null)
+
+const followerLabel = computed(() => {
+  const n = profileStore.viewedProfile?.followersCount ?? 0
+  const formatted = n >= 10000
+    ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '')}K`
+    : n.toLocaleString()
+  return `${formatted} follower${n === 1 ? '' : 's'}`
+})
+
+const tabFetchOpts = computed(() => {
+  if (profileTab.value === 'media') return { onlyMedia: true, excludeReplies: true }
+  if (profileTab.value === 'replies') return { excludeReplies: false, onlyMedia: false }
+  return { excludeReplies: true, onlyMedia: false }
+})
+
+const visibleStatuses = computed(() => {
+  const list = profileStore.statuses
+  if (profileTab.value === 'replies') {
+    // Prefer posts that are replies; fall back to full list if API didn't filter
+    const replies = list.filter((s) => !!s.inReplyToId)
+    return replies.length ? replies : list
+  }
+  if (profileTab.value === 'posts') {
+    return list.filter((s) => !s.inReplyToId)
+  }
+  return list
+})
+
+const setProfileTab = async (tab: 'posts' | 'replies' | 'media' | 'insights') => {
+  if (profileTab.value === tab) return
+  profileTab.value = tab
+  if (tab === 'insights') return
+  const opts =
+    tab === 'media'
+      ? { onlyMedia: true, excludeReplies: true }
+      : tab === 'replies'
+        ? { excludeReplies: false, onlyMedia: false }
+        : { excludeReplies: true, onlyMedia: false }
+  await profileStore.fetchStatuses(true, opts)
+}
+
+const shareProfile = async () => {
+  const p = profileStore.viewedProfile
+  if (!p) return
+  const url = p.url || `${window.location.origin}/profile?user=${encodeURIComponent(p.acct)}`
+  const title = p.displayName || p.username
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, url, text: `@${p.acct}` })
+      return
+    }
+  } catch {
+    /* cancelled */
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+  } catch {
+    /* ignore */
+  }
+}
+
+const messageUser = async () => {
+  const account = profileStore.viewedProfile
+  if (!account?.acct) return
+  if (!instancesStore.hasAuthenticatedInstance) {
+    router.push('/login')
+    return
+  }
+  const { openOrComposeDirect } = await import('~/utils/dmHelpers')
+  await openOrComposeDirect(account, router, {
+    onPosted: async (status) => {
+      const { useConversationsStore } = await import('~/stores/conversations')
+      await useConversationsStore().fetchConversations(true)
+      await router.push(`/status/${status.id}`)
+    },
+  })
+}
 
 async function loadProfileFromRoute() {
   const userParam = route.query.user
@@ -40,6 +196,8 @@ async function loadProfileFromRoute() {
   } else {
     await profileStore.fetchProfile()
   }
+
+  profileTab.value = 'posts'
 
   if (!profileStore.isOwnProfile) {
     relationship.value = await profileStore.getRelationship()
@@ -81,32 +239,10 @@ watch(
   },
 )
 
-const switchOwnAccount = async (instanceId: string) => {
-  if (route.query.user) return
-  if (instancesStore.activeAccount?.id === instanceId) return
-  instancesStore.setActiveAccount(instanceId)
-  await profileStore.fetchProfile()
-  relationship.value = null
-}
-
 // Cleanup
 onUnmounted(() => {
   profileStore.clear()
 })
-
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  
-  const hours = Math.floor(diff / (1000 * 60 * 60))
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  
-  if (hours < 24) return `${hours}h ago`
-  if (days < 7) return `${days}d ago`
-  
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
 
 const handleFollow = async () => {
   isFollowLoading.value = true
@@ -162,67 +298,66 @@ useHead({
 
 <template>
   <div class="profile-page">
+    <SubviewChrome :title="chromeTitle">
+      <template #actions>
+        <a
+          v-if="websiteFieldUrl"
+          class="subview-chrome__btn neo-tip"
+          :href="websiteFieldUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Website"
+          aria-label="Website"
+        >
+          <NeoIcon name="globe" :size="18" :stroke="1.75" />
+        </a>
+        <a
+          v-if="instanceProfileUrl"
+          class="subview-chrome__btn neo-tip"
+          :href="instanceProfileUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open on instance"
+          aria-label="Open on instance"
+        >
+          <NeoIcon name="servers" :size="18" :stroke="1.75" />
+        </a>
+        <button
+          v-if="profileStore.viewedProfile"
+          type="button"
+          class="subview-chrome__btn neo-tip"
+          title="Share profile"
+          aria-label="Share profile"
+          @click="shareProfile"
+        >
+          <NeoIcon name="share" :size="18" :stroke="1.75" />
+        </button>
+        <button
+          v-if="!profileStore.isOwnProfile && profileStore.viewedProfile && instancesStore.hasAuthenticatedInstance"
+          type="button"
+          class="subview-chrome__btn neo-tip"
+          title="Message"
+          aria-label="Message"
+          @click="messageUser"
+        >
+          <NeoIcon name="message" :size="18" :stroke="1.75" />
+        </button>
+      </template>
+    </SubviewChrome>
+
     <!-- Followers/Following Modal -->
     <FollowersModal 
       ref="followersModalRef" 
       :account-id="profileStore.viewedProfile?.id"
     />
     
-    <!-- Connected Accounts Overview (when viewing own profile with multi-instance) -->
-    <section 
-      v-if="instancesStore.authenticatedInstances.length > 0 && !route.query.user" 
-      class="connected-accounts neo-card"
-    >
-      <div class="connected-accounts__header">
-        <h2>Your accounts</h2>
-        <button class="connected-accounts__add" @click="openAccounts()">
-          Accounts &amp; servers
-        </button>
-      </div>
-      
-      <div class="connected-accounts__list">
-        <button 
-          v-for="instance in instancesStore.authenticatedInstances" 
-          :key="instance.id"
-          type="button"
-          class="account-card"
-          :class="{ 'account-card--active': instance.id === instancesStore.activeAccount?.id }"
-          @click="switchOwnAccount(instance.id)"
-        >
-          <img 
-            :src="instance.user?.avatar" 
-            :alt="instance.user?.displayName || instance.user?.username"
-            class="account-card__avatar"
-          />
-          <div class="account-card__info">
-            <span class="account-card__name">{{ instance.user?.displayName || instance.user?.username }}</span>
-            <span class="account-card__handle">@{{ instance.user?.acct }}</span>
-            <span class="account-card__instance">{{ instance.name }}</span>
-          </div>
-          <div class="account-card__stats">
-            <span v-if="instance.id === instancesStore.activeAccount?.id" class="account-card__posting">Posting as</span>
-            <span>{{ instance.user?.statusesCount }} posts</span>
-            <span>{{ instance.user?.followersCount }} followers</span>
-          </div>
-        </button>
-      </div>
-      
-      <div v-if="instancesStore.watchingInstances.length > 0" class="watching-instances">
-        <span class="watching-label">Also watching:</span>
-        <span 
-          v-for="instance in instancesStore.watchingInstances" 
-          :key="instance.id"
-          class="watching-badge"
-        >
-          {{ instance.name }}
-        </span>
-      </div>
-    </section>
-    
+    <p v-if="route.query.linked === '1' && !route.query.user" class="profile-linked-banner" role="status">
+      Linked. Tap your name to switch.
+    </p>
+
     <!-- Loading State -->
-    <div v-if="profileStore.isLoading" class="profile-loading">
-      <span class="profile-loading__spinner">🌀</span>
-      <p>Loading profile...</p>
+    <div v-if="profileStore.isLoading" class="profile-loading" aria-busy="true">
+      <FunLoader fill label="Loading profile" />
     </div>
 
     <!-- Error State -->
@@ -234,457 +369,364 @@ useHead({
 
     <!-- Profile Content -->
     <template v-else-if="profileStore.viewedProfile">
-      <!-- Hero Section -->
       <section class="profile-hero">
-        <!-- Header Image -->
-        <div class="profile-header">
-          <img 
-            v-if="profileStore.viewedProfile.header && !profileStore.viewedProfile.header.includes('missing')"
-            :src="profileStore.viewedProfile.header"
-            :alt="`${profileStore.viewedProfile.displayName}'s header`"
-            class="profile-header__image"
-          />
-          <div v-else class="profile-header__placeholder" />
-          
-          <!-- Edit header button -->
-          <button 
-            v-if="profileStore.isOwnProfile && profileStore.isEditing"
-            class="profile-header__edit"
-            @click="triggerHeaderUpload"
-          >
-            📷 Change Header
-          </button>
-          <input 
-            ref="headerInput"
-            type="file"
-            accept="image/*"
-            class="hidden-input"
-            @change="handleHeaderChange"
-          />
-        </div>
-
-        <!-- Avatar & Basic Info -->
-        <div class="profile-identity">
+        <!-- Threads-style top: avatar left, actions right -->
+        <div class="profile-top">
           <div class="profile-avatar-wrapper">
-            <img 
+            <img
               :src="profileStore.viewedProfile.avatar"
               :alt="profileStore.viewedProfile.displayName || profileStore.viewedProfile.username"
               class="profile-avatar"
             />
-            <!-- Edit avatar button -->
-            <button 
+            <button
               v-if="profileStore.isOwnProfile && profileStore.isEditing"
+              type="button"
               class="profile-avatar__edit"
+              aria-label="Change avatar"
               @click="triggerAvatarUpload"
             >
-              📷
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
             </button>
-            <input 
+            <input
               ref="avatarInput"
               type="file"
               accept="image/*"
               class="hidden-input"
               @change="handleAvatarChange"
             />
-            <!-- Badges -->
-            <div class="profile-badges">
-              <span v-if="profileStore.viewedProfile.bot" class="profile-badge profile-badge--bot">🤖 Bot</span>
-              <span v-if="profileStore.viewedProfile.locked" class="profile-badge profile-badge--locked">🔒</span>
-            </div>
           </div>
 
-          <div class="profile-info">
-            <!-- Edit Mode: Display Name -->
-            <template v-if="profileStore.isEditing">
-              <input 
-                v-model="profileStore.editForm.displayName"
-                type="text"
-                class="profile-name-input neo-input"
-                placeholder="Display Name"
-              />
-            </template>
-            <template v-else>
-              <h1 class="profile-name" v-html="profileStore.viewedProfile.displayName || profileStore.viewedProfile.username" />
-            </template>
-            
-            <p class="profile-handle">
-              @{{ profileStore.viewedProfile.acct }}
-            </p>
+        </div>
 
-            <!-- Stats Row -->
-            <div class="profile-stats">
-              <div class="profile-stat">
-                <span class="profile-stat__value">{{ profileStore.viewedProfile.statusesCount?.toLocaleString() }}</span>
-                <span class="profile-stat__label">Posts</span>
-              </div>
-              <button 
-                class="profile-stat profile-stat--clickable"
-                @click="followersModalRef?.open('following')"
-              >
-                <span class="profile-stat__value">{{ profileStore.viewedProfile.followingCount?.toLocaleString() }}</span>
-                <span class="profile-stat__label">Following</span>
-              </button>
-              <button 
-                class="profile-stat profile-stat--clickable"
-                @click="followersModalRef?.open('followers')"
-              >
-                <span class="profile-stat__value">{{ profileStore.viewedProfile.followersCount?.toLocaleString() }}</span>
-                <span class="profile-stat__label">Followers</span>
-              </button>
-            </div>
+        <div class="profile-identity">
+          <template v-if="profileStore.isEditing">
+            <input
+              v-model="profileStore.editForm.displayName"
+              type="text"
+              class="profile-name-input neo-input"
+              placeholder="Display name"
+            />
+          </template>
+          <button
+            v-else-if="canSwitchAccounts"
+            type="button"
+            class="profile-name profile-name--switch"
+            aria-haspopup="dialog"
+            aria-label="Switch account"
+            @click="openAccountSwitcher"
+          >
+            <span class="profile-name__text" v-html="safeProfileName" />
+            <svg
+              class="profile-name__chevron"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          <h1 v-else class="profile-name" v-html="safeProfileName" />
+
+          <p class="profile-handle">
+            @{{ profileStore.viewedProfile.acct }}
+            <span v-if="profileStore.viewedProfile.bot" class="profile-chip">bot</span>
+            <span v-if="profileStore.viewedProfile.locked" class="profile-chip profile-chip--lock" title="Private">
+              <NeoIcon name="lock" :size="12" :stroke="2" />
+            </span>
+          </p>
+
+          <template v-if="profileStore.isEditing">
+            <textarea
+              v-model="profileStore.editForm.note"
+              class="profile-bio-input neo-input"
+              placeholder="Write a bio…"
+              rows="3"
+            />
+          </template>
+          <div
+            v-else-if="profileStore.viewedProfile.note"
+            class="profile-bio"
+            v-html="safeProfileNote"
+          />
+
+          <!-- Profile fields as wrapping token chips (internal sync fields hidden) -->
+          <div v-if="!profileStore.isEditing && fieldTokens.length" class="profile-tokens">
+            <component
+              :is="field.href ? 'a' : 'span'"
+              v-for="field in fieldTokens"
+              :key="field.name + field.plainValue"
+              class="profile-token"
+              :class="{ 'profile-token--link': !!field.href }"
+              v-bind="
+                field.href
+                  ? { href: field.href, target: '_blank', rel: 'noopener noreferrer' }
+                  : {}
+              "
+              :title="field.plainValue || field.name"
+            >
+              <span v-if="field.name" class="profile-token__label">{{ field.name }}</span>
+              <span class="profile-token__value">{{ field.plainValue || '—' }}</span>
+              <span v-if="field.verifiedAt" class="profile-token__verified" title="Verified">✓</span>
+            </component>
           </div>
 
-          <!-- Action Buttons -->
-          <div class="profile-actions">
+          <button
+            type="button"
+            class="profile-followers"
+            @click="followersModalRef?.open('followers')"
+          >
+            {{ followerLabel }}
+          </button>
+
+          <div class="profile-cta">
             <template v-if="profileStore.isOwnProfile">
               <template v-if="profileStore.isEditing">
-                <button 
-                  class="neo-btn neo-btn--primary"
+                <button
+                  type="button"
+                  class="neo-btn neo-btn--primary profile-cta__btn"
                   :disabled="profileStore.isUpdating"
                   @click="handleSaveProfile"
                 >
-                  {{ profileStore.isUpdating ? 'Saving...' : 'Save Changes' }}
+                  {{ profileStore.isUpdating ? 'Saving…' : 'Done' }}
                 </button>
-                <button 
-                  class="neo-btn neo-btn--secondary"
+                <button
+                  type="button"
+                  class="neo-btn neo-btn--secondary profile-cta__btn"
                   @click="profileStore.cancelEdit"
                 >
                   Cancel
                 </button>
               </template>
               <template v-else>
-                <button 
-                  class="neo-btn neo-btn--primary"
+                <button
+                  type="button"
+                  class="neo-btn neo-btn--secondary profile-cta__btn"
                   @click="profileStore.toggleEditMode"
                 >
-                  ✏️ Edit Profile
+                  Edit profile
+                </button>
+                <button
+                  type="button"
+                  class="neo-btn neo-btn--secondary profile-cta__btn"
+                  @click="shareProfile"
+                >
+                  Share profile
                 </button>
               </template>
             </template>
             <template v-else>
-              <button 
-                class="neo-btn"
+              <button
+                type="button"
+                class="neo-btn profile-cta__btn"
                 :class="relationship?.following ? 'neo-btn--secondary' : 'neo-btn--primary'"
                 :disabled="isFollowLoading"
                 @click="handleFollow"
               >
-                {{ relationship?.following ? 'Following ✓' : 'Follow' }}
+                {{ relationship?.following ? 'Following' : 'Follow' }}
               </button>
-              <button class="neo-btn neo-btn--ghost">💬 Message</button>
+              <button
+                type="button"
+                class="neo-btn neo-btn--secondary profile-cta__btn"
+                @click="messageUser"
+              >
+                Message
+              </button>
             </template>
           </div>
-        </div>
-      </section>
 
-      <!-- Bio Section -->
-      <section class="profile-bio neo-card">
-        <h2 class="profile-section-title">About</h2>
-        
-        <template v-if="profileStore.isEditing">
-          <textarea
-            v-model="profileStore.editForm.note"
-            class="profile-bio-input neo-input"
-            placeholder="Tell the world about yourself..."
-            rows="4"
-          />
-        </template>
-        <template v-else>
-          <div 
-            v-if="profileStore.viewedProfile.note"
-            class="profile-bio__content"
-            v-html="profileStore.viewedProfile.note"
-          />
-          <p v-else class="profile-bio__empty">No bio yet.</p>
-        </template>
+          <!-- Edit-only extras (fields, header, privacy) stay tucked away -->
+          <div v-if="profileStore.isEditing" class="profile-edit-extras">
+            <button type="button" class="neo-btn neo-btn--ghost" @click="triggerHeaderUpload">
+              Change header image
+            </button>
+            <input
+              ref="headerInput"
+              type="file"
+              accept="image/*"
+              class="hidden-input"
+              @change="handleHeaderChange"
+            />
 
-        <!-- Join Date -->
-        <p class="profile-joined">
-          📅 Joined {{ profileStore.joinDate }}
-        </p>
-      </section>
-
-      <!-- Profile Fields -->
-      <section v-if="profileStore.viewedProfile.fields?.length || profileStore.isEditing" class="profile-fields neo-card">
-        <h2 class="profile-section-title">Profile Fields</h2>
-        
-        <template v-if="profileStore.isEditing">
-          <div class="profile-fields-editor">
-            <div 
-              v-for="(field, index) in profileStore.editForm.fields" 
-              :key="index"
-              class="profile-field-row"
-            >
-              <input 
-                v-model="field.name"
-                type="text"
-                class="neo-input profile-field-name"
-                placeholder="Label"
-              />
-              <input 
-                v-model="field.value"
-                type="text"
-                class="neo-input profile-field-value"
-                placeholder="Value"
-              />
-              <button 
-                class="profile-field-remove"
-                @click="profileStore.removeField(index)"
+            <div class="profile-fields-editor">
+              <div
+                v-for="(field, index) in profileStore.editForm.fields"
+                :key="index"
+                class="profile-field-row"
               >
-                ✕
+                <input v-model="field.name" type="text" class="neo-input" placeholder="Label" />
+                <input v-model="field.value" type="text" class="neo-input" placeholder="Link or value" />
+                <button type="button" class="profile-field-remove" @click="profileStore.removeField(index)">✕</button>
+              </div>
+              <button
+                v-if="profileStore.editForm.fields.length < 4"
+                type="button"
+                class="neo-btn neo-btn--ghost"
+                @click="profileStore.addField"
+              >
+                + Add field
               </button>
             </div>
-            <button 
-              v-if="profileStore.editForm.fields.length < 4"
-              class="neo-btn neo-btn--ghost profile-field-add"
-              @click="profileStore.addField"
+
+            <label class="profile-toggle">
+              <input v-model="profileStore.editForm.locked" type="checkbox" />
+              <span>Require follow approval</span>
+            </label>
+            <label class="profile-toggle">
+              <input v-model="profileStore.editForm.discoverable" type="checkbox" />
+              <span>Discoverable in search</span>
+            </label>
+            <label class="profile-toggle">
+              <input v-model="profileStore.editForm.bot" type="checkbox" />
+              <span>This is a bot account</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Threads-style tabs -->
+      <nav class="profile-tabs" aria-label="Profile sections" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          class="profile-tabs__tab"
+          :class="{ 'profile-tabs__tab--active': profileTab === 'posts' }"
+          :aria-selected="profileTab === 'posts'"
+          @click="setProfileTab('posts')"
+        >
+          Posts
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="profile-tabs__tab"
+          :class="{ 'profile-tabs__tab--active': profileTab === 'replies' }"
+          :aria-selected="profileTab === 'replies'"
+          @click="setProfileTab('replies')"
+        >
+          Replies
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="profile-tabs__tab"
+          :class="{ 'profile-tabs__tab--active': profileTab === 'media' }"
+          :aria-selected="profileTab === 'media'"
+          @click="setProfileTab('media')"
+        >
+          Media
+        </button>
+        <button
+          v-if="profileStore.isOwnProfile"
+          type="button"
+          role="tab"
+          class="profile-tabs__tab"
+          :class="{ 'profile-tabs__tab--active': profileTab === 'insights' }"
+          :aria-selected="profileTab === 'insights'"
+          @click="setProfileTab('insights')"
+        >
+          Insights
+        </button>
+      </nav>
+
+      <ProfileInsights
+        v-if="profileTab === 'insights' && profileStore.isOwnProfile && profileStore.viewedProfile"
+        :account="profileStore.viewedProfile"
+      />
+
+      <template v-else>
+        <section v-if="profileStore.pinnedStatuses.length && profileTab === 'posts'" class="profile-pinned">
+          <RealPostCard
+            v-for="status in profileStore.pinnedStatuses"
+            :key="'pin-' + status.id"
+            :status="status"
+          />
+        </section>
+
+        <section class="profile-posts-section">
+          <div v-if="profileStore.isLoadingStatuses && !visibleStatuses.length" class="profile-posts-loading" aria-busy="true">
+            <FunLoader fill label="Loading posts" />
+          </div>
+
+          <div v-else-if="visibleStatuses.length" class="profile-posts">
+            <RealPostCard
+              v-for="status in visibleStatuses"
+              :key="status.id"
+              :status="status"
+            />
+
+            <button
+              v-if="profileStore.hasMoreStatuses"
+              type="button"
+              class="neo-btn neo-btn--secondary profile-load-more"
+              :disabled="profileStore.isLoadingStatuses"
+              @click="profileStore.fetchStatuses(false, tabFetchOpts)"
             >
-              + Add Field
+              {{ profileStore.isLoadingStatuses ? 'Loading…' : 'Load more' }}
             </button>
-            <p class="profile-fields-hint">
-              Profile fields show on your account. Use them for links, pronouns, or other details.
+          </div>
+
+          <div v-else class="profile-posts-empty">
+            <p>
+              {{
+                profileTab === 'media'
+                  ? 'No media yet.'
+                  : profileTab === 'replies'
+                    ? 'No replies yet.'
+                    : 'No posts yet.'
+              }}
             </p>
           </div>
-        </template>
-        <template v-else>
-          <dl class="profile-fields-list">
-            <div 
-              v-for="field in profileStore.viewedProfile.fields" 
-              :key="field.name"
-              class="profile-field"
-            >
-              <dt class="profile-field__name">{{ field.name }}</dt>
-              <dd class="profile-field__value" v-html="field.value" />
-              <span v-if="field.verifiedAt" class="profile-field__verified" title="Verified">✓</span>
-            </div>
-          </dl>
-        </template>
-      </section>
-
-      <!-- Privacy Settings (Edit Mode) -->
-      <section v-if="profileStore.isEditing" class="profile-privacy neo-card">
-        <h2 class="profile-section-title">Privacy & Settings</h2>
-        
-        <label class="profile-toggle">
-          <input v-model="profileStore.editForm.locked" type="checkbox" />
-          <span class="profile-toggle__label">
-            <span>🔒 Require follow approval</span>
-            <span class="profile-toggle__desc">New followers must be approved</span>
-          </span>
-        </label>
-
-        <label class="profile-toggle">
-          <input v-model="profileStore.editForm.discoverable" type="checkbox" />
-          <span class="profile-toggle__label">
-            <span>🔍 Discoverable</span>
-            <span class="profile-toggle__desc">Appear in profile directories</span>
-          </span>
-        </label>
-
-        <label class="profile-toggle">
-          <input v-model="profileStore.editForm.bot" type="checkbox" />
-          <span class="profile-toggle__label">
-            <span>🤖 This is a bot account</span>
-            <span class="profile-toggle__desc">Mark as automated</span>
-          </span>
-        </label>
-      </section>
-
-      <!-- Pinned Posts -->
-      <section v-if="profileStore.pinnedStatuses.length" class="profile-pinned">
-        <h2 class="profile-section-title">📌 Pinned Posts</h2>
-        <div class="profile-posts">
-          <RealPostCard 
-            v-for="status in profileStore.pinnedStatuses" 
-            :key="status.id" 
-            :status="status"
-          />
-        </div>
-      </section>
-
-      <!-- Posts Section -->
-      <section class="profile-posts-section">
-        <h2 class="profile-section-title">Posts</h2>
-        
-        <div v-if="profileStore.isLoadingStatuses && !profileStore.statuses.length" class="profile-posts-loading">
-          <span>🌀</span> Loading posts...
-        </div>
-
-        <div v-else-if="profileStore.statuses.length" class="profile-posts">
-          <RealPostCard 
-            v-for="status in profileStore.statuses" 
-            :key="status.id" 
-            :status="status"
-          />
-
-          <button 
-            v-if="profileStore.hasMoreStatuses"
-            class="neo-btn neo-btn--secondary profile-load-more"
-            :disabled="profileStore.isLoadingStatuses"
-            @click="profileStore.fetchStatuses()"
-          >
-            {{ profileStore.isLoadingStatuses ? 'Loading...' : 'Load More' }}
-          </button>
-        </div>
-
-        <div v-else class="profile-posts-empty neo-card">
-          <span>📝</span>
-          <p>No posts yet.</p>
-        </div>
-      </section>
+        </section>
+      </template>
     </template>
   </div>
 </template>
 
 <style lang="scss" scoped>
 .profile-page {
-  max-width: 800px;
+  max-width: 640px;
   margin: 0 auto;
+  padding: 0 0 2rem;
 }
 
 .hidden-input {
   display: none;
 }
 
-// Connected Accounts Section
-.connected-accounts {
-  margin-bottom: 1.5rem;
-  
-  &__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1rem;
-    
-    h2 {
-      font-size: 1.125rem;
-      font-weight: 700;
-      color: var(--neo-text-primary);
-    }
-  }
-  
-  &__add {
-    background: transparent;
-    border: 1px dashed var(--neo-border-color);
-    color: var(--neo-accent);
-    padding: 0.375rem 0.75rem;
-    border-radius: 8px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    
-    &:hover {
-      border-color: var(--neo-accent);
-      background: var(--neo-accent-soft);
-    }
-  }
-  
-  &__list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-}
-
-.account-card {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  width: 100%;
-  padding: 0.875rem 1rem;
-  text-align: left;
-  background: var(--neo-bg-tertiary);
-  border-radius: 12px;
-  border: 1px solid var(--neo-border-color);
-  cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover {
-    border-color: var(--neo-text-muted);
-  }
-
-  &--active {
-    border-color: var(--neo-accent);
-    background: var(--neo-accent-soft);
-  }
-  
-  &__avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-  }
-  
-  &__info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-  }
-  
-  &__name {
-    font-weight: 600;
-    color: var(--neo-text-primary);
-    font-size: 0.9375rem;
-  }
-  
-  &__handle {
-    font-size: 0.8125rem;
-    color: var(--neo-text-muted);
-  }
-  
-  &__instance {
-    font-size: 0.75rem;
-    color: var(--neo-accent);
-    font-weight: 500;
-  }
-  
-  &__stats {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.125rem;
-    font-size: 0.75rem;
-    color: var(--neo-text-muted);
-  }
-
-  &__posting {
-    font-size: 0.625rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--neo-accent);
-  }
-}
-
-.watching-instances {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--neo-border-color);
-  flex-wrap: wrap;
-}
-
-.watching-label {
+.profile-linked-banner {
+  margin: 0.75rem 1rem 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: var(--neo-accent-soft);
+  color: var(--neo-text-primary);
   font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-}
+  line-height: 1.4;
 
-.watching-badge {
-  padding: 0.25rem 0.5rem;
-  background: var(--neo-bg-tertiary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-  font-size: 0.75rem;
-  color: var(--neo-text-secondary);
+  @media (min-width: 1024px) {
+    margin-left: 0;
+    margin-right: 0;
+  }
 }
 
 // Loading & Error States
-.profile-loading,
+.profile-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  min-height: min(70dvh, 36rem);
+  padding: 1.5rem;
+  box-sizing: border-box;
+}
+
 .profile-error,
 .profile-posts-empty {
   display: flex;
@@ -701,7 +743,7 @@ useHead({
 
   p {
     color: var(--neo-text-muted);
-    font-size: 1.125rem;
+    font-size: 1rem;
   }
 }
 
@@ -714,67 +756,15 @@ useHead({
   to { transform: rotate(360deg); }
 }
 
-// Hero Section
+// Threads-style hero — no banner, left avatar, compact CTAs
 .profile-hero {
-  margin-bottom: 1.5rem;
+  padding: 1rem 1rem 0.25rem;
 }
 
-.profile-header {
-  position: relative;
-  height: 280px;
-  border-radius: var(--neo-radius-xl);
-  overflow: hidden;
-  background: linear-gradient(135deg, var(--neo-accent), var(--neo-accent-hover));
-
-  &__image {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  &__placeholder {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, 
-      var(--neo-accent) 0%, 
-      color-mix(in srgb, var(--neo-accent) 70%, var(--neo-bg-primary)) 50%,
-      var(--neo-accent-hover) 100%
-    );
-  }
-
-  &__edit {
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    padding: 0.5rem 1rem;
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
-    border: none;
-    border-radius: var(--neo-radius-md);
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: background var(--neo-transition);
-
-    &:hover {
-      background: rgba(0, 0, 0, 0.9);
-    }
-  }
-}
-
-.profile-identity {
+.profile-top {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-top: -80px;
-  padding: 0 1.5rem;
-  text-align: center;
-
-  @media (min-width: 640px) {
-    flex-direction: row;
-    align-items: flex-end;
-    text-align: left;
-    gap: 1.5rem;
-  }
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
 }
 
 .profile-avatar-wrapper {
@@ -783,381 +773,347 @@ useHead({
 }
 
 .profile-avatar {
-  width: 160px;
-  height: 160px;
+  width: 86px;
+  height: 86px;
   border-radius: 50%;
-  border: 5px solid var(--neo-bg-secondary);
-  box-shadow: var(--neo-shadow-lg);
   object-fit: cover;
-  background-color: var(--neo-bg-secondary);
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
 }
 
 .profile-avatar__edit {
   position: absolute;
-  bottom: 8px;
-  right: 8px;
-  width: 40px;
-  height: 40px;
+  bottom: 0;
+  right: 0;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: var(--neo-accent);
-  border: 3px solid var(--neo-bg-secondary);
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  color: var(--neo-text-primary);
   cursor: pointer;
-  font-size: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform var(--neo-transition);
-
-  &:hover {
-    transform: scale(1.1);
-  }
 }
 
-.profile-badges {
-  position: absolute;
-  top: 8px;
-  right: -8px;
+.profile-identity {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-
-.profile-badge {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  border-radius: var(--neo-radius-full);
-  background: var(--neo-bg-tertiary);
-  border: 1px solid var(--neo-border-color);
-
-  &--bot {
-    background: var(--neo-accent-soft);
-    color: var(--neo-accent);
-  }
-}
-
-.profile-info {
-  flex: 1;
-  min-width: 0;
-  padding: 1rem 0;
-
-  @media (min-width: 640px) {
-    padding: 0.5rem 0;
-  }
+  align-items: flex-start;
+  text-align: left;
+  gap: 0.35rem;
 }
 
 .profile-name {
-  font-size: 2rem;
-  font-weight: 800;
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 700;
   color: var(--neo-text-primary);
-  margin-bottom: 0.25rem;
   line-height: 1.2;
+  letter-spacing: -0.02em;
 
   :deep(img.emoji) {
     height: 1em;
     vertical-align: middle;
   }
-}
 
-.profile-name-input {
-  font-size: 1.5rem;
-  font-weight: 700;
-  width: 100%;
-  max-width: 400px;
-}
-
-.profile-handle {
-  font-size: 1.125rem;
-  color: var(--neo-text-muted);
-  margin-bottom: 1rem;
-}
-
-.profile-stats {
-  display: flex;
-  gap: 2rem;
-  justify-content: center;
-
-  @media (min-width: 640px) {
-    justify-content: flex-start;
-  }
-}
-
-.profile-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: none;
-  border: none;
-  padding: 0;
-
-  @media (min-width: 640px) {
-    align-items: flex-start;
-  }
-
-  &__value {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: var(--neo-text-primary);
-  }
-
-  &__label {
-    font-size: 0.8125rem;
-    color: var(--neo-text-muted);
-  }
-
-  &--clickable {
+  &--switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    text-align: left;
     cursor: pointer;
-    padding: 0.5rem 0.75rem;
-    margin: -0.5rem -0.75rem;
-    border-radius: var(--neo-radius-md);
-    transition: all 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
 
-    &:hover {
-      background: var(--neo-bg-secondary);
-      
-      .profile-stat__value {
-        color: var(--neo-accent);
-      }
+    &:hover .profile-name__chevron,
+    &:focus-visible .profile-name__chevron {
+      color: var(--neo-text-primary);
     }
   }
 }
 
-.profile-actions {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 1rem;
-  flex-shrink: 0;
+.profile-name__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-  @media (min-width: 640px) {
-    margin-top: 0;
-    margin-left: auto;
+.profile-name__chevron {
+  flex-shrink: 0;
+  color: var(--neo-text-muted);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.profile-name-input {
+  font-size: 1.25rem;
+  font-weight: 700;
+  width: 100%;
+}
+
+.profile-handle {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--neo-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.profile-chip {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-tertiary);
+  text-transform: lowercase;
+
+  &--lock {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.15rem 0.35rem;
+    text-transform: none;
   }
 }
 
-// Bio Section
 .profile-bio {
-  margin-bottom: 1.5rem;
-}
-
-.profile-section-title {
-  font-size: 1.125rem;
-  font-weight: 700;
+  margin: 0.35rem 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
   color: var(--neo-text-primary);
-  margin-bottom: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+  width: 100%;
 
-.profile-bio__content {
-  font-size: 1rem;
-  line-height: 1.7;
-  color: var(--neo-text-secondary);
+  :deep(p) {
+    margin: 0 0 0.35rem;
+  }
 
   :deep(a) {
     color: var(--neo-accent);
   }
-
-  :deep(p) {
-    margin-bottom: 0.75rem;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-}
-
-.profile-bio__empty {
-  color: var(--neo-text-muted);
-  font-style: italic;
 }
 
 .profile-bio-input {
   width: 100%;
+  margin-top: 0.35rem;
   resize: vertical;
-  min-height: 100px;
 }
 
-.profile-joined {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--neo-border-color);
-  font-size: 0.875rem;
-  color: var(--neo-text-muted);
-}
-
-// Profile Fields
-.profile-fields {
-  margin-bottom: 1.5rem;
-}
-
-.profile-fields-list {
+.profile-tokens {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  width: 100%;
+  max-width: 100%;
 }
 
-.profile-field {
-  display: flex;
+.profile-token {
+  display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: var(--neo-bg-tertiary);
-  border-radius: var(--neo-radius-md);
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary, var(--neo-bg-tertiary));
+  color: var(--neo-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 550;
+  line-height: 1.25;
+  text-decoration: none;
+  box-sizing: border-box;
 
-  &__name {
-    font-weight: 600;
-    color: var(--neo-text-muted);
-    min-width: 100px;
-    font-size: 0.875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
+  &--link {
+    color: var(--neo-accent);
+    border-color: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
 
-  &__value {
-    flex: 1;
-    color: var(--neo-text-primary);
-
-    :deep(a) {
-      color: var(--neo-accent);
+    &:hover {
+      background: color-mix(in srgb, var(--neo-accent) 10%, var(--neo-bg-secondary, var(--neo-bg-tertiary)));
     }
   }
 
-  &__verified {
-    color: var(--neo-success);
-    font-weight: bold;
+  &__label {
+    color: var(--neo-text-quaternary);
+    font-weight: 600;
+    flex-shrink: 0;
   }
+
+  &__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__verified {
+    color: var(--neo-accent);
+    font-size: 0.6875rem;
+    flex-shrink: 0;
+  }
+}
+
+.profile-followers {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+    color: var(--neo-text-primary);
+  }
+}
+
+.profile-cta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.85rem;
+}
+
+.profile-cta__btn {
+  width: 100%;
+  justify-content: center;
+  font-weight: 600;
+  border-radius: 10px;
+}
+
+.profile-edit-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  width: 100%;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--neo-border-color);
 }
 
 .profile-fields-editor {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
 .profile-field-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.profile-field-name {
-  width: 120px;
-  flex-shrink: 0;
-}
-
-.profile-field-value {
-  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 0.35rem;
 }
 
 .profile-field-remove {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--neo-radius-md);
-  background: var(--neo-danger);
-  color: white;
   border: none;
+  background: transparent;
+  color: var(--neo-text-muted);
   cursor: pointer;
-  font-size: 1rem;
-  flex-shrink: 0;
-
-  &:hover {
-    opacity: 0.9;
-  }
-}
-
-.profile-field-add {
-  align-self: flex-start;
-}
-
-.profile-fields-hint {
-  margin-top: 0.75rem;
-  padding: 0.75rem;
-  background: var(--neo-accent-soft);
-  border-radius: var(--neo-radius-md);
-  font-size: 0.875rem;
-  color: var(--neo-text-secondary);
-
-  code {
-    font-family: var(--neo-font-mono);
-    background: var(--neo-bg-tertiary);
-    padding: 0.125rem 0.375rem;
-    border-radius: var(--neo-radius-sm);
-  }
-}
-
-// Privacy Settings
-.profile-privacy {
-  margin-bottom: 1.5rem;
+  padding: 0 0.35rem;
 }
 
 .profile-toggle {
   display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.75rem 0;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--neo-text-secondary);
   cursor: pointer;
-
-  & + & {
-    border-top: 1px solid var(--neo-border-color);
-  }
-
-  input[type="checkbox"] {
-    width: 20px;
-    height: 20px;
-    margin-top: 0.125rem;
-    accent-color: var(--neo-accent);
-  }
-
-  &__label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-  }
-
-  &__desc {
-    font-size: 0.8125rem;
-    color: var(--neo-text-muted);
-  }
 }
 
-// Posts Section
-.profile-pinned {
-  margin-bottom: 1.5rem;
-}
-
-.profile-posts-section {
-  margin-bottom: 2rem;
-}
-
-.profile-posts {
+.profile-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  border-bottom: 1px solid var(--neo-border-color);
+  margin: 0.75rem 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--neo-bg-primary);
+
+  @media (max-width: 1023px) {
+    top: 52px;
+  }
+}
+
+.profile-tabs__tab {
+  flex: 1;
+  height: 48px;
+  border: none;
+  background: transparent;
+  color: var(--neo-text-muted);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+
+  &--active {
+    color: var(--neo-text-primary);
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 20%;
+      right: 20%;
+      bottom: 0;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: var(--neo-text-primary);
+    }
+  }
+
+  &:hover:not(.profile-tabs__tab--active) {
+    color: var(--neo-text-secondary);
+  }
+}
+
+.profile-pinned,
+.profile-posts-section {
+  margin-top: 0;
 }
 
 .profile-posts-loading {
-  padding: 2rem;
-  text-align: center;
-  color: var(--neo-text-muted);
-
-  span {
-    display: inline-block;
-    animation: spin 1s linear infinite;
-  }
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  min-height: min(48dvh, 22rem);
+  padding: 1.25rem;
+  box-sizing: border-box;
 }
 
 .profile-load-more {
-  width: 100%;
-  margin-top: 1rem;
+  display: block;
+  margin: 1rem auto 2rem;
+}
+
+@media (max-width: 1023px) {
+  .profile-hero {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+.profile-pinned,
+.profile-posts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0 0.5rem 0.5rem;
 }
 
 // Chaos Mode Enhancements
 :global(.chaos-active) {
-  .profile-header__image,
-  .profile-header__placeholder {
-    filter: saturate(1.2);
-  }
-
   .profile-avatar {
     border-color: var(--neo-accent);
     box-shadow: 0 0 20px var(--neo-accent);
@@ -1166,11 +1122,7 @@ useHead({
   .profile-name {
     text-shadow: 0 0 10px var(--neo-text-primary);
   }
-
-  .profile-field {
-    border: 1px solid var(--neo-border-color);
-    box-shadow: 0 0 5px var(--neo-accent);
-  }
 }
+
 </style>
 

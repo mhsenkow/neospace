@@ -14,12 +14,12 @@ export function useAccountSearch() {
   const isLoadingFollowing = ref(false)
   let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-  const loadFollowing = async (limit = 40) => {
+  const loadFollowing = async (limit = 40, force = false) => {
     if (!instancesStore.currentUser?.id || !instancesStore.hasAuthenticatedInstance) {
       following.value = []
       return
     }
-    if (following.value.length) return
+    if (following.value.length && !force) return
     isLoadingFollowing.value = true
     try {
       const client = activeClient()

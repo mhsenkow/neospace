@@ -32,7 +32,8 @@ function originAllowed(origin: string | null): boolean {
   if (ALLOWED_ORIGINS.has(origin)) return true
   try {
     const host = new URL(origin).hostname
-    return host.endsWith('.neospace-dc4.pages.dev') || host.endsWith('.pages.dev')
+    // Only this Pages project’s preview hosts — not every *.pages.dev app
+    return host === 'neospace-dc4.pages.dev' || host.endsWith('.neospace-dc4.pages.dev')
   } catch {
     return false
   }

@@ -67,8 +67,8 @@ const canPost = computed(() => {
 })
 
 const visibilityOptions = [
-  { value: 'public', label: 'Public', icon: '🌍' },
-  { value: 'unlisted', label: 'Unlisted', icon: '🔓' },
+  { value: 'public', label: 'Public' },
+  { value: 'unlisted', label: 'Unlisted' },
 ]
 
 const handlePost = async () => {
@@ -178,18 +178,18 @@ const onFilePicked = async (e: Event) => {
           aria-label="Remove"
           @click="removeAttachment(item.localId)"
         >
-          ×
+          <NeoIcon name="x" :size="12" :stroke="2.5" />
         </button>
       </div>
     </div>
 
     <div v-if="error" class="group-compose__error">
-      <span>⚠️</span> {{ error }}
+      <NeoIcon name="alert" :size="16" :stroke="2" /> {{ error }}
     </div>
 
     <Transition name="fade">
       <div v-if="showSuccess" class="group-compose__success">
-        <span>✅</span> Posted to #{{ tag }}!
+        <NeoIcon name="check" :size="16" :stroke="2.5" /> Posted to #{{ tag }}!
       </div>
     </Transition>
 
@@ -210,11 +210,11 @@ const onFilePicked = async (e: Event) => {
           :disabled="!canAddMore || isPosting"
           @click="openFilePicker"
         >
-          📷
+          <NeoIcon name="image" :size="18" :stroke="1.75" />
         </button>
         <select v-model="visibility" class="group-compose__visibility">
           <option v-for="opt in visibilityOptions" :key="opt.value" :value="opt.value">
-            {{ opt.icon }} {{ opt.label }}
+            {{ opt.label }}
           </option>
         </select>
       </div>
@@ -450,16 +450,18 @@ const onFilePicked = async (e: Event) => {
 .group-compose__photo {
   width: 2rem;
   height: 2rem;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   border-radius: var(--neo-radius-chrome, 6px);
+  color: var(--neo-text-secondary);
   cursor: pointer;
-  font-size: 1rem;
 
   &:hover:not(:disabled) {
     background: var(--neo-accent-soft);
+    color: var(--neo-accent);
   }
 
   &:disabled {

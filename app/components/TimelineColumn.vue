@@ -8,9 +8,35 @@
 import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
-import type { ColumnConfig, ColumnFeedType } from '~/stores/columns'
+import { useColumnsStore, type ColumnConfig, type ColumnFeedType } from '~/stores/columns'
 import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
+import { dedupeStatusesByIdentity, statusIdentity } from '~/utils/statusIdentity'
+
+/** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
+const withBrowseOrigin = (
+  list: mastodon.v1.Status[],
+): (mastodon.v1.Status | ExtendedStatus)[] => {
+  const account =
+    instancesStore.activeAccount ||
+    instancesStore.instances.find((i) => i.accessToken) ||
+    instancesStore.instances[0]
+  if (!account) return list
+  return list.map((s) => ({
+    ...s,
+    _instanceId: account.id,
+    _instanceUrl: account.url,
+  }))
+}
+
+const fetchGroupPage = async (tag: string, maxId?: string) => {
+  const client = publicClient()
+  const list = await client.v1.timelines.tag.$select(tag).list({
+    limit: 20,
+    ...(maxId ? { maxId } : {}),
+  })
+  return withBrowseOrigin(list)
+}
 
 interface Props {
   column: ColumnConfig
@@ -26,6 +52,7 @@ interface Props {
    * Cleared on hover / focus-within via .neo-chrome.
    */
   recessed?: boolean
+  focused?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,6 +61,38 @@ const props = withDefaults(defineProps<Props>(), {
   dropTarget: false,
   dragging: false,
   recessed: false,
+  focused: false,
+})
+
+/** Desktop-only inline compose — mobile uses the + sheet (avoids stealing Loom handoff) */
+const isDesktop = ref(false)
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const mq = window.matchMedia('(min-width: 1024px)')
+  const sync = () => {
+    isDesktop.value = mq.matches
+  }
+  sync()
+  mq.addEventListener('change', sync)
+  onUnmounted(() => mq.removeEventListener('change', sync))
+})
+
+/** Flip = full-bleed snap — mobile only */
+const isFlip = computed(
+  () => !isDesktop.value && (props.column.viewMode || 'flow') === 'flip',
+)
+
+const syncFlipPort = () => {
+  const el = scrollContainer.value
+  if (!el || !isFlip.value) return
+  el.style.setProperty('--flip-port', `${el.clientHeight}px`)
+}
+
+watch(isFlip, () => {
+  nextTick(() => {
+    syncFlipPort()
+    scrollContainer.value?.scrollTo({ top: 0 })
+  })
 })
 const emit = defineEmits<{
   remove: []
@@ -44,6 +103,7 @@ const emit = defineEmits<{
   'column-drop': [fromColumnId: string]
   'move-left': []
   'move-right': []
+  focus: []
 }>()
 
 const onColumnDragStart = (e: DragEvent) => {
@@ -79,6 +139,11 @@ const onColumnDrop = (e: DragEvent) => {
 
 const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
+const columnsStore = useColumnsStore()
+
+const openProfileInColumn = (acct: string) => {
+  columnsStore.peekProfileInColumn(props.column.id, acct)
+}
 
 const statuses = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isLoading = ref(false)
@@ -95,10 +160,21 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const loadTrigger = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let pullStartY = 0
+let pullListening = false
+let flipRo: ResizeObserver | null = null
 
 /** Newer posts waiting while you read (never auto-jump) */
 const pendingNew = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isNearTop = ref(true)
+
+/** Mobile pull-to-refresh (no preventDefault — that fights iOS compositing) */
+const pullDistance = ref(0)
+const isRefreshing = ref(false)
+const PTR_THRESHOLD = 64
+
+const isMobileViewport = () =>
+  typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
 
 const pendingLabel = computed(() => {
   const n = pendingNew.value.length
@@ -151,10 +227,12 @@ const isLoginRequiredError = computed(() => {
   )
 })
 
+import type { NeoIconName } from '~/utils/neoIcons'
+
 type EmptyAction = { to: string; label: string; primary?: boolean }
 
 const emptyState = computed((): {
-  icon: string
+  icon: NeoIconName
   title: string
   body: string
   actions: EmptyAction[]
@@ -164,9 +242,21 @@ const emptyState = computed((): {
 
   if (!authed && isGatedGuestBrowse.value) {
     return {
-      icon: '🔒',
-      title: 'This feed needs a sign-in',
-      body: `${browsingHost.value} hides its public timeline until you log in. Sign in, or explore a server that still shows public posts.`,
+      icon: 'lock',
+      title: 'Sign in to open this feed',
+      body: `${browsingHost.value} only shows its public timeline to signed-in people. Sign in with any Mastodon account, or pick a server that still shares public posts.`,
+      actions: [
+        { to: '/login', label: 'Sign in', primary: true },
+        { to: '/explore', label: 'Find an open server' },
+      ],
+    }
+  }
+
+  if (!authed) {
+    return {
+      icon: 'globe',
+      title: 'Browsing as a guest',
+      body: 'You’re looking at public posts — no account needed. Sign in when you want your home feed, notifications, and to join groups.',
       actions: [
         { to: '/login', label: 'Sign in', primary: true },
         { to: '/explore', label: 'Explore servers' },
@@ -174,21 +264,9 @@ const emptyState = computed((): {
     }
   }
 
-  if (!authed) {
-    return {
-      icon: '📭',
-      title: 'No posts yet',
-      body: 'Explore servers to watch public posts, or sign in to see your home feed.',
-      actions: [
-        { to: '/explore', label: 'Explore', primary: true },
-        { to: '/login', label: 'Sign in' },
-      ],
-    }
-  }
-
   if (feed === 'home') {
     return {
-      icon: '✨',
+      icon: 'sparkle',
       title: 'Your feed is quiet',
       body: 'Follow people or explore servers to fill this column.',
       actions: [{ to: '/explore', label: 'Explore servers', primary: true }],
@@ -196,7 +274,7 @@ const emptyState = computed((): {
   }
 
   return {
-    icon: '📭',
+    icon: 'message',
     title: 'No posts yet',
     body: 'Try another timeline, or find a different server to watch.',
     actions: [{ to: '/explore', label: 'Explore', primary: true }],
@@ -238,6 +316,70 @@ const onScroll = () => {
   isNearTop.value = scrollContainer.value.scrollTop < 96
 }
 
+const onPullStart = (e: TouchEvent) => {
+  if (!isMobileViewport() || isRefreshing.value || props.recessed) return
+  if (!scrollContainer.value || scrollContainer.value.scrollTop > 0) return
+  pullStartY = e.touches[0]?.clientY ?? 0
+  pullListening = true
+}
+
+const onPullMove = (e: TouchEvent) => {
+  if (!pullListening || !scrollContainer.value) return
+  if (scrollContainer.value.scrollTop > 0) {
+    pullListening = false
+    pullDistance.value = 0
+    return
+  }
+  const y = e.touches[0]?.clientY ?? pullStartY
+  const dy = y - pullStartY
+  if (dy <= 0) {
+    pullDistance.value = 0
+    return
+  }
+  // Never preventDefault — iOS turns that into black flashes with nested scrollers
+  pullDistance.value = Math.min(dy * 0.35, 72)
+}
+
+const onPullEnd = async () => {
+  if (!pullListening) return
+  pullListening = false
+  const shouldRefresh = pullDistance.value >= PTR_THRESHOLD && !isRefreshing.value
+  pullDistance.value = 0
+  if (!shouldRefresh) return
+  isRefreshing.value = true
+  try {
+    // Soft refresh — keep current posts visible until the new page lands
+    const fresh = await fetchFreshPage()
+    if (fresh.length) {
+      statuses.value = fresh
+      maxId.value = fresh.at(-1)?.id ?? null
+      pendingNew.value = []
+      hasMore.value = true
+      homeCursors.value = {}
+      if (props.column.feedType === 'home') {
+        const next: Record<string, string> = {}
+        for (const s of fresh) {
+          const ext = s as ExtendedStatus
+          if (!ext._instanceId) continue
+          const prev = next[ext._instanceId]
+          if (!prev || s.id < prev) next[ext._instanceId] = s.id
+        }
+        homeCursors.value = next
+      }
+    }
+  } catch {
+    /* quiet — keep existing feed */
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+const pullHint = computed(() => {
+  if (isRefreshing.value) return 'Refreshing…'
+  if (pullDistance.value >= PTR_THRESHOLD) return 'Release to refresh'
+  return 'Pull to refresh'
+})
+
 /** Tap feed title: if scrolled, jump to top (and merge new posts); else open menu */
 const onFeedHeaderClick = () => {
   if (scrollContainer.value && scrollContainer.value.scrollTop > 96) {
@@ -252,10 +394,10 @@ const onFeedHeaderClick = () => {
 }
 
 const jumpToNew = () => {
-  const seen = new Set(statuses.value.map((s) => s.id))
-  const unique = pendingNew.value.filter((s) => !seen.has(s.id))
+  const seen = new Set(statuses.value.map((s) => statusIdentity(s)))
+  const unique = pendingNew.value.filter((s) => !seen.has(statusIdentity(s)))
   if (unique.length) {
-    statuses.value = [...unique, ...statuses.value]
+    statuses.value = dedupeStatusesByIdentity([...unique, ...statuses.value])
   }
   pendingNew.value = []
   scrollContainer.value?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -263,19 +405,20 @@ const jumpToNew = () => {
 
 const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
   if (!fresh.length || !statuses.value.length) return
-  const existing = new Set(statuses.value.map((s) => s.id))
-  const pendingIds = new Set(pendingNew.value.map((s) => s.id))
+  const existing = new Set(statuses.value.map((s) => statusIdentity(s)))
+  const pendingIds = new Set(pendingNew.value.map((s) => statusIdentity(s)))
   const cutoff = new Date(statuses.value[0]!.createdAt).getTime()
   const newer = fresh.filter((s) => {
-    if (existing.has(s.id) || pendingIds.has(s.id)) return false
+    const key = statusIdentity(s)
+    if (!key || existing.has(key) || pendingIds.has(key)) return false
     return new Date(s.createdAt).getTime() > cutoff
   })
   if (!newer.length) return
 
   if (isNearTop.value) {
-    statuses.value = [...newer, ...statuses.value]
+    statuses.value = dedupeStatusesByIdentity([...newer, ...statuses.value])
   } else {
-    pendingNew.value = [...newer, ...pendingNew.value].sort(
+    pendingNew.value = dedupeStatusesByIdentity([...newer, ...pendingNew.value]).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     )
   }
@@ -283,8 +426,7 @@ const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
 
 const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
   if (props.column.feedType === 'group' && props.column.groupTag) {
-    const client = publicClient()
-    return await client.v1.timelines.tag.$select(props.column.groupTag).list({ limit: 20 })
+    return await fetchGroupPage(props.column.groupTag)
   }
   if (props.column.feedType === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return []
@@ -304,7 +446,7 @@ const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]
 }
 
 const pollForNew = async () => {
-  if (isLoading.value || document.hidden || !statuses.value.length) return
+  if (props.recessed || isLoading.value || document.hidden || !statuses.value.length) return
   try {
     const fresh = await fetchFreshPage()
     mergeIncoming(fresh)
@@ -322,6 +464,7 @@ const stopPolling = () => {
 
 const startPolling = () => {
   stopPolling()
+  if (props.recessed) return
   if (typeof document !== 'undefined' && document.hidden) return
   pollTimer = setInterval(pollForNew, 45000)
 }
@@ -334,6 +477,14 @@ const onVisibilityChange = () => {
   void pollForNew()
   startPolling()
 }
+
+watch(
+  () => props.recessed,
+  (recessed) => {
+    if (recessed) stopPolling()
+    else startPolling()
+  },
+)
 
 const fetchTimeline = async (refresh = false) => {
   if (refresh) {
@@ -351,8 +502,7 @@ const fetchTimeline = async (refresh = false) => {
     let result: (mastodon.v1.Status | ExtendedStatus)[] = []
 
     if (props.column.feedType === 'group' && props.column.groupTag) {
-      const client = publicClient()
-      result = await client.v1.timelines.tag.$select(props.column.groupTag).list({ limit: 20 })
+      result = await fetchGroupPage(props.column.groupTag)
     } else if (props.column.feedType === 'home') {
       if (!instancesStore.hasAuthenticatedInstance) {
         throw new Error('Log in or add an instance to view your home timeline')
@@ -380,9 +530,9 @@ const fetchTimeline = async (refresh = false) => {
       })
     }
 
-    statuses.value = result
+    statuses.value = dedupeStatusesByIdentity(result)
     if (result.length > 0) {
-      maxId.value = result.at(-1)!.id
+      maxId.value = statuses.value.at(-1)!.id
     }
     hasMore.value = result.length >= 20
   } catch (e: any) {
@@ -440,19 +590,18 @@ const loadMore = async () => {
       }
       case 'group': {
         if (props.column.groupTag) {
-          const client = publicClient()
-          newStatuses = await client.v1.timelines.tag
-            .$select(props.column.groupTag)
-            .list({ maxId: maxId.value!, limit: 20 })
+          newStatuses = await fetchGroupPage(props.column.groupTag, maxId.value!)
         }
         break
       }
     }
 
     if (newStatuses.length > 0) {
-      // Dedupe by id when merging across accounts
-      const seen = new Set(statuses.value.map((s) => s.id))
-      const unique = newStatuses.filter((s) => !seen.has(s.id))
+      const seen = new Set(statuses.value.map((s) => statusIdentity(s)))
+      const unique = newStatuses.filter((s) => {
+        const key = statusIdentity(s)
+        return key && !seen.has(key)
+      })
       statuses.value = [...statuses.value, ...unique]
       maxId.value = newStatuses.at(-1)!.id
     }
@@ -513,7 +662,18 @@ onMounted(async () => {
   }
   nextTick(() => {
     setupInfiniteScroll()
-    scrollContainer.value?.addEventListener('scroll', onScroll, { passive: true })
+    const el = scrollContainer.value
+    el?.addEventListener('scroll', onScroll, { passive: true })
+    el?.addEventListener('touchstart', onPullStart, { passive: true })
+    el?.addEventListener('touchmove', onPullMove, { passive: true })
+    el?.addEventListener('touchend', onPullEnd, { passive: true })
+    el?.addEventListener('touchcancel', onPullEnd, { passive: true })
+    syncFlipPort()
+    if (el && typeof ResizeObserver !== 'undefined') {
+      flipRo?.disconnect()
+      flipRo = new ResizeObserver(() => syncFlipPort())
+      flipRo.observe(el)
+    }
   })
   document.addEventListener('click', closeFeedMenu)
   document.addEventListener('visibilitychange', onVisibilityChange)
@@ -524,7 +684,15 @@ onUnmounted(() => {
   if (observer) observer.disconnect()
   document.removeEventListener('click', closeFeedMenu)
   document.removeEventListener('visibilitychange', onVisibilityChange)
-  scrollContainer.value?.removeEventListener('scroll', onScroll)
+  const el = scrollContainer.value
+  el?.removeEventListener('scroll', onScroll)
+  el?.removeEventListener('touchstart', onPullStart)
+  el?.removeEventListener('touchmove', onPullMove)
+  el?.removeEventListener('touchend', onPullEnd)
+  el?.removeEventListener('touchcancel', onPullEnd)
+  flipRo?.disconnect()
+  flipRo = null
+  document.documentElement.classList.remove('mobile-chrome-collapsed')
   stopPolling()
 })
 </script>
@@ -595,6 +763,23 @@ onUnmounted(() => {
           </svg>
         </button>
       </div>
+
+      <button
+        type="button"
+        class="neo-chrome-btn column-focus"
+        :class="{ 'column-focus--push': !canReorder, 'neo-chrome-btn--on': focused }"
+        :title="focused ? 'Show all views' : 'Focus this view'"
+        :aria-label="focused ? 'Show all views' : 'Focus this view'"
+        :aria-pressed="focused"
+        @click="emit('focus')"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="15 3 21 3 21 9" />
+          <polyline points="9 21 3 21 3 15" />
+          <line x1="21" y1="3" x2="14" y2="10" />
+          <line x1="3" y1="21" x2="10" y2="14" />
+        </svg>
+      </button>
 
       <button
         v-if="canRemove"
@@ -677,6 +862,52 @@ onUnmounted(() => {
 
           <!-- Browse groups link -->
           <div class="feed-dropdown__divider"></div>
+          <button
+            class="feed-dropdown__item"
+            :class="{ 'feed-dropdown__item--active': column.feedType === 'search' }"
+            @click="switchFeed('search')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            Search
+          </button>
+          <button
+            class="feed-dropdown__item"
+            :class="{ 'feed-dropdown__item--active': column.feedType === 'profile' }"
+            @click="switchFeed('profile')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            Profile
+          </button>
+          <button
+            v-if="canShowHome"
+            class="feed-dropdown__item"
+            :class="{ 'feed-dropdown__item--active': column.feedType === 'notifications' }"
+            @click="switchFeed('notifications')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 01-3.46 0" />
+            </svg>
+            Notifications
+          </button>
+          <button
+            v-if="canShowHome"
+            class="feed-dropdown__item"
+            :class="{ 'feed-dropdown__item--active': column.feedType === 'messages' }"
+            @click="switchFeed('messages')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+            Messages
+          </button>
+          <div class="feed-dropdown__divider"></div>
           <NuxtLink to="/groups" class="feed-dropdown__item feed-dropdown__item--link" @click="feedMenuOpen = false">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
@@ -691,13 +922,35 @@ onUnmounted(() => {
     </div>
 
     <!-- Scrollable Content -->
-    <div class="column-scroll" ref="scrollContainer">
-      <!-- Compose: desktop first column only — mobile uses center + sheet -->
+    <div
+      class="column-scroll"
+      :class="{ 'column-scroll--flip': isFlip }"
+      ref="scrollContainer"
+    >
+      <!-- Mobile pull-to-refresh affordance -->
       <div
-        v-if="isFirst && instancesStore.isAuthenticated"
-        class="column-compose column-compose--desktop-only"
+        v-if="pullDistance > 0 || isRefreshing"
+        class="column-ptr"
+        :class="{ 'column-ptr--ready': pullDistance >= PTR_THRESHOLD || isRefreshing }"
+        :style="{ height: `${isRefreshing ? 48 : pullDistance}px` }"
+        aria-live="polite"
       >
-        <RealComposeBox @posted="onComposePosted" />
+        <span class="column-ptr__label">{{ pullHint }}</span>
+      </div>
+
+      <!-- Compose: desktop first column — Threads-size compact pill -->
+      <div
+        v-if="isFirst && instancesStore.isAuthenticated && isDesktop"
+        class="column-compose"
+      >
+        <RealComposeBox
+          compact
+          :accept-handoff="true"
+          placeholder="What's new?"
+          title="What's new?"
+          :initial-group-tag="column.feedType === 'group' ? column.groupTag : undefined"
+          @posted="onComposePosted"
+        />
       </div>
 
       <!-- New posts pill — never auto-jumps the feed -->
@@ -713,14 +966,15 @@ onUnmounted(() => {
       </Transition>
 
       <!-- Loading -->
-      <div v-if="isLoading" class="column-state">
-        <span class="column-state__spinner">&#x1F300;</span>
-        <p>Loading...</p>
+      <div v-if="isLoading" class="column-state" aria-busy="true">
+        <FunLoader fill label="Loading" />
       </div>
 
       <!-- Error -->
       <div v-else-if="error" class="column-state column-state--error">
-        <span>{{ isLoginRequiredError ? '🔒' : '⚠️' }}</span>
+        <span class="column-error__icon">
+          <NeoIcon :name="isLoginRequiredError ? 'lock' : 'alert'" :size="22" :stroke="1.75" />
+        </span>
         <p class="column-state__title">
           {{ isLoginRequiredError ? 'Sign in to see this feed' : 'Couldn’t load posts' }}
         </p>
@@ -741,18 +995,21 @@ onUnmounted(() => {
 
       <!-- Login prompt for home when not authenticated -->
       <div v-else-if="column.feedType === 'home' && !canShowHome" class="column-state">
-        <span>🔑</span>
-        <p class="column-state__title">Log in to see your feed</p>
-        <p>Your home timeline needs a Mastodon account.</p>
+        <span>👋</span>
+        <p class="column-state__title">Home needs a sign-in</p>
+        <p>
+          You’re browsing as a guest. Sign in with a Mastodon account to see people you follow —
+          or switch this column to Local / Federated for public posts.
+        </p>
         <div class="column-state__actions">
           <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in</NuxtLink>
-          <NuxtLink to="/explore" class="neo-btn neo-btn--ghost neo-btn--sm">Explore</NuxtLink>
+          <NuxtLink to="/explore" class="neo-btn neo-btn--ghost neo-btn--sm">Explore servers</NuxtLink>
         </div>
       </div>
 
       <!-- Empty / first-run -->
       <div v-else-if="statuses.length === 0" class="column-state">
-        <span>{{ emptyState.icon }}</span>
+        <span class="column-state__icon"><NeoIcon :name="emptyState.icon" :size="28" :stroke="1.5" /></span>
         <p class="column-state__title">{{ emptyState.title }}</p>
         <p>{{ emptyState.body }}</p>
         <div v-if="emptyState.actions.length" class="column-state__actions">
@@ -769,25 +1026,38 @@ onUnmounted(() => {
       </div>
 
       <!-- Posts -->
-      <div v-else class="column-posts">
-        <TransitionGroup name="post-list">
+      <div v-else class="column-posts" :class="{ 'column-posts--flip': isFlip }">
+        <template v-if="isFlip">
           <RealPostCard
             v-for="status in statuses"
-            :key="status.id"
+            :key="statusIdentity(status)"
             :status="status"
+            variant="flip"
+            hide-inline-reply
+            column-profile
+            @open-profile="openProfileInColumn"
+          />
+        </template>
+        <TransitionGroup v-else name="post-list">
+          <RealPostCard
+            v-for="status in statuses"
+            :key="statusIdentity(status)"
+            :status="status"
+            column-profile
+            @open-profile="openProfileInColumn"
           />
         </TransitionGroup>
 
         <!-- Infinite scroll trigger -->
-        <div ref="loadTrigger" class="column-load-trigger">
+        <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
           <Transition name="fade">
             <div v-if="isLoadingMore" class="column-loading-more">
-              <span></span><span></span><span></span>
+              <FunLoader :size="88" />
             </div>
           </Transition>
         </div>
 
-        <div v-if="!hasMore && statuses.length > 0" class="column-end">
+        <div v-if="!hasMore && statuses.length > 0 && !isFlip" class="column-end">
           <span>&#x2728;</span> All caught up
         </div>
       </div>
@@ -834,6 +1104,11 @@ onUnmounted(() => {
   background: var(--neo-bg-primary);
   position: relative;
   z-index: 10;
+
+  // Mobile tabs already name the feed — drop the duplicate chrome
+  @media (max-width: 1023px) {
+    display: none;
+  }
 }
 
 .column-drag-handle {
@@ -852,32 +1127,14 @@ onUnmounted(() => {
   gap: 0.125rem;
 }
 
-// Mobile: less chrome in the header — jump feeds via tabs / ‹ › instead
-@media (max-width: 1023px) {
-  .column-drag-handle,
-  .column-reorder {
-    display: none;
-  }
-
-  .column-header {
-    height: 44px;
-    padding: 0 0.35rem 0 0.5rem;
-  }
-
-  .column-feed-select {
-    min-height: 40px;
-    flex: 1;
-  }
-
-  .column-feed-label {
-    max-width: none;
-    font-size: 1rem;
-  }
-
-  .column-close {
-    margin-left: auto;
-  }
+.column-focus--push {
+  margin-left: auto;
 }
+
+.neo-chrome-btn--on {
+  color: var(--neo-accent);
+}
+
 
 .column-new-pill {
   position: sticky;
@@ -1065,14 +1322,59 @@ onUnmounted(() => {
 // ========================================
 // Column Scroll + Posts
 // ========================================
+.column-ptr {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  color: var(--neo-text-tertiary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: color 0.12s ease;
+
+  &--ready {
+    color: var(--neo-accent);
+  }
+
+  &__label {
+    padding-bottom: 0.5rem;
+  }
+
+  @media (min-width: 1024px) {
+    display: none;
+  }
+}
+
 .column-scroll {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  // Let horizontal swipes bubble to the mobile feed carousel
+  // Vertical latch for the feed; horizontal feed-switching is claimed by
+  // index.vue carousel gestures (Chrome Android won't chain pan-x through this).
   touch-action: pan-y;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--neo-bg-primary);
   scrollbar-width: thin;
   scrollbar-color: var(--neo-text-muted) transparent;
+
+  @media (max-width: 1023px) {
+    // Keep last post actions above the home-indicator / nav edge
+    padding-bottom: 0.75rem;
+  }
+
+  &--flip {
+    scroll-snap-type: y mandatory;
+    scroll-padding: 0;
+    padding-bottom: 0;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -1090,30 +1392,39 @@ onUnmounted(() => {
 }
 
 .column-compose {
-  padding: 0.75rem;
+  padding: 0.55rem 0.65rem;
   border-bottom: 1px solid var(--neo-border-color);
-
-  &--desktop-only {
-    @media (max-width: 1023px) {
-      display: none;
-    }
-  }
 }
 
 .column-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
+  justify-content: center;
   gap: 0.625rem;
-  padding: 3rem 1.5rem;
+  min-height: 100%;
+  width: 100%;
+  padding: 1.25rem 1.5rem;
   text-align: center;
+  box-sizing: border-box;
 
-  > span:first-child {
-    font-size: 1.75rem;
+  &[aria-busy='true'] {
+    min-height: min(55dvh, 28rem);
+  }
+
+  &__icon,
+  .column-error__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    color: var(--neo-text-tertiary);
   }
 
   p {
     max-width: 28ch;
+    margin-left: auto;
+    margin-right: auto;
     color: var(--neo-text-muted);
     font-size: 0.875rem;
     line-height: 1.45;
@@ -1171,30 +1482,45 @@ onUnmounted(() => {
       border-color: var(--neo-border-color-dark);
     }
   }
+
+  &--flip {
+    gap: 0;
+    padding: 0;
+
+    :deep(.status-card) {
+      border: none;
+      border-radius: 0;
+      flex: 0 0 var(--flip-port, 100%);
+      height: var(--flip-port, 100%);
+      min-height: var(--flip-port, 100%);
+      max-height: var(--flip-port, 100%);
+
+      &:hover {
+        border-color: transparent;
+      }
+    }
+  }
 }
 
 .column-load-trigger {
   min-height: 1px;
   padding: 0.5rem 0;
+
+  &--flip {
+    flex: 0 0 40%;
+    min-height: 40%;
+    scroll-snap-align: start;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 .column-loading-more {
   display: flex;
   justify-content: center;
-  gap: 0.375rem;
+  align-items: center;
   padding: 1rem 0;
-
-  span {
-    width: 6px;
-    height: 6px;
-    background: var(--neo-text-muted);
-    border-radius: 50%;
-    animation: bounce 1.4s ease-in-out infinite both;
-
-    &:nth-child(1) { animation-delay: -0.32s; }
-    &:nth-child(2) { animation-delay: -0.16s; }
-    &:nth-child(3) { animation-delay: 0s; }
-  }
 }
 
 .column-end {

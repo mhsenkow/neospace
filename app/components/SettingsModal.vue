@@ -14,13 +14,19 @@
 import { useSettingsStore, SETTINGS_CATEGORIES } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import {
+  DENSITY_OPTIONS,
   FONT_OPTIONS,
   FONT_SIZE_OPTIONS,
+  LINE_OPTIONS,
+  RADIUS_OPTIONS,
   THEME_OPTIONS,
   UI_OPTIONS,
   TYPE_FACES,
+  type NeoDensityId,
   type NeoFontId,
   type NeoFontSizeId,
+  type NeoLineId,
+  type NeoRadiusId,
   type NeoThemeId,
   type NeoUiId,
 } from '~/utils/appearance'
@@ -28,6 +34,13 @@ import {
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
 const contentEl = ref<HTMLElement | null>(null)
+const modalRef = ref<HTMLElement | null>(null)
+const isOpen = computed(() => settingsStore.isOpen)
+
+useFocusTrap(modalRef, isOpen, {
+  onEscape: () => settingsStore.close(),
+  initialFocus: '.settings-search__input, .settings-close',
+})
 
 // Edit form for profile
 const profileForm = reactive({
@@ -50,10 +63,26 @@ const appearanceForm = reactive({
   ui: 'braun' as NeoUiId,
   font: 'sans' as NeoFontId,
   fontSize: 'medium' as NeoFontSizeId,
+  radius: 'match' as NeoRadiusId,
+  density: 'cozy' as NeoDensityId,
+  line: 'clean' as NeoLineId,
   reduceMotion: false,
-  compactMode: false,
   customProfileCss: false,
+  flipTextAlign: 'center' as 'left' | 'center' | 'right',
+  flipTextSize: 'large' as 'reading' | 'large' | 'display',
 })
+
+const flipAlignOptions = [
+  { value: 'left' as const, label: 'Left' },
+  { value: 'center' as const, label: 'Center' },
+  { value: 'right' as const, label: 'Right' },
+]
+
+const flipSizeOptions = [
+  { value: 'reading' as const, label: 'Reading' },
+  { value: 'large' as const, label: 'Large' },
+  { value: 'display' as const, label: 'Display' },
+]
 
 // Watch for settings load to populate forms
 watch(() => settingsStore.account, (account) => {
@@ -90,9 +119,13 @@ watch(() => settingsStore.localPreferences, (prefs) => {
     appearanceForm.ui = prefs.ui
     appearanceForm.font = prefs.font
     appearanceForm.fontSize = prefs.fontSize
+    appearanceForm.radius = prefs.radius
+    appearanceForm.density = prefs.density
+    appearanceForm.line = prefs.line
     appearanceForm.reduceMotion = prefs.reduceMotion
-    appearanceForm.compactMode = prefs.compactMode
     appearanceForm.customProfileCss = prefs.customProfileCss
+    appearanceForm.flipTextAlign = prefs.flipTextAlign
+    appearanceForm.flipTextSize = prefs.flipTextSize
   }
 }, { immediate: true })
 
@@ -102,21 +135,6 @@ watch(
     if (contentEl.value) contentEl.value.scrollTop = 0
   },
 )
-
-// Handle close on escape
-const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    settingsStore.close()
-  }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown)
-})
 
 // Save handlers
 const saveProfile = async () => {
@@ -144,9 +162,13 @@ const saveAppearance = () => {
     ui: appearanceForm.ui,
     font: appearanceForm.font,
     fontSize: appearanceForm.fontSize,
+    radius: appearanceForm.radius,
+    density: appearanceForm.density,
+    line: appearanceForm.line,
     reduceMotion: appearanceForm.reduceMotion,
-    compactMode: appearanceForm.compactMode,
     customProfileCss: appearanceForm.customProfileCss,
+    flipTextAlign: appearanceForm.flipTextAlign,
+    flipTextSize: appearanceForm.flipTextSize,
   })
   settingsStore.clearSuccess()
 }
@@ -155,10 +177,10 @@ const hasProfileCss = computed(() => !!instancesStore.userCustomCSS)
 
 // Visibility options
 const visibilityOptions = [
-  { value: 'public', label: 'Public', icon: '🌍', desc: 'Visible to everyone' },
-  { value: 'unlisted', label: 'Unlisted', icon: '🔓', desc: 'Visible but not on public timelines' },
-  { value: 'private', label: 'Followers Only', icon: '🔒', desc: 'Only your followers can see' },
-  { value: 'direct', label: 'Direct', icon: '✉️', desc: 'Only mentioned users can see' },
+  { value: 'public', label: 'Public', icon: 'globe' as const, desc: 'Visible to everyone' },
+  { value: 'unlisted', label: 'Unlisted', icon: 'unlisted' as const, desc: 'Visible but not on public timelines' },
+  { value: 'private', label: 'Followers Only', icon: 'lock' as const, desc: 'Only your followers can see' },
+  { value: 'direct', label: 'Direct', icon: 'message' as const, desc: 'Only mentioned users can see' },
 ]
 
 const themeOptions = [
@@ -175,6 +197,9 @@ const themeOptions = [
 const uiOptions = UI_OPTIONS
 const fontOptions = FONT_OPTIONS
 const fontSizeOptions = FONT_SIZE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
+const radiusOptions = RADIUS_OPTIONS
+const densityOptions = DENSITY_OPTIONS
+const lineOptions = LINE_OPTIONS
 
 const fontPreviewStack = (fontId: NeoFontId) => {
   const ui = appearanceForm.ui || 'braun'
@@ -184,27 +209,40 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="settingsStore.isOpen" class="settings-overlay" @click.self="settingsStore.close">
+      <div
+        v-if="settingsStore.isOpen"
+        ref="modalRef"
+        class="settings-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        @click.self="settingsStore.close"
+      >
         <div class="settings-modal">
           <!-- Header with search -->
           <header class="settings-header">
             <div class="settings-header__left">
-              <h1 class="settings-title">Settings</h1>
+              <h1 id="settings-title" class="settings-title">Settings</h1>
             </div>
             <div class="settings-header__center">
               <div class="settings-search">
-                <span class="settings-search__icon">🔍</span>
+                <label class="sr-only" for="settings-search-input">Search settings</label>
+                <span class="settings-search__icon" aria-hidden="true">
+                  <NeoIcon name="search" :size="16" :stroke="1.75" />
+                </span>
                 <input
+                  id="settings-search-input"
                   v-model="settingsStore.searchQuery"
-                  type="text"
+                  type="search"
                   placeholder="Search settings..."
                   class="settings-search__input"
+                  autocomplete="off"
                 />
               </div>
             </div>
             <div class="settings-header__right">
-              <button class="settings-close" @click="settingsStore.close">
-                <span>✕</span>
+              <button class="settings-close" @click="settingsStore.close" aria-label="Close settings">
+                <NeoIcon name="x" :size="18" :stroke="2" />
               </button>
             </div>
           </header>
@@ -218,35 +256,42 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 :class="['settings-nav-item', { active: settingsStore.activeCategory === category.id }]"
                 @click="settingsStore.setCategory(category.id)"
               >
-                <span class="settings-nav-item__icon">{{ category.icon }}</span>
+                <span class="settings-nav-item__icon"><NeoIcon :name="(category.icon as any)" :size="18" :stroke="1.75" /></span>
                 <span class="settings-nav-item__label">{{ category.label }}</span>
               </button>
             </nav>
 
             <!-- Content -->
-            <main ref="contentEl" class="settings-content">
+            <div ref="contentEl" class="settings-content">
               <!-- Loading -->
-              <div v-if="settingsStore.isLoading" class="settings-loading">
-                <span class="settings-loading__spinner">🌀</span>
-                <p>Loading settings...</p>
+              <div v-if="settingsStore.isLoading" class="settings-loading" aria-busy="true">
+                <FunLoader fill label="Loading settings" />
               </div>
 
               <!-- Success message -->
               <Transition name="fade">
-                <div v-if="settingsStore.saveSuccess" class="settings-success">
-                  <span>✓</span> Settings saved successfully
+                <div v-if="settingsStore.saveSuccess" class="settings-success" role="status">
+                  <span aria-hidden="true">✓</span> Settings saved successfully
                 </div>
               </Transition>
 
               <!-- Error message -->
-              <div v-if="settingsStore.error" class="settings-error">
-                <span>⚠️</span> {{ settingsStore.error }}
+              <div v-if="settingsStore.error" class="settings-error" role="alert">
+                <span aria-hidden="true">⚠️</span> {{ settingsStore.error }}
               </div>
 
               <!-- Profile Settings -->
               <section v-if="settingsStore.activeCategory === 'profile'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -275,7 +320,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">🔒 Require follow approval</span>
+                      <span class="settings-toggle__label">Require follow approval</span>
                       <span class="settings-toggle__desc">New followers must be approved before they can see your posts</span>
                     </div>
                     <input v-model="profileForm.locked" type="checkbox" class="settings-checkbox" />
@@ -283,7 +328,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">🔍 Discoverable</span>
+                      <span class="settings-toggle__label">Discoverable</span>
                       <span class="settings-toggle__desc">Allow your account to be found in search results and profile directories</span>
                     </div>
                     <input v-model="profileForm.discoverable" type="checkbox" class="settings-checkbox" />
@@ -312,7 +357,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Privacy & Safety -->
               <section v-if="settingsStore.activeCategory === 'privacy'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -321,7 +374,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">🔒 Require follow approval</span>
+                      <span class="settings-toggle__label">Require follow approval</span>
                       <span class="settings-toggle__desc">New followers must be approved</span>
                     </div>
                     <input v-model="profileForm.locked" type="checkbox" class="settings-checkbox" />
@@ -412,7 +465,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Notifications -->
               <section v-if="settingsStore.activeCategory === 'notifications'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -425,7 +486,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <a 
                     v-if="instancesStore.instanceUrl"
                     :href="`${instancesStore.instanceUrl}/settings/notifications`"
-                    target="_blank"
+                    target="_blank" rel="noopener noreferrer"
                     class="settings-btn settings-btn--primary"
                   >
                     Open Instance Notification Settings →
@@ -436,7 +497,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Appearance -->
               <section v-if="settingsStore.activeCategory === 'appearance'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -470,7 +539,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <div class="settings-divider" />
 
                   <h3 class="settings-subheading">Chrome</h3>
-                  <p class="settings-hint">Full interface system — type, corners, borders, labels. Same set as wordcount.</p>
+                  <p class="settings-hint">Full interface system — type, borders, labels. Corners follow Radius unless set to Match.</p>
                   <div class="settings-chrome-grid">
                     <label
                       v-for="option in uiOptions"
@@ -535,20 +604,124 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
                   <div class="settings-divider" />
 
+                  <h3 class="settings-subheading">Corners</h3>
+                  <p class="settings-hint">
+                    Border-radius set across cards, inputs, and chrome. Match keeps the active chrome’s corners
+                    (Brutal / NES stay sharp when Match).
+                  </p>
+                  <div class="settings-radius-grid">
+                    <button
+                      v-for="option in radiusOptions"
+                      :key="option.id"
+                      type="button"
+                      :class="['settings-radius-card', { active: appearanceForm.radius === option.id }]"
+                      :title="option.desc"
+                      @click="appearanceForm.radius = option.id; saveAppearance()"
+                    >
+                      <span
+                        class="settings-radius-card__preview"
+                        :data-radius-preview="option.id"
+                        aria-hidden="true"
+                      />
+                      <span class="settings-radius-card__label">{{ option.label }}</span>
+                      <span class="settings-radius-card__desc">{{ option.desc }}</span>
+                    </button>
+                  </div>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Flip text</h3>
+                  <p class="settings-hint">
+                    How posts look in Flip mode (full-bleed swipe). Applies especially to text-only slides.
+                  </p>
+
+                  <h3 class="settings-subheading settings-subheading--tight">Alignment</h3>
+                  <div class="settings-segmented">
+                    <button
+                      v-for="option in flipAlignOptions"
+                      :key="option.value"
+                      type="button"
+                      :class="['settings-segmented__btn', { active: appearanceForm.flipTextAlign === option.value }]"
+                      @click="appearanceForm.flipTextAlign = option.value; saveAppearance()"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+
+                  <h3 class="settings-subheading settings-subheading--tight">Size</h3>
+                  <div class="settings-segmented">
+                    <button
+                      v-for="option in flipSizeOptions"
+                      :key="option.value"
+                      type="button"
+                      :class="['settings-segmented__btn', { active: appearanceForm.flipTextSize === option.value }]"
+                      @click="appearanceForm.flipTextSize = option.value; saveAppearance()"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Density</h3>
+                  <p class="settings-hint">How tightly cards and chrome pack the screen.</p>
+                  <div class="settings-density-grid">
+                    <button
+                      v-for="option in densityOptions"
+                      :key="option.id"
+                      type="button"
+                      :class="['settings-density-card', { active: appearanceForm.density === option.id }]"
+                      :title="option.desc"
+                      @click="appearanceForm.density = option.id; saveAppearance()"
+                    >
+                      <span
+                        class="settings-density-card__preview"
+                        :data-density-preview="option.id"
+                        aria-hidden="true"
+                      >
+                        <i /><i /><i />
+                      </span>
+                      <span class="settings-density-card__label">{{ option.label }}</span>
+                      <span class="settings-density-card__desc">{{ option.desc }}</span>
+                    </button>
+                  </div>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Lines</h3>
+                  <p class="settings-hint">Outline character — clean hairlines through crayon wiggles.</p>
+                  <div class="settings-line-grid">
+                    <button
+                      v-for="option in lineOptions"
+                      :key="option.id"
+                      type="button"
+                      :class="['settings-line-card', { active: appearanceForm.line === option.id }]"
+                      :title="option.desc"
+                      @click="appearanceForm.line = option.id; saveAppearance()"
+                    >
+                      <span
+                        class="settings-line-card__preview"
+                        :data-line-preview="option.id"
+                        aria-hidden="true"
+                      />
+                      <span class="settings-line-card__label">{{ option.label }}</span>
+                      <span class="settings-line-card__desc">{{ option.desc }}</span>
+                    </button>
+                  </div>
+
+                  <div class="settings-divider" />
+
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
                       <span class="settings-toggle__label">Reduce motion</span>
                       <span class="settings-toggle__desc">Disable animations and auto-playing content</span>
                     </div>
-                    <input v-model="appearanceForm.reduceMotion" type="checkbox" class="settings-checkbox" />
-                  </label>
-
-                  <label class="settings-toggle">
-                    <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">Compact mode</span>
-                      <span class="settings-toggle__desc">Show more content with reduced spacing</span>
-                    </div>
-                    <input v-model="appearanceForm.compactMode" type="checkbox" class="settings-checkbox" />
+                    <input
+                      v-model="appearanceForm.reduceMotion"
+                      type="checkbox"
+                      class="settings-checkbox"
+                      @change="saveAppearance"
+                    />
                   </label>
 
                   <div class="settings-divider" />
@@ -594,7 +767,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Posting Defaults -->
               <section v-if="settingsStore.activeCategory === 'posting'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -614,12 +795,16 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                         :value="option.value"
                         class="settings-radio-hidden"
                       />
-                      <span class="settings-option-row__icon">{{ option.icon }}</span>
+                      <span class="settings-option-row__icon">
+                        <NeoIcon :name="option.icon" :size="20" :stroke="1.75" />
+                      </span>
                       <div class="settings-option-row__text">
                         <span class="settings-option-row__label">{{ option.label }}</span>
                         <span class="settings-option-row__desc">{{ option.desc }}</span>
                       </div>
-                      <span v-if="postingForm.visibility === option.value" class="settings-option-row__check">✓</span>
+                      <span v-if="postingForm.visibility === option.value" class="settings-option-row__check">
+                        <NeoIcon name="check" :size="16" :stroke="2.5" />
+                      </span>
                     </label>
                   </div>
 
@@ -627,7 +812,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">🔞 Mark media as sensitive by default</span>
+                      <span class="settings-toggle__label">Mark media as sensitive by default</span>
                       <span class="settings-toggle__desc">Media will be hidden behind a warning</span>
                     </div>
                     <input v-model="postingForm.sensitive" type="checkbox" class="settings-checkbox" />
@@ -647,7 +832,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Filters -->
               <section v-if="settingsStore.activeCategory === 'filters'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -688,7 +881,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <a 
                     v-if="instancesStore.instanceUrl"
                     :href="`${instancesStore.instanceUrl}/settings/filters`"
-                    target="_blank"
+                    target="_blank" rel="noopener noreferrer"
                     class="settings-btn settings-btn--ghost"
                   >
                     Manage Filters on Instance →
@@ -699,7 +892,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Account -->
               <section v-if="settingsStore.activeCategory === 'account'" class="settings-section">
                 <div class="settings-section__header">
-                  <h2>{{ settingsStore.currentCategory?.icon }} {{ settingsStore.currentCategory?.label }}</h2>
+                  <h2>
+                    <NeoIcon
+                      v-if="settingsStore.currentCategory?.icon"
+                      :name="(settingsStore.currentCategory.icon as any)"
+                      :size="18"
+                      :stroke="1.75"
+                    />
+                    {{ settingsStore.currentCategory?.label }}
+                  </h2>
                   <p>{{ settingsStore.currentCategory?.description }}</p>
                 </div>
 
@@ -732,7 +933,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <a 
                     v-if="instancesStore.instanceUrl"
                     :href="`${instancesStore.instanceUrl}/settings`"
-                    target="_blank"
+                    target="_blank" rel="noopener noreferrer"
                     class="settings-btn settings-btn--primary"
                   >
                     Open Instance Settings →
@@ -748,14 +949,14 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <a 
                     v-if="instancesStore.instanceUrl"
                     :href="`${instancesStore.instanceUrl}/settings/export`"
-                    target="_blank"
+                    target="_blank" rel="noopener noreferrer"
                     class="settings-btn settings-btn--ghost"
                   >
                     Export Data →
                   </a>
                 </div>
               </section>
-            </main>
+            </div>
           </div>
         </div>
       </div>
@@ -846,8 +1047,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   &__icon {
     position: absolute;
     left: 0.75rem;
-    font-size: 0.875rem;
-    opacity: 0.55;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--neo-text-muted);
     pointer-events: none;
   }
 
@@ -930,10 +1133,13 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
   &__icon {
-    font-size: 1rem;
     width: 1.25rem;
-    text-align: center;
+    height: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    color: inherit;
   }
 
   &__label {
@@ -970,10 +1176,13 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 .settings-loading {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 1rem;
-  padding: 4rem 2rem;
+  flex: 1;
+  min-height: 100%;
+  width: 100%;
+  padding: 1.25rem;
+  box-sizing: border-box;
   color: var(--neo-text-muted);
 
   &__spinner {
@@ -1027,6 +1236,9 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     font-size: 1.375rem;
     font-weight: 700;
     color: var(--neo-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
   p {
@@ -1050,6 +1262,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   color: var(--neo-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+
+  &--tight {
+    margin-top: 0.85rem;
+  }
 }
 
 .settings-hint {
@@ -1398,6 +1614,204 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 }
 
+.settings-radius-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.625rem;
+}
+
+.settings-radius-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.875rem 0.75rem;
+  background: var(--neo-bg-primary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--neo-border-color-dark);
+  }
+
+  &.active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  &__preview {
+    display: block;
+    width: 2.5rem;
+    height: 2.5rem;
+    background: var(--neo-accent);
+    border: 2px solid var(--neo-text-primary);
+
+    &[data-radius-preview='match'] {
+      border-radius: var(--neo-radius-md, 4px);
+      background: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-bg-tertiary));
+    }
+
+    &[data-radius-preview='sharp'] {
+      border-radius: 0;
+    }
+
+    &[data-radius-preview='business'] {
+      border-radius: 6px;
+    }
+
+    &[data-radius-preview='soft'] {
+      border-radius: 14px;
+    }
+
+    &[data-radius-preview='bubble'] {
+      border-radius: 999px;
+    }
+
+    &[data-radius-preview='jagged'] {
+      border-radius: 2px 14px 4px 12px / 12px 4px 14px 2px;
+      clip-path: polygon(
+        0% 12%,
+        8% 0%,
+        28% 10%,
+        48% 0%,
+        72% 12%,
+        100% 0%,
+        100% 30%,
+        90% 50%,
+        100% 72%,
+        88% 100%,
+        60% 90%,
+        32% 100%,
+        0% 86%,
+        10% 58%,
+        0% 32%
+      );
+    }
+  }
+
+  &__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    line-height: 1.3;
+  }
+}
+
+.settings-density-grid,
+.settings-line-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.625rem;
+}
+
+.settings-density-card,
+.settings-line-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.875rem 0.75rem;
+  background: var(--neo-bg-primary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--neo-border-color-dark);
+  }
+
+  &.active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  &__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    line-height: 1.3;
+  }
+}
+
+.settings-density-card__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 2.75rem;
+
+  i {
+    display: block;
+    height: 5px;
+    border-radius: 2px;
+    background: var(--neo-accent);
+  }
+
+  &[data-density-preview='roomy'] {
+    gap: 7px;
+    i { height: 4px; }
+  }
+
+  &[data-density-preview='cozy'] {
+    gap: 4px;
+  }
+
+  &[data-density-preview='dense'] {
+    gap: 2px;
+    i { height: 6px; }
+  }
+}
+
+.settings-line-card__preview {
+  display: block;
+  width: 2.75rem;
+  height: 1.75rem;
+  background: color-mix(in srgb, var(--neo-accent) 18%, var(--neo-bg-tertiary));
+  border: 1.5px solid var(--neo-text-primary);
+  border-radius: 4px;
+
+  &[data-line-preview='clean'] {
+    border-width: 1px;
+    border-style: solid;
+  }
+
+  &[data-line-preview='ink'] {
+    border-width: 2.5px;
+    border-style: solid;
+    box-shadow: 1.5px 1.5px 0 color-mix(in srgb, var(--neo-text-primary) 25%, transparent);
+  }
+
+  &[data-line-preview='crayon'] {
+    border-width: 2.5px;
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--neo-text-primary) 80%, var(--neo-accent));
+    box-shadow:
+      1px 0.5px 0 color-mix(in srgb, var(--neo-text-primary) 40%, transparent),
+      -0.8px 1px 0 color-mix(in srgb, var(--neo-accent) 35%, transparent);
+  }
+
+  &[data-line-preview='dashed'] {
+    border-width: 1.5px;
+    border-style: dashed;
+  }
+}
+
 // Segmented Control
 .settings-segmented {
   display: flex;
@@ -1460,7 +1874,13 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 
   &__icon {
-    font-size: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    color: var(--neo-text-secondary);
+    flex-shrink: 0;
   }
 
   &__text {
@@ -1482,9 +1902,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 
   &__check {
-    font-size: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--neo-accent);
-    font-weight: bold;
   }
 }
 
@@ -1781,14 +2202,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
   .settings-search__icon {
     left: 0.75rem;
-    font-size: 0.75rem;
   }
 
   .settings-sidebar { width: 3rem; }
 
   .settings-nav-item {
     padding: 0.5rem;
-    &__icon { font-size: 1rem; }
   }
 
   .settings-content { padding: 0.875rem; }
