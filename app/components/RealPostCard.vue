@@ -948,7 +948,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         <!-- Actions: on mobile, like sits in the right thumb zone -->
         <footer class="status-actions">
           <button
-            class="status-action status-action--reply neo-tip"
+            class="status-action status-action--reply"
             aria-label="Reply"
             :disabled="isOpeningReply"
             @click.stop="handleReply"
@@ -958,7 +958,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
           </button>
 
           <button
-            class="status-action status-action--boost neo-tip"
+            class="status-action status-action--boost"
             :class="{ 'status-action--boosted': displayStatus.reblogged }"
             :aria-disabled="isBoosting || undefined"
             aria-label="Repost"
@@ -970,7 +970,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
           </button>
 
           <button
-            class="status-action status-action--share neo-tip"
+            class="status-action status-action--share"
             aria-label="Share"
             @click.stop="handleShare"
           >
@@ -978,7 +978,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
           </button>
 
           <button
-            class="status-action status-action--bookmark neo-tip"
+            class="status-action status-action--bookmark"
             :class="{ 'status-action--bookmarked': displayStatus.bookmarked }"
             :aria-disabled="isBookmarking || undefined"
             aria-label="Bookmark"
@@ -991,7 +991,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
           </button>
 
           <button
-            class="status-action status-action--like neo-tip"
+            class="status-action status-action--like"
             :class="{
               'status-action--liked': displayStatus.favourited,
               'status-action--pop': likePop,
@@ -1058,6 +1058,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
   overflow: visible;
   max-width: 100%;
   width: 100%;
+
+  // Lift the hovered/focused card so tip popovers paint above the next article
+  // (each card is its own stacking context; z-index on ::after alone can't escape).
+  &:hover,
+  &:focus-within {
+    z-index: 5;
+  }
 
   &--menu-open {
     z-index: 30;

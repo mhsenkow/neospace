@@ -21,18 +21,20 @@ withDefaults(
   <NuxtLink
     v-if="to"
     :to="to"
-    class="chrome-btn neo-tip"
-    :title="title"
-    :aria-label="ariaLabel || title"
+    class="chrome-btn"
+    :class="{ 'neo-tip': !!(ariaLabel || title) }"
+    :title="title || undefined"
+    :aria-label="ariaLabel || title || undefined"
   >
     <slot />
   </NuxtLink>
   <button
     v-else
     type="button"
-    class="chrome-btn neo-tip"
-    :title="title"
-    :aria-label="ariaLabel || title"
+    class="chrome-btn"
+    :class="{ 'neo-tip': !!(ariaLabel || title) }"
+    :title="title || undefined"
+    :aria-label="ariaLabel || title || undefined"
     :disabled="disabled"
   >
     <slot />
