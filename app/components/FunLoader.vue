@@ -178,7 +178,8 @@ const computeLayout = (segs: Segment[], size: number) => {
     minY = Math.min(minY, s.y1, s.y2)
     maxY = Math.max(maxY, s.y1, s.y2)
   }
-  const margin = size * 0.04
+  // Tight inset so the mark owns the square
+  const margin = size * 0.015
   const w = Math.max(1, maxX - minX)
   const h = Math.max(1, maxY - minY)
   const scale = Math.min((size - margin * 2) / w, (size - margin * 2) / h)
@@ -236,13 +237,16 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
   const total = segments.length
   if (!total) return
 
+  // Keep stroke weight proportional so large region fills don't look spindly
+  const strokeScale = Math.max(0.85, Math.min(2.4, size / 160))
+
   ctx.beginPath()
   for (const s of segments) {
     ctx.moveTo(s.x1 * scale + ox, s.y1 * scale + oy)
     ctx.lineTo(s.x2 * scale + ox, s.y2 * scale + oy)
   }
   ctx.strokeStyle = 'rgba(255,255,255,0.07)'
-  ctx.lineWidth = 1.15
+  ctx.lineWidth = 1.15 * strokeScale
   ctx.lineCap = 'square'
   ctx.stroke()
 
@@ -267,7 +271,7 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
       s.x2 * scale + ox,
       s.y2 * scale + oy,
       lit ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.1)',
-      Math.max(0.7, 1.7 - s.depth * 0.22 + combined * 1.35),
+      Math.max(0.7, 1.7 - s.depth * 0.22 + combined * 1.35) * strokeScale,
       lit ? 0.22 + combined * 0.72 : 0.07,
     )
   }
@@ -278,7 +282,7 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
     const frac = progress * total - headIdx
     const hx = (head.x1 + (head.x2 - head.x1) * frac) * scale + ox
     const hy = (head.y1 + (head.y2 - head.y1) * frac) * scale + oy
-    const r = run.headSize
+    const r = run.headSize * strokeScale
     ctx.fillStyle = 'rgba(255,255,255,0.95)'
     ctx.fillRect(hx - r, hy - r, r * 2, r * 2)
   }
@@ -316,8 +320,8 @@ const onVis = () => {
 }
 
 const applySize = (next: number) => {
-  const min = mode.value === 'seed' ? 28 : mode.value === 'pull' ? 40 : 80
-  const max = mode.value === 'seed' ? 64 : mode.value === 'pull' ? 96 : 420
+  const min = mode.value === 'seed' ? 28 : mode.value === 'pull' ? 40 : 96
+  const max = mode.value === 'seed' ? 64 : mode.value === 'pull' ? 112 : 640
   const clamped = Math.max(min, Math.min(max, Math.floor(next)))
   if (Math.abs(clamped - renderSize.value) < 4) return
   renderSize.value = clamped
@@ -330,12 +334,15 @@ const syncFluidSize = () => {
   const { width, height } = el.getBoundingClientRect()
   if (mode.value === 'pull') {
     // Sprout into the pull strip — prefer height, grow a bit with pull width
-    const next = Math.min(height * 0.92, Math.max(44, width * 0.18))
+    const next = Math.min(height * 0.98, Math.max(48, width * 0.24))
     applySize(next || 56)
     return
   }
-  const next = Math.min(width, height) * (props.label ? 0.62 : 0.72)
-  applySize(next || props.size)
+  // Leave a slim band for the label; otherwise nearly fill the shorter axis
+  const labelBand = props.label ? Math.min(40, height * 0.12) : 0
+  const pad = Math.min(width, height) * 0.04
+  const avail = Math.min(width - pad * 2, height - labelBand - pad * 2)
+  applySize(Math.max(avail, 96) || props.size)
 }
 
 const markSize = computed(() => {
@@ -380,6 +387,15 @@ watch(
     applySize(markSize.value)
   },
 )
+
+const markBoxStyle = computed(() => {
+  if (isFluid.value) return undefined
+  // Seed stays a tight square; mark with a caption grows vertically for the label
+  if (mode.value === 'seed' || !props.label) {
+    return { width: `${markSize.value}px`, height: `${markSize.value}px` }
+  }
+  return { width: `${markSize.value}px` }
+})
 </script>
 
 <template>
@@ -393,7 +409,7 @@ watch(
     }"
     role="status"
     :aria-label="label || 'Loading'"
-    :style="isFluid ? undefined : { width: `${markSize}px`, height: `${markSize}px` }"
+    :style="markBoxStyle"
   >
     <canvas
       ref="canvasRef"
@@ -413,39 +429,51 @@ watch(
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.55rem;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .fun-loader--region {
   display: flex;
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: inherit;
   flex: 1 1 auto;
-  flex-shrink: 1;
+  align-self: stretch;
+  padding: 0.25rem;
 }
 
 .fun-loader--pull {
   display: flex;
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: inherit;
+  align-self: stretch;
   pointer-events: none;
 }
 
 .fun-loader--seed {
   flex-shrink: 0;
+  gap: 0;
 }
 
 .fun-loader__canvas {
   display: block;
+  flex-shrink: 0;
   max-width: 100%;
   max-height: 100%;
+  margin: 0 auto;
 }
 
 .fun-loader__label {
-  margin-top: 0.75rem;
+  margin: 0;
+  flex-shrink: 0;
   font-size: 0.875rem;
+  line-height: 1.3;
   color: var(--neo-text-muted);
+  text-align: center;
 }
 </style>

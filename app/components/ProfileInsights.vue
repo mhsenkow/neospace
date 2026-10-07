@@ -387,6 +387,9 @@ const kpi = computed(() => {
   min-height: min(48dvh, 22rem);
   display: flex;
   align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .insights__error {

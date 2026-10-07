@@ -638,6 +638,8 @@ useHead({
 .thread-loading {
   display: flex;
   align-items: stretch;
+  justify-content: center;
+  width: 100%;
   min-height: min(55dvh, 26rem);
   padding: 1.25rem;
   box-sizing: border-box;

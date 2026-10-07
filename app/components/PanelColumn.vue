@@ -959,6 +959,10 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .panel-body {
@@ -979,8 +983,11 @@ onUnmounted(() => {
 .panel-loading {
   display: flex;
   align-items: stretch;
-  min-height: 12rem;
-  padding: 0.5rem 0;
+  justify-content: center;
+  width: 100%;
+  min-height: min(42dvh, 18rem);
+  padding: 0.75rem 0.35rem;
+  box-sizing: border-box;
 }
 
 .panel-msg-row {

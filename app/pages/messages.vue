@@ -255,7 +255,7 @@ useHead({ title: 'Messages | NeoSpace' })
       <section v-if="suggestedPeople.length || isLoadingFollowing" class="messages-suggest">
         <h2 class="messages-suggest__title">People you follow</h2>
         <div v-if="isLoadingFollowing && !suggestedPeople.length" class="messages-suggest__grow" aria-busy="true">
-          <FunLoader variant="pull" />
+          <FunLoader fill label="Loading people" />
         </div>
         <div v-else class="messages-suggest__grid">
           <button
@@ -479,6 +479,8 @@ useHead({ title: 'Messages | NeoSpace' })
 .messages-loading {
   display: flex;
   align-items: stretch;
+  justify-content: center;
+  width: 100%;
   min-height: min(55dvh, 26rem);
   padding: 1.25rem;
   box-sizing: border-box;
@@ -552,8 +554,12 @@ useHead({ title: 'Messages | NeoSpace' })
   }
 
   &__grow {
-    height: 4.5rem;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    min-height: 12rem;
     margin-top: 0.75rem;
+    box-sizing: border-box;
   }
 
   &__head {

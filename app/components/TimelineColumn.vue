@@ -1050,8 +1050,8 @@ onUnmounted(() => {
         <!-- Infinite scroll trigger -->
         <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
           <Transition name="fade">
-            <div v-if="isLoadingMore" class="column-loading-more">
-              <FunLoader :size="88" />
+            <div v-if="isLoadingMore" class="column-loading-more" aria-busy="true">
+              <FunLoader :size="120" label="Loading more" />
             </div>
           </Transition>
         </div>
@@ -1519,7 +1519,9 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 1rem 0;
+  min-height: 9rem;
+  padding: 1.25rem 0.75rem;
+  box-sizing: border-box;
 }
 
 .column-end {

@@ -237,10 +237,14 @@ body {
   font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
   font-variant-ligatures: common-ligatures contextual;
 
-  // iOS: fixed attachment + nested overflow scroll paints black mid-gesture
+  // iOS / iPadOS: fixed attachment + nested overflow scroll paints black mid-gesture
   @media (max-width: 1023px) {
     background-attachment: scroll;
     background-image: none;
+  }
+
+  @supports (-webkit-touch-callout: none) {
+    background-attachment: scroll;
   }
 }
 

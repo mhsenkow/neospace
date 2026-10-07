@@ -278,9 +278,9 @@ const onCarouselScrollEnd = () => {
 }
 
 /**
- * Chrome Android latches touches to nested `.column-scroll` (touch-action: pan-y),
- * so horizontal feed swipes never reach the snap carousel — trackpads still work
- * via wheel. Axis-lock here and drive scrollLeft ourselves on clear horizontal intent.
+ * Nested `.column-scroll` uses touch-action: pan-y, so Chrome Android + iPadOS
+ * latch vertical and never chain horizontal pans to the board. Drive scrollLeft
+ * ourselves on clear horizontal intent (finger). Trackpads use the wheel bridge.
  */
 const AXIS_LOCK_PX = 12
 const FLICK_VX = 0.4 // px/ms
@@ -298,11 +298,47 @@ type CarouselGesture = {
 
 let carouselGesture: CarouselGesture | null = null
 
-const onCarouselTouchStart = (e: TouchEvent) => {
-  if (!isMobileUi.value || e.touches.length !== 1) return
+const columnsCanScrollX = () => {
   const el = columnsContainer.value
-  // Edge portals mean swipe works even with a single feed
-  if (!el || columnsStore.columns.length < 1) return
+  if (!el) return false
+  return el.scrollWidth > el.clientWidth + 2
+}
+
+/** iPad Magic Keyboard / trackpad: map horizontal wheel onto the board scroller */
+const onColumnsWheel = (e: WheelEvent) => {
+  const el = columnsContainer.value
+  if (!el || !columnsCanScrollX()) return
+
+  let dx = e.deltaX
+  let dy = e.deltaY
+  if (e.deltaMode === 1) {
+    dx *= 16
+    dy *= 16
+  } else if (e.deltaMode === 2) {
+    dx *= el.clientWidth
+    dy *= el.clientHeight
+  }
+
+  // Shift+vertical wheel (mice) → horizontal
+  if (e.shiftKey && Math.abs(dy) >= Math.abs(dx)) {
+    dx = dy
+  }
+
+  // Dominant-horizontal trackpad swipe (iPadOS often sends deltaX here)
+  if (Math.abs(dx) < 0.5 || Math.abs(dx) <= Math.abs(dy) * 1.05) return
+
+  const max = el.scrollWidth - el.clientWidth
+  const next = Math.max(0, Math.min(max, el.scrollLeft + dx))
+  if (next === el.scrollLeft) return
+
+  e.preventDefault()
+  el.scrollLeft = next
+}
+
+const onCarouselTouchStart = (e: TouchEvent) => {
+  if (e.touches.length !== 1) return
+  const el = columnsContainer.value
+  if (!el || !columnsCanScrollX()) return
   const t = e.touches[0]!
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable="true"], .mobile-feed-tabs')) {
@@ -370,12 +406,21 @@ const finishCarouselGesture = (e: TouchEvent) => {
   el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping')
 
-  const w = el.clientWidth || 1
-  let index = Math.round(el.scrollLeft / w)
-  if (vx < -FLICK_VX) index += 1
-  else if (vx > FLICK_VX) index -= 1
-  index = clamp(index, 0, Math.max(0, slideCount.value - 1))
-  settleCarousel(index)
+  // Mobile snap carousel — park on a full-width slide
+  if (isMobileUi.value) {
+    const w = el.clientWidth || 1
+    let index = Math.round(el.scrollLeft / w)
+    if (vx < -FLICK_VX) index += 1
+    else if (vx > FLICK_VX) index -= 1
+    index = clamp(index, 0, Math.max(0, slideCount.value - 1))
+    settleCarousel(index)
+    return
+  }
+
+  // Desktop / iPad board — coast a little, no full-viewport snap
+  if (Math.abs(vx) > 0.08) {
+    el.scrollBy({ left: -vx * 220, behavior: 'smooth' })
+  }
 }
 
 const bindCarouselGestures = () => {
@@ -385,6 +430,7 @@ const bindCarouselGestures = () => {
   el.addEventListener('touchmove', onCarouselTouchMove, { passive: false, capture: true })
   el.addEventListener('touchend', finishCarouselGesture, { passive: true, capture: true })
   el.addEventListener('touchcancel', finishCarouselGesture, { passive: true, capture: true })
+  el.addEventListener('wheel', onColumnsWheel, { passive: false, capture: true })
   el.addEventListener('scrollend', onCarouselScrollEnd)
 }
 
@@ -395,6 +441,7 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('touchmove', onCarouselTouchMove, true)
   el.removeEventListener('touchend', finishCarouselGesture, true)
   el.removeEventListener('touchcancel', finishCarouselGesture, true)
+  el.removeEventListener('wheel', onColumnsWheel, true)
   el.removeEventListener('scrollend', onCarouselScrollEnd)
   el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping')
@@ -827,6 +874,11 @@ useHead({ title: 'Home | NeoSpace' })
   // Desktop: extend into main-content padding to fill the full viewport
   @media (min-width: 1024px) {
     height: 100vh;
+    margin: -1.25rem;
+    width: calc(100% + 2.5rem);
+  }
+
+  @media (min-width: 1200px) {
     margin: -1.5rem -2rem;
     width: calc(100% + 4rem);
   }
@@ -847,9 +899,9 @@ useHead({ title: 'Home | NeoSpace' })
     }
   }
 
-  // Desktop multi: every column whispers until hovered (ignore mobile active index)
+  // Desktop multi: whisper until hovered — only when real hover exists (not iPad sticky-hover)
   &--multi {
-    @media (min-width: 1024px) {
+    @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
       :deep(.timeline-column.neo-chrome),
       :deep(.panel-column.neo-chrome) {
         --neo-chrome-fg: var(--neo-text-quaternary);
@@ -877,13 +929,23 @@ useHead({ title: 'Home | NeoSpace' })
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  // Let iPad finger + trackpad claim horizontal; nested feeds keep pan-y for vertical
+  touch-action: pan-x pan-y;
   scrollbar-width: thin;
+
+  &--swiping {
+    scroll-snap-type: none;
+    cursor: grabbing;
+    user-select: none;
+  }
 
   // Single column: cap width for readability
   .columns-page:not(.columns-page--multi) & {
     @media (min-width: 1024px) {
       max-width: 620px;
       overflow-x: hidden;
+      touch-action: pan-y;
 
       :deep(.timeline-column),
       :deep(.panel-column) {
@@ -902,19 +964,10 @@ useHead({ title: 'Home | NeoSpace' })
   @media (max-width: 1023px) {
     width: 100%;
     scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-    // pan-y alone on nested feeds blocks Chrome Android from ever scrolling this;
-    // JS axis-lock (bindCarouselGestures) drives horizontal. Keep both here as fallback.
-    touch-action: pan-x pan-y;
     scrollbar-width: none;
 
     &::-webkit-scrollbar {
       display: none;
-    }
-
-    &--swiping {
-      scroll-snap-type: none;
-      cursor: grabbing;
     }
 
     :deep(.timeline-column),
@@ -933,6 +986,7 @@ useHead({ title: 'Home | NeoSpace' })
   @media (min-width: 1024px) {
     // Packed: share the row, but never crush past a readable width.
     // Wide desks: up to 6 across; narrower: step down to 4, then scroll.
+    // iPad landscape (~1024–1366): prefer readable mins that still leave room to scroll.
     .columns-page--multi.columns-page--packed & {
       overflow-x: auto;
       scroll-snap-type: x proximity;
@@ -946,7 +1000,17 @@ useHead({ title: 'Home | NeoSpace' })
       }
     }
 
-    @media (max-width: 1599px) {
+    @media (max-width: 1366px) {
+      .columns-page--multi.columns-page--packed & {
+        :deep(.timeline-column),
+        :deep(.panel-column) {
+          // ~3 across on iPad landscape, then trackpad/finger scroll
+          min-width: max(300px, 32%);
+        }
+      }
+    }
+
+    @media (min-width: 1367px) and (max-width: 1599px) {
       .columns-page--multi.columns-page--packed & {
         :deep(.timeline-column),
         :deep(.panel-column) {
@@ -963,6 +1027,17 @@ useHead({ title: 'Home | NeoSpace' })
         flex: 0 0 30%;
         min-width: 320px;
         max-width: 520px;
+      }
+    }
+
+    @media (max-width: 1199px) {
+      .columns-page--multi.columns-page--roomy & {
+        :deep(.timeline-column),
+        :deep(.panel-column) {
+          flex: 0 0 42%;
+          min-width: 300px;
+          max-width: 480px;
+        }
       }
     }
 

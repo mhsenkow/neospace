@@ -206,9 +206,8 @@ useHead({
             </button>
           </nav>
 
-          <div v-if="groupsStore.isLoading" class="loading-state">
-            <FunLoader :size="180" />
-            <p>Loading groups...</p>
+          <div v-if="groupsStore.isLoading" class="loading-state" aria-busy="true">
+            <FunLoader fill label="Loading groups" />
           </div>
 
           <div v-else-if="filteredGroups.length === 0" class="empty-state">
@@ -563,11 +562,18 @@ useHead({
 .empty-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   text-align: center;
-  padding: 2.5rem 1.5rem;
+  min-height: min(55dvh, 28rem);
+  padding: 1.25rem;
+  box-sizing: border-box;
   color: var(--neo-text-muted);
+}
+
+.empty-state {
+  align-items: center;
+  padding: 2.5rem 1.5rem;
 }
 
 .empty-emoji {

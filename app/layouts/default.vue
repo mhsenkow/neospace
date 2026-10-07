@@ -1148,6 +1148,11 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   min-height: 100vh;
   background: var(--neo-bg-primary);
 
+  // iPad / small laptop: give the board more horizontal room
+  @media (min-width: 1024px) and (max-width: 1199px) {
+    --neo-sidebar-w: 200px;
+  }
+
   &--rail {
     --neo-sidebar-w: 68px;
   }
@@ -2414,9 +2419,13 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   }
 
   @media (min-width: 1024px) {
-    padding: 1.5rem 2rem;
+    padding: 1.25rem 1.25rem;
     margin-left: var(--neo-sidebar-w, 248px);
     transition: margin-left 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (min-width: 1200px) {
+    padding: 1.5rem 2rem;
   }
 
   .neo-layout--thread &,
@@ -2427,6 +2436,10 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     padding-bottom: env(safe-area-inset-bottom, 0);
 
     @media (min-width: 1024px) {
+      padding: 1.25rem;
+    }
+
+    @media (min-width: 1200px) {
       padding: 1.5rem 2rem;
     }
   }
