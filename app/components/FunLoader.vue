@@ -202,29 +202,6 @@ const loopWindow = (x: number, center: number, half: number) => {
   return u * u * (3 - 2 * u)
 }
 
-const strokeSeg = (
-  ctx: CanvasRenderingContext2D,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  color: string,
-  width: number,
-  alpha: number,
-) => {
-  ctx.save()
-  ctx.globalAlpha = alpha
-  ctx.strokeStyle = color
-  ctx.lineWidth = width
-  ctx.lineCap = 'square'
-  ctx.lineJoin = 'miter'
-  ctx.beginPath()
-  ctx.moveTo(x0, y0)
-  ctx.lineTo(x1, y1)
-  ctx.stroke()
-  ctx.restore()
-}
-
 const inkColor = () => {
   const el = rootRef.value
   if (!el || typeof getComputedStyle === 'undefined') return 'currentColor'
@@ -271,6 +248,9 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
   if (run.reverse) progress = 1 - progress
   const halfW = run.trail * 0.5
 
+  type StrokeBatch = { width: number; alpha: number; coords: number[] }
+  const batches = new Map<string, StrokeBatch>()
+
   for (let i = 0; i < total; i++) {
     const s = segments[i]!
     const mx = (s.x1 + s.x2) * 0.5 * scale + ox
@@ -281,17 +261,36 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
     if (combined < 0.04) continue
 
     const lit = combined > 0.12
-    strokeSeg(
-      ctx,
+    const width = Math.max(0.7, 1.7 - s.depth * 0.22 + combined * 1.35) * strokeScale
+    const alpha = lit ? 0.55 + combined * 0.4 : 0.18
+    const key = `${width.toFixed(2)}:${alpha.toFixed(2)}`
+    let batch = batches.get(key)
+    if (!batch) {
+      batch = { width, alpha, coords: [] }
+      batches.set(key, batch)
+    }
+    batch.coords.push(
       s.x1 * scale + ox,
       s.y1 * scale + oy,
       s.x2 * scale + ox,
       s.y2 * scale + oy,
-      ink,
-      Math.max(0.7, 1.7 - s.depth * 0.22 + combined * 1.35) * strokeScale,
-      lit ? 0.55 + combined * 0.4 : 0.18,
     )
   }
+
+  ctx.strokeStyle = ink
+  ctx.lineCap = 'square'
+  ctx.lineJoin = 'miter'
+  for (const batch of batches.values()) {
+    ctx.globalAlpha = batch.alpha
+    ctx.lineWidth = batch.width
+    ctx.beginPath()
+    for (let i = 0; i < batch.coords.length; i += 4) {
+      ctx.moveTo(batch.coords[i]!, batch.coords[i + 1]!)
+      ctx.lineTo(batch.coords[i + 2]!, batch.coords[i + 3]!)
+    }
+    ctx.stroke()
+  }
+  ctx.globalAlpha = 1
 
   const headIdx = Math.min(total - 1, Math.floor(progress * total))
   const head = segments[headIdx]

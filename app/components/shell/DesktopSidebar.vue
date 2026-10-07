@@ -25,12 +25,7 @@ const router = useRouter()
 const route = useRoute()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 const isHome = computed(() => path.value === '/' && !columnsStore.focusedColumnId)
-const isActivity = computed(
-  () => path.value === '/notifications' && route.query.filter !== 'mention',
-)
-const isMentions = computed(
-  () => path.value === '/notifications' && route.query.filter === 'mention',
-)
+const { isActivity, isMentions } = useActivityNav()
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
 const messagesBadge = computed(() => conversationsStore.badgeLabel)
@@ -488,7 +483,7 @@ watch(
   left: 0;
   top: 0;
   bottom: 0;
-  width: var(--neo-sidebar-w);
+  width: var(--neo-sidebar-width);
   display: none;
   flex-direction: column;
   align-items: stretch;
@@ -1002,7 +997,13 @@ watch(
   }
 
   .density-glyph__packed i {
-    width: 1.25px;
+    width: 1px;
+  }
+
+  @media (min-resolution: 2dppx) {
+    .density-glyph__packed i {
+      width: 2px;
+    }
   }
 
   .density-glyph__roomy {
@@ -1187,37 +1188,6 @@ watch(
     }
   }
 
-  &__avatar-link {
-    display: block;
-    padding: 4px;
-    border-radius: 50%;
-    transition: background-color var(--neo-transition-fast);
-
-    &:hover {
-      background: var(--neo-bg-hover);
-    }
-
-    &.active .sidebar__avatar {
-      border-color: var(--neo-accent);
-    }
-  }
-
-  &__avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 1.5px solid transparent;
-    transition: border-color var(--neo-transition-fast);
-
-    &--placeholder {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-muted);
-    }
-  }
 }
 
 .nav-badge {

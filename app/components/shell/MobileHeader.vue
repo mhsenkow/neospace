@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { useShellAppearance } from '~/composables/useShellAppearance'
-
 const open = defineModel<boolean>('open', { default: false })
 
 const { boardPortal } = useBoardPortal()
 const route = useRoute()
-const { currentThemeLabel, cycleTheme } = useShellAppearance()
 
 const toggleMenu = () => {
   open.value = !open.value
@@ -40,15 +37,6 @@ const toggleMenu = () => {
     >
       <NeoIcon name="search" :size="20" :stroke="route.path === '/explore' || boardPortal === 'search' ? 2 : 1.75" />
     </NuxtLink>
-    <button
-      class="mobile-header__btn"
-      :class="{ 'chrome-hint': boardPortal === 'settings' }"
-      @click="cycleTheme"
-      aria-label="Theme"
-      type="button"
-    >
-      <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
-    </button>
   </div>
 </header>
 </template>

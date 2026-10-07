@@ -31,6 +31,8 @@ export interface ExtendedNotification extends mastodon.v1.Notification {
 interface NotificationsState {
   notifications: ExtendedNotification[]
   isLoading: boolean
+  /** Bumps to invalidate in-flight fetches when a refresh is requested mid-flight */
+  fetchGeneration: number
   isLoadingMore: boolean
   error: string | null
   hasMore: boolean
@@ -76,6 +78,7 @@ export const useNotificationsStore = defineStore('notifications', {
   state: (): NotificationsState => ({
     notifications: [],
     isLoading: false,
+    fetchGeneration: 0,
     isLoadingMore: false,
     error: null,
     hasMore: true,
@@ -251,13 +254,16 @@ export const useNotificationsStore = defineStore('notifications', {
       this.unreadCount = total
     },
 
-    async fetchNotifications(refresh = false) {
-      if (this.isLoading) return
+    async fetchNotifications(_refresh = false) {
+      const gen = ++this.fetchGeneration
 
       const instances = useInstancesStore()
       const authed = instances.authenticatedInstances
       if (!authed.length) {
-        this.error = 'Please log in to view notifications'
+        if (gen === this.fetchGeneration) {
+          this.error = 'Please log in to view notifications'
+          this.isLoading = false
+        }
         return
       }
 
@@ -318,6 +324,8 @@ export const useNotificationsStore = defineStore('notifications', {
           if (batch.items.length >= 30) anyFull = true
         }
 
+        if (gen !== this.fetchGeneration) return
+
         this.failedHosts = failed
         merged.sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -330,10 +338,14 @@ export const useNotificationsStore = defineStore('notifications', {
           this.error = 'Couldn’t load notifications from any account'
         }
       } catch (e: any) {
-        this.error = e.message || 'Failed to fetch notifications'
-        console.error('Notifications fetch error:', e)
+        if (gen === this.fetchGeneration) {
+          this.error = e.message || 'Failed to fetch notifications'
+          console.error('Notifications fetch error:', e)
+        }
       } finally {
-        this.isLoading = false
+        if (gen === this.fetchGeneration) {
+          this.isLoading = false
+        }
       }
     },
 
@@ -358,7 +370,7 @@ export const useNotificationsStore = defineStore('notifications', {
               const client = clientFor(inst.id)
               const items = await client.v1.notifications.list({
                 limit: 30,
-                maxId: this.cursors[inst.id],
+                maxId: this.cursors[inst.id]!,
               })
               return { instanceId: inst.id, instanceUrl: inst.url, items }
             } catch (e) {
@@ -406,36 +418,40 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     async markAllRead() {
-      const instances = useInstancesStore()
+      const sorted = [...this.notifications].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
       const byInstance = new Map<string, string>()
-      for (const n of this.notifications) {
+      for (const n of sorted) {
         if (!byInstance.has(n._instanceId)) {
           byInstance.set(n._instanceId, n.id)
         }
       }
 
-      await Promise.all(
+      const results = await Promise.all(
         [...byInstance.entries()].map(async ([instanceId, topId]) => {
           try {
             const client = clientFor(instanceId)
-            await (client.v1.markers as any).create({
+            await client.v1.markers.create({
               notifications: { lastReadId: topId },
             })
+            return { instanceId, topId, ok: true as const }
           } catch (e) {
             logWarn(`Failed to mark notifications read on ${instanceId}:`, e)
+            return { instanceId, topId, ok: false as const }
           }
-          this.persistLastRead(instanceId, topId)
         }),
       )
 
-      // Also seed accounts with no loaded notifs from authenticated list
-      for (const inst of instances.authenticatedInstances) {
-        if (!this.lastReadByInstance[inst.id] && byInstance.has(inst.id)) {
-          /* already persisted above */
-        }
+      for (const r of results) {
+        if (r.ok) this.persistLastRead(r.instanceId, r.topId)
       }
 
-      this.unreadCount = 0
+      if (results.every((r) => r.ok)) {
+        this.unreadCount = 0
+      } else {
+        this.recomputeUnread()
+      }
     },
 
     async dismissNotification(keyOrId: string) {

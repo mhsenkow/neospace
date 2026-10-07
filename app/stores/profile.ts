@@ -435,9 +435,15 @@ export const useProfileStore = defineStore('profile', {
       this.viewedProfile = null
       this.statuses = []
       this.pinnedStatuses = []
+      this.isLoading = false
+      this.isLoadingStatuses = false
+      this.isUpdating = false
       this.isEditing = false
+      this.maxStatusId = null
+      this.hasMoreStatuses = true
       this.error = null
       this.saveError = null
+      this.initEditForm()
     },
   },
 })

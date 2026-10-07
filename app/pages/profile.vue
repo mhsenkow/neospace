@@ -514,7 +514,9 @@ useHead({
         <div class="profile-head">
           <div class="profile-head__text">
             <template v-if="profileStore.isEditing">
+              <label class="sr-only" for="profile-display-name">Display name</label>
               <input
+                id="profile-display-name"
                 v-model="profileStore.editForm.displayName"
                 type="text"
                 class="profile-name-input neo-input"
@@ -589,7 +591,9 @@ useHead({
         </div>
 
         <template v-if="profileStore.isEditing">
+          <label class="sr-only" for="profile-bio">Bio</label>
           <textarea
+            id="profile-bio"
             v-model="profileStore.editForm.note"
             class="profile-bio-input neo-input"
             placeholder="Write a bio…"
@@ -792,9 +796,28 @@ useHead({
               :key="index"
               class="profile-field-row"
             >
-              <input v-model="field.name" type="text" class="neo-input" placeholder="Label" />
-              <input v-model="field.value" type="text" class="neo-input" placeholder="Link or value" />
-              <button type="button" class="profile-field-remove" @click="profileStore.removeField(index)">
+              <label class="sr-only" :for="`profile-field-name-${index}`">Field {{ index + 1 }} label</label>
+              <input
+                :id="`profile-field-name-${index}`"
+                v-model="field.name"
+                type="text"
+                class="neo-input"
+                placeholder="Label"
+              />
+              <label class="sr-only" :for="`profile-field-value-${index}`">Field {{ index + 1 }} value</label>
+              <input
+                :id="`profile-field-value-${index}`"
+                v-model="field.value"
+                type="text"
+                class="neo-input"
+                placeholder="Link or value"
+              />
+              <button
+                type="button"
+                class="profile-field-remove"
+                :aria-label="`Remove field ${index + 1}`"
+                @click="profileStore.removeField(index)"
+              >
                 ✕
               </button>
             </div>

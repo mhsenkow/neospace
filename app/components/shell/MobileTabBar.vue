@@ -13,7 +13,7 @@ const columnsStore = useColumnsStore()
 const { boardPortal } = useBoardPortal()
 const router = useRouter()
 const route = useRoute()
-const path = computed(() => route.path.replace(/\/+$/, '') || '/')
+const { path, isActivity } = useActivityNav()
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
 const messagesBadge = computed(() => conversationsStore.badgeLabel)
@@ -100,17 +100,17 @@ const openCompose = () => {
     to="/notifications"
     class="mobile-nav__item mobile-nav__item--badge"
     :class="{
-      active: path === '/notifications',
+      active: isActivity,
       'chrome-hint': boardPortal === 'activity',
     }"
     :aria-label="notifBadge ? `Activity, ${notifBadge} unread` : 'Activity'"
-    :aria-current="path === '/notifications' ? 'page' : undefined"
+    :aria-current="isActivity ? 'page' : undefined"
   >
     <NeoIcon
       name="heart"
       :size="22"
-      :stroke="path === '/notifications' || boardPortal === 'activity' ? 2 : 1.5"
-      :filled="path === '/notifications' && route.query.filter !== 'mention'"
+      :stroke="isActivity || boardPortal === 'activity' ? 2 : 1.5"
+      :filled="isActivity"
     />
     <span class="mobile-nav__label">Activity</span>
     <span v-if="notifBadge" class="nav-badge" aria-hidden="true">{{ notifBadge }}</span>

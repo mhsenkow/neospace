@@ -7,7 +7,7 @@ import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
 import { useOverlayStore } from '~/stores/overlay'
 import { useAccountsManager } from '~/composables/useAccountsManager'
-import { categoryTint } from '~/composables/useShellAppearance'
+import { categoryTint, useShellAppearance } from '~/composables/useShellAppearance'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -20,6 +20,7 @@ const themeStore = useThemeStore()
 const overlayStore = useOverlayStore()
 const { open: openAccounts } = useAccountsManager()
 const { boardPortal } = useBoardPortal()
+const { currentThemeLabel, cycleTheme } = useShellAppearance()
 const router = useRouter()
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
@@ -228,6 +229,16 @@ useFocusTrap(mobileSidebarRef, open, {
     <div class="mobile-sidebar__spacer"></div>
 
     <div class="mobile-sidebar__footer">
+      <button
+        class="mobile-sidebar__action mobile-sidebar__action--theme"
+        :class="{ 'chrome-hint': boardPortal === 'settings' }"
+        type="button"
+        :aria-label="`Theme: ${currentThemeLabel}`"
+        @click="cycleTheme"
+      >
+        <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
+        <span>Theme · {{ currentThemeLabel }}</span>
+      </button>
       <button
         class="mobile-sidebar__action"
         :class="{ 'chrome-hint': boardPortal === 'settings' }"
@@ -449,8 +460,12 @@ useFocusTrap(mobileSidebarRef, open, {
   &__groups-all {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--neo-accent);
+    color: var(--neo-text-link);
     text-decoration: none;
+
+    &:hover {
+      color: var(--neo-text-link-hover);
+    }
   }
 
   &__group-chips {
@@ -482,12 +497,17 @@ useFocusTrap(mobileSidebarRef, open, {
     gap: 0.3rem;
     width: 4.25rem;
     flex: 0 0 auto;
-    padding: 0.15rem;
+    padding: 0.25rem;
     border: none;
+    border-radius: var(--neo-radius-sm, 4px);
     background: transparent;
     cursor: pointer;
     color: inherit;
     -webkit-tap-highlight-color: transparent;
+
+    &:active {
+      background: var(--neo-bg-hover);
+    }
   }
 
   &__group-icon {
@@ -503,7 +523,7 @@ useFocusTrap(mobileSidebarRef, open, {
   }
 
   &__group-name {
-    font-size: 0.625rem;
+    font-size: max(0.6875rem, 11px);
     font-weight: 600;
     color: var(--neo-text-primary);
     text-align: center;
@@ -611,6 +631,10 @@ useFocusTrap(mobileSidebarRef, open, {
     &--danger:hover {
       background: var(--neo-danger-soft);
       color: var(--neo-danger);
+    }
+
+    &--theme {
+      gap: 0.65rem;
     }
   }
 

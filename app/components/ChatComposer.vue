@@ -461,7 +461,7 @@ onMounted(() => {
   backdrop-filter: blur(14px);
 
   @media (min-width: 1024px) {
-    left: var(--neo-sidebar-w, 248px);
+    left: var(--neo-sidebar-width, 248px);
     padding: 0.9rem 1.25rem 1rem;
   }
 

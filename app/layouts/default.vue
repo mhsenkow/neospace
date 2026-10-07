@@ -70,11 +70,6 @@ watch(isDesk, (desk) => {
 })
 
 onMounted(async () => {
-  // Mobile chrome is in-flow (flex), so main no longer reserves fixed offsets.
-  // Keep --neo-mobile-nav-h for FABs that sit above the tab bar.
-  document.documentElement.style.setProperty('--neo-mobile-chrome-top', '0px')
-  document.documentElement.style.setProperty('--neo-mobile-nav-h', '64px')
-
   // Loom handoff listener MUST register before initialize() — Loom may postMessage
   // while auth/storage is still loading, and those messages are otherwise lost.
   const cleanups: Array<() => void> = []
@@ -192,7 +187,7 @@ watch(
 
 <style lang="scss" scoped>
 .neo-layout {
-  --neo-sidebar-w: 248px;
+  --neo-sidebar-width: 248px;
   display: flex;
   min-height: 100vh;
   min-height: 100dvh;
@@ -219,12 +214,12 @@ watch(
 
   // iPad / small laptop: give the board more horizontal room
   @media (min-width: 1024px) and (max-width: 1199px) {
-    --neo-sidebar-w: 200px;
+    --neo-sidebar-width: 200px;
   }
 
   &--rail,
   :global(html[data-rail]) & {
-    --neo-sidebar-w: 68px;
+    --neo-sidebar-width: 68px;
   }
 }
 
@@ -305,7 +300,7 @@ watch(
     max-height: none;
     overflow: visible;
     padding: 1.25rem 1.25rem;
-    margin-left: var(--neo-sidebar-w, 248px);
+    margin-left: var(--neo-sidebar-width, 248px);
     transition: margin-left 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   }
 

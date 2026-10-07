@@ -165,6 +165,10 @@
   --neo-sidebar-width-md: #{vars.$sidebar-width-md};
   --neo-sidebar-width-lg: #{vars.$sidebar-width-lg};
   --neo-sidebar-width: var(--neo-sidebar-width-md);
+
+  // Mobile shell chrome — in-flow header/tabs; FABs offset above tab bar
+  --neo-mobile-chrome-top: 0px;
+  --neo-mobile-nav-h: 64px;
   
   --neo-container-sm: #{vars.$container-sm};
   --neo-container-md: #{vars.$container-md};

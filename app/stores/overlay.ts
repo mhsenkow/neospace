@@ -25,9 +25,27 @@ export type ConfirmState = {
   danger: boolean
 }
 
+export type ReportCategory = 'spam' | 'violation' | 'other'
+
+export type ReportState = {
+  open: boolean
+  accountAcct: string
+  category: ReportCategory
+  comment: string
+  forward: boolean
+}
+
+export type ReportPayload = {
+  category: ReportCategory
+  comment: string
+  forward: boolean
+}
+
 type ConfirmResolver = (ok: boolean) => void
+type ReportResolver = (payload: ReportPayload | null) => void
 
 let confirmResolve: ConfirmResolver | null = null
+let reportResolve: ReportResolver | null = null
 
 export const useOverlayStore = defineStore('overlay', {
   state: () => ({
@@ -45,6 +63,13 @@ export const useOverlayStore = defineStore('overlay', {
       confirmLabel: 'Confirm',
       danger: false,
     } as ConfirmState,
+    report: {
+      open: false,
+      accountAcct: '',
+      category: 'other',
+      comment: '',
+      forward: true,
+    } as ReportState,
   }),
 
   actions: {
@@ -105,6 +130,30 @@ export const useOverlayStore = defineStore('overlay', {
       const resolve = confirmResolve
       confirmResolve = null
       resolve?.(ok)
+    },
+
+    openReport(opts: { accountAcct: string }): Promise<ReportPayload | null> {
+      if (reportResolve) {
+        reportResolve(null)
+        reportResolve = null
+      }
+      this.report = {
+        open: true,
+        accountAcct: opts.accountAcct,
+        category: 'other',
+        comment: '',
+        forward: true,
+      }
+      return new Promise<ReportPayload | null>((resolve) => {
+        reportResolve = resolve
+      })
+    },
+
+    resolveReport(payload: ReportPayload | null) {
+      this.report.open = false
+      const resolve = reportResolve
+      reportResolve = null
+      resolve?.(payload)
     },
   },
 })

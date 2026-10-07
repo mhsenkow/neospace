@@ -6,6 +6,7 @@
 
 <template>
   <NeoConfirm />
+  <NeoReport />
   <NeoLightbox />
   <NeoToastHost />
 </template>

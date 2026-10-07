@@ -840,7 +840,7 @@ useHead({
   backdrop-filter: blur(10px);
 
   @media (min-width: 1024px) {
-    left: var(--neo-sidebar-w, 248px);
+    left: var(--neo-sidebar-width, 248px);
   }
 }
 
@@ -864,7 +864,7 @@ useHead({
   }
 
   @media (min-width: 1024px) {
-    left: var(--neo-sidebar-w, 248px);
+    left: var(--neo-sidebar-width, 248px);
     padding: 0.7rem 1rem 0.85rem;
   }
 

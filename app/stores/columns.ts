@@ -82,10 +82,19 @@ export interface ColumnConfig {
   returnFeed?: { feedType: ColumnFeedType; groupTag?: string }
 }
 
+type StoredLayoutMeta = {
+  columns: ColumnConfig[]
+  updatedAt: number
+  dirty: boolean
+}
+
 interface ColumnsState {
   columns: ColumnConfig[]
   /** Storage / sync key for the active identity (acct@host or guest) */
   accountKey: string
+  /** True when local edits haven't been reconciled with profile field */
+  layoutDirty: boolean
+  layoutUpdatedAt: number
   syncing: boolean
   lastSyncError: string | null
   /** Device-local: packed / roomy strip, or tabs = one focused feed */
@@ -219,12 +228,34 @@ function normalizeColumns(cols: ColumnConfig[]): ColumnConfig[] {
   }))
 }
 
+function parseStoredLayout(raw: unknown): StoredLayoutMeta | null {
+  if (Array.isArray(raw) && raw.length > 0 && raw.length <= MAX_COLUMNS) {
+    return {
+      columns: normalizeColumns(raw as ColumnConfig[]),
+      updatedAt: 0,
+      dirty: false,
+    }
+  }
+  if (raw && typeof raw === 'object' && Array.isArray((raw as StoredLayoutMeta).columns)) {
+    const entry = raw as StoredLayoutMeta
+    if (!entry.columns.length || entry.columns.length > MAX_COLUMNS) return null
+    return {
+      columns: normalizeColumns(entry.columns),
+      updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
+      dirty: !!entry.dirty,
+    }
+  }
+  return null
+}
+
 let profileSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 export const useColumnsStore = defineStore('columns', {
   state: (): ColumnsState => ({
     columns: defaultColumns(false),
     accountKey: 'guest',
+    layoutDirty: false,
+    layoutUpdatedAt: 0,
     syncing: false,
     lastSyncError: null,
     ...readDeskLayout(),
@@ -246,32 +277,29 @@ export const useColumnsStore = defineStore('columns', {
       return accountKey || 'guest'
     },
 
-    loadLocal(accountKey: string): ColumnConfig[] | null {
+    loadLocal(accountKey: string): StoredLayoutMeta | null {
       if (typeof window === 'undefined') return null
       try {
         const raw = localStorage.getItem(STORAGE_KEY)
         if (raw) {
           const parsed = JSON.parse(raw) as {
             v?: number
-            byAccount?: Record<string, ColumnConfig[]>
+            byAccount?: Record<string, unknown>
           }
           const data =
             typeof parsed?.v === 'number'
               ? parsed
-              : (parsed as { byAccount?: Record<string, ColumnConfig[]> })
-          const cols = data.byAccount?.[this.storageBucketKey(accountKey)]
-          if (Array.isArray(cols) && cols.length > 0 && cols.length <= MAX_COLUMNS) {
-            return normalizeColumns(cols)
-          }
+              : (parsed as { byAccount?: Record<string, unknown> })
+          const entry = parseStoredLayout(data.byAccount?.[this.storageBucketKey(accountKey)])
+          if (entry) return entry
         }
 
         // Migrate legacy single-bucket layout into the current account once
         const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
         if (legacy) {
           const data = JSON.parse(legacy)
-          if (Array.isArray(data.columns) && data.columns.length > 0 && data.columns.length <= MAX_COLUMNS) {
-            return normalizeColumns(data.columns as ColumnConfig[])
-          }
+          const entry = parseStoredLayout(data.columns)
+          if (entry) return entry
         }
       } catch (e) {
         console.error('Failed to load columns config:', e)
@@ -279,23 +307,35 @@ export const useColumnsStore = defineStore('columns', {
       return null
     },
 
-    saveToStorage() {
+    saveToStorage(opts?: { markDirty?: boolean }) {
       if (typeof window === 'undefined') return
+      const markDirty = opts?.markDirty !== false
+      if (markDirty) {
+        this.layoutDirty = true
+        this.layoutUpdatedAt = Date.now()
+      }
       try {
         const key = this.storageBucketKey(this.accountKey)
-        let byAccount: Record<string, ColumnConfig[]> = {}
+        let byAccount: Record<string, StoredLayoutMeta> = {}
         try {
           const existing = localStorage.getItem(STORAGE_KEY)
           if (existing) {
             const parsed = JSON.parse(existing)
             if (parsed?.byAccount && typeof parsed.byAccount === 'object') {
-              byAccount = parsed.byAccount
+              for (const [k, v] of Object.entries(parsed.byAccount)) {
+                const entry = parseStoredLayout(v)
+                if (entry) byAccount[k] = entry
+              }
             }
           }
         } catch {
           /* replace corrupt blob */
         }
-        byAccount[key] = this.columns
+        byAccount[key] = {
+          columns: this.columns,
+          updatedAt: this.layoutUpdatedAt || Date.now(),
+          dirty: this.layoutDirty,
+        }
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: STORAGE_VERSION, byAccount }))
         // Clear legacy so we don't keep resurrecting old single-device layout
         localStorage.removeItem(LEGACY_STORAGE_KEY)
@@ -305,7 +345,7 @@ export const useColumnsStore = defineStore('columns', {
     },
 
     persist() {
-      this.saveToStorage()
+      this.saveToStorage({ markDirty: true })
       // Profile-field sync disabled: it federated followed tags, corrupted other
       // metadata fields, and fired an Update on every reorder. Layout stays local.
     },
@@ -616,16 +656,25 @@ export const useColumnsStore = defineStore('columns', {
       const previous = this.columns
       const prevFocused = previous.find((c) => c.id === this.focusedColumnId)
 
-      if (fromProfile?.length) {
-        this.columns = mergeViewModes(fromProfile, fromLocal || previous)
-        this.saveToStorage()
-      } else if (fromLocal?.length) {
-        this.columns = fromLocal
-        // Push local layout up so other devices can pick it up
+      if (fromLocal?.dirty && fromLocal.columns.length) {
+        this.columns = fromLocal.columns
+        this.layoutDirty = true
+        this.layoutUpdatedAt = fromLocal.updatedAt
+      } else if (fromProfile?.length) {
+        this.columns = mergeViewModes(fromProfile, fromLocal?.columns || previous)
+        this.layoutDirty = false
+        this.layoutUpdatedAt = fromLocal?.updatedAt || Date.now()
+        this.saveToStorage({ markDirty: false })
+      } else if (fromLocal?.columns.length) {
+        this.columns = fromLocal.columns
+        this.layoutDirty = fromLocal.dirty
+        this.layoutUpdatedAt = fromLocal.updatedAt
         this.scheduleProfileSync()
       } else {
         this.columns = defaultColumns(preferHome)
-        this.saveToStorage()
+        this.layoutDirty = false
+        this.layoutUpdatedAt = Date.now()
+        this.saveToStorage({ markDirty: false })
         this.scheduleProfileSync()
       }
 

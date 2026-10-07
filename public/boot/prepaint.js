@@ -38,7 +38,7 @@
     if (p.reduceMotion) document.documentElement.classList.add('reduce-motion')
     if (localStorage.getItem('neospace_sidebar_rail') === '1') {
       document.documentElement.setAttribute('data-rail', '')
-      document.documentElement.style.setProperty('--neo-sidebar-w', '68px')
+      document.documentElement.style.setProperty('--neo-sidebar-width', '68px')
     }
   } catch (e) {
     document.documentElement.setAttribute('data-theme', 'light')

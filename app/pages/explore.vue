@@ -480,7 +480,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="tab === 'all' || tab === 'servers'" class="explore-featured">
+          <div v-if="tab === 'all'" class="explore-featured">
             <h2 class="explore-section-title">Servers</h2>
             <div class="explore-grid explore-grid--compact">
               <InstanceCard

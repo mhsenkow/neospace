@@ -669,26 +669,22 @@ const handleBlock = async () => {
 const handleReport = async () => {
   if (!canInteract.value) return
 
-  const confirmed = await overlayStore.openConfirm({
-    title: `Report @${displayStatus.value.account.acct}?`,
-    body: 'Submit a report for this post to your home server moderators.',
-    confirmLabel: 'Report',
-    danger: true,
+  const payload = await overlayStore.openReport({
+    accountAcct: displayStatus.value.account.acct,
   })
-  if (!confirmed) return
-
-  const reason = prompt('Optionally, provide a reason:')
-  if (reason === null) return
+  if (!payload) return
 
   try {
     const ctx = await getActionContext()
     await statusStore.reportStatus(
       ctx?.id || displayStatus.value.id,
       displayStatus.value.account.id,
-      reason || undefined,
+      payload.comment || undefined,
       {
         statusUrl: statusUrl.value || undefined,
         acct: displayStatus.value.account.acct,
+        category: payload.category,
+        forward: payload.forward,
       },
     )
     toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })

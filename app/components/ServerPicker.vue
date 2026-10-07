@@ -180,7 +180,6 @@ onUnmounted(() => {
           :disabled="disabled"
           :aria-invalid="!!localError"
           :aria-describedby="localError ? inputErrorId : undefined"
-          @input="schedulePeek"
         />
         <p class="server-picker__hint">
           Enter <strong>@you@server</strong> or just the server name — like
