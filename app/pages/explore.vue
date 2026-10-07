@@ -8,8 +8,10 @@ import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import { activeClient } from '~/composables/useMasto'
+import { createRaceGuard } from '~/composables/useRace'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
 import { stripHtml } from '~/utils/sanitizeHtml'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 
 type ExploreTab = 'all' | 'people' | 'posts' | 'tags' | 'servers'
 
@@ -53,6 +55,7 @@ const statuses = ref<mastodon.v1.Status[]>([])
 const hashtags = ref<mastodon.v1.Tag[]>([])
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+const searchRace = createRaceGuard()
 
 const isSignedIn = computed(() => instancesStore.hasAuthenticatedInstance)
 const hasQuery = computed(() => query.value.trim().length >= 2)
@@ -150,7 +153,7 @@ const setTab = (next: ExploreTab) => {
   searchError.value = null
   persistRoute()
   nextTick(() => searchInputRef.value?.focus())
-  if (hasQuery.value) void runFediverseSearch(query.value)
+  // Search is driven by watch(tab) — avoid a double request here
 }
 
 const handleVisit = (domain: string) => {
@@ -193,13 +196,17 @@ const lookUpCustom = async () => {
 }
 
 const clearFediverseResults = () => {
+  searchRace.abort()
   accounts.value = []
   statuses.value = []
   hashtags.value = []
   searchError.value = null
 }
 
-const runFediverseSearch = async (q: string) => {
+const shouldResolveQuery = (q: string) =>
+  /@[\w.-]+@[\w.-]+/.test(q) || /^https?:\/\//i.test(q.trim())
+
+const runFediverseSearch = async (q: string, opts?: { resolve?: boolean }) => {
   const trimmed = q.trim()
   if (trimmed.length < 2) {
     clearFediverseResults()
@@ -214,6 +221,7 @@ const runFediverseSearch = async (q: string) => {
     return
   }
 
+  const ticket = searchRace.next()
   searchBusy.value = true
   searchError.value = null
   try {
@@ -227,30 +235,37 @@ const runFediverseSearch = async (q: string) => {
             ? 'hashtags'
             : undefined
 
+    const resolve = opts?.resolve ?? shouldResolveQuery(trimmed)
     const res = await client.v2.search.fetch({
       q: trimmed,
       limit: 16,
-      resolve: true,
+      resolve,
       ...(type ? { type } : {}),
-    } as any)
+    })
 
+    if (!ticket.isCurrent()) return
     accounts.value = res.accounts || []
     statuses.value = res.statuses || []
     hashtags.value = res.hashtags || []
   } catch (e: any) {
-    searchError.value = e?.message || 'Search failed'
-    clearFediverseResults()
+    if (!ticket.isCurrent()) return
+    if (e?.name === 'AbortError') return
+    const friendly = mapErrorToMessage(e)
+    searchError.value = friendly.detail || friendly.title || 'Search failed'
+    accounts.value = []
+    statuses.value = []
+    hashtags.value = []
   } finally {
-    searchBusy.value = false
+    if (ticket.isCurrent()) searchBusy.value = false
   }
 }
 
 const onSearchEnter = () => {
-  if (tab.value === 'servers' || looksLikeHostname(query.value)) {
+  if (tab.value === 'servers' || (tab.value === 'all' && looksLikeHostname(query.value))) {
     void lookUpCustom()
     return
   }
-  void runFediverseSearch(query.value)
+  void runFediverseSearch(query.value, { resolve: true })
 }
 
 const looksLikeHostname = (raw: string) => {
@@ -267,10 +282,11 @@ const openHashtag = (tag: string) => {
 }
 
 const applyTopic = (tag: string) => {
+  if (searchTimer) clearTimeout(searchTimer)
   query.value = tag
   if (tab.value === 'servers') tab.value = 'all'
-  void runFediverseSearch(tag)
   persistRoute()
+  void runFediverseSearch(tag)
   nextTick(() => searchInputRef.value?.focus())
 }
 
@@ -308,6 +324,8 @@ onMounted(async () => {
   }
   nextTick(() => {
     searchInputRef.value?.focus()
+    // Route sync already set query/tab; the query watcher + tab watcher cover search
+    if (searchTimer) clearTimeout(searchTimer)
     if (hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
   })
 })
@@ -330,6 +348,7 @@ useHead({
 onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
   if (searchTimer) clearTimeout(searchTimer)
+  searchRace.next()
 })
 </script>
 
@@ -675,7 +694,7 @@ onUnmounted(() => {
 
     <Teleport to="body">
       <Transition name="toast-fade">
-        <div v-if="watchToast" class="explore-toast">{{ watchToast }}</div>
+        <div v-if="watchToast" class="explore-toast" role="status">{{ watchToast }}</div>
       </Transition>
     </Teleport>
   </div>
