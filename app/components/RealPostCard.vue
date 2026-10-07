@@ -40,9 +40,13 @@ const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
 /** Profiles always open the full /profile page — not a column peek. */
 const openProfile = (acct: string | undefined | null, e?: Event) => {
   if (!acct) return
-  e?.preventDefault()
-  e?.stopPropagation()
+  if (e && typeof e.preventDefault === 'function') e.preventDefault()
+  if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
   router.push({ path: '/profile', query: { user: acct.replace(/^@/, '') } })
+}
+
+const onHeaderProfileClick = (acct: string, e: MouseEvent) => {
+  openProfile(acct || displayStatus.value.account?.acct, e)
 }
 
 const displayStatus = computed(() => props.status.reblog || props.status)
@@ -731,7 +735,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
           :created-at="displayStatus.createdAt"
           :thread-to="threadTo"
           :in-app-profile="!!(accountProfileTo || displayStatus.account?.acct)"
-          @profile-click="openProfile(displayStatus.account.acct, $event)"
+          @profile-click="onHeaderProfileClick"
         >
           <NeoMenu
             v-model:open="isMenuOpen"

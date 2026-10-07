@@ -26,7 +26,7 @@ const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
       type="button"
       :id="cardLabelId"
       class="status-author"
-      @click="emit('profileClick', account.acct, $event)"
+      @click.stop="emit('profileClick', account.acct, $event)"
     >
       <span class="status-display-name" v-html="safeDisplayName" />
       <span class="status-handle">{{ accountHandle }}</span>
