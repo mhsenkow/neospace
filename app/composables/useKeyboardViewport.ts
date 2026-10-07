@@ -3,7 +3,7 @@
  * doesn't bury inputs on iOS/Android.
  */
 
-import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useScrollLock } from '~/composables/useScrollLock'
 
 export function useKeyboardViewport(
@@ -84,4 +84,43 @@ export function useKeyboardViewport(
   })
 
   return { viewportStyle, syncViewport, onFocusField }
+}
+
+/**
+ * Bottom inset for fixed composers/docks that sit above the soft keyboard.
+ * Call when the bar is mounted (always-on), unlike useKeyboardViewport's active gate.
+ */
+export function useKeyboardBottomInset() {
+  const insetStyle = ref<Record<string, string>>({})
+
+  const syncInset = () => {
+    if (typeof window === 'undefined') return
+    const vv = window.visualViewport
+    if (!vv) {
+      insetStyle.value = { bottom: '0px' }
+      return
+    }
+    const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+    insetStyle.value = { bottom: `${inset}px` }
+  }
+
+  const attach = () => {
+    if (typeof window === 'undefined') return
+    syncInset()
+    window.visualViewport?.addEventListener('resize', syncInset)
+    window.visualViewport?.addEventListener('scroll', syncInset)
+    window.addEventListener('resize', syncInset)
+  }
+
+  const detach = () => {
+    if (typeof window === 'undefined') return
+    window.visualViewport?.removeEventListener('resize', syncInset)
+    window.visualViewport?.removeEventListener('scroll', syncInset)
+    window.removeEventListener('resize', syncInset)
+  }
+
+  onMounted(attach)
+  onUnmounted(detach)
+
+  return { insetStyle, syncInset }
 }

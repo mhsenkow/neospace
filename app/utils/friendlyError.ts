@@ -8,7 +8,8 @@ export type FriendlyError = {
   retryable: boolean
 }
 
-function statusFrom(err: unknown): number | null {
+/** Prefer explicit HTTP status fields; avoid treating bare "not found" text as 404. */
+export function httpStatusFrom(err: unknown): number | null {
   if (!err || typeof err !== 'object') return null
   const e = err as Record<string, unknown>
   if (typeof e.status === 'number') return e.status
@@ -16,8 +17,14 @@ function statusFrom(err: unknown): number | null {
   const res = e.response as { status?: number } | undefined
   if (typeof res?.status === 'number') return res.status
   const msg = typeof e.message === 'string' ? e.message : ''
-  const m = msg.match(/\b([45]\d{2})\b/)
+  // Only scrape a status code when the message looks like an HTTP error line
+  const m = msg.match(/\b(?:HTTP\/\d(?:\.\d)?\s+|status(?:Code)?[:=]\s*)([45]\d{2})\b/i)
+    || msg.match(/\b([45]\d{2})\s+(?:Not Found|Unprocessable|Too Many|Forbidden|Unauthorized)\b/i)
   return m ? Number(m[1]) : null
+}
+
+function statusFrom(err: unknown): number | null {
+  return httpStatusFrom(err)
 }
 
 function isOffline(err: unknown): boolean {
@@ -95,4 +102,36 @@ export function mapErrorToMessage(err: unknown): FriendlyError {
     detail,
     retryable: true,
   }
+}
+
+/** Compose / DM post failures — match status + context, never regex alone. */
+export function mapComposeError(
+  err: unknown,
+  ctx?: { inReplyToId?: string | null; hasMedia?: boolean },
+): string {
+  const status = httpStatusFrom(err)
+  const friendly = mapErrorToMessage(err)
+  const raw =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === 'object' && 'message' in err
+        ? String((err as { message?: string }).message || '')
+        : ''
+
+  if (status === 404) {
+    if (ctx?.inReplyToId) {
+      return 'That post isn’t on your account’s server — try opening the thread and replying there.'
+    }
+    return friendly.detail
+  }
+  if (status === 422) {
+    if (ctx?.hasMedia || /media|processing|attachment/i.test(raw)) {
+      return 'Media is still processing — wait a moment and try again.'
+    }
+    return friendly.detail
+  }
+  if (status === 429) {
+    return 'Too many requests. Wait a moment and try again.'
+  }
+  return friendly.detail || friendly.title || raw || 'Failed to post'
 }

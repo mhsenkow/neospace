@@ -13,8 +13,18 @@ import { useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 import { useOverlayStore } from '~/stores/overlay'
-import { mapErrorToMessage } from '~/utils/friendlyError'
+import { mapComposeError } from '~/utils/friendlyError'
 import type { mastodon } from 'masto'
+
+const isApplePlatform = (() => {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+    ?.platform || navigator.platform || ''
+  return /Mac|iPhone|iPad|iPod/i.test(platform) || /Mac OS|iPhone|iPad|iPod/i.test(ua)
+})()
+const submitModHint = isApplePlatform ? '⌘↵' : 'Ctrl+Enter'
+const submitKeyshortcuts = isApplePlatform ? 'Meta+Enter' : 'Control+Enter'
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -43,6 +53,8 @@ const props = withDefaults(
      * Only one visible composer should accept — mobile sheet vs desktop column.
      */
     acceptHandoff?: boolean
+    /** Soft-disable (reply dock resolving, etc.) — keeps layout, blocks input/submit */
+    disabled?: boolean
   }>(),
   {
     placeholder: "What's new?",
@@ -50,6 +62,7 @@ const props = withDefaults(
     compact: false,
     lockGroup: false,
     acceptHandoff: true,
+    disabled: false,
   },
 )
 
@@ -222,10 +235,13 @@ const canPost = computed(() => {
     !isOverLimit.value &&
     !isPosting.value &&
     !isUploading.value &&
+    !props.disabled &&
     allReady.value &&
     instancesStore.isAuthenticated
   )
 })
+
+const inputLocked = computed(() => isPosting.value || props.disabled)
 
 const postingAs = computed(() => {
   const account = instancesStore.activeAccount
@@ -292,7 +308,14 @@ const mentionIndex = ref(0)
 const mentionAt = ref(-1)
 const activeMentionId = computed(() => {
   const pick = mentionResults.value[mentionIndex.value]
-  return pick ? `compose-mention-${pick.id}` : undefined
+  return pick ? `${mentionListId}-${pick.id}` : undefined
+})
+
+const submitShortcutTitle = computed(() => {
+  if (isUploading.value) return 'Waiting for uploads…'
+  if (props.inReplyToId) return `Reply (${submitModHint})`
+  if (isDirectCompose.value) return `Send (${submitModHint})`
+  return `Post (${submitModHint})`
 })
 
 const closeMentions = () => {
@@ -414,18 +437,10 @@ const handlePost = async () => {
       }
     })
   } catch (e: unknown) {
-    const friendly = mapErrorToMessage(e)
-    const raw = e && typeof e === 'object' && 'message' in e ? String((e as { message?: string }).message || '') : ''
-    if (friendly.title === 'Not found' && props.inReplyToId) {
-      error.value =
-        'That post isn’t on your account’s server — try opening the thread and replying there.'
-    } else if (friendly.title === 'Couldn’t save that') {
-      error.value = 'Media is still processing — wait a moment and try again.'
-    } else if (friendly.title === 'Slow down') {
-      error.value = friendly.detail
-    } else {
-      error.value = friendly.detail || friendly.title || raw || 'Failed to post'
-    }
+    error.value = mapComposeError(e, {
+      inReplyToId: props.inReplyToId,
+      hasMedia: mediaIds.value.length > 0,
+    })
   } finally {
     isPosting.value = false
   }
@@ -617,8 +632,8 @@ onUnmounted(() => {
           class="compose-input neo-input"
           :placeholder="placeholder"
           rows="1"
-          :readonly="isPosting"
-          :aria-busy="isPosting || isUploading || undefined"
+          :readonly="inputLocked"
+          :aria-busy="isPosting || isUploading || props.disabled || undefined"
           role="combobox"
           aria-autocomplete="list"
           :aria-expanded="mentionOpen"
@@ -626,6 +641,7 @@ onUnmounted(() => {
           :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
+          :aria-keyshortcuts="submitKeyshortcuts"
           @focus="composeFocused = true"
           @blur="composeFocused = false"
           @paste="onPaste"
@@ -634,41 +650,22 @@ onUnmounted(() => {
           @click="syncMentions"
           @keyup="onMentionKeyup"
         />
-        <div
-          v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+        <ComposeAutocomplete
+          v-if="mentionOpen"
           :id="mentionListId"
-          class="compose-mentions"
-          role="listbox"
-          aria-label="Mention suggestions"
-        >
-          <p v-if="mentionSearching && !mentionResults.length" class="compose-mentions__status">
-            Looking up…
-          </p>
-          <button
-            v-for="(account, idx) in mentionResults"
-            :id="`compose-mention-${account.id}`"
-            :key="account.id"
-            type="button"
-            class="compose-mentions__item"
-            :class="{ 'compose-mentions__item--active': idx === mentionIndex }"
-            role="option"
-            :aria-selected="idx === mentionIndex"
-            @mousedown.prevent="insertMention(account)"
-          >
-            <img :src="account.avatar" alt="" class="compose-mentions__avatar" />
-            <span class="compose-mentions__meta">
-              <span class="compose-mentions__name">{{ account.displayName || account.username }}</span>
-              <span class="compose-mentions__acct">{{ accountHandle(account) }}</span>
-            </span>
-          </button>
-        </div>
+          :results="mentionResults"
+          :searching="mentionSearching"
+          :active-index="mentionIndex"
+          @select="insertMention"
+        />
       </div>
       <button
         type="button"
         class="compose-submit neo-btn neo-btn--primary"
         :disabled="!canPost"
         :aria-label="submitAriaLabel"
-        :title="isUploading ? 'Waiting for uploads…' : inReplyToId ? 'Reply (⌘↵)' : 'Post (⌘↵)'"
+        :title="submitShortcutTitle"
+        :aria-keyshortcuts="submitKeyshortcuts"
         @click="handlePost"
       >
         <span v-if="isPosting">{{ inReplyToId ? 'Replying…' : 'Posting…' }}</span>
@@ -717,8 +714,8 @@ onUnmounted(() => {
           class="compose-input neo-input"
           :placeholder="placeholder"
           :rows="3"
-          :readonly="isPosting"
-          :aria-busy="isPosting || isUploading || undefined"
+          :readonly="inputLocked"
+          :aria-busy="isPosting || isUploading || props.disabled || undefined"
           role="combobox"
           aria-autocomplete="list"
           :aria-expanded="mentionOpen"
@@ -726,6 +723,7 @@ onUnmounted(() => {
           :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
+          :aria-keyshortcuts="submitKeyshortcuts"
           @paste="onPaste"
           @keydown="onKeydown"
           @input="onComposeInput"
@@ -733,34 +731,14 @@ onUnmounted(() => {
           @keyup="onMentionKeyup"
         />
 
-        <div
-          v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+        <ComposeAutocomplete
+          v-if="mentionOpen"
           :id="mentionListId"
-          class="compose-mentions"
-          role="listbox"
-          aria-label="Mention suggestions"
-        >
-          <p v-if="mentionSearching && !mentionResults.length" class="compose-mentions__status">
-            Looking up…
-          </p>
-          <button
-            v-for="(account, idx) in mentionResults"
-            :id="`compose-mention-${account.id}`"
-            :key="account.id"
-            type="button"
-            class="compose-mentions__item"
-            :class="{ 'compose-mentions__item--active': idx === mentionIndex }"
-            role="option"
-            :aria-selected="idx === mentionIndex"
-            @mousedown.prevent="insertMention(account)"
-          >
-            <img :src="account.avatar" alt="" class="compose-mentions__avatar" />
-            <span class="compose-mentions__meta">
-              <span class="compose-mentions__name">{{ account.displayName || account.username }}</span>
-              <span class="compose-mentions__acct">{{ accountHandle(account) }}</span>
-            </span>
-          </button>
-        </div>
+          :results="mentionResults"
+          :searching="mentionSearching"
+          :active-index="mentionIndex"
+          @select="insertMention"
+        />
       </div>
     </template>
 
@@ -789,7 +767,7 @@ onUnmounted(() => {
         <img
           v-if="item.file.type.startsWith('image/')"
           :src="item.previewUrl"
-          :alt="item.description || ''"
+          alt=""
           class="compose-media__thumb"
         />
         <div v-else class="compose-media__video">
@@ -928,7 +906,8 @@ onUnmounted(() => {
           type="button"
           class="compose-submit neo-btn neo-btn--primary"
           :disabled="!canPost"
-          :title="isUploading ? 'Waiting for uploads…' : isDirectCompose ? 'Send (⌘↵)' : 'Post (⌘↵)'"
+          :title="submitShortcutTitle"
+          :aria-keyshortcuts="submitKeyshortcuts"
           @click="handlePost"
         >
           <span v-if="isPosting">{{ isDirectCompose ? 'Sending…' : 'Posting…' }}</span>
@@ -1193,77 +1172,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-
-.compose-mentions {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 0.25rem);
-  z-index: 30;
-  max-height: 220px;
-  overflow-y: auto;
-  background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 10px;
-  box-shadow: var(--neo-shadow-lg);
-}
-
-.compose-mentions__status {
-  margin: 0;
-  padding: 0.75rem 1rem;
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-}
-
-.compose-mentions__item {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  width: 100%;
-  padding: 0.55rem 0.75rem;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  min-height: 48px;
-
-  &:hover,
-  &--active {
-    background: var(--neo-bg-tertiary);
-  }
-}
-
-.compose-mentions__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.compose-mentions__meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 0.05rem;
-}
-
-.compose-mentions__name {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--neo-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.compose-mentions__acct {
-  font-size: 0.75rem;
-  color: var(--neo-text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .compose-input {

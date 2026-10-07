@@ -9,15 +9,15 @@ import { useNotificationsStore, type ExtendedNotification } from '~/stores/notif
 import { useConversationsStore } from '~/stores/conversations'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useOverlayStore } from '~/stores/overlay'
-import { useColumnsStore, type ColumnConfig } from '~/stores/columns'
+import { useColumnsStore, FEED_LABELS, type ColumnConfig } from '~/stores/columns'
 import { useStatusStore } from '~/stores/status'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useLinkedProfileFeed } from '~/composables/useLinkedProfileFeed'
 import { sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
+import { emojify } from '~/utils/emojify'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { participantLabel } from '~/utils/dmHelpers'
-import { FEED_LABELS } from '~/stores/columns'
 
 interface Props {
   column: ColumnConfig
@@ -202,8 +202,16 @@ const remoteHandle = computed(() => {
   return acct ? `@${acct.replace(/^@/, '')}` : ''
 })
 
-const safeRemoteBio = computed(() => sanitizeStatusHtml(remoteAccount.value?.note || ''))
-const safeProfileBio = computed(() => sanitizeStatusHtml(profileAccount.value?.note || ''))
+const safeRemoteBio = computed(() => {
+  const note = remoteAccount.value?.note || ''
+  const emojis = remoteAccount.value?.emojis || []
+  return emojify(sanitizeStatusHtml(note), emojis, { escape: false })
+})
+const safeProfileBio = computed(() => {
+  const note = profileAccount.value?.note || ''
+  const emojis = profileAccount.value?.emojis || []
+  return emojify(sanitizeStatusHtml(note), emojis, { escape: false })
+})
 
 const onProfilePeekKeydown = (e: KeyboardEvent) => {
   const list = profileLinkedAccounts.value
@@ -1323,6 +1331,23 @@ onUnmounted(() => {
     flex-shrink: 0;
   }
 
+  &__unread {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--neo-accent);
+    flex-shrink: 0;
+  }
+
+  &__excerpt {
+    white-space: normal !important;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--neo-text-secondary) !important;
+  }
+
   &--plain {
     font-weight: 600;
     padding: 0.4rem 0.15rem;
@@ -1450,6 +1475,22 @@ onUnmounted(() => {
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
+
+    :deep(p) {
+      margin: 0;
+    }
+
+    :deep(a) {
+      color: var(--neo-accent);
+      text-decoration: none;
+    }
+
+    :deep(img.emoji),
+    :deep(img.custom-emoji) {
+      width: 1.1em;
+      height: 1.1em;
+      vertical-align: -0.15em;
+    }
   }
 
   &__followers {

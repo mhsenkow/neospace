@@ -12,6 +12,8 @@ import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel } from '~/utils/dmHelpers'
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
+import { setReadAccountOverride } from '~/composables/useMasto'
+import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +23,14 @@ const conversationsStore = useConversationsStore()
 const loadRace = createRaceGuard()
 let skipNextRouteWatch = false
 let dmRefreshActive = false
+
+const syncReadAccountOverride = () => {
+  const account = route.query.account
+  setReadAccountOverride(typeof account === 'string' ? account : null)
+}
+syncReadAccountOverride()
+watch(() => route.query.account, syncReadAccountOverride)
+onBeforeUnmount(() => setReadAccountOverride(null))
 
 const isLoading = ref(true)
 const isRefreshing = ref(false)
@@ -158,36 +168,75 @@ const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
 
 /** Resolved local id for public inline reply (foreign URLs) */
 const publicReplyId = ref<string | null>(null)
+/** True while resolveReplyId is in flight — dock shows disabled immediately */
+const replyResolving = ref(false)
+let replyResolveToken = 0
 
 watch(
   () => [replyTarget.value?.id, replyTarget.value?.url, replyTarget.value?.uri, isDirectThread.value] as const,
   async ([id, url, uri, isDm]) => {
+    const token = ++replyResolveToken
     if (!id || isDm) {
       publicReplyId.value = null
+      replyResolving.value = false
       return
     }
-    publicReplyId.value =
-      (await statusStore.resolveReplyId({
-        id,
-        url: (typeof url === 'string' && url) || (typeof uri === 'string' && uri) || queryUrl.value,
-      })) || id
+    // Show dock immediately with the local id; refine after network resolve
+    publicReplyId.value = id
+    replyResolving.value = true
+    try {
+      const resolved =
+        (await statusStore.resolveReplyId({
+          id,
+          url: (typeof url === 'string' && url) || (typeof uri === 'string' && uri) || queryUrl.value,
+        })) || id
+      if (token !== replyResolveToken) return
+      publicReplyId.value = resolved
+    } finally {
+      if (token === replyResolveToken) replyResolving.value = false
+    }
   },
   { immediate: true },
 )
 
-/** Keep public reply dock above the soft keyboard (iOS visualViewport) */
-const replyDockStyle = ref<Record<string, string>>({})
+/** Flat reply list with depth from inReplyToId (root = focus post) */
+type ReplyNode = { status: mastodon.v1.Status; depth: number }
 
-const syncReplyDockOffset = () => {
-  if (typeof window === 'undefined') return
-  const vv = window.visualViewport
-  if (!vv) {
-    replyDockStyle.value = { bottom: '0px' }
-    return
+const replyTree = computed((): ReplyNode[] => {
+  const focusId = focusStatus.value?.id
+  if (!focusId || !descendants.value.length) return []
+
+  const byParent = new Map<string, mastodon.v1.Status[]>()
+  for (const s of descendants.value) {
+    const parent = s.inReplyToId || focusId
+    const list = byParent.get(parent)
+    if (list) list.push(s)
+    else byParent.set(parent, [s])
   }
-  const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-  replyDockStyle.value = { bottom: `${inset}px` }
-}
+
+  const out: ReplyNode[] = []
+  const seen = new Set<string>()
+  const walk = (parentId: string, depth: number) => {
+    const kids = byParent.get(parentId) || []
+    for (const kid of kids) {
+      if (seen.has(kid.id)) continue
+      seen.add(kid.id)
+      out.push({ status: kid, depth: Math.min(depth, 6) })
+      walk(kid.id, depth + 1)
+    }
+  }
+  walk(focusId, 0)
+
+  // Orphans whose parent isn't in this context — append at depth 0
+  for (const s of descendants.value) {
+    if (seen.has(s.id)) continue
+    out.push({ status: s, depth: 0 })
+  }
+  return out
+})
+
+/** Keep public reply dock above the soft keyboard (iOS visualViewport) */
+const { insetStyle: replyDockStyle } = useKeyboardBottomInset()
 
 const preferReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -342,19 +391,12 @@ const startThreadPoll = () => {
 
 onMounted(() => {
   void loadThread().then(() => startThreadPoll())
-  syncReplyDockOffset()
-  window.visualViewport?.addEventListener('resize', syncReplyDockOffset)
-  window.visualViewport?.addEventListener('scroll', syncReplyDockOffset)
-  window.addEventListener('resize', syncReplyDockOffset)
 })
 
 onUnmounted(() => {
   stopThreadPoll()
   loadRace.abort()
   syncDmLiveRefresh(false)
-  window.visualViewport?.removeEventListener('resize', syncReplyDockOffset)
-  window.visualViewport?.removeEventListener('scroll', syncReplyDockOffset)
-  window.removeEventListener('resize', syncReplyDockOffset)
 })
 
 watch(() => [route.params.id, route.query.url], () => {
@@ -534,11 +576,13 @@ useHead({
         </div>
 
         <RealPostCard
-          v-for="status in descendants"
-          :key="status.id"
-          :status="status"
+          v-for="node in replyTree"
+          :key="node.status.id"
+          :status="node.status"
           hide-inline-reply
           class="thread-post thread-post--reply"
+          :class="{ 'thread-post--nested': node.depth > 0 }"
+          :style="{ '--thread-depth': String(node.depth) }"
           @replied="onReplyPosted"
         />
 
@@ -549,18 +593,21 @@ useHead({
         <div ref="chatEndEl" class="chat-end" aria-hidden="true" />
       </div>
 
-      <!-- Threads-style: type in the bar above the keyboard -->
+      <!-- Threads-style: type in the bar above the keyboard (show disabled while resolving) -->
       <div
-        v-if="focusStatus && canReply && publicReplyId"
+        v-if="focusStatus && canReply"
         class="thread-reply-dock"
+        :class="{ 'thread-reply-dock--pending': replyResolving || !publicReplyId }"
         :style="replyDockStyle"
+        :aria-busy="replyResolving || !publicReplyId || undefined"
       >
         <div class="thread-reply-dock__inner">
           <RealComposeBox
-            :key="publicReplyId"
+            :key="publicReplyId || focusStatus.id"
             compact
             :accept-handoff="false"
-            :in-reply-to-id="publicReplyId"
+            :disabled="replyResolving || !publicReplyId"
+            :in-reply-to-id="publicReplyId || focusStatus.id"
             :initial-text="replyPrefill"
             :initial-visibility="focusStatus.visibility === 'direct' ? 'direct' : focusStatus.visibility"
             :placeholder="`Reply to @${focusStatus.account.acct}…`"
@@ -748,26 +795,20 @@ useHead({
   }
 }
 
-.thread-spinner {
-  width: 1.5rem;
-  height: 1.5rem;
-  border: 2px solid var(--neo-border-color);
-  border-top-color: var(--neo-accent);
-  border-radius: 50%;
-  animation: thread-spin 0.7s linear infinite;
-}
-
-@keyframes thread-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .thread-stream {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
+}
+
+.thread-post--reply {
+  margin-left: calc(var(--thread-depth, 0) * 0.85rem);
+}
+
+.thread-post--nested {
+  padding-left: 0.5rem;
+  border-left: 2px solid color-mix(in srgb, var(--neo-accent) 28%, var(--neo-border-color));
 }
 
 .thread-focus {
@@ -799,7 +840,7 @@ useHead({
   backdrop-filter: blur(10px);
 
   @media (min-width: 1024px) {
-    left: 64px;
+    left: var(--neo-sidebar-w, 248px);
   }
 }
 
@@ -816,6 +857,11 @@ useHead({
   border-top: 1px solid var(--neo-border-color);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+
+  &--pending {
+    opacity: 0.72;
+    pointer-events: none;
+  }
 
   @media (min-width: 1024px) {
     left: var(--neo-sidebar-w, 248px);

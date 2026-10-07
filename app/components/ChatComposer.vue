@@ -9,6 +9,9 @@ import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { COMPOSE_MEDIA_ACCEPT, useComposeMedia } from '~/composables/useComposeMedia'
 import { isImeEvent } from '~/composables/useComposerCore'
+import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
+import { mapComposeError } from '~/utils/friendlyError'
+import { mastodonLength } from '~/utils/mastodonLength'
 
 const props = defineProps<{
   /** Latest status in the thread to reply to */
@@ -99,6 +102,7 @@ const makeOptimisticStatus = (body: string): mastodon.v1.Status => {
 
 const {
   attachments,
+  isDragging,
   isUploading,
   hasMedia,
   mediaIds,
@@ -111,9 +115,16 @@ const {
   setDescription,
   altMax,
   onPaste,
+  onDragEnter,
+  onDragLeave,
+  onDragOver,
+  onDrop,
 } = useComposeMedia()
 
+const { insetStyle: barStyle } = useKeyboardBottomInset()
+
 const maxChars = computed(() => instancesStore.statusMaxCharacters || 500)
+const counterAnnounce = ref('')
 
 const mentionList = computed(() => {
   const raw = [
@@ -139,19 +150,32 @@ const mentionPrefix = computed(() =>
 
 const projectedLen = computed(() => {
   const text = content.value.trim()
-  if (!mentionPrefix.value) return text.length
-  let overhead = 0
+  if (!mentionPrefix.value) return mastodonLength(text)
+  let body = text
   for (const acct of mentionList.value) {
     const mention = `@${acct}`
-    if (!text.toLowerCase().includes(mention.toLowerCase())) {
-      overhead += mention.length + 1
-    }
+    const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const already = new RegExp(`(?:^|[\\s\\u200B])${escaped}(?=$|[\\s\\u200B]|[^\\w.])`, 'i').test(
+      ` ${text} `,
+    )
+    if (!already) body = `${mention} ${body}`
   }
-  return text.length + overhead
+  return mastodonLength(body)
 })
 
 const remaining = computed(() => maxChars.value - projectedLen.value)
 const overLimit = computed(() => remaining.value < 0)
+const nearLimit = computed(() => !overLimit.value && remaining.value <= 40)
+
+watch([remaining, overLimit, nearLimit], () => {
+  if (overLimit.value) {
+    counterAnnounce.value = `Over character limit by ${-remaining.value}`
+  } else if (nearLimit.value) {
+    counterAnnounce.value = `${remaining.value} characters left`
+  } else {
+    counterAnnounce.value = ''
+  }
+})
 
 const canSend = computed(() => {
   const hasText = content.value.trim().length > 0
@@ -173,7 +197,10 @@ const autosize = () => {
   el.style.height = `${Math.min(el.scrollHeight, 140)}px`
 }
 
-watch(content, () => nextTick(autosize))
+watch(content, () => {
+  // Single nextTick — avoid double autosize from @input + watch
+  void nextTick(autosize)
+})
 
 const buildBody = () => {
   let text = content.value.trim()
@@ -207,13 +234,11 @@ const postBody = async (body: string, ids: string[]) => {
     pendingSend.value = null
     emit('posted', status)
     textareaRef.value?.focus()
-  } catch (e: any) {
-    const raw = (e?.message || '').toString()
-    if (/record not found|not found/i.test(raw)) {
-      error.value = 'That conversation isn’t on your account’s server.'
-    } else {
-      error.value = raw || 'Couldn’t send'
-    }
+  } catch (e: unknown) {
+    error.value = mapComposeError(e, {
+      inReplyToId: props.inReplyToId,
+      hasMedia: ids.length > 0,
+    })
     if (pendingSend.value) {
       pendingSend.value = { ...pendingSend.value, delivery: 'failed' }
     }
@@ -257,40 +282,24 @@ const onFileChange = (e: Event) => {
   input.value = ''
 }
 
-/** Keep the bar above the soft keyboard (iOS visualViewport) */
-const barStyle = ref<Record<string, string>>({})
-
-const syncKeyboardOffset = () => {
-  if (typeof window === 'undefined') return
-  const vv = window.visualViewport
-  if (!vv) {
-    barStyle.value = { bottom: '0px' }
-    return
-  }
-  const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-  barStyle.value = { bottom: `${inset}px` }
-}
-
 onMounted(() => {
-  syncKeyboardOffset()
-  window.visualViewport?.addEventListener('resize', syncKeyboardOffset)
-  window.visualViewport?.addEventListener('scroll', syncKeyboardOffset)
-  window.addEventListener('resize', syncKeyboardOffset)
   // Autofocus only with a fine pointer — avoid popping the mobile keyboard
   if (typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches) {
     nextTick(() => textareaRef.value?.focus())
   }
 })
-
-onUnmounted(() => {
-  window.visualViewport?.removeEventListener('resize', syncKeyboardOffset)
-  window.visualViewport?.removeEventListener('scroll', syncKeyboardOffset)
-  window.removeEventListener('resize', syncKeyboardOffset)
-})
 </script>
 
 <template>
-  <div class="chat-composer" :style="barStyle">
+  <div
+    class="chat-composer"
+    :class="{ 'chat-composer--dragging': isDragging }"
+    :style="barStyle"
+    @dragenter="onDragEnter"
+    @dragleave="onDragLeave"
+    @dragover="onDragOver"
+    @drop="onDrop"
+  >
     <div class="chat-composer__inner">
       <div v-if="pendingSend" class="chat-composer__pending">
         <MessageBubble
@@ -324,7 +333,7 @@ onUnmounted(() => {
             <img
               v-else-if="item.previewUrl"
               :src="item.previewUrl"
-              :alt="item.description || ''"
+              alt=""
             />
             <div v-if="item.uploading" class="chat-composer__thumb-overlay">
               Uploading…
@@ -394,19 +403,20 @@ onUnmounted(() => {
             enterkeyhint="send"
             aria-label="Message"
             :aria-busy="isSending || undefined"
+            :aria-invalid="overLimit || undefined"
             @keydown="onKeydown"
             @paste="onPaste"
-            @input="autosize"
           />
         </div>
 
+        <span class="sr-only" aria-live="polite" aria-atomic="true">{{ counterAnnounce }}</span>
         <span
           class="chat-composer__count"
           :class="{
-            'chat-composer__count--warn': remaining <= 40 && remaining >= 0,
+            'chat-composer__count--warn': nearLimit,
             'chat-composer__count--over': overLimit,
           }"
-          :aria-live="overLimit ? 'polite' : 'off'"
+          aria-hidden="true"
         >
           {{ remaining }}
         </span>
@@ -451,8 +461,13 @@ onUnmounted(() => {
   backdrop-filter: blur(14px);
 
   @media (min-width: 1024px) {
-    left: 64px;
+    left: var(--neo-sidebar-w, 248px);
     padding: 0.9rem 1.25rem 1rem;
+  }
+
+  &--dragging {
+    outline: 2px dashed var(--neo-accent);
+    outline-offset: -4px;
   }
 }
 

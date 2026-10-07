@@ -10,7 +10,13 @@
 
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
-import { useColumnsStore, MAX_COLUMNS, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
+import {
+  useColumnsStore,
+  MAX_COLUMNS,
+  FEED_LABELS,
+  isTimelineFeed,
+  type ColumnFeedType,
+} from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 import { useSettingsStore } from '~/stores/settings'
 import { useConversationsStore } from '~/stores/conversations'
@@ -54,16 +60,6 @@ const slideCount = computed(() => {
 })
 
 const feedSlideOffset = computed(() => (isMobileUi.value ? EDGE_LEFT : 0))
-
-const FEED_LABELS: Record<string, string> = {
-  home: 'For You',
-  local: 'Local',
-  federated: 'Federated',
-  profile: 'Profile',
-  search: 'Search',
-  notifications: 'Notifications',
-  messages: 'Messages',
-}
 
 const localHostLabel = computed(() => {
   const filteredId = instancesStore.activeInstanceFilter
@@ -977,7 +973,8 @@ useHead({ title: 'Home | NeoSpace' })
           type="button"
           class="mobile-feed-tabs__mode"
           :class="{ 'mobile-feed-tabs__mode--flip': activeViewMode === 'flip' }"
-          :aria-label="activeViewMode === 'flip' ? 'Flip — tap for Flow' : 'Flow — tap for Flip'"
+          :aria-label="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
+          :aria-pressed="activeViewMode === 'flip'"
           :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
           @click="toggleActiveViewMode"
         >
@@ -1802,8 +1799,23 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
+/* Keep mounted so column scrollTop survives focus mode (avoid display:none). */
 :deep(.board-col--hidden) {
-  display: none !important;
+  content-visibility: hidden;
+  visibility: hidden;
+  position: absolute !important;
+  inset: 0 auto auto 0;
+  width: 1px !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .feed-portal {
@@ -2478,8 +2490,8 @@ useHead({ title: 'Home | NeoSpace' })
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--neo-text-secondary);
-    border-radius: 8px;
-    transition: all 0.12s ease;
+    border-radius: var(--neo-radius-lg, 8px);
+    transition: background-color 0.12s ease, color 0.12s ease;
 
     &:hover {
       background: var(--neo-bg-tertiary);
@@ -2512,8 +2524,8 @@ useHead({ title: 'Home | NeoSpace' })
     color: var(--neo-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    border-radius: 6px;
-    transition: all 0.12s ease;
+    border-radius: var(--neo-radius-lg, 6px);
+    transition: background-color 0.12s ease, color 0.12s ease;
 
     &:hover {
       background: var(--neo-bg-tertiary);
@@ -2585,21 +2597,4 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
-// ========================================
-// Add menu transition
-// ========================================
-.add-menu-enter-active,
-.add-menu-leave-active {
-  transition: all 0.15s ease;
-  transform-origin: right top;
-}
-.add-menu-enter-from,
-.add-menu-leave-to {
-  opacity: 0;
-  transform: scale(0.95) translateX(4px);
-}
-.add-column-menu--mobile.add-menu-enter-from,
-.add-column-menu--mobile.add-menu-leave-to {
-  transform: scale(0.95) translateY(-4px);
-}
 </style>

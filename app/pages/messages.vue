@@ -155,14 +155,31 @@ const onTouchMove = (e: TouchEvent) => {
   }
 }
 
-const onTouchEnd = async () => {
-  if (!pullActive) return
+const resetPull = () => {
   pullActive = false
-  const shouldRefresh = pullDist.value > 52
   pulling.value = false
   pullDist.value = 0
+}
+
+const onTouchEnd = async () => {
+  if (!pullActive) return
+  const shouldRefresh = pullDist.value > 52
+  resetPull()
   if (shouldRefresh) await refreshInbox()
 }
+
+const onTouchCancel = () => {
+  if (!pullActive) return
+  resetPull()
+}
+
+const filterStatusText = computed(() => {
+  const q = searchQuery.value.trim()
+  if (!q) return ''
+  const n = filteredConversations.value.length
+  if (!n) return `No chats match “${q}”.`
+  return `${n} chat${n === 1 ? '' : 's'} match “${q}”.`
+})
 
 let liveRefreshStarted = false
 
@@ -324,6 +341,7 @@ useHead({ title: 'Messages | NeoSpace' })
         @touchstart.passive="onTouchStart"
         @touchmove.passive="onTouchMove"
         @touchend="onTouchEnd"
+        @touchcancel="onTouchCancel"
       >
         <div
           class="messages-pull"
@@ -397,8 +415,13 @@ useHead({ title: 'Messages | NeoSpace' })
           </li>
         </ul>
 
-        <p v-if="searchQuery && !filteredConversations.length" class="messages-filter-empty">
-          No chats match “{{ searchQuery }}”.
+        <p
+          class="messages-filter-status"
+          :class="{ 'messages-filter-status--empty': searchQuery && !filteredConversations.length }"
+          role="status"
+          aria-live="polite"
+        >
+          {{ filterStatusText }}
         </p>
 
         <div v-if="!searchQuery && conversationsStore.hasMore" class="messages-more">
@@ -484,7 +507,7 @@ useHead({ title: 'Messages | NeoSpace' })
     width: 100%;
     box-sizing: border-box;
     padding: 0.55rem 0.85rem;
-    border-radius: 12px;
+    border-radius: var(--neo-radius-md, 12px);
     border: 1px solid var(--neo-border-color);
     background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
@@ -496,18 +519,21 @@ useHead({ title: 'Messages | NeoSpace' })
       border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
       box-shadow: 0 0 0 3px var(--neo-accent-soft);
     }
-  }
-}
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
+    &:focus-visible {
+      outline: 2px solid var(--neo-focus, var(--neo-accent));
+      outline-offset: 2px;
+    }
+
+    @media (forced-colors: active) {
+      &:focus,
+      &:focus-visible {
+        outline: 2px solid Highlight;
+        outline-offset: 2px;
+        box-shadow: none;
+      }
+    }
+  }
 }
 
 .messages-loading {
@@ -774,10 +800,16 @@ useHead({ title: 'Messages | NeoSpace' })
     background: transparent;
     color: inherit;
     cursor: pointer;
+    border-radius: 0;
 
     &:hover:not(:disabled),
     &:active:not(:disabled) {
       background: var(--neo-bg-tertiary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-focus, var(--neo-accent));
+      outline-offset: -2px;
     }
   }
 
@@ -790,12 +822,17 @@ useHead({ title: 'Messages | NeoSpace' })
     justify-content: center;
     border: none;
     background: transparent;
-    color: var(--neo-text-quaternary);
+    color: var(--neo-text-tertiary);
     cursor: pointer;
 
     &:hover {
       color: var(--neo-text-primary);
       background: var(--neo-bg-tertiary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-focus, var(--neo-accent));
+      outline-offset: -2px;
     }
   }
 
@@ -846,7 +883,7 @@ useHead({ title: 'Messages | NeoSpace' })
   &__time {
     flex-shrink: 0;
     font-size: 0.75rem;
-    color: var(--neo-text-quaternary);
+    color: var(--neo-text-tertiary);
   }
 
   &__preview {
@@ -862,7 +899,7 @@ useHead({ title: 'Messages | NeoSpace' })
   &__accts {
     margin: 0.15rem 0 0;
     font-size: 0.75rem;
-    color: var(--neo-text-quaternary);
+    color: var(--neo-text-tertiary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -878,7 +915,25 @@ useHead({ title: 'Messages | NeoSpace' })
   }
 }
 
-.messages-filter-empty,
+.messages-filter-status {
+  margin: 0;
+  min-height: 1.25rem;
+  padding: 0.35rem 1rem 0;
+  text-align: center;
+  color: var(--neo-text-muted);
+  font-size: 0.8125rem;
+
+  &:empty {
+    padding: 0;
+    min-height: 0;
+  }
+
+  &--empty {
+    padding: 1rem;
+    font-size: 0.875rem;
+  }
+}
+
 .messages-more {
   padding: 1rem;
   text-align: center;

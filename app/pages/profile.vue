@@ -29,6 +29,7 @@ import {
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
+import { setReadAccountOverride } from '~/composables/useMasto'
 
 const INTERNAL_FIELD_NAMES = new Set([
   'neospace_columns',
@@ -49,6 +50,14 @@ const route = useRoute()
 const router = useRouter()
 const profileRace = createRaceGuard()
 const statusesRace = createRaceGuard()
+
+const syncReadAccountOverride = () => {
+  const account = route.query.account
+  setReadAccountOverride(typeof account === 'string' ? account : null)
+}
+syncReadAccountOverride()
+watch(() => route.query.account, syncReadAccountOverride)
+onBeforeUnmount(() => setReadAccountOverride(null))
 
 const canSwitchAccounts = computed(
   () =>
