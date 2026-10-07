@@ -1350,14 +1350,20 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  // Vertical latch for the feed; horizontal feed-switching is claimed by
-  // index.vue carousel gestures (Chrome Android won't chain pan-x through this).
+  // Mobile: vertical latch — horizontal feed switches are driven by index.vue
+  // axis-lock (Chrome Android won't chain pan-x through this).
+  // Desktop / iPad board: allow horizontal pan so Magic Keyboard trackpad can
+  // reach .columns-container (wheel bridge is the other half).
   touch-action: pan-y;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   background: var(--neo-bg-primary);
   scrollbar-width: thin;
   scrollbar-color: var(--neo-text-muted) transparent;
+
+  @media (min-width: 1024px) {
+    touch-action: pan-x pan-y;
+  }
 
   @media (max-width: 1023px) {
     // Keep last post actions above the home-indicator / nav edge

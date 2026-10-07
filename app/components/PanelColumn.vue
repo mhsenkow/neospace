@@ -963,6 +963,10 @@ onUnmounted(() => {
   touch-action: pan-y;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+
+  @media (min-width: 1024px) {
+    touch-action: pan-x pan-y;
+  }
 }
 
 .panel-body {
