@@ -50,9 +50,7 @@ const selected = computed(() => {
 })
 
 const joined = computed(() => groupsStore.joinedGroups.slice(0, 24))
-const suggested = computed(() =>
-  groupsStore.recommendedGroups.filter((g) => !g.isMember).slice(0, 12),
-)
+const suggested = computed(() => groupsStore.suggestedFeaturedGroups.slice(0, 12))
 
 const filteredJoined = computed(() => {
   const q = query.value.trim().toLowerCase()

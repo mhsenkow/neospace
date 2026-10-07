@@ -13,6 +13,8 @@
     "postinstall": "nuxt prepare",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc -p functions/tsconfig.json --noEmit",
+    "typecheck:app": "nuxt typecheck",
     "cf:preview": "npm run generate && wrangler pages dev",
     "cf:deploy": "npm run generate && wrangler pages deploy --commit-dirty=true"
   },
@@ -28,7 +30,9 @@
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
     "@vite-pwa/nuxt": "^1.1.1",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9",
+    "vue-tsc": "^3.0.8",
     "wrangler": "^4.147.0"
   }
 }

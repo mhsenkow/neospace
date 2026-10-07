@@ -11,6 +11,7 @@ import {
   beginOAuthChallenge,
   consumeOAuthChallenge,
   stashClientSecret,
+  persistClientSecret,
   readClientSecret,
   clearClientSecret,
 } from '~/utils/oauthPkce'
@@ -214,23 +215,31 @@ export const useInstancesStore = defineStore('instances', {
             isConnecting: false,
             error: null,
           })) as ConnectedInstance[]
-          // Collapse duplicate URLs (prefer authenticated + richer user)
-          const byUrl = new Map<string, ConnectedInstance>()
+          // Keep multiple accounts on the same server; only collapse empty duplicates
+          const seen = new Map<string, ConnectedInstance>()
+          const kept: ConnectedInstance[] = []
           for (const inst of raw) {
-            const key = (inst.url || '').replace(/\/+$/, '').toLowerCase()
-            if (!key) continue
-            const prev = byUrl.get(key)
+            const urlKey = (inst.url || '').replace(/\/+$/, '').toLowerCase()
+            if (!urlKey) continue
+            const userKey = inst.user?.id || inst.id
+            const key = `${urlKey}::${userKey}`
+            const prev = seen.get(key)
             if (!prev) {
-              byUrl.set(key, inst)
+              seen.set(key, inst)
+              kept.push(inst)
               continue
             }
-            const prefer =
+            // Same slot — prefer authenticated + richer user
+            if (
               (!!inst.accessToken && !prev.accessToken) ||
-              (!!inst.user && !prev.user) ||
-              (!!inst.accessToken && !!prev.accessToken)
-            byUrl.set(key, prefer ? { ...prev, ...inst, url: prev.url } : prev)
+              (!!inst.user && !prev.user)
+            ) {
+              const idx = kept.indexOf(prev)
+              if (idx !== -1) kept[idx] = { ...prev, ...inst, url: prev.url, id: prev.id }
+              seen.set(key, kept[idx]!)
+            }
           }
-          this.instances = Array.from(byUrl.values())
+          this.instances = kept
           this.activeInstanceFilter = data.activeInstanceFilter || null
           this.activeAccountId = data.activeAccountId || null
           this.primaryAccountId = data.primaryAccountId || null
@@ -354,11 +363,14 @@ export const useInstancesStore = defineStore('instances', {
       this.saveToStorage()
     },
 
-    async addInstance(instanceUrl: string): Promise<ConnectedInstance> {
+    async addInstance(
+      instanceUrl: string,
+      opts?: { allowDuplicateUrl?: boolean },
+    ): Promise<ConnectedInstance> {
       const url = instanceUrl.replace(/\/+$/, '')
 
       const existing = this.getInstanceByUrl(url)
-      if (existing) {
+      if (existing && !opts?.allowDuplicateUrl) {
         throw new Error('Already watching this server')
       }
 
@@ -415,12 +427,19 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     /**
-     * Login flow for /login — add instance if needed, then start OAuth
+     * Login flow for /login — add instance if needed, then start OAuth.
+     * If this server already has a signed-in account, open a new slot so we
+     * don't silently overwrite (and orphan) the previous token.
      */
     async loginWithInstance(instanceUrl: string): Promise<string> {
       const url = instanceUrl.replace(/\/+$/, '')
-      let instance = this.getInstanceByUrl(url)
-      if (!instance) {
+      const existing = this.getInstanceByUrl(url)
+      let instance: ConnectedInstance
+      if (existing?.accessToken) {
+        instance = await this.addInstance(url, { allowDuplicateUrl: true })
+      } else if (existing) {
+        instance = existing
+      } else {
         instance = await this.addInstance(url)
       }
       return await this.startAuth(instance.id)
@@ -524,8 +543,27 @@ export const useInstancesStore = defineStore('instances', {
         }
 
         const data = await response.json()
+        // Revoke any previous token on this slot before overwriting
+        const previousToken = instance.accessToken
+        if (previousToken && previousToken !== data.access_token && instance.clientId) {
+          try {
+            await fetch(`${instance.url}/oauth/revoke`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                client_id: instance.clientId,
+                client_secret: clientSecret,
+                token: previousToken,
+              }),
+            })
+          } catch {
+            /* still replace local session */
+          }
+        }
         instance.accessToken = data.access_token
         instance.clientSecret = null
+        // Keep secret for logout revoke across tabs/sessions
+        persistClientSecret(instanceId, clientSecret)
 
         const client = createRestAPIClient({
           url: instance.url,
@@ -660,30 +698,47 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     async initialize() {
-      this.loadFromStorage()
-      this.migrateLegacyAuth()
-
-      const gatedWatchOnly = this.instances.filter(
-        (i) => !i.accessToken && isAuthGatedPublicHost(i.url),
-      )
-      for (const instance of gatedWatchOnly) {
-        this.instances = this.instances.filter((i) => i.id !== instance.id)
-      }
-      if (gatedWatchOnly.length > 0) {
-        this.saveToStorage()
+      if (this.isInitialized) return
+      // Coalesce concurrent callers (layout + notifications cold load, etc.)
+      const inflight = (this as { _initPromise?: Promise<void> })._initPromise
+      if (inflight) {
+        await inflight
+        return
       }
 
-      if (this.instances.length === 0) {
-        try {
-          await this.addInstance(DEFAULT_PUBLIC_INSTANCE)
-        } catch {
-          logWarn('Failed to add default instance')
+      const run = (async () => {
+        this.loadFromStorage()
+        this.migrateLegacyAuth()
+
+        const gatedWatchOnly = this.instances.filter(
+          (i) => !i.accessToken && isAuthGatedPublicHost(i.url),
+        )
+        for (const instance of gatedWatchOnly) {
+          this.instances = this.instances.filter((i) => i.id !== instance.id)
         }
-      }
+        if (gatedWatchOnly.length > 0) {
+          this.saveToStorage()
+        }
 
-      await this.verifyAllInstances()
-      this.ensurePrimaryAccount()
-      this.isInitialized = true
+        if (this.instances.length === 0) {
+          try {
+            await this.addInstance(DEFAULT_PUBLIC_INSTANCE)
+          } catch {
+            logWarn('Failed to add default instance')
+          }
+        }
+
+        await this.verifyAllInstances()
+        this.ensurePrimaryAccount()
+        this.isInitialized = true
+      })()
+
+      ;(this as { _initPromise?: Promise<void> })._initPromise = run
+      try {
+        await run
+      } finally {
+        delete (this as { _initPromise?: Promise<void> })._initPromise
+      }
     },
 
     getClient(instanceId: string): mastodon.rest.Client {

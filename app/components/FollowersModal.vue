@@ -24,6 +24,11 @@ const relationships = ref<Record<string, mastodon.v1.Relationship>>({})
 const loadingActions = ref<Record<string, boolean>>({})
 const modalRef = ref<HTMLElement | null>(null)
 
+const isOwnFollowersList = computed(() => {
+  const viewing = props.accountId || instancesStore.currentUser?.id
+  return !!viewing && viewing === instancesStore.currentUser?.id
+})
+
 useFocusTrap(modalRef, isOpen, {
   onEscape: () => {
     isOpen.value = false
@@ -378,7 +383,7 @@ defineExpose({ open, close })
                           🚫 Block
                         </button>
                         <button 
-                          v-if="activeTab === 'followers'"
+                          v-if="activeTab === 'followers' && isOwnFollowersList"
                           @click="handleRemoveFollower(account.id)"
                           class="danger"
                         >

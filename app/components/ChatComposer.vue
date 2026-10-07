@@ -114,7 +114,12 @@ const buildBody = () => {
       text = mention
       continue
     }
-    if (!text.toLowerCase().includes(mention.toLowerCase())) {
+    // Word-boundary match so @bobby does not count as @bob
+    const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const already = new RegExp(`(?:^|[\\s\\u200B])${escaped}(?=$|[\\s\\u200B]|[^\\w.])`, 'i').test(
+      ` ${text} `,
+    )
+    if (!already) {
       text = `${mention} ${text}`
     }
   }
@@ -149,6 +154,7 @@ const send = async () => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     void send()

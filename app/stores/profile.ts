@@ -297,14 +297,13 @@ export const useProfileStore = defineStore('profile', {
           discoverable: this.editForm.discoverable,
         }
 
-        // Add fields (filter out empty ones)
-        const validFields = this.editForm.fields.filter(f => f.name.trim() || f.value.trim())
-        if (validFields.length > 0) {
-          updateData.fieldsAttributes = validFields.map((f, i) => ({
-            name: f.name,
-            value: f.value,
-          }))
-        }
+        // Always send 4 slots (padded empty) so cleared fields actually delete on the server
+        const slots = [...this.editForm.fields]
+        while (slots.length < 4) slots.push({ name: '', value: '' })
+        updateData.fieldsAttributes = slots.slice(0, 4).map((f) => ({
+          name: f.name,
+          value: f.value,
+        }))
 
         // Handle avatar upload
         if (this.editForm.avatar) {

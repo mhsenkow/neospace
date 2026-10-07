@@ -174,6 +174,7 @@ const closeDropdowns = (e: MouseEvent) => {
 
 onMounted(async () => {
   applyFilterFromRoute()
+  await instancesStore.initialize()
   if (canView.value) {
     await notificationsStore.fetchNotifications(true)
     await notificationsStore.markAllRead()
@@ -200,6 +201,12 @@ watch(
     applyFilterFromRoute()
   },
 )
+
+watch(canView, async (ok) => {
+  if (!ok || notificationsStore.notifications.length) return
+  await notificationsStore.fetchNotifications(true)
+  await notificationsStore.markAllRead()
+})
 
 onBeforeUnmount(() => {
   observer?.disconnect()

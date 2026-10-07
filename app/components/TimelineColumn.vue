@@ -12,6 +12,7 @@ import { useColumnsStore, type ColumnConfig, type ColumnFeedType } from '~/store
 import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 import { dedupeStatusesByIdentity, statusIdentity } from '~/utils/statusIdentity'
+import { idLess } from '~/utils/compareId'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
 const withBrowseOrigin = (
@@ -365,7 +366,7 @@ const onPullEnd = async () => {
           const ext = s as ExtendedStatus
           if (!ext._instanceId) continue
           const prev = next[ext._instanceId]
-          if (!prev || s.id < prev) next[ext._instanceId] = s.id
+          if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
         }
         homeCursors.value = next
       }
@@ -448,8 +449,11 @@ const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]
   })
 }
 
+/** Recessed only pauses polling on mobile (one visible column); desktop multi-col keeps all live */
+const pauseForRecess = () => props.recessed && isMobileViewport()
+
 const pollForNew = async () => {
-  if (props.recessed || isLoading.value || document.hidden || !statuses.value.length) return
+  if (pauseForRecess() || isLoading.value || document.hidden || !statuses.value.length) return
   try {
     const fresh = await fetchFreshPage()
     mergeIncoming(fresh)
@@ -467,7 +471,7 @@ const stopPolling = () => {
 
 const startPolling = () => {
   stopPolling()
-  if (props.recessed) return
+  if (pauseForRecess()) return
   if (typeof document !== 'undefined' && document.hidden) return
   pollTimer = setInterval(pollForNew, 45000)
 }
@@ -483,8 +487,8 @@ const onVisibilityChange = () => {
 
 watch(
   () => props.recessed,
-  (recessed) => {
-    if (recessed) stopPolling()
+  () => {
+    if (pauseForRecess()) stopPolling()
     else startPolling()
   },
 )
@@ -517,7 +521,7 @@ const fetchTimeline = async (refresh = false) => {
         const ext = s as ExtendedStatus
         if (!ext._instanceId) continue
         const prev = next[ext._instanceId]
-        if (!prev || s.id < prev) next[ext._instanceId] = s.id
+        if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
       }
       homeCursors.value = next
     } else if (instancesStore.instances.length > 0) {
@@ -568,7 +572,7 @@ const loadMore = async () => {
           const ext = s as ExtendedStatus
           if (!ext._instanceId) continue
           const prev = next[ext._instanceId]
-          if (!prev || s.id < prev) next[ext._instanceId] = s.id
+          if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
         }
         homeCursors.value = next
         break

@@ -54,9 +54,8 @@ const inboxMenuOpen = ref(false)
 const inboxMenuRef = ref<HTMLElement | null>(null)
 
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
-const sidebarSuggestedGroups = computed(() =>
-  groupsStore.recommendedGroups.filter((g) => !g.isMember).slice(0, 6),
-)
+// Curated picks only — raw server trends live on /groups (Trending tab), not the home rail
+const sidebarSuggestedGroups = computed(() => groupsStore.suggestedFeaturedGroups.slice(0, 6))
 const visibleJoinedGroups = computed(() =>
   groupsShowAll.value ? sidebarJoinedGroups.value : sidebarJoinedGroups.value.slice(0, 5),
 )
@@ -258,7 +257,10 @@ const currentLineLabel = computed(
 
 onMounted(async () => {
   // Mobile chrome metrics — header collapse toggles --neo-mobile-chrome-top
-  document.documentElement.style.setProperty('--neo-mobile-chrome-top', '52px')
+  document.documentElement.style.setProperty(
+    '--neo-mobile-chrome-top',
+    'calc(52px + env(safe-area-inset-top, 0px))',
+  )
   document.documentElement.style.setProperty('--neo-mobile-nav-h', '56px')
 
   // Loom handoff listener MUST register before initialize() — Loom may postMessage
@@ -1834,11 +1836,11 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   top: 0;
   left: 0;
   right: 0;
-  height: 52px;
+  height: calc(52px + env(safe-area-inset-top, 0px));
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 0.5rem;
+  padding: env(safe-area-inset-top, 0px) 0.5rem 0;
   // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);

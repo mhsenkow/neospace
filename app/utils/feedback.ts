@@ -27,7 +27,10 @@ export async function createGitHubIssue(
       body,
       kind: options?.kind || 'feedback',
       imageBase64: options?.imageBase64 ?? null,
-      href: options?.href ?? (typeof window !== 'undefined' ? window.location.href : ''),
+      // Only send path area — never full URL with DM/status ids
+      href:
+        options?.href ??
+        (typeof window !== 'undefined' ? window.location.pathname : ''),
     }),
   })
 
@@ -38,7 +41,8 @@ export async function createGitHubIssue(
   return json.url
 }
 
-const MAX_SHOT_CHARS = 350_000
+/** Keep under GitHub issue body limits (~65k) with room for text */
+const MAX_SHOT_CHARS = 40_000
 
 export async function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

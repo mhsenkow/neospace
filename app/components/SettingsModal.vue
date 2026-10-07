@@ -30,6 +30,7 @@ import {
   type NeoThemeId,
   type NeoUiId,
 } from '~/utils/appearance'
+import { stripHtml } from '~/utils/sanitizeHtml'
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
@@ -88,7 +89,8 @@ const flipSizeOptions = [
 watch(() => settingsStore.account, (account) => {
   if (account) {
     profileForm.displayName = account.displayName || ''
-    profileForm.note = account.note?.replace(/<[^>]*>/g, '') || ''
+    // Mastodon returns HTML; strip to plain text for the editor (API accepts plain)
+    profileForm.note = stripHtml(account.note || '')
     profileForm.locked = account.locked || false
     profileForm.bot = account.bot || false
     profileForm.discoverable = account.discoverable !== false
@@ -204,7 +206,8 @@ const lineOptions = LINE_OPTIONS
 const fontPreviewStack = (fontId: NeoFontId) => {
   const ui = appearanceForm.ui || 'braun'
   return TYPE_FACES[ui]?.[fontId] || TYPE_FACES.braun[fontId]
-}</script>
+}
+</script>
 
 <template>
   <Teleport to="body">

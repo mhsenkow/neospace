@@ -58,18 +58,52 @@ export function consumeOAuthChallenge(stateFromQuery: string | null): {
   return { ok: true, codeVerifier: verifier }
 }
 
-/** Ephemeral client secrets — session only, never localStorage */
+/**
+ * Client secrets for token revoke.
+ * Session during OAuth; persisted to localStorage after login so logout can revoke
+ * even when the original tab is gone (access tokens already live in localStorage).
+ */
 export function stashClientSecret(instanceId: string, secret: string) {
-  if (typeof sessionStorage === 'undefined') return
-  sessionStorage.setItem(AUTH_SECRET_PREFIX + instanceId, secret)
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(AUTH_SECRET_PREFIX + instanceId, secret)
+  }
+}
+
+export function persistClientSecret(instanceId: string, secret: string) {
+  stashClientSecret(instanceId, secret)
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(AUTH_SECRET_PREFIX + instanceId, secret)
+    } catch {
+      /* quota / private mode */
+    }
+  }
 }
 
 export function readClientSecret(instanceId: string): string | null {
-  if (typeof sessionStorage === 'undefined') return null
-  return sessionStorage.getItem(AUTH_SECRET_PREFIX + instanceId)
+  if (typeof sessionStorage !== 'undefined') {
+    const fromSession = sessionStorage.getItem(AUTH_SECRET_PREFIX + instanceId)
+    if (fromSession) return fromSession
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      return localStorage.getItem(AUTH_SECRET_PREFIX + instanceId)
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 export function clearClientSecret(instanceId: string) {
-  if (typeof sessionStorage === 'undefined') return
-  sessionStorage.removeItem(AUTH_SECRET_PREFIX + instanceId)
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(AUTH_SECRET_PREFIX + instanceId)
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(AUTH_SECRET_PREFIX + instanceId)
+    } catch {
+      /* ignore */
+    }
+  }
 }

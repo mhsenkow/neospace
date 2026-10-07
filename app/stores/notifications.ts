@@ -3,6 +3,7 @@ import { createRestAPIClient, type mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { logWarn } from '~/utils/log'
+import { idGreater } from '~/utils/compareId'
 
 export type NotificationFilterType =
   | 'all'
@@ -189,7 +190,7 @@ export const useNotificationsStore = defineStore('notifications', {
       let total = 0
       for (const n of this.notifications) {
         const last = this.lastReadByInstance[n._instanceId]
-        if (!last || n.id > last) total += 1
+        if (!last || idGreater(n.id, last)) total += 1
       }
       // First visit per account: don't explode badge — seed from loaded list tops
       this.unreadCount = total
@@ -226,7 +227,7 @@ export const useNotificationsStore = defineStore('notifications', {
               map[inst.id] = items[0]!.id
               return
             }
-            total += items.filter((n) => n.id > last).length
+            total += items.filter((n) => idGreater(n.id, last)).length
           } catch (e) {
             logWarn(`Unread badge refresh failed for ${inst.url}:`, e)
           }

@@ -163,6 +163,21 @@ export function useComposeMedia() {
     )
   }
 
+  /** Flush pending alt-text PUTs before post (⌘↵ races the 450ms debounce) */
+  const flushAltDescriptions = async () => {
+    const pending: Promise<unknown>[] = []
+    for (const [localId, timer] of altTimers) {
+      clearTimeout(timer)
+      altTimers.delete(localId)
+      const current = attachments.value.find((a) => a.localId === localId)
+      if (!current?.remoteId) continue
+      pending.push(
+        statusStore.updateMediaDescription(current.remoteId, current.description.trim()),
+      )
+    }
+    if (pending.length) await Promise.allSettled(pending)
+  }
+
   const onDragEnter = (e: DragEvent) => {
     if (!e.dataTransfer?.types?.includes('Files')) return
     e.preventDefault()
@@ -225,6 +240,7 @@ export function useComposeMedia() {
     removeAttachment,
     clearAttachments,
     setDescription,
+    flushAltDescriptions,
     onDragEnter,
     onDragLeave,
     onDragOver,

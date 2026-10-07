@@ -87,13 +87,26 @@ export const onRequestPost = async (context: PagesContext) => {
   }
 
   const title = (payload.title || 'NeoSpace feedback').trim().slice(0, 200)
-  let body = (payload.body || '(no description)').trim().slice(0, 50_000)
+  // Escape @mentions so public issues don't spam random accounts
+  const escapeMd = (s: string) => s.replace(/(^|[^a-zA-Z0-9_])@/g, '$1&#64;')
+  let body = escapeMd((payload.body || '(no description)').trim()).slice(0, 8_000)
   const kind = (payload.kind || 'feedback').trim().slice(0, 40)
-  const href = (payload.href || '').trim().slice(0, 500)
+
+  // Strip path/query that may include DM / status ids from public issues
+  let pageLabel = ''
+  try {
+    const raw = (payload.href || '').trim().slice(0, 500)
+    if (raw) {
+      const u = new URL(raw, 'https://neospace.ibm.io')
+      pageLabel = u.pathname.split('/').filter(Boolean)[0] || 'home'
+    }
+  } catch {
+    pageLabel = 'unknown'
+  }
 
   const meta = [
     `**Kind:** ${kind}`,
-    href ? `**Page:** ${href}` : null,
+    pageLabel ? `**Area:** \`${pageLabel}\`` : null,
     `**Source:** neospace.ibm.io leave-a-note`,
   ]
     .filter(Boolean)
@@ -101,12 +114,22 @@ export const onRequestPost = async (context: PagesContext) => {
 
   body = `${body}\n\n---\n${meta}`
 
-  if (payload.imageBase64 && payload.imageBase64.length < 400_000) {
+  // GitHub issue body soft limit ~65k; keep screenshots small or omit
+  const GITHUB_BODY_BUDGET = 60_000
+  if (payload.imageBase64 && payload.imageBase64.length < 45_000) {
     const dataUrl = payload.imageBase64.startsWith('data:')
       ? payload.imageBase64
       : `data:image/png;base64,${payload.imageBase64}`
-    body += `\n\n![screenshot](${dataUrl})`
+    const withShot = `${body}\n\n![screenshot](${dataUrl})`
+    if (withShot.length <= GITHUB_BODY_BUDGET) {
+      body = withShot
+    } else {
+      body += `\n\n_(screenshot omitted — too large for GitHub issue body)_`
+    }
+  } else if (payload.imageBase64) {
+    body += `\n\n_(screenshot omitted — too large for GitHub issue body)_`
   }
+  body = body.slice(0, GITHUB_BODY_BUDGET)
 
   const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues`, {
     method: 'POST',

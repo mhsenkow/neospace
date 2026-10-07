@@ -15,8 +15,15 @@ const { viewportStyle, onFocusField } = useKeyboardViewport(sheetOpen, {
   lockScroll: true,
 })
 
+const requestClose = () => {
+  const draft = panelRef.value?.querySelector<HTMLTextAreaElement>('textarea.compose-input, .compose-input')
+  const dirty = !!(draft?.value?.trim())
+  if (dirty && !window.confirm('Discard this draft?')) return
+  sheet.hide()
+}
+
 useFocusTrap(panelRef, sheetOpen, {
-  onEscape: () => sheet.hide(),
+  onEscape: requestClose,
   // Prefer the composer — Cancel is first in the DOM and stole focus on mobile
   initialFocus: 'textarea, .compose-input, .group-pick-sheet__input, .compose-sheet__close',
 })
@@ -62,7 +69,7 @@ const onPick = async (account: mastodon.v1.Account) => {
         aria-modal="true"
         :aria-label="ariaLabel"
       >
-        <button type="button" class="compose-sheet__backdrop" aria-label="Close" @click="sheet.hide()" />
+        <button type="button" class="compose-sheet__backdrop" aria-label="Close" @click="requestClose" />
         <div class="compose-sheet__panel">
           <RecipientPicker
             v-if="sheet.pickRecipient"
@@ -71,7 +78,7 @@ const onPick = async (account: mastodon.v1.Account) => {
           />
           <template v-else>
             <header class="compose-sheet__header">
-              <button type="button" class="compose-sheet__close neo-btn neo-btn--tertiary" @click="sheet.hide()">
+              <button type="button" class="compose-sheet__close neo-btn neo-btn--tertiary" @click="requestClose">
                 Cancel
               </button>
               <span class="compose-sheet__title">{{ sheet.title || 'New post' }}</span>

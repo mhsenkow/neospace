@@ -561,6 +561,8 @@ onUnmounted(() => {
   mobileMq = null
 })
 
+definePageMeta({ keepalive: true })
+
 useHead({ title: 'Home | NeoSpace' })
 </script>
 
@@ -574,6 +576,7 @@ useHead({ title: 'Home | NeoSpace' })
       'columns-page--focus': !!columnsStore.focusedColumnId && !isMobileUi,
     }"
   >
+    <h1 class="sr-only">Home</h1>
     <!-- Mobile: feed strip + thumb-zone prev/next + add -->
     <nav class="mobile-feed-tabs" aria-label="Feeds">
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">

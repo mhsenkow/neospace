@@ -10,10 +10,23 @@ const STATUS_TAGS = [
   'code', 'pre', 'blockquote', 'ul', 'ol', 'li',
 ]
 
-const STATUS_ATTR = ['href', 'rel', 'target', 'class', 'translate']
-
+// No arbitrary `class` — remote HTML could spoof app overlay/chrome classes.
+// Custom emoji uses class="invisible|ellipsis|…" from Mastodon; allowlist those.
+const STATUS_ATTR = ['href', 'rel', 'target', 'translate']
 const NAME_TAGS = ['span', 'img']
 const NAME_ATTR = ['class', 'alt', 'src', 'title', 'width', 'height']
+
+const SAFE_EMOJI_CLASSES = new Set([
+  'invisible',
+  'ellipsis',
+  'mention',
+  'hashtag',
+  'u-url',
+  'h-card',
+  'quote-inline',
+  'bbcode-spoiler',
+  'spoiler-text',
+])
 
 function purify(dirty: string, tags: string[], attr: string[]): string {
   if (!dirty || typeof dirty !== 'string') return ''
@@ -26,22 +39,42 @@ function purify(dirty: string, tags: string[], attr: string[]): string {
     ALLOWED_ATTR: attr,
     ALLOW_DATA_ATTR: false,
     ADD_ATTR: ['target'],
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  })
+}
+
+function purifyWithSafeClasses(dirty: string, tags: string[], attr: string[]): string {
+  if (!dirty || typeof dirty !== 'string') return ''
+  if (typeof window === 'undefined') {
+    return dirty.replace(/<[^>]*>/g, '')
+  }
+  return DOMPurify.sanitize(dirty, {
+    ALLOWED_TAGS: tags,
+    ALLOWED_ATTR: [...attr, 'class'],
+    ALLOW_DATA_ATTR: false,
+    ADD_ATTR: ['target'],
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  }).replace(/\sclass="([^"]*)"/gi, (_m, classes: string) => {
+    const kept = classes
+      .split(/\s+/)
+      .filter((c) => SAFE_EMOJI_CLASSES.has(c) || /^custom-emoji/.test(c) || /^emoji/.test(c))
+    return kept.length ? ` class="${kept.join(' ')}"` : ''
   })
 }
 
 /** Status / profile bio HTML (links, formatting, custom-emoji spans) */
 export function sanitizeStatusHtml(html: string): string {
-  return purify(html, STATUS_TAGS, STATUS_ATTR)
+  return purifyWithSafeClasses(html, STATUS_TAGS, STATUS_ATTR)
 }
 
 /** Display name may include custom emoji <img>/<span> */
 export function sanitizeDisplayName(html: string): string {
-  return purify(html, NAME_TAGS, NAME_ATTR)
+  return purifyWithSafeClasses(html, NAME_TAGS, NAME_ATTR.filter((a) => a !== 'class'))
 }
 
 /** Profile metadata field values */
 export function sanitizeFieldHtml(html: string): string {
-  return purify(html, STATUS_TAGS, STATUS_ATTR)
+  return purifyWithSafeClasses(html, STATUS_TAGS, STATUS_ATTR)
 }
 
 /** Strip all tags → plain text (no innerHTML assignment) */

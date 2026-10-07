@@ -94,6 +94,28 @@ onMounted(() => {
 
 /** Long-post collapse (Threads-style see more, without engagement bait) */
 const contentExpanded = ref(false)
+/** CW / sensitive media revealed by the reader */
+const mediaRevealed = ref(false)
+const cwOpen = ref(false)
+
+const hasSpoiler = computed(() => !!displayStatus.value.spoilerText?.trim())
+const isSensitive = computed(() => !!displayStatus.value.sensitive)
+const mediaHidden = computed(
+  () =>
+    !!displayStatus.value.mediaAttachments?.length &&
+    ((hasSpoiler.value && !cwOpen.value) ||
+      (isSensitive.value && !mediaRevealed.value && !cwOpen.value)),
+)
+
+const onCwToggle = (e: Event) => {
+  cwOpen.value = (e.target as HTMLDetailsElement).open
+  if (cwOpen.value) mediaRevealed.value = true
+}
+
+const revealMedia = () => {
+  mediaRevealed.value = true
+  cwOpen.value = true
+}
 const plainLength = computed(() =>
   (displayStatus.value.content || '').replace(/<[^>]*>/g, '').length,
 )
@@ -361,7 +383,8 @@ const openReplyComposer = async () => {
       placeholder: isDm ? `Message @${handle}…` : `Reply to @${handle}…`,
       initialText: `@${handle} `,
       inReplyToId: replyId,
-      visibility: isDm ? 'direct' : undefined,
+      // Inherit parent visibility so replies to private posts don't go public
+      visibility: isDm ? 'direct' : displayStatus.value.visibility,
       contextPost: contextFromStatus(),
       onPosted: (created) => {
         displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
@@ -815,7 +838,11 @@ onUnmounted(() => {
         </header>
 
         <!-- Content Warning / Spoiler -->
-        <details v-if="displayStatus.spoilerText" class="status-cw">
+        <details
+          v-if="hasSpoiler"
+          class="status-cw"
+          @toggle="onCwToggle"
+        >
           <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
           <div class="status-content status-content--clickable" v-html="safeContent" @click="onContentClick" />
         </details>
@@ -838,38 +865,50 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- Media Attachments -->
+        <!-- Media: gated behind CW / sensitive -->
         <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
-          <template v-for="media in displayStatus.mediaAttachments" :key="media.id">
-            <button
-              v-if="media.type === 'image'"
-              type="button"
-              class="status-media-hit"
-              @click.stop="openLightbox(media)"
-            >
-              <img
-                :src="media.previewUrl ?? media.url ?? undefined"
-                :alt="media.description || 'Image attachment'"
-                class="status-media-image"
-                loading="lazy"
+          <button
+            v-if="mediaHidden"
+            type="button"
+            class="status-media-cw"
+            @click.stop="revealMedia"
+          >
+            <span>{{ hasSpoiler ? displayStatus.spoilerText : 'Sensitive media' }}</span>
+            <span class="status-media-cw__hint">Tap to reveal</span>
+          </button>
+          <template v-else>
+            <template v-for="(media, mediaIdx) in displayStatus.mediaAttachments" :key="media.id">
+              <button
+                v-if="media.type === 'image'"
+                type="button"
+                class="status-media-hit"
+                :aria-label="media.description || `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}`"
+                @click.stop="openLightbox(media)"
+              >
+                <img
+                  :src="media.previewUrl ?? media.url ?? undefined"
+                  :alt="media.description || `Image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}`"
+                  class="status-media-image"
+                  loading="lazy"
+                />
+              </button>
+              <video
+                v-else-if="media.type === 'video' || media.type === 'gifv'"
+                :src="media.url ?? undefined"
+                :poster="media.previewUrl ?? undefined"
+                controls
+                :autoplay="media.type === 'gifv' && !prefersReducedMotion"
+                :loop="media.type === 'gifv'"
+                :muted="media.type === 'gifv'"
+                class="status-media-video"
               />
-            </button>
-            <video
-              v-else-if="media.type === 'video' || media.type === 'gifv'"
-              :src="media.url ?? undefined"
-              :poster="media.previewUrl ?? undefined"
-              controls
-              :autoplay="media.type === 'gifv' && !prefersReducedMotion"
-              :loop="media.type === 'gifv'"
-              :muted="media.type === 'gifv'"
-              class="status-media-video"
-            />
-            <audio
-              v-else-if="media.type === 'audio'"
-              :src="media.url ?? undefined"
-              controls
-              class="status-media-audio"
-            />
+              <audio
+                v-else-if="media.type === 'audio'"
+                :src="media.url ?? undefined"
+                controls
+                class="status-media-audio"
+              />
+            </template>
           </template>
         </div>
 
@@ -1726,8 +1765,31 @@ onUnmounted(() => {
   overflow: hidden;
   max-width: 100%;
 
-  &:has(> *:nth-child(2)) {
+  &:has(> *:nth-child(2):not(.status-media-cw)) {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.status-media-cw {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 140px;
+  padding: 1rem;
+  border: 1px dashed var(--neo-border-color);
+  border-radius: 12px;
+  background: var(--neo-bg-secondary);
+  color: var(--neo-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+
+  &__hint {
+    font-size: 0.8em;
+    color: var(--neo-text-muted);
   }
 }
 

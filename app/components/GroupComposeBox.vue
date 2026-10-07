@@ -106,6 +106,14 @@ const handlePost = async () => {
   }
 }
 
+const onComposeKeydown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault()
+    void handlePost()
+  }
+}
+
 const openFilePicker = () => {
   if (!canAddMore.value || isPosting.value) return
   fileInputRef.value?.click()
@@ -152,8 +160,7 @@ const onFilePicked = async (e: Event) => {
           rows="3"
           :disabled="isPosting"
           @paste="onPaste"
-          @keydown.meta.enter="handlePost"
-          @keydown.ctrl.enter="handlePost"
+          @keydown="onComposeKeydown"
         />
         <span class="group-compose__hashtag-preview">#{{ tag }}</span>
       </div>

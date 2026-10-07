@@ -56,14 +56,21 @@ export const useStatusStore = defineStore('status', {
       }
 
       const client = this.getClient()
-      return await client.v1.statuses.create({
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `neo-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const params: Record<string, unknown> = {
         status: text || undefined,
         visibility: options.visibility || 'public',
         spoilerText: options.spoilerText,
-        mediaIds: mediaIds.length ? mediaIds : undefined,
         inReplyToId: options.inReplyToId,
         sensitive: options.sensitive,
-      })
+      }
+      if (mediaIds.length) params.mediaIds = mediaIds
+      return await client.v1.statuses.create(params as any, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      } as any)
     },
 
     /**
@@ -275,14 +282,14 @@ export const useStatusStore = defineStore('status', {
     },
 
     async muteAccount(accountIdOrAcct: string, opts?: { acct?: string }) {
-      const id =
-        (opts?.acct ? await this.resolveAccount(opts.acct) : null) || accountIdOrAcct
+      const id = opts?.acct ? await this.resolveAccount(opts.acct) : accountIdOrAcct
+      if (!id) throw new Error('Couldn’t find that account on your server')
       await this.getClient().v1.accounts.$select(id).mute()
     },
 
     async blockAccount(accountIdOrAcct: string, opts?: { acct?: string }) {
-      const id =
-        (opts?.acct ? await this.resolveAccount(opts.acct) : null) || accountIdOrAcct
+      const id = opts?.acct ? await this.resolveAccount(opts.acct) : accountIdOrAcct
+      if (!id) throw new Error('Couldn’t find that account on your server')
       await this.getClient().v1.accounts.$select(id).block()
     },
 
@@ -297,11 +304,13 @@ export const useStatusStore = defineStore('status', {
 
       if (opts?.statusUrl) {
         const resolved = await this.resolveStatus(opts.statusUrl)
-        if (resolved) localStatusId = resolved
+        if (!resolved) throw new Error('Couldn’t find that post on your server')
+        localStatusId = resolved
       }
       if (opts?.acct) {
         const resolvedAcct = await this.resolveAccount(opts.acct)
-        if (resolvedAcct) localAccountId = resolvedAcct
+        if (!resolvedAcct) throw new Error('Couldn’t find that account on your server')
+        localAccountId = resolvedAcct
       }
 
       await this.getClient().v1.reports.create({

@@ -88,6 +88,7 @@ const {
   clearAttachments,
   retryUpload,
   setDescription,
+  flushAltDescriptions,
   onDragEnter,
   onDragLeave,
   onDragOver,
@@ -198,7 +199,7 @@ const getMentionContext = () => {
   return { start, query, caret }
 }
 
-const syncMentions = () => {
+const syncMentions = (opts?: { resetIndex?: boolean }) => {
   if (!instancesStore.isAuthenticated) {
     closeMentions()
     return
@@ -209,9 +210,12 @@ const syncMentions = () => {
     return
   }
   // Don't pop open on a lone @ with zero chars unless user is typing into a mention
+  const queryChanged = mentionAt.value !== ctx.start || !mentionOpen.value
   mentionAt.value = ctx.start
   mentionOpen.value = true
-  mentionIndex.value = 0
+  if (opts?.resetIndex !== false && queryChanged) {
+    mentionIndex.value = 0
+  }
   searchMentions(ctx.query)
 }
 
@@ -254,13 +258,20 @@ const handlePost = async () => {
       body = `${body.trim()}\n\n${quote}`
     }
     const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
-    if (tag) {
+    // Never append community tags to private messages
+    if (tag && visibility.value !== 'direct' && props.initialVisibility !== 'direct') {
       const hasTag = new RegExp(`(?:^|\\s)#${tag}\\b`, 'i').test(body)
       if (!hasTag) body = `${body.trim()} #${tag}`.trim()
     }
 
+    await flushAltDescriptions()
+    const postVisibility =
+      props.initialVisibility === 'direct' || visibility.value === 'direct'
+        ? 'direct'
+        : visibility.value
+
     const status = await statusStore.postStatus(body, {
-      visibility: props.initialVisibility === 'direct' ? 'direct' : visibility.value,
+      visibility: postVisibility,
       spoilerText: showCW.value ? spoilerText.value : undefined,
       mediaIds: mediaIds.value,
       sensitive: showCW.value || undefined,
@@ -305,38 +316,50 @@ const onFilePicked = async (e: Event) => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
   if (mentionOpen.value && mentionResults.value.length) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
+      e.stopPropagation()
       mentionIndex.value = (mentionIndex.value + 1) % mentionResults.value.length
       return
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault()
+      e.stopPropagation()
       mentionIndex.value =
         (mentionIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length
       return
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault()
+      e.stopPropagation()
       const pick = mentionResults.value[mentionIndex.value]
       if (pick) insertMention(pick)
       return
     }
     if (e.key === 'Escape') {
       e.preventDefault()
+      e.stopPropagation()
       closeMentions()
       return
     }
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault()
-    handlePost()
+    void handlePost()
   }
 }
 
 const onComposeInput = () => {
-  syncMentions()
+  syncMentions({ resetIndex: true })
+}
+
+const onMentionKeyup = (e: KeyboardEvent) => {
+  // Don't reset arrow selection when navigating the popup
+  if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) return
+  if (e.isComposing || e.keyCode === 229) return
+  syncMentions({ resetIndex: true })
 }
 
 const focusComposer = () => {
@@ -451,7 +474,7 @@ onMounted(() => {
           @keydown="onKeydown"
           @input="onComposeInput"
           @click="syncMentions"
-          @keyup="syncMentions"
+          @keyup="onMentionKeyup"
         />
         <div
           v-if="mentionOpen && (mentionResults.length || mentionSearching)"
@@ -538,7 +561,7 @@ onMounted(() => {
           @keydown="onKeydown"
           @input="onComposeInput"
           @click="syncMentions"
-          @keyup="syncMentions"
+          @keyup="onMentionKeyup"
         />
 
         <div

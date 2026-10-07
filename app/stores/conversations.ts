@@ -69,8 +69,15 @@ export const useConversationsStore = defineStore('conversations', {
         const items = (await client.v1.conversations.list({
           limit: PAGE_LIMIT,
         } as any)) as mastodon.v1.Conversation[]
-        this.conversations = Array.isArray(items) ? items : []
-        this.hasMore = this.conversations.length >= PAGE_LIMIT
+        const page = Array.isArray(items) ? items : []
+        // Merge page 1 so quiet polls don't drop conversations loaded via loadMore
+        const pageIds = new Set(page.map((c) => c.id))
+        const older = this.conversations.filter((c) => !pageIds.has(c.id))
+        const hadExtraPages = older.length > 0
+        this.conversations = [...page, ...older]
+        if (!hadExtraPages) {
+          this.hasMore = page.length >= PAGE_LIMIT
+        }
       } catch (e: any) {
         if (!quiet) this.error = e?.message || 'Could not load messages'
         logWarn('conversations fetch failed:', e)
@@ -156,17 +163,14 @@ export const useConversationsStore = defineStore('conversations', {
       if (match?.unread) await this.markRead(match.id)
     },
 
-    /** 1:1 DM with this account, else any conversation that includes them */
+    /** Exact 1:1 DM with this account — never fall back to a group thread */
     findDirectWith(accountId: string): mastodon.v1.Conversation | null {
       if (!accountId) return null
-      const exact = this.conversations.find((c) => {
-        const ids = (c.accounts || []).map((a) => a.id)
-        return ids.length === 1 && ids[0] === accountId
-      })
-      if (exact) return exact
       return (
-        this.conversations.find((c) => (c.accounts || []).some((a) => a.id === accountId)) ||
-        null
+        this.conversations.find((c) => {
+          const ids = (c.accounts || []).map((a) => a.id)
+          return ids.length === 1 && ids[0] === accountId
+        }) || null
       )
     },
 

@@ -93,8 +93,11 @@ interface SettingsState {
     flipTextAlign: 'left' | 'center' | 'right'
     /** Type scale for Flip-mode text (esp. text-only slides) */
     flipTextSize: 'reading' | 'large' | 'display'
-    defaultVisibility: 'public' | 'unlisted' | 'private' | 'direct'
-    defaultSensitive: boolean
+    /** null = follow server preference */
+    defaultVisibility: 'public' | 'unlisted' | 'private' | 'direct' | null
+    defaultSensitive: boolean | null
+    /** True only after the user saves Posting Defaults (avoids hard-coded public shadowing server prefs) */
+    postingDefaultsTouched: boolean
   }
   
   // Filters
@@ -136,8 +139,9 @@ export const useSettingsStore = defineStore('settings', {
       customProfileCss: false,
       flipTextAlign: 'center',
       flipTextSize: 'large',
-      defaultVisibility: 'public',
-      defaultSensitive: false,
+      defaultVisibility: null,
+      defaultSensitive: null,
+      postingDefaultsTouched: false,
     },
     
     filters: [],
@@ -177,8 +181,8 @@ export const useSettingsStore = defineStore('settings', {
      */
     defaultVisibility: (state): 'public' | 'unlisted' | 'private' | 'direct' => {
       return (
-        state.localPreferences.defaultVisibility ||
-        state.preferences?.['posting:default:visibility'] ||
+        state.localPreferences.defaultVisibility ??
+        state.preferences?.['posting:default:visibility'] ??
         'public'
       )
     },
@@ -187,7 +191,10 @@ export const useSettingsStore = defineStore('settings', {
      * Default sensitive media
      */
     defaultSensitive: (state): boolean => {
-      if (typeof state.localPreferences.defaultSensitive === 'boolean') {
+      if (
+        state.localPreferences.postingDefaultsTouched &&
+        typeof state.localPreferences.defaultSensitive === 'boolean'
+      ) {
         return state.localPreferences.defaultSensitive
       }
       return state.preferences?.['posting:default:sensitive'] || false
@@ -264,10 +271,16 @@ export const useSettingsStore = defineStore('settings', {
             flipTextSize: (['reading', 'large', 'display'].includes(parsed.flipTextSize)
               ? parsed.flipTextSize
               : 'large') as SettingsState['localPreferences']['flipTextSize'],
-            defaultVisibility: (['public', 'unlisted', 'private', 'direct'].includes(vis)
-              ? vis
-              : this.localPreferences.defaultVisibility) as SettingsState['localPreferences']['defaultVisibility'],
-            defaultSensitive: !!parsed.defaultSensitive,
+            postingDefaultsTouched: !!parsed.postingDefaultsTouched,
+            defaultVisibility:
+              parsed.postingDefaultsTouched &&
+              ['public', 'unlisted', 'private', 'direct'].includes(vis)
+                ? vis
+                : null,
+            defaultSensitive:
+              parsed.postingDefaultsTouched && typeof parsed.defaultSensitive === 'boolean'
+                ? parsed.defaultSensitive
+                : null,
           }
         }
         this.applyLocalAppearance()
@@ -472,12 +485,14 @@ export const useSettingsStore = defineStore('settings', {
     }) {
       if (data.visibility) {
         this.localPreferences.defaultVisibility = data.visibility
+        this.localPreferences.postingDefaultsTouched = true
         if (this.preferences) {
           this.preferences['posting:default:visibility'] = data.visibility
         }
       }
       if (data.sensitive !== undefined) {
         this.localPreferences.defaultSensitive = data.sensitive
+        this.localPreferences.postingDefaultsTouched = true
         if (this.preferences) {
           this.preferences['posting:default:sensitive'] = data.sensitive
         }

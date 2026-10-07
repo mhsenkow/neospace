@@ -73,7 +73,16 @@ export function normalizePresenceInput(
 ): string {
   const value = raw.trim()
   if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
+  if (/^(javascript|data|vbscript):/i.test(value)) return ''
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const u = new URL(value)
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return ''
+      return value.replace(/\/+$/, '')
+    } catch {
+      return ''
+    }
+  }
 
   if (kind === 'bluesky') {
     const handle = value.replace(/^@/, '')
@@ -88,11 +97,19 @@ export function normalizePresenceInput(
     return `https://seenu.io/${handle}`
   }
 
-  // website — require a host-looking string
-  if (value.includes('.')) {
-    return `https://${value.replace(/^https?:\/\//i, '')}`
+  // website — only http(s) or a host-looking string (never javascript:/data:)
+  if (/^(javascript|data|vbscript):/i.test(value)) return ''
+  if (value.includes('.') && !/^\w+:/i.test(value)) {
+    const href = `https://${value.replace(/^https?:\/\//i, '')}`
+    try {
+      const u = new URL(href)
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return ''
+      return href.replace(/\/+$/, '')
+    } catch {
+      return ''
+    }
   }
-  return value
+  return ''
 }
 
 export function hintFromHref(href: string): string {
@@ -148,15 +165,17 @@ export function mergePresenceIntoFields(
   fields: { name: string; value: string }[],
   draft: { bluesky: string; seenu: string; website: string },
 ): { name: string; value: string }[] {
-  const next = fields.filter((f) => !isPresenceField(f))
+  // Keep non-presence custom fields; never silently drop them for a 4th presence link
+  const custom = fields.filter((f) => !isPresenceField(f))
+  const presence: { name: string; value: string }[] = []
   const order: Exclude<PresenceKind, 'mastodon'>[] = ['bluesky', 'seenu', 'website']
   for (const kind of order) {
     const href = normalizePresenceInput(kind, draft[kind])
     if (!href) continue
-    next.push({ name: SOURCE_LABELS[kind], value: href })
+    presence.push({ name: SOURCE_LABELS[kind], value: href })
   }
-  // Mastodon typically allows 4 metadata fields
-  return next.slice(0, 4)
+  const room = Math.max(0, 4 - custom.length)
+  return [...custom.slice(0, 4), ...presence.slice(0, room)].slice(0, 4)
 }
 
 export function buildPresenceLinks(opts: {

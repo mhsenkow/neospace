@@ -2,15 +2,12 @@
  * NeoSpace Column Layout Store
  *
  * Multi-column TweetDeck-style layout configuration.
- * - Persisted per-account in localStorage
- * - Synced to the signed-in Mastodon profile field `neospace_columns`
- *   so phone/desktop share the same feeds (when a profile field slot is free)
+ * Persisted per-account in localStorage (device-local; not federated to profile).
  */
 
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
-import { activeClient } from '~/composables/useMasto'
 
 export type ColumnFeedType =
   | 'home'
@@ -269,68 +266,19 @@ export const useColumnsStore = defineStore('columns', {
 
     persist() {
       this.saveToStorage()
-      this.scheduleProfileSync()
+      // Profile-field sync disabled: it federated followed tags, corrupted other
+      // metadata fields, and fired an Update on every reorder. Layout stays local.
     },
 
     scheduleProfileSync() {
-      if (typeof window === 'undefined') return
-      if (profileSyncTimer) clearTimeout(profileSyncTimer)
-      profileSyncTimer = setTimeout(() => {
-        profileSyncTimer = null
-        void this.syncToProfile()
-      }, 600)
+      /* no-op — see persist() */
     },
 
     /**
-     * Upsert compact column layout onto the active account's profile fields.
-     * No-ops for guests, or when all 4 field slots are taken by something else.
+     * @deprecated Column layout is device-local only (see persist).
      */
     async syncToProfile() {
-      const instancesStore = useInstancesStore()
-      const account = instancesStore.activeAccount
-      if (!account?.user || !account.accessToken) return
-
-      const encoded = encodeColumns(this.columns)
-      if (encoded.length > 255) {
-        this.lastSyncError = 'Column layout too long to sync to profile'
-        return
-      }
-
-      const existing = (account.user.fields || []).map((f) => ({
-        name: f.name,
-        value: stripHtml(f.value || ''),
-      }))
-      const idx = existing.findIndex(
-        (f) => normalizeFieldName(f.name) === normalizeFieldName(COLUMNS_PROFILE_FIELD),
-      )
-
-      if (idx >= 0) {
-        if (existing[idx]!.value === encoded) return
-        existing[idx]!.value = encoded
-      } else if (existing.length < 4) {
-        existing.push({ name: COLUMNS_PROFILE_FIELD, value: encoded })
-      } else {
-        this.lastSyncError = 'Profile fields full — columns stay on this device'
-        return
-      }
-
-      this.syncing = true
-      this.lastSyncError = null
-      try {
-        const client = activeClient()
-        const updated = await client.v1.accounts.updateCredentials({
-          fieldsAttributes: existing.map((f) => ({
-            name: f.name,
-            value: f.value,
-          })),
-        })
-        instancesStore.updateActiveAccount(updated)
-      } catch (e: any) {
-        this.lastSyncError = e?.message || 'Failed to sync columns to profile'
-        console.warn('Column profile sync failed:', this.lastSyncError)
-      } finally {
-        this.syncing = false
-      }
+      return
     },
 
     saveDeskLayout() {

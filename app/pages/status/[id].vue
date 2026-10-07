@@ -118,7 +118,13 @@ const threadSubtitle = computed(() => {
   return otherParticipants.value.map((p) => `@${p.acct}`).join(' · ')
 })
 
-const replyTarget = computed(() => chatMessages.value.at(-1) || focusStatus.value)
+/** DM replies chain to the latest message; public replies always target the focus post */
+const replyTarget = computed(() => {
+  if (isDirectThread.value) {
+    return chatMessages.value.at(-1) || focusStatus.value
+  }
+  return focusStatus.value
+})
 
 const replyPrefill = computed(() => {
   if (!isDirectThread.value) {
@@ -496,6 +502,7 @@ useHead({
             :accept-handoff="false"
             :in-reply-to-id="publicReplyId"
             :initial-text="replyPrefill"
+            :initial-visibility="focusStatus.visibility === 'direct' ? 'direct' : focusStatus.visibility"
             :placeholder="`Reply to @${focusStatus.account.acct}…`"
             title="Reply"
             @posted="onReplyPosted"
