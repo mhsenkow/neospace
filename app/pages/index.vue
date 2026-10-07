@@ -137,6 +137,26 @@ const feedTabsScroller = ref<HTMLElement | null>(null)
 
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
 
+/** Desktop/iPad multi-column: elastic gutters absorb overscroll before Safari history */
+const showBoardGutters = computed(
+  () => !isMobileUi.value && columnsStore.isMultiColumn && !columnsStore.focusedColumnId,
+)
+
+const getColumnEls = (): HTMLElement[] => {
+  const el = columnsContainer.value
+  if (!el) return []
+  return Array.from(
+    el.querySelectorAll<HTMLElement>(':scope > .timeline-column, :scope > .panel-column'),
+  )
+}
+
+const boardGutterWidth = () => {
+  const el = columnsContainer.value
+  if (!el || !showBoardGutters.value) return 0
+  const g = el.querySelector('.board-gutter--start') as HTMLElement | null
+  return g?.offsetWidth || 0
+}
+
 const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') => {
   const el = columnsContainer.value
   if (!el) return
@@ -157,9 +177,68 @@ const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth
 const scrollToColumn = (index: number, behavior: ScrollBehavior = 'smooth') => {
   const colIdx = clamp(index, 0, Math.max(0, columnsStore.columns.length - 1))
   activeColumnIndex.value = colIdx
-  scrollToSlide(colIdx + feedSlideOffset.value, behavior)
+  if (isMobileUi.value) {
+    scrollToSlide(colIdx + feedSlideOffset.value, behavior)
+  } else {
+    const el = columnsContainer.value
+    const col = getColumnEls()[colIdx]
+    if (el && col) el.scrollTo({ left: col.offsetLeft, behavior })
+  }
   syncTabIntoView(colIdx, behavior)
 }
+
+/** Park on the nearest column (chunky snap); pull out of elastic gutters */
+const snapBoardToNearest = (velocity = 0) => {
+  const el = columnsContainer.value
+  const cols = getColumnEls()
+  if (!el || !cols.length || isMobileUi.value) return
+
+  const predict = el.scrollLeft - velocity * 200
+  let best = 0
+  let bestDist = Infinity
+  for (let i = 0; i < cols.length; i++) {
+    const left = cols[i]!.offsetLeft
+    const d = Math.abs(left - predict)
+    if (d < bestDist) {
+      bestDist = d
+      best = i
+    }
+  }
+  if (velocity < -FLICK_VX) best = Math.min(cols.length - 1, best + 1)
+  else if (velocity > FLICK_VX) best = Math.max(0, best - 1)
+
+  activeColumnIndex.value = best
+  el.scrollTo({ left: cols[best]!.offsetLeft, behavior: 'smooth' })
+}
+
+/**
+ * Rubber-band into the gutters: ~2× gutter of travel before true edges
+ * (where Safari history swipe can finally win). Middle zone is linear.
+ */
+const applyBoardScroll = (el: HTMLElement, raw: number) => {
+  const max = Math.max(0, el.scrollWidth - el.clientWidth)
+  const gutter = boardGutterWidth()
+  if (gutter <= 0) {
+    el.scrollLeft = Math.max(0, Math.min(max, raw))
+    return
+  }
+
+  if (raw < gutter) {
+    const over = gutter - raw
+    const t = over / (gutter * 2.25)
+    const eased = 1 - 1 / (1 + t * t * 2.8)
+    el.scrollLeft = Math.max(0, gutter * (1 - eased))
+  } else if (raw > max - gutter) {
+    const over = raw - (max - gutter)
+    const t = over / (gutter * 2.25)
+    const eased = 1 - 1 / (1 + t * t * 2.8)
+    el.scrollLeft = Math.min(max, max - gutter + gutter * eased)
+  } else {
+    el.scrollLeft = raw
+  }
+}
+
+let wheelSnapTimer = 0
 
 const openPortal = async (kind: 'settings' | 'profile' | 'communities') => {
   if (portalActionLock) return
@@ -252,15 +331,27 @@ const toggleActiveViewMode = () => {
 const onColumnsScroll = () => {
   const el = columnsContainer.value
   if (!el || el.clientWidth <= 0) return
-  const index = Math.round(el.scrollLeft / el.clientWidth)
-  carouselSlideIndex.value = index
 
-  const feeds = columnsStore.columns.length
   if (!isMobileUi.value) {
-    activeColumnIndex.value = clamp(index, 0, Math.max(0, feeds - 1))
+    const cols = getColumnEls()
+    if (!cols.length) return
+    let best = 0
+    let bestDist = Infinity
+    const x = el.scrollLeft
+    for (let i = 0; i < cols.length; i++) {
+      const d = Math.abs(cols[i]!.offsetLeft - x)
+      if (d < bestDist) {
+        bestDist = d
+        best = i
+      }
+    }
+    activeColumnIndex.value = best
     return
   }
 
+  const index = Math.round(el.scrollLeft / el.clientWidth)
+  carouselSlideIndex.value = index
+  const feeds = columnsStore.columns.length
   // Only remap tab highlight while parked on a real feed
   if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
     activeColumnIndex.value = index - EDGE_LEFT
@@ -269,7 +360,11 @@ const onColumnsScroll = () => {
 
 /** Trackpad / snap settle onto an edge portal (gesture path calls settleCarousel itself) */
 const onCarouselScrollEnd = () => {
-  if (!isMobileUi.value || carouselGesture || portalActionLock) return
+  if (carouselGesture || portalActionLock) return
+  if (!isMobileUi.value) {
+    if (showBoardGutters.value) snapBoardToNearest(0)
+    return
+  }
   const idx = carouselSlideIndex.value
   const feeds = columnsStore.columns.length
   if (idx <= 1 || idx >= EDGE_LEFT + feeds) {
@@ -282,8 +377,8 @@ const onCarouselScrollEnd = () => {
  * latch vertical and never chain horizontal pans to the board. Drive scrollLeft
  * ourselves on clear horizontal intent (finger). Trackpads use the wheel bridge.
  */
-const AXIS_LOCK_PX = 12
-const FLICK_VX = 0.4 // px/ms
+const AXIS_LOCK_PX = 10
+const FLICK_VX = 0.35 // px/ms — easier column chunks on flick
 
 type CarouselGesture = {
   id: number
@@ -298,16 +393,9 @@ type CarouselGesture = {
 
 let carouselGesture: CarouselGesture | null = null
 
-const columnsCanScrollX = () => {
-  const el = columnsContainer.value
-  if (!el) return false
-  return el.scrollWidth > el.clientWidth + 2
-}
-
 /**
  * iPad Magic Keyboard / trackpad: map horizontal wheel onto the board scroller.
- * Always claim dominant-horizontal gestures over the board — even at the edges —
- * so Safari's history back/forward swipe doesn't steal them.
+ * Rubber-band through gutters; claim the gesture so Safari history needs a long slide.
  */
 const onColumnsWheel = (e: WheelEvent) => {
   const el = columnsContainer.value
@@ -331,11 +419,14 @@ const onColumnsWheel = (e: WheelEvent) => {
   // Dominant-horizontal trackpad swipe (iPadOS often sends deltaX here)
   if (Math.abs(dx) < 0.5 || Math.abs(dx) <= Math.abs(dy) * 1.05) return
 
-  const max = Math.max(0, el.scrollWidth - el.clientWidth)
-  const next = Math.max(0, Math.min(max, el.scrollLeft + dx))
-  // preventDefault even when clamped — blocks Safari history navigation
+  // preventDefault even when clamped — blocks Safari history until true edge
   e.preventDefault()
-  if (next !== el.scrollLeft) el.scrollLeft = next
+  applyBoardScroll(el, el.scrollLeft + dx)
+
+  if (!isMobileUi.value && showBoardGutters.value) {
+    window.clearTimeout(wheelSnapTimer)
+    wheelSnapTimer = window.setTimeout(() => snapBoardToNearest(0), 80)
+  }
 }
 
 const onCarouselTouchStart = (e: TouchEvent) => {
@@ -391,8 +482,7 @@ const onCarouselTouchMove = (e: TouchEvent) => {
   g.vx = (t.clientX - g.lastX) / dt
   g.lastX = t.clientX
   g.lastT = now
-  const max = el.scrollWidth - el.clientWidth
-  el.scrollLeft = Math.max(0, Math.min(max, g.startScroll - dx))
+  applyBoardScroll(el, g.startScroll - dx)
 }
 
 const finishCarouselGesture = (e: TouchEvent) => {
@@ -421,10 +511,8 @@ const finishCarouselGesture = (e: TouchEvent) => {
     return
   }
 
-  // Desktop / iPad board — coast a little, no full-viewport snap
-  if (Math.abs(vx) > 0.08) {
-    el.scrollBy({ left: -vx * 220, behavior: 'smooth' })
-  }
+  // Desktop / iPad — chunk onto nearest column (elastic gutters spring back)
+  snapBoardToNearest(vx)
 }
 
 const bindCarouselGestures = () => {
@@ -447,6 +535,7 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('touchcancel', finishCarouselGesture, true)
   el.removeEventListener('wheel', onColumnsWheel, true)
   el.removeEventListener('scrollend', onCarouselScrollEnd)
+  window.clearTimeout(wheelSnapTimer)
   el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping')
   carouselGesture = null
@@ -468,6 +557,11 @@ watch(
     nextTick(() => scrollToColumn(activeColumnIndex.value, 'auto'))
   },
 )
+
+// Gutters change column offsetLeft — re-park so we don't sit in the pad
+watch(showBoardGutters, () => {
+  nextTick(() => scrollToColumn(activeColumnIndex.value, 'auto'))
+})
 
 // Reload feeds when switching accounts (per-account + profile sync)
 watch(
@@ -667,8 +761,16 @@ useHead({ title: 'Home | NeoSpace' })
     <div
       ref="columnsContainer"
       class="columns-container"
+      :class="{ 'columns-container--gutters': showBoardGutters }"
       @scroll.passive="onColumnsScroll"
     >
+      <!-- Desktop/iPad: elastic lead-in before Safari history edge -->
+      <div
+        v-if="showBoardGutters"
+        class="board-gutter board-gutter--start"
+        aria-hidden="true"
+      />
+
       <!-- Mobile edge: keep swiping left → Profile, then Settings -->
       <aside
         v-if="isMobileUi"
@@ -754,6 +856,12 @@ useHead({ title: 'Home | NeoSpace' })
           Browse
         </button>
       </aside>
+
+      <div
+        v-if="showBoardGutters"
+        class="board-gutter board-gutter--end"
+        aria-hidden="true"
+      />
     </div>
 
     <!-- Desktop Add Column Panel -->
@@ -943,9 +1051,30 @@ useHead({ title: 'Home | NeoSpace' })
   scrollbar-width: thin;
 
   &--swiping {
-    scroll-snap-type: none;
+    scroll-snap-type: none !important;
     cursor: grabbing;
     user-select: none;
+  }
+
+  // Elastic pads — park columns off the true scroll edges
+  .board-gutter {
+    flex: 0 0 clamp(48px, 9vw, 96px);
+    width: clamp(48px, 9vw, 96px);
+    min-width: clamp(48px, 9vw, 96px);
+    pointer-events: none;
+    flex-shrink: 0;
+    scroll-snap-align: none;
+  }
+
+  &--gutters {
+    @media (min-width: 1024px) and (max-width: 1366px) {
+      // iPad: thicker give so you really slide before history
+      .board-gutter {
+        flex-basis: clamp(64px, 11vw, 112px);
+        width: clamp(64px, 11vw, 112px);
+        min-width: clamp(64px, 11vw, 112px);
+      }
+    }
   }
 
   // Single column: cap width for readability
@@ -994,10 +1123,11 @@ useHead({ title: 'Home | NeoSpace' })
   @media (min-width: 1024px) {
     // Packed: share the row, but never crush past a readable width.
     // Wide desks: up to 6 across; narrower: step down to 4, then scroll.
-    // iPad landscape (~1024–1366): prefer readable mins that still leave room to scroll.
+    // iPad landscape (~1024–1366): chunky mandatory snap + elastic gutters.
     .columns-page--multi.columns-page--packed & {
       overflow-x: auto;
       scroll-snap-type: x proximity;
+      scroll-padding-inline: 0;
 
       :deep(.timeline-column),
       :deep(.panel-column) {
@@ -1005,15 +1135,30 @@ useHead({ title: 'Home | NeoSpace' })
         min-width: max(280px, calc(100% / 6));
         max-width: none;
         scroll-snap-align: start;
+        scroll-snap-stop: always;
       }
     }
 
     @media (max-width: 1366px) {
       .columns-page--multi.columns-page--packed & {
+        // Chunky column hits on iPad — must stop on each column
+        scroll-snap-type: x mandatory;
+
         :deep(.timeline-column),
         :deep(.panel-column) {
           // ~3 across on iPad landscape, then trackpad/finger scroll
           min-width: max(300px, 32%);
+          scroll-snap-stop: always;
+        }
+      }
+
+      .columns-page--multi.columns-page--roomy & {
+        scroll-snap-type: x mandatory;
+
+        :deep(.timeline-column),
+        :deep(.panel-column) {
+          scroll-snap-align: start;
+          scroll-snap-stop: always;
         }
       }
     }
@@ -1029,12 +1174,15 @@ useHead({ title: 'Home | NeoSpace' })
 
     .columns-page--multi.columns-page--roomy & {
       overflow-x: auto;
+      scroll-snap-type: x proximity;
 
       :deep(.timeline-column),
       :deep(.panel-column) {
         flex: 0 0 30%;
         min-width: 320px;
         max-width: 520px;
+        scroll-snap-align: start;
+        scroll-snap-stop: always;
       }
     }
 
