@@ -31,7 +31,8 @@ const { setBoardPortal } = useBoardPortal()
 const router = useRouter()
 
 const addMenuOpen = ref(false)
-const addGroupsExpanded = ref(false)
+const addGroupsExpanded = ref(true)
+const addGroupQuery = ref('')
 const columnsContainer = ref<HTMLElement | null>(null)
 const activeColumnIndex = ref(0)
 const draggingColumnId = ref<string | null>(null)
@@ -140,7 +141,7 @@ const moveColumnRight = (index: number) => {
 const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   const id = columnsStore.addColumn(feedType, groupTag)
   addMenuOpen.value = false
-  addGroupsExpanded.value = false
+  addGroupQuery.value = ''
   nextTick(() => {
     const idx = id
       ? columnsStore.columns.findIndex((c) => c.id === id)
@@ -149,8 +150,39 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   })
 }
 
+/** Joined first, then featured (News, etc.) — filterable so the list isn’t a dead end. */
+const addableGroups = computed(() => {
+  const seen = new Set<string>()
+  const out: typeof groupsStore.joinedGroups = []
+  for (const g of [...groupsStore.joinedGroups, ...groupsStore.featuredGroups]) {
+    const key = g.tag.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(g)
+  }
+  const q = addGroupQuery.value.trim().toLowerCase().replace(/^#/, '')
+  if (!q) return out
+  return out.filter(
+    (g) => g.tag.toLowerCase().includes(q) || g.name.toLowerCase().includes(q),
+  )
+})
+
+const addGroupCustomTag = computed(() => {
+  const q = addGroupQuery.value.trim().toLowerCase().replace(/^#/, '')
+  if (!q || !/^[a-z0-9_]+$/i.test(q)) return null
+  if (addableGroups.value.some((g) => g.tag.toLowerCase() === q)) return null
+  return q
+})
+
+const addGroupAsColumn = (tag: string) => {
+  addColumn('group', tag.replace(/^#/, '').toLowerCase())
+}
+
 watch(addMenuOpen, (open) => {
-  if (!open) addGroupsExpanded.value = false
+  if (!open) {
+    addGroupQuery.value = ''
+    addGroupsExpanded.value = true
+  }
 })
 
 const feedTabsScroller = ref<HTMLElement | null>(null)
@@ -165,14 +197,81 @@ const getColumnEls = (): HTMLElement[] => {
   )
 }
 
+/** Every full-width carousel page (edge portals + feed columns). */
+const getSlideEls = (): HTMLElement[] => {
+  const el = columnsContainer.value
+  if (!el) return []
+  return Array.from(el.children).filter((c): c is HTMLElement => c instanceof HTMLElement)
+}
+
+/** Prefer offsetLeft over scrollLeft/width — padding/subpixels break index math with many slides. */
+const nearestSlideIndex = (scrollLeft?: number) => {
+  const el = columnsContainer.value
+  const slides = getSlideEls()
+  if (!el || !slides.length) return 0
+  const x = scrollLeft ?? el.scrollLeft
+  let best = 0
+  let bestDist = Infinity
+  for (let i = 0; i < slides.length; i++) {
+    const d = Math.abs(slides[i]!.offsetLeft - x)
+    if (d < bestDist) {
+      bestDist = d
+      best = i
+    }
+  }
+  return best
+}
+
+let settleTimer = 0
+let settleGen = 0
+let carouselSettling = false
+
+const finishCarouselSettle = (gen: number, finalIndex: number) => {
+  if (gen !== settleGen) return
+  const el = columnsContainer.value
+  if (el) {
+    // Land exactly — smooth scroll can stop a few px short with many slides
+    const slides = getSlideEls()
+    const child = slides[clamp(finalIndex, 0, Math.max(0, slides.length - 1))]
+    if (child) el.scrollLeft = child.offsetLeft
+    el.style.scrollSnapType = ''
+    el.classList.remove('columns-container--settling', 'columns-container--swiping')
+  }
+  carouselSettling = false
+  carouselSlideIndex.value = finalIndex
+  syncBoardPortalFromSlide(finalIndex)
+}
+
 const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') => {
   const el = columnsContainer.value
-  if (!el) return
-  const idx = clamp(slideIndex, 0, Math.max(0, el.children.length - 1))
-  const child = el.children[idx] as HTMLElement | undefined
+  const slides = getSlideEls()
+  if (!el || !slides.length) return
+  const idx = clamp(slideIndex, 0, slides.length - 1)
+  const child = slides[idx]
   if (!child) return
-  el.scrollTo({ left: child.offsetLeft, behavior })
   carouselSlideIndex.value = idx
+  syncBoardPortalFromSlide(idx)
+
+  if (behavior === 'auto' || !isMobileUi.value) {
+    el.scrollLeft = child.offsetLeft
+    return
+  }
+
+  const gen = ++settleGen
+  carouselSettling = true
+  el.style.scrollSnapType = 'none'
+  el.classList.add('columns-container--settling')
+  window.clearTimeout(settleTimer)
+  el.scrollTo({ left: child.offsetLeft, behavior: 'smooth' })
+
+  const done = () => {
+    el.removeEventListener('scrollend', done)
+    window.clearTimeout(settleTimer)
+    finishCarouselSettle(gen, idx)
+  }
+  el.addEventListener('scrollend', done, { once: true })
+  // Safari / older WebViews may not fire scrollend
+  settleTimer = window.setTimeout(done, 380)
 }
 
 const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth') => {
@@ -345,13 +444,11 @@ const settleCarousel = (slideIndex: number, behavior: ScrollBehavior = 'smooth')
     return
   }
 
-  const maxSlide = EDGE_LEFT + feeds + EDGE_RIGHT - 1
+  const maxSlide = Math.max(0, EDGE_LEFT + feeds + EDGE_RIGHT - 1)
   const idx = clamp(slideIndex, 0, maxSlide)
 
   // Edge portals stay parked (filled cards + chrome hints) — CTA opens the destination
-  if (idx === 0 || idx === 1 || idx >= EDGE_LEFT + feeds) {
-    carouselSlideIndex.value = idx
-    syncBoardPortalFromSlide(idx)
+  if (idx < EDGE_LEFT || idx >= EDGE_LEFT + feeds) {
     scrollToSlide(idx, behavior)
     return
   }
@@ -405,9 +502,9 @@ const onColumnsScroll = () => {
     return
   }
 
-  const index = Math.round(el.scrollLeft / el.clientWidth)
+  const index = nearestSlideIndex()
   carouselSlideIndex.value = index
-  syncBoardPortalFromSlide(index)
+  if (!carouselSettling) syncBoardPortalFromSlide(index)
   const feeds = columnsStore.columns.length
   // Only remap tab highlight while parked on a real feed
   if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
@@ -415,18 +512,22 @@ const onColumnsScroll = () => {
   }
 }
 
-/** Trackpad / snap settle onto an edge portal (gesture path calls settleCarousel itself) */
+/** Native scroll / momentum ended — park on the nearest full slide */
 const onCarouselScrollEnd = () => {
-  if (carouselGesture || portalActionLock) return
+  if (carouselGesture || portalActionLock || carouselSettling) return
   if (!isMobileUi.value) {
     syncActiveColumnFromScroll()
     return
   }
-  const idx = carouselSlideIndex.value
-  const feeds = columnsStore.columns.length
-  if (idx <= 1 || idx >= EDGE_LEFT + feeds) {
-    settleCarousel(idx)
-  }
+  const el = columnsContainer.value
+  const idx = nearestSlideIndex()
+  const child = getSlideEls()[idx]
+  if (!el || !child) return
+  carouselSlideIndex.value = idx
+  syncBoardPortalFromSlide(idx)
+  // Already parked — don't kick another smooth settle (avoids jitter loops)
+  if (Math.abs(el.scrollLeft - child.offsetLeft) < 3) return
+  settleCarousel(idx, 'smooth')
 }
 
 /**
@@ -435,7 +536,7 @@ const onCarouselScrollEnd = () => {
  * ourselves on clear horizontal intent (finger). Trackpads use the wheel bridge.
  */
 const AXIS_LOCK_PX = 10
-const FLICK_VX = 0.35 // px/ms — easier column chunks on flick
+const FLICK_VX = 0.22 // px/ms — one-slide flicks without needing a hard whip
 
 type CarouselGesture = {
   id: number
@@ -501,7 +602,7 @@ const onCarouselTouchStart = (e: TouchEvent) => {
   // Don't steal taps from column chrome / compose / menus (iPad move/close/focus)
   if (
     target?.closest(
-      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .mobile-feed-tabs, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill',
+      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .mobile-feed-tabs, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill, .feed-portal__search, .feed-portal__list',
     )
   ) {
     return
@@ -568,10 +669,9 @@ const finishCarouselGesture = (e: TouchEvent) => {
   el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping')
 
-  // Mobile snap carousel — park on a full-width slide
+  // Mobile snap carousel — park on a full-width slide (±1 on a clear flick)
   if (isMobileUi.value) {
-    const w = el.clientWidth || 1
-    let index = Math.round(el.scrollLeft / w)
+    let index = nearestSlideIndex()
     if (vx < -FLICK_VX) index += 1
     else if (vx > FLICK_VX) index -= 1
     index = clamp(index, 0, Math.max(0, slideCount.value - 1))
@@ -609,9 +709,11 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('wheel', onColumnsWheel, true)
   el.removeEventListener('scrollend', onCarouselScrollEnd)
   window.clearTimeout(wheelIdleTimer)
+  window.clearTimeout(settleTimer)
   wheelArmed = false
+  carouselSettling = false
   el.style.scrollSnapType = ''
-  el.classList.remove('columns-container--swiping')
+  el.classList.remove('columns-container--swiping', 'columns-container--settling')
   carouselGesture = null
 }
 
@@ -643,11 +745,26 @@ watch(
   },
 )
 
-/** Re-park on the active feed after layout chrome returns (e.g. back from Messages). */
+/**
+ * After returning from a subview, layout chrome reflow can leave scroll at slide 0
+ * (Settings). Re-park on the active feed — but only if we're stranded on an edge
+ * portal, so intentional portal parking isn't always yanked away.
+ */
 const restoreFeedPark = () => {
   nextTick(() => {
     requestAnimationFrame(() => {
-      scrollToColumn(activeColumnIndex.value, 'auto')
+      if (!isMobileUi.value) {
+        scrollToColumn(activeColumnIndex.value, 'auto')
+        return
+      }
+      const idx = nearestSlideIndex()
+      const feeds = columnsStore.columns.length
+      const onEdge = idx < EDGE_LEFT || idx >= EDGE_LEFT + feeds
+      if (onEdge) scrollToColumn(activeColumnIndex.value, 'auto')
+      else {
+        carouselSlideIndex.value = idx
+        syncBoardPortalFromSlide(idx)
+      }
     })
   })
 }
@@ -816,27 +933,50 @@ useHead({ title: 'Home | NeoSpace' })
                 class="add-column-menu__item"
                 @click="addColumn('messages')"
               >Messages</button>
-              <template v-if="groupsStore.joinedGroups.length > 0">
-                <div class="add-column-menu__divider" role="separator" />
-                <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
-                  <span>Groups</span>
-                  <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-                <template v-if="addGroupsExpanded">
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+                <span>Groups</span>
+                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addGroupsExpanded">
+                <div class="add-column-menu__filter" @click.stop>
+                  <input
+                    v-model="addGroupQuery"
+                    type="search"
+                    class="add-column-menu__filter-input"
+                    placeholder="Find News, Dogs…"
+                    aria-label="Filter groups"
+                    @keydown.enter.prevent="addGroupCustomTag ? addGroupAsColumn(addGroupCustomTag) : addableGroups[0] && addGroupAsColumn(addableGroups[0].tag)"
+                  >
+                </div>
+                <div class="add-column-menu__groups">
                   <button
-                    v-for="group in groupsStore.joinedGroups"
+                    v-for="group in addableGroups"
                     :key="group.tag"
                     type="button"
                     role="menuitem"
                     class="add-column-menu__item add-column-menu__item--group"
-                    @click="addColumn('group', group.tag)"
+                    @click="addGroupAsColumn(group.tag)"
                   >
                     <span class="add-column-menu__group-icon">{{ group.icon }}</span>
                     {{ group.name }}
                   </button>
-                </template>
+                  <button
+                    v-if="addGroupCustomTag"
+                    type="button"
+                    role="menuitem"
+                    class="add-column-menu__item add-column-menu__item--group"
+                    @click="addGroupAsColumn(addGroupCustomTag)"
+                  >
+                    <span class="add-column-menu__group-icon">🏷️</span>
+                    Add #{{ addGroupCustomTag }}
+                  </button>
+                  <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
+                    No matching groups
+                  </p>
+                </div>
               </template>
               <span class="add-column-menu__hint">
                 {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }}
@@ -1235,27 +1375,50 @@ useHead({ title: 'Home | NeoSpace' })
             </svg>
             Messages
           </button>
-          <template v-if="groupsStore.joinedGroups.length > 0">
-            <div class="add-column-menu__divider" role="separator" />
-            <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
-              <span>Groups</span>
-              <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            <template v-if="addGroupsExpanded">
+          <div class="add-column-menu__divider" role="separator" />
+          <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+            <span>Groups</span>
+            <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          <template v-if="addGroupsExpanded">
+            <div class="add-column-menu__filter" @click.stop>
+              <input
+                v-model="addGroupQuery"
+                type="search"
+                class="add-column-menu__filter-input"
+                placeholder="Find News, Dogs…"
+                aria-label="Filter groups"
+                @keydown.enter.prevent="addGroupCustomTag ? addGroupAsColumn(addGroupCustomTag) : addableGroups[0] && addGroupAsColumn(addableGroups[0].tag)"
+              >
+            </div>
+            <div class="add-column-menu__groups">
               <button
-                v-for="group in groupsStore.joinedGroups"
+                v-for="group in addableGroups"
                 :key="group.tag"
                 type="button"
                 role="menuitem"
                 class="add-column-menu__item add-column-menu__item--group"
-                @click="addColumn('group', group.tag)"
+                @click="addGroupAsColumn(group.tag)"
               >
                 <span class="add-column-menu__group-icon">{{ group.icon }}</span>
                 {{ group.name }}
               </button>
-            </template>
+              <button
+                v-if="addGroupCustomTag"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item add-column-menu__item--group"
+                @click="addGroupAsColumn(addGroupCustomTag)"
+              >
+                <span class="add-column-menu__group-icon">🏷️</span>
+                Add #{{ addGroupCustomTag }}
+              </button>
+              <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
+                No matching groups
+              </p>
+            </div>
           </template>
           <span class="add-column-menu__hint">
             {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns
@@ -1286,13 +1449,20 @@ useHead({ title: 'Home | NeoSpace' })
     width: calc(100% + 4rem);
   }
 
-  // Mobile: fill viewport minus header + nav (keep height stable while scrolling)
+  // Mobile: fill viewport minus header + nav; full-bleed so slides are true page width
   @media (max-width: 1023px) {
     flex-direction: column;
     height: calc(
       100dvh - var(--neo-mobile-chrome-top, 52px) - var(--neo-mobile-nav-h, 64px) -
         env(safe-area-inset-bottom, 0px)
     );
+    margin-inline: -0.5rem;
+    width: calc(100% + 1rem);
+  }
+
+  @media (max-width: 1023px) and (min-width: 600px) {
+    margin-inline: -1rem;
+    width: calc(100% + 2rem);
   }
 
   // Single column mode on desktop: center the content
@@ -1348,7 +1518,8 @@ useHead({ title: 'Home | NeoSpace' })
     padding-inline-start: 0.5rem;
   }
 
-  &--swiping {
+  &--swiping,
+  &--settling {
     scroll-snap-type: none !important;
     cursor: grabbing;
     user-select: none;
@@ -1374,11 +1545,16 @@ useHead({ title: 'Home | NeoSpace' })
     max-width: none;
   }
 
-  // Mobile: full-width snap carousel — swipe left/right between feeds
+  // Mobile: full-width snap carousel — swipe left/right between feeds + edge portals
   @media (max-width: 1023px) {
     width: 100%;
+    // No side padding — equal-width pages + scrollLeft math need a clean box
+    padding-inline: 0;
+    scroll-padding-inline: 0;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
+    // Finger: we axis-lock in JS; keep pan-y for nested feed scroll
+    touch-action: pan-y;
 
     &::-webkit-scrollbar {
       display: none;
@@ -1394,6 +1570,7 @@ useHead({ title: 'Home | NeoSpace' })
       scroll-snap-align: start;
       scroll-snap-stop: always;
       border-right: none;
+      box-sizing: border-box;
     }
   }
 
@@ -1488,7 +1665,11 @@ useHead({ title: 'Home | NeoSpace' })
   align-items: flex-start;
   justify-content: center;
   gap: 0.75rem;
-  padding: 2.5rem 1.75rem 5rem;
+  padding: 2.5rem 1.25rem 5rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   background:
     radial-gradient(
       ellipse 70% 45% at 20% 35%,
@@ -1984,6 +2165,7 @@ useHead({ title: 'Home | NeoSpace' })
 
   &--expanded {
     width: 48px;
+    z-index: var(--neo-z-dropdown, 1000);
   }
 }
 
@@ -2009,7 +2191,10 @@ useHead({ title: 'Home | NeoSpace' })
   }
 
   :deep(.neo-menu__panel) {
-    width: 200px;
+    width: 240px;
+    max-height: min(70vh, 28rem);
+    overflow-x: hidden;
+    overflow-y: auto;
     background: var(--neo-bg-secondary);
     border-radius: 12px;
     box-shadow: var(--neo-shadow-xl);
@@ -2110,6 +2295,42 @@ useHead({ title: 'Home | NeoSpace' })
     width: 16px;
     text-align: center;
     flex-shrink: 0;
+  }
+
+  &__filter {
+    padding: 0.25rem 0.5rem 0.5rem;
+  }
+
+  &__filter-input {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    font-size: 0.8125rem;
+    color: var(--neo-text-primary);
+    background: var(--neo-bg-primary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: 8px;
+
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
+    }
+  }
+
+  &__groups {
+    max-height: 14rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  &__empty {
+    margin: 0;
+    padding: 0.5rem 0.75rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
   }
 
   &__hint {
