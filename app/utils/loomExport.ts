@@ -11,7 +11,6 @@ import {
 } from '~/utils/insights'
 
 export const LOOM_HOME = 'https://loom.ibm.io/'
-export const LOOM_DEV = 'https://loom-storyteller.mhsenkow.workers.dev/'
 
 export type LoomExportFile = {
   name: string
@@ -76,17 +75,20 @@ function downloadCsv(csv: string, filename: string) {
   a.href = url
   a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`
   a.click()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** Combined fallback when browsers block multiple programmatic downloads. */
+function downloadCombinedCsv(files: LoomExportFile[]) {
+  const parts = files.map(
+    (f) => `# ${f.name}\n${f.csv.trim()}\n`,
+  )
+  downloadCsv(parts.join('\n'), files[0]?.name.replace(/\.csv$/i, '') + '-bundle.csv')
 }
 
 export function downloadInsightsCsv(report: InsightsReport) {
   const { files } = buildInsightsExport(report)
-  for (const f of files) downloadCsv(f.csv, f.name)
-}
-
-function loomOriginForOpen(): string {
-  if (typeof window === 'undefined') return LOOM_HOME
-  return LOOM_HOME
+  downloadCombinedCsv(files)
 }
 
 /**
@@ -107,7 +109,7 @@ export async function exportInsightsToLoom(report: InsightsReport): Promise<'pos
     },
   }
 
-  const dest = new URL(loomOriginForOpen())
+  const dest = new URL(LOOM_HOME)
   dest.searchParams.set('from', 'neospace')
   dest.searchParams.set('dataset', 'insights')
 
@@ -141,6 +143,7 @@ export async function exportInsightsToLoom(report: InsightsReport): Promise<'pos
     }
 
     const onMessage = (event: MessageEvent) => {
+      if (event.source !== child) return
       if (!LOOM_ORIGINS.has(event.origin)) return
       const data = event.data
       if (!data || typeof data !== 'object') return

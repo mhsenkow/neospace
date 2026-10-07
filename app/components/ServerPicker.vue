@@ -182,8 +182,14 @@ onUnmounted(() => {
           :aria-describedby="localError ? inputErrorId : undefined"
         />
         <p class="server-picker__hint">
-          Enter <strong>@you@server</strong> or just the server name — like
-          <strong>mastodon.social</strong>.
+          Pick the server where your account lives — like a phone company for the fediverse.
+          Enter <strong>@you@server</strong> or just the server name (e.g.
+          <strong>mastodon.social</strong>).
+        </p>
+        <p v-if="peekUsers != null || peekOpen != null" class="server-picker__peek-summary">
+          <template v-if="peekUsers != null">{{ peekUsers.toLocaleString() }} monthly active</template>
+          <template v-if="peekOpen === true"> · open registration</template>
+          <template v-else-if="peekOpen === false"> · invite-only</template>
         </p>
 
         <!-- Live peek -->

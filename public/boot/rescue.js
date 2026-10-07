@@ -50,9 +50,22 @@
       var r = e && e.reason
       bad((r && r.message) || r) && rescue()
     })
+    var watchdogMs = 20000
+    try {
+      var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+      if (conn && (conn.saveData || conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g')) {
+        watchdogMs = 45000
+      }
+    } catch (e) {}
+    window.__neospaceMounted = function () {
+      try {
+        window.__neospaceMounted = null
+      } catch (e) {}
+    }
     setTimeout(function () {
+      if (window.__neospaceMounted === null) return
       var el = document.getElementById('__nuxt')
       if (el && !el.querySelector('.neo-layout') && !sessionStorage.getItem(K)) rescue()
-    }, 12000)
+    }, watchdogMs)
   } catch (e) {}
 })()

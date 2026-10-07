@@ -34,6 +34,7 @@ const mobileMenuOpen = ref(false)
 const { sidebarRail, loadSidebarRail, applyTheme } = useShellAppearance()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
 const isDesk = useDeskViewport()
+useAppShellHeight()
 
 /** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
 const isThreadRoute = computed(() => path.value.startsWith('/status/'))
@@ -82,6 +83,14 @@ onMounted(async () => {
   }
   mq.addEventListener?.('change', onScheme)
   cleanups.push(() => mq.removeEventListener?.('change', onScheme))
+
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible' && instancesStore.hasAuthenticatedInstance) {
+      void notificationsStore.refreshUnreadBadge()
+    }
+  }
+  document.addEventListener('visibilitychange', onVisibility)
+  cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility))
 
   onUnmounted(() => {
     for (const fn of cleanups) fn()
@@ -162,6 +171,17 @@ watch(
 
     <MobileDrawer v-model:open="mobileMenuOpen" />
 
+    <div
+      v-if="instancesStore.authNotice"
+      class="neo-auth-notice"
+      role="status"
+    >
+      <p>{{ instancesStore.authNotice }}</p>
+      <button type="button" class="neo-auth-notice__dismiss" @click="instancesStore.dismissAuthNotice()">
+        Dismiss
+      </button>
+    </div>
+
     <main id="main-content" class="main-content" tabindex="-1">
       <slot />
     </main>
@@ -186,6 +206,37 @@ watch(
 </template>
 
 <style lang="scss" scoped>
+.neo-auth-notice {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  background: color-mix(in srgb, var(--neo-warning, #d97706) 14%, var(--neo-bg-primary));
+  border-bottom: 1px solid color-mix(in srgb, var(--neo-warning, #d97706) 35%, transparent);
+  color: var(--neo-text-primary);
+  font-size: 0.8125rem;
+
+  p {
+    margin: 0;
+    flex: 1;
+  }
+}
+
+.neo-auth-notice__dismiss {
+  flex-shrink: 0;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-primary);
+  padding: 0.25rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .neo-layout {
   --neo-sidebar-width: 248px;
   display: flex;
@@ -198,7 +249,7 @@ watch(
   // Mobile: column shell with in-flow header/tabs.
   // Avoid position:fixed chrome inside overflow:hidden — iOS Safari clips it
   // (Chrome device emulation does not), which hid the bottom tab bar.
-  // Prefer svh so the URL-bar show/hide doesn't resize-jitter the shell.
+  // --neo-app-height tracks visualViewport (Android URL-bar); svh/dvh as fallback.
   @media (max-width: 1023px) {
     flex-direction: column;
     // Override base min-height: 100dvh — min-height beats max-height when larger
@@ -206,9 +257,11 @@ watch(
     height: 100vh;
     height: 100dvh;
     height: 100svh;
+    height: var(--neo-app-height, 100svh);
     max-height: 100vh;
     max-height: 100dvh;
     max-height: 100svh;
+    max-height: var(--neo-app-height, 100svh);
     overflow: hidden;
   }
 

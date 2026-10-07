@@ -11,7 +11,6 @@ import { resolve } from 'node:path'
 const out = resolve('.output/public')
 const index = resolve(out, 'index.html')
 const notFound = resolve(out, '404.html')
-const ok = resolve(out, '200.html')
 const headersSrc = resolve('public/_headers')
 const headersOut = resolve(out, '_headers')
 
@@ -21,8 +20,7 @@ if (!existsSync(index)) {
 }
 
 copyFileSync(index, notFound)
-copyFileSync(index, ok)
-console.log('spa-fallback: synced 404.html and 200.html to index.html')
+console.log('spa-fallback: synced 404.html to index.html (Cloudflare Pages SPA fallback)')
 
 const html = readFileSync(index, 'utf8')
 const inlineScripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(
@@ -37,7 +35,7 @@ const hashes = inlineScripts
 
 const scriptSrc = ["'self'", ...hashes].join(' ')
 const reportOnly =
-  `Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src ${scriptSrc}; connect-src 'self' https:; worker-src 'self' blob:; manifest-src 'self'`
+  `Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src ${scriptSrc}; connect-src 'self' https:; worker-src 'self' blob:; manifest-src 'self'`
 
 let headers = existsSync(headersOut)
   ? readFileSync(headersOut, 'utf8')

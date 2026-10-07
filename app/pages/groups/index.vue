@@ -6,6 +6,8 @@
 
 import { useGroupsStore, GROUP_CATEGORIES } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
+import { categoryTint } from '~/composables/useShellAppearance'
+import { useHorizontalRail } from '~/composables/useHorizontalRail'
 
 const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
@@ -68,19 +70,10 @@ const viewGroup = (tag: string) => {
   router.push(`/groups/${tag}`)
 }
 
-const categoryColor = (category: string) => {
-  const colors: Record<string, string> = {
-    tech: '#c45c26',
-    creative: '#b8860b',
-    gaming: '#2f7d4a',
-    social: '#a84c1e',
-    news: '#3a6ea5',
-    trending: '#c45c26',
-    local: '#757575',
-    other: '#757575',
-  }
-  return colors[category] || colors.other
-}
+const suggestedRailRef = ref<HTMLElement | null>(null)
+const trendingRailRef = ref<HTMLElement | null>(null)
+const suggestedRail = useHorizontalRail(suggestedRailRef)
+const trendingRail = useHorizontalRail(trendingRailRef)
 
 useHead({
   title: 'Groups',
@@ -186,7 +179,7 @@ useHead({
             >
               <span
                 class="jump-chip__icon"
-                :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+                :style="{ backgroundColor: categoryTint(group.category) }"
               >
                 {{ group.icon }}
               </span>
@@ -203,15 +196,35 @@ useHead({
           <div class="section-heading">
             <h2 class="section-title">Suggested</h2>
           </div>
-          <div class="groups-rail" role="list">
-            <GroupCard
-              v-for="group in recommendedGroups"
-              :key="group.tag"
-              :group="group"
-              tile
-              role="listitem"
-              @view="viewGroup"
-            />
+          <div class="groups-rail-wrap">
+            <button
+              v-if="suggestedRail.canScrollBack.value"
+              type="button"
+              class="groups-rail-nav groups-rail-nav--prev"
+              aria-label="Scroll suggested groups left"
+              @click="suggestedRail.scrollBy(-240)"
+            >
+              <NeoIcon name="chevron-left" :size="18" :stroke="2" />
+            </button>
+            <div ref="suggestedRailRef" class="groups-rail" role="list">
+              <GroupCard
+                v-for="group in recommendedGroups"
+                :key="group.tag"
+                :group="group"
+                tile
+                role="listitem"
+                @view="viewGroup"
+              />
+            </div>
+            <button
+              v-if="suggestedRail.canScrollForward.value"
+              type="button"
+              class="groups-rail-nav groups-rail-nav--next"
+              aria-label="Scroll suggested groups right"
+              @click="suggestedRail.scrollBy(240)"
+            >
+              <NeoIcon name="chevron-right" :size="18" :stroke="2" />
+            </button>
           </div>
         </section>
 
@@ -223,15 +236,35 @@ useHead({
           <div class="section-heading">
             <h2 class="section-title">Trending on {{ trendingServerLabel }}</h2>
           </div>
-          <div class="groups-rail" role="list">
-            <GroupCard
-              v-for="group in trendingGroups"
-              :key="`trend-${group.tag}`"
-              :group="group"
-              tile
-              role="listitem"
-              @view="viewGroup"
-            />
+          <div class="groups-rail-wrap">
+            <button
+              v-if="trendingRail.canScrollBack.value"
+              type="button"
+              class="groups-rail-nav groups-rail-nav--prev"
+              aria-label="Scroll trending groups left"
+              @click="trendingRail.scrollBy(-240)"
+            >
+              <NeoIcon name="chevron-left" :size="18" :stroke="2" />
+            </button>
+            <div ref="trendingRailRef" class="groups-rail" role="list">
+              <GroupCard
+                v-for="group in trendingGroups"
+                :key="`trend-${group.tag}`"
+                :group="group"
+                tile
+                role="listitem"
+                @view="viewGroup"
+              />
+            </div>
+            <button
+              v-if="trendingRail.canScrollForward.value"
+              type="button"
+              class="groups-rail-nav groups-rail-nav--next"
+              aria-label="Scroll trending groups right"
+              @click="trendingRail.scrollBy(240)"
+            >
+              <NeoIcon name="chevron-right" :size="18" :stroke="2" />
+            </button>
           </div>
         </section>
 
@@ -412,6 +445,41 @@ useHead({
 
 .groups-rail-section {
   margin-bottom: 1.75rem;
+}
+
+.groups-rail-wrap {
+  position: relative;
+}
+
+.groups-rail-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 50%;
+  background: var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+
+  &--prev {
+    left: 0.25rem;
+  }
+
+  &--next {
+    right: 0.25rem;
+  }
 }
 
 .groups-jump,

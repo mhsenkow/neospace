@@ -9,9 +9,11 @@ import { activeClient } from '~/composables/useMasto'
 import { useInstancesStore } from './instances'
 import { logWarn } from '~/utils/log'
 import { findExactOneToOne } from '~/utils/dmHelpers'
+import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
 
 const PAGE_LIMIT = 40
 const POLL_MS = 45_000
+const POLL_BACKOFF_MAX_MS = 180_000
 
 interface ConversationsState {
   conversations: mastodon.v1.Conversation[]
@@ -20,15 +22,28 @@ interface ConversationsState {
   isLoadingMore: boolean
   hasMore: boolean
   error: string | null
+  loadMoreError: string | null
+  quietRefreshFailures: number
 }
+
+type LiveRefreshStop = () => void
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let focusHandler: (() => void) | null = null
 let pollConsumers = 0
 let fetchSeq = 0
+let pollIntervalMs = POLL_MS
 
-const stripHtml = (html: string) =>
-  html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+/** Strip leading @mentions from DM preview text */
+function previewText(html: string, participantAccts: string[]): string {
+  let text = stripHtml(html)
+  for (const acct of participantAccts) {
+    const handle = acct.startsWith('@') ? acct : `@${acct}`
+    const re = new RegExp(`^${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i')
+    text = text.replace(re, '').trim()
+  }
+  return text
+}
 
 export const useConversationsStore = defineStore('conversations', {
   state: (): ConversationsState => ({
@@ -38,6 +53,8 @@ export const useConversationsStore = defineStore('conversations', {
     isLoadingMore: false,
     hasMore: true,
     error: null,
+    loadMoreError: null,
+    quietRefreshFailures: 0,
   }),
 
   getters: {
@@ -64,7 +81,6 @@ export const useConversationsStore = defineStore('conversations', {
       if ((this.isLoading || this.isRefreshing) && !force) return
 
       const seq = ++fetchSeq
-      // Quiet/background polls must not flip isRefreshing (pull indicator).
       if (!quiet) {
         if (this.conversations.length) this.isRefreshing = true
         else this.isLoading = true
@@ -72,12 +88,11 @@ export const useConversationsStore = defineStore('conversations', {
       this.error = null
       try {
         const client = activeClient()
-        const items = (await client.v1.conversations.list({
+        const items = await client.v1.conversations.list({
           limit: PAGE_LIMIT,
-        } as any)) as mastodon.v1.Conversation[]
+        })
         if (seq !== fetchSeq) return
         const page = Array.isArray(items) ? items : []
-        // Merge page 1 so quiet polls don't drop conversations loaded via loadMore
         const pageIds = new Set(page.map((c) => c.id))
         const older = this.conversations.filter((c) => !pageIds.has(c.id))
         const hadExtraPages = older.length > 0
@@ -85,9 +100,18 @@ export const useConversationsStore = defineStore('conversations', {
         if (!hadExtraPages) {
           this.hasMore = page.length >= PAGE_LIMIT
         }
-      } catch (e: any) {
+        if (quiet) {
+          this.quietRefreshFailures = 0
+          pollIntervalMs = POLL_MS
+        }
+      } catch (e: unknown) {
         if (seq !== fetchSeq) return
-        if (!quiet) this.error = e?.message || 'Could not load messages'
+        const message = e instanceof Error ? e.message : 'Could not load messages'
+        if (!quiet) this.error = message
+        else {
+          this.quietRefreshFailures += 1
+          pollIntervalMs = Math.min(POLL_BACKOFF_MAX_MS, POLL_MS * 2 ** this.quietRefreshFailures)
+        }
         logWarn('conversations fetch failed:', e)
       } finally {
         if (seq === fetchSeq) {
@@ -105,26 +129,35 @@ export const useConversationsStore = defineStore('conversations', {
         return
       }
       this.isLoadingMore = true
+      this.loadMoreError = null
       try {
         const client = activeClient()
-        const items = (await client.v1.conversations.list({
+        const items = await client.v1.conversations.list({
           limit: PAGE_LIMIT,
           maxId: last.id,
-        } as any)) as mastodon.v1.Conversation[]
+        })
         const batch = Array.isArray(items) ? items : []
         const seen = new Set(this.conversations.map((c) => c.id))
         const fresh = batch.filter((c) => !seen.has(c.id))
         this.conversations = [...this.conversations, ...fresh]
         this.hasMore = batch.length >= PAGE_LIMIT
-      } catch (e) {
+      } catch (e: unknown) {
         logWarn('conversations loadMore failed:', e)
-        this.hasMore = false
+        this.loadMoreError = e instanceof Error ? e.message : 'Could not load more'
       } finally {
         this.isLoadingMore = false
       }
     },
 
+    markReadLocal(conversationId: string) {
+      const idx = this.conversations.findIndex((c) => c.id === conversationId)
+      if (idx !== -1 && this.conversations[idx]?.unread) {
+        this.conversations[idx] = { ...this.conversations[idx]!, unread: false }
+      }
+    },
+
     async markRead(conversationId: string) {
+      this.markReadLocal(conversationId)
       try {
         const client = activeClient()
         const updated = await client.v1.conversations.$select(conversationId).read()
@@ -137,10 +170,6 @@ export const useConversationsStore = defineStore('conversations', {
       }
     },
 
-    /**
-     * Mark the conversation matching this DM thread as read.
-     * Matches by last_status id, any known status id, or participant set.
-     */
     async markReadForThread(opts: {
       statusIds: string[]
       accountIds: string[]
@@ -156,7 +185,6 @@ export const useConversationsStore = defineStore('conversations', {
         null
 
       if (!match && acctSet.size) {
-        // Exact participant set only — never mark a group DM via a subset match
         match =
           this.conversations.find((c) => {
             const ids = (c.accounts || []).map((a) => a.id)
@@ -169,7 +197,6 @@ export const useConversationsStore = defineStore('conversations', {
       if (match?.unread) await this.markRead(match.id)
     },
 
-    /** Exact 1:1 DM with this account — never fall back to a group thread */
     findDirectWith(accountId: string): mastodon.v1.Conversation | null {
       return findExactOneToOne(this.conversations, accountId)
     },
@@ -179,8 +206,8 @@ export const useConversationsStore = defineStore('conversations', {
         const client = activeClient()
         await client.v1.conversations.$select(conversationId).remove()
         this.conversations = this.conversations.filter((c) => c.id !== conversationId)
-      } catch (e: any) {
-        this.error = e?.message || 'Could not remove conversation'
+      } catch (e: unknown) {
+        this.error = e instanceof Error ? e.message : 'Could not remove conversation'
         throw e
       }
     },
@@ -189,22 +216,23 @@ export const useConversationsStore = defineStore('conversations', {
       await this.fetchConversations({ force: true, quiet: true })
     },
 
-    /** Preview line with “You:” when the last message is ours */
     previewFor(c: mastodon.v1.Conversation, myId?: string | null, myAcct?: string | null): string {
       const status = c.lastStatus
       if (!status?.content) return 'No messages yet'
-      const text = stripHtml(status.content)
-      const clipped = text.length > 120 ? `${text.slice(0, 120)}…` : text
+      const participantAccts = (c.accounts || []).map((a) => a.acct).filter(Boolean)
+      const text = previewText(status.content, participantAccts)
+      const clipped = clipGraphemes(text, 120)
       const mine =
         (!!myId && status.account.id === myId) ||
         (!!myAcct && status.account.acct?.toLowerCase() === myAcct.toLowerCase())
       return mine ? `You: ${clipped}` : clipped
     },
 
-    /** Start conversation polling. Idempotent for the timer; refcounts consumers. */
-    startLiveRefresh() {
+    startLiveRefresh(): LiveRefreshStop {
       pollConsumers += 1
-      if (pollTimer) return
+      if (pollTimer) {
+        return () => this.stopLiveRefresh()
+      }
 
       const tick = () => {
         const instancesStore = useInstancesStore()
@@ -213,7 +241,7 @@ export const useConversationsStore = defineStore('conversations', {
         void this.fetchConversations({ quiet: true, force: true })
       }
 
-      pollTimer = setInterval(tick, POLL_MS)
+      pollTimer = setInterval(tick, pollIntervalMs)
       focusHandler = () => {
         if (typeof document !== 'undefined' && !document.hidden) tick()
       }
@@ -223,6 +251,7 @@ export const useConversationsStore = defineStore('conversations', {
       if (typeof window !== 'undefined') {
         window.addEventListener('focus', focusHandler)
       }
+      return () => this.stopLiveRefresh()
     },
 
     stopLiveRefresh() {
@@ -241,6 +270,11 @@ export const useConversationsStore = defineStore('conversations', {
         }
         focusHandler = null
       }
+    },
+
+    resetQuietRefreshFailures() {
+      this.quietRefreshFailures = 0
+      pollIntervalMs = POLL_MS
     },
   },
 })

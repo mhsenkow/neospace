@@ -11,7 +11,13 @@ import { useGroupsStore } from '~/stores/groups'
 import { useColumnsStore, FEED_LABELS, type ColumnConfig, type ColumnFeedType } from '~/stores/columns'
 import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
-import { dedupeStatusesByIdentity, statusIdentity, statusListKey } from '~/utils/statusIdentity'
+import {
+  collapseDuplicateReblogs,
+  dedupeStatusesByIdentity,
+  statusIdentity,
+  statusListKey,
+} from '~/utils/statusIdentity'
+import { useSettingsStore } from '~/stores/settings'
 import { idLess } from '~/utils/compareId'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
@@ -143,6 +149,7 @@ const onColumnDrop = (e: DragEvent) => {
 }
 
 const instancesStore = useInstancesStore()
+const settingsStore = useSettingsStore()
 const groupsStore = useGroupsStore()
 const columnsStore = useColumnsStore()
 
@@ -549,6 +556,72 @@ const loadTimelinePage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)
 
 const fetchFreshPage = () => loadTimelinePage()
 
+const displayStatuses = computed(() => {
+  const list = statuses.value
+  if (props.column.feedType === 'home' && settingsStore.localPreferences.collapseReblogs) {
+    return collapseDuplicateReblogs(list)
+  }
+  return list
+})
+
+/** Fetch only posts newer than the current top (since_id) — avoids re-downloading the full page. */
+const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+  const top = statuses.value[0]
+  if (!top?.id) return []
+
+  const sinceId = top.id
+
+  if (props.column.feedType === 'group' && props.column.groupTag) {
+    const client = publicClient()
+    const list = await client.v1.timelines.tag.$select(props.column.groupTag).list({
+      limit: 20,
+      sinceId,
+    })
+    return withBrowseOrigin(list)
+  }
+
+  if (props.column.feedType === 'home') {
+    if (!instancesStore.hasAuthenticatedInstance) return []
+    const active = instancesStore.activeAccount
+    if (!active?.accessToken) return []
+    return await instancesStore.fetchMergedHomeTimeline(20, { [active.id]: sinceId }, { since: true })
+  }
+
+  if (props.column.feedType === 'local' || props.column.feedType === 'federated') {
+    const targets = instancesStore.publicTimelineTargets()
+    if (targets.length === 1 && targets[0]?.accessToken) {
+      const inst = targets[0]
+      const client = instancesStore.getClient(inst.id)
+      const list = await client.v1.timelines.public.list({
+        local: props.column.feedType === 'local',
+        limit: 20,
+        sinceId,
+      })
+      return list.map((s) => ({
+        ...s,
+        _instanceId: inst.id,
+        _instanceUrl: inst.url,
+      }))
+    }
+    if (instancesStore.instances.length > 0) {
+      return await instancesStore.fetchMergedTimeline(
+        props.column.feedType as 'local' | 'federated',
+        20,
+        { [targets[0]!.id]: sinceId },
+        { since: true },
+      )
+    }
+    const client = publicClient()
+    return await client.v1.timelines.public.list({
+      local: props.column.feedType === 'local',
+      limit: 20,
+      sinceId,
+    })
+  }
+
+  return []
+}
+
 /** Recessed only pauses polling on mobile (one visible column); desktop multi-col keeps all live */
 const pauseForRecess = () => props.recessed && isMobileViewport()
 
@@ -565,7 +638,7 @@ const pollForNew = async () => {
   }
   isPolling.value = true
   try {
-    const fresh = await fetchFreshPage()
+    const fresh = await fetchNewSince()
     mergeIncoming(fresh)
   } catch {
     // quiet — polling failures shouldn't interrupt reading
@@ -1251,7 +1324,7 @@ onUnmounted(() => {
       >
         <template v-if="isFlip">
           <RealPostCard
-            v-for="status in statuses"
+            v-for="status in displayStatuses"
             :key="statusListKey(status)"
             :status="status"
             variant="flip"
@@ -1260,7 +1333,7 @@ onUnmounted(() => {
         </template>
         <TransitionGroup v-else name="post-list" :css="listMotionActive">
           <RealPostCard
-            v-for="status in statuses"
+            v-for="status in displayStatuses"
             :key="statusListKey(status)"
             :status="status"
           />

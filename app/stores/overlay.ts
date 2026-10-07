@@ -47,8 +47,15 @@ type ReportResolver = (payload: ReportPayload | null) => void
 let confirmResolve: ConfirmResolver | null = null
 let reportResolve: ReportResolver | null = null
 
+export type AccountSwitcherState = {
+  open: boolean
+}
+
 export const useOverlayStore = defineStore('overlay', {
   state: () => ({
+    accountSwitcher: {
+      open: false,
+    } as AccountSwitcherState,
     lightbox: {
       open: false,
       src: '',
@@ -73,6 +80,18 @@ export const useOverlayStore = defineStore('overlay', {
   }),
 
   actions: {
+    openAccountSwitcher() {
+      this.accountSwitcher.open = true
+    },
+
+    closeAccountSwitcher() {
+      this.accountSwitcher.open = false
+    },
+
+    toggleAccountSwitcher() {
+      this.accountSwitcher.open = !this.accountSwitcher.open
+    },
+
     openLightbox(opts: { src: string; alt?: string; items?: LightboxItem[]; index?: number }) {
       const items =
         opts.items?.length

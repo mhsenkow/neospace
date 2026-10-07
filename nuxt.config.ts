@@ -1,7 +1,14 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
-  devtools: { enabled: true },
+  devtools: { enabled: process.env.NODE_ENV === 'development' },
+
+  runtimeConfig: {
+    public: {
+      /** Cloudflare Turnstile site key — optional; pairs with TURNSTILE_SECRET_KEY on Pages */
+      turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || '',
+    },
+  },
 
   // Generate as static site (SPA mode) - works great for hosting
   ssr: false,
@@ -23,12 +30,17 @@ export default defineNuxtConfig({
           additionalData: `@use "~/assets/css/_variables.scss" as *;`
         }
       }
-    }
+    },
+    build: {
+      chunkSizeWarningLimit: 120,
+    },
   },
 
   // Installable app for Pixel / iOS home screen
   pwa: {
-    registerType: 'prompt',
+    // Auto-activate new SW — Android/home-screen installs were stuck on stale shells
+    // (missing tab bar + old carousel) when registerType stayed on 'prompt'.
+    registerType: 'autoUpdate',
     includeAssets: [
       'favicon.ico',
       'icons/apple-touch-icon.png',
@@ -80,9 +92,10 @@ export default defineNuxtConfig({
       navigateFallbackDenylist: [/^\/auth/, /^\/api\//],
       // App shell only — Mastodon API / media stay network-first by default
       globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,webmanifest}'],
+      globIgnores: ['**/200.html', '**/404.html', '**/auth/**'],
       cleanupOutdatedCaches: true,
       clientsClaim: true,
-      skipWaiting: false,
+      skipWaiting: true,
     },
     client: {
       installPrompt: true,

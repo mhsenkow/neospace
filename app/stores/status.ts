@@ -46,6 +46,8 @@ export const useStatusStore = defineStore('status', {
         mediaIds?: string[]
         inReplyToId?: string
         sensitive?: boolean
+        language?: string
+        quotedStatusId?: string
       } = {},
     ) {
       const instances = useInstancesStore()
@@ -72,6 +74,8 @@ export const useStatusStore = defineStore('status', {
         sensitive: options.sensitive,
       }
       if (mediaIds.length) params.mediaIds = mediaIds
+      if (options.language) params.language = options.language
+      if (options.quotedStatusId) params.quotedStatusId = options.quotedStatusId
       return await client.v1.statuses.create(params as any, {
         headers: { 'Idempotency-Key': idempotencyKey },
       } as any)
@@ -83,7 +87,11 @@ export const useStatusStore = defineStore('status', {
      * set, which routinely hangs 30–60s on mastodon.social even with skipPolling
      * (and older cached bundles ignored it). The media id from v2 is enough to post.
      */
-    async uploadMedia(file: Blob, description?: string): Promise<mastodon.v1.MediaAttachment> {
+    async uploadMedia(
+      file: Blob,
+      description?: string,
+      opts?: { signal?: AbortSignal; timeoutMs?: number },
+    ): Promise<mastodon.v1.MediaAttachment> {
       const instances = useInstancesStore()
       if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
         throw new Error('Not authenticated')
@@ -99,7 +107,10 @@ export const useStatusStore = defineStore('status', {
       if (description) form.append('description', description)
 
       const controller = new AbortController()
-      const timer = window.setTimeout(() => controller.abort(), 25_000)
+      const onExternalAbort = () => controller.abort()
+      opts?.signal?.addEventListener('abort', onExternalAbort, { once: true })
+      const timeoutMs = opts?.timeoutMs ?? 25_000
+      const timer = window.setTimeout(() => controller.abort(), timeoutMs)
       try {
         const res = await fetch(`${instances.instanceUrl}/api/v2/media`, {
           method: 'POST',
@@ -137,7 +148,25 @@ export const useStatusStore = defineStore('status', {
         }
         throw e
       } finally {
+        opts?.signal?.removeEventListener('abort', onExternalAbort)
         window.clearTimeout(timer)
+      }
+    },
+
+    async deleteStatus(statusId: string): Promise<void> {
+      const instances = useInstancesStore()
+      if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
+        throw new Error('Not authenticated')
+      }
+      const res = await fetch(
+        `${instances.instanceUrl}/api/v1/statuses/${encodeURIComponent(statusId)}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${instances.accessToken}` },
+        },
+      )
+      if (!res.ok) {
+        throw new Error(`Couldn't delete message (${res.status})`)
       }
     },
 

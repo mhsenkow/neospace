@@ -95,7 +95,10 @@ const afterMessagePosted = async (status: mastodon.v1.Status) => {
 const openConversation = async (c: mastodon.v1.Conversation) => {
   const statusId = c.lastStatus?.id
   if (!statusId) return
-  if (c.unread) await conversationsStore.markRead(c.id)
+  if (c.unread) {
+    conversationsStore.markReadLocal(c.id)
+    void conversationsStore.markRead(c.id)
+  }
   await router.push(`/status/${statusId}`)
 }
 
@@ -131,7 +134,7 @@ const messageAccount = async (account: mastodon.v1.Account) => {
 
 const refreshInbox = async () => {
   if (!canView.value) return
-  // User-initiated — show pull indicator (not quiet)
+  conversationsStore.resetQuietRefreshFailures()
   await Promise.all([
     conversationsStore.fetchConversations({ force: true }),
     loadFollowing(80, true),
@@ -177,8 +180,25 @@ const filterStatusText = computed(() => {
   const q = searchQuery.value.trim()
   if (!q) return ''
   const n = filteredConversations.value.length
-  if (!n) return `No chats match “${q}”.`
-  return `${n} chat${n === 1 ? '' : 's'} match “${q}”.`
+  const loaded = conversationsStore.conversations.length
+  const scope =
+    conversationsStore.hasMore
+      ? `Searching ${loaded} loaded chats · `
+      : ''
+  if (!n) return `${scope}No chats match “${q}”.`
+  return `${scope}${n} chat${n === 1 ? '' : 's'} match “${q}”.`
+})
+
+const showRefreshBanner = computed(() => conversationsStore.quietRefreshFailures >= 2)
+
+const pageTitle = computed(() => {
+  const n = conversationsStore.unreadCount
+  return n > 0 ? `Messages (${n} unread) | NeoSpace` : 'Messages | NeoSpace'
+})
+
+const chromeTitle = computed(() => {
+  const n = conversationsStore.unreadCount
+  return n > 0 ? `Messages (${n} unread)` : 'Messages'
 })
 
 let liveRefreshStarted = false
@@ -219,12 +239,12 @@ const goHome = () => {
   void router.push('/')
 }
 
-useHead({ title: 'Messages | NeoSpace' })
+useHead(() => ({ title: pageTitle.value }))
 </script>
 
 <template>
   <div class="messages-page">
-    <SubviewChrome title="Messages" :back-action="goHome">
+    <SubviewChrome :title="chromeTitle" :back-action="goHome">
       <template #actions>
         <button
           v-if="canView"
@@ -260,6 +280,13 @@ useHead({ title: 'Messages | NeoSpace' })
       Direct messages are <strong>not end-to-end encrypted</strong>. They’re visible to recipients
       and admins of their servers; mentioning someone adds them to the thread.
     </p>
+
+    <div v-if="canView && showRefreshBanner" class="messages-refresh-banner" role="status">
+      <span>Couldn’t refresh messages</span>
+      <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="refreshInbox">
+        Retry
+      </button>
+    </div>
 
     <div
       v-if="canView && conversationsStore.conversations.length"
@@ -424,7 +451,7 @@ useHead({ title: 'Messages | NeoSpace' })
           {{ filterStatusText }}
         </p>
 
-        <div v-if="!searchQuery && conversationsStore.hasMore" class="messages-more">
+        <div v-if="conversationsStore.hasMore" class="messages-more">
           <button
             type="button"
             class="neo-btn neo-btn--secondary neo-btn--sm"
@@ -439,6 +466,12 @@ useHead({ title: 'Messages | NeoSpace' })
             />
             <span v-else>Load more</span>
           </button>
+          <p v-if="conversationsStore.loadMoreError" class="messages-more__error" role="alert">
+            {{ conversationsStore.loadMoreError }}
+            <button type="button" class="messages-more__retry" @click="conversationsStore.loadMore()">
+              Retry
+            </button>
+          </p>
         </div>
 
         <section
@@ -943,7 +976,39 @@ useHead({ title: 'Messages | NeoSpace' })
 
 .messages-more {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.messages-more__error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--neo-danger);
+}
+
+.messages-more__retry {
+  margin-left: 0.35rem;
+  border: none;
+  background: none;
+  color: var(--neo-accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.messages-refresh-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 1rem 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--neo-danger) 10%, var(--neo-bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--neo-danger) 25%, transparent);
+  font-size: 0.8125rem;
+  color: var(--neo-text-primary);
 }
 
 @media (min-width: 1024px) {

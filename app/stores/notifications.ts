@@ -26,6 +26,8 @@ export interface ExtendedNotification extends mastodon.v1.Notification {
   _key: string
   _instanceId: string
   _instanceUrl?: string
+  /** Pre-parsed createdAt for sorting */
+  _tsMs: number
 }
 
 interface NotificationsState {
@@ -71,7 +73,13 @@ function tagNotification(
     _key: `${instanceId}:${n.id}`,
     _instanceId: instanceId,
     _instanceUrl: instanceUrl,
+    _tsMs: new Date(n.createdAt).getTime(),
   }
+}
+
+function linkHasNext(headers: Headers): boolean {
+  const link = headers.get('Link') || headers.get('link')
+  return !!link && /rel=["']?next["']?/i.test(link)
 }
 
 export const useNotificationsStore = defineStore('notifications', {
@@ -99,7 +107,7 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     filteredNotifications: (state): ExtendedNotification[] => {
-      let items = [...state.notifications]
+      let items = state.notifications
 
       if (state.filter !== 'all') {
         const types = FILTER_TO_TYPES[state.filter]
@@ -108,13 +116,12 @@ export const useNotificationsStore = defineStore('notifications', {
         }
       }
 
-      items.sort((a, b) => {
-        const timeA = new Date(a.createdAt).getTime()
-        const timeB = new Date(b.createdAt).getTime()
-        return state.sortOrder === 'newest' ? timeB - timeA : timeA - timeB
-      })
+      if (state.sortOrder === 'newest') {
+        if (state.filter === 'all') return items
+        return [...items].sort((a, b) => b._tsMs - a._tsMs)
+      }
 
-      return items
+      return [...items].sort((a, b) => a._tsMs - b._tsMs)
     },
 
     /** Filtered + consecutive same type/status collapsed into one row */
@@ -215,7 +222,7 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     /**
-     * Lightweight badge refresh — polls every authenticated account.
+     * Lightweight badge refresh via /notifications/unread_count.
      */
     async refreshUnreadBadge() {
       const instances = useInstancesStore()
@@ -225,32 +232,19 @@ export const useNotificationsStore = defineStore('notifications', {
         return
       }
 
-      this.loadLastRead()
       let total = 0
-      const map = { ...this.lastReadByInstance }
-
       await Promise.all(
         authed.map(async (inst) => {
           try {
             const client = clientFor(inst.id)
-            const items = await client.v1.notifications.list({ limit: 40 })
-            if (!items.length) return
-
-            const last = map[inst.id]
-            if (!last) {
-              // First visit: treat current stack as read so badge doesn't explode
-              map[inst.id] = items[0]!.id
-              return
-            }
-            total += items.filter((n) => idGreater(n.id, last)).length
+            const { count } = await client.v1.notifications.unreadCount.fetch({ limit: 1000 })
+            total += count
           } catch (e) {
             logWarn(`Unread badge refresh failed for ${inst.url}:`, e)
           }
         }),
       )
 
-      this.lastReadByInstance = map
-      this.persistLastReadMap()
       this.unreadCount = total
     },
 
@@ -277,7 +271,8 @@ export const useNotificationsStore = defineStore('notifications', {
           authed.map(async (inst) => {
             try {
               const client = clientFor(inst.id)
-              const items = await client.v1.notifications.list({ limit: 30 })
+              const res = await client.v1.notifications.list.$raw({ limit: 30 })
+              const items = res.data
               if (items.length && !this.lastReadByInstance[inst.id]) {
                 this.persistLastRead(inst.id, items[0]!.id)
               }
@@ -285,6 +280,7 @@ export const useNotificationsStore = defineStore('notifications', {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
                 items,
+                hasNext: linkHasNext(res.headers) || items.length >= 30,
                 ok: true as const,
               }
             } catch (e: any) {
@@ -293,6 +289,7 @@ export const useNotificationsStore = defineStore('notifications', {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
                 items: [] as mastodon.v1.Notification[],
+                hasNext: false,
                 ok: false as const,
               }
             }
@@ -302,7 +299,7 @@ export const useNotificationsStore = defineStore('notifications', {
         const merged: ExtendedNotification[] = []
         const nextCursors: Record<string, string> = {}
         const failed: string[] = []
-        let anyFull = false
+        let anyHasNext = false
         let anyOk = false
 
         for (const batch of batches) {
@@ -321,18 +318,16 @@ export const useNotificationsStore = defineStore('notifications', {
           if (batch.items.length > 0) {
             nextCursors[batch.instanceId] = batch.items[batch.items.length - 1]!.id
           }
-          if (batch.items.length >= 30) anyFull = true
+          if (batch.hasNext) anyHasNext = true
         }
 
         if (gen !== this.fetchGeneration) return
 
         this.failedHosts = failed
-        merged.sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        )
+        merged.sort((a, b) => b._tsMs - a._tsMs)
         this.notifications = merged
         this.cursors = nextCursors
-        this.hasMore = anyFull
+        this.hasMore = anyHasNext
         this.recomputeUnread()
         if (!anyOk && failed.length) {
           this.error = 'Couldn’t load notifications from any account'
@@ -368,20 +363,30 @@ export const useNotificationsStore = defineStore('notifications', {
           withCursor.map(async (inst) => {
             try {
               const client = clientFor(inst.id)
-              const items = await client.v1.notifications.list({
+              const res = await client.v1.notifications.list.$raw({
                 limit: 30,
                 maxId: this.cursors[inst.id]!,
               })
-              return { instanceId: inst.id, instanceUrl: inst.url, items }
+              return {
+                instanceId: inst.id,
+                instanceUrl: inst.url,
+                items: res.data,
+                hasNext: linkHasNext(res.headers) || res.data.length >= 30,
+              }
             } catch (e) {
               logWarn(`Load more notifications failed for ${inst.url}:`, e)
-              return { instanceId: inst.id, instanceUrl: inst.url, items: [] as mastodon.v1.Notification[] }
+              return {
+                instanceId: inst.id,
+                instanceUrl: inst.url,
+                items: [] as mastodon.v1.Notification[],
+                hasNext: false,
+              }
             }
           }),
         )
 
         const seen = new Set(this.notifications.map((n) => n._key))
-        let anyFull = false
+        let anyHasNext = false
         const nextCursors = { ...this.cursors }
 
         for (const batch of batches) {
@@ -397,11 +402,11 @@ export const useNotificationsStore = defineStore('notifications', {
           } else {
             delete nextCursors[batch.instanceId]
           }
-          if (batch.items.length >= 30) anyFull = true
+          if (batch.hasNext) anyHasNext = true
         }
 
         this.cursors = nextCursors
-        this.hasMore = anyFull && Object.keys(nextCursors).length > 0
+        this.hasMore = anyHasNext && Object.keys(nextCursors).length > 0
       } catch (e: any) {
         console.error('Load more notifications error:', e)
       } finally {

@@ -10,7 +10,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('https://cdn.jsdelivr.net/fontsource/fonts/opendyslexic@5.2.5/latin-400-normal.woff2') format('woff2');
+  src: url('/fonts/opendyslexic-latin-400-normal.woff2') format('woff2');
 }
 
 @font-face {
@@ -18,7 +18,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url('https://cdn.jsdelivr.net/fontsource/fonts/opendyslexic@5.2.5/latin-700-normal.woff2') format('woff2');
+  src: url('/fonts/opendyslexic-latin-700-normal.woff2') format('woff2');
 }
 
 @mixin neo-from-braun(
@@ -717,10 +717,38 @@ html[data-ui='nyt'] h1 {
   text-transform: var(--neo-chrome-label-transform);
 }
 
-.neo-card {
-  border-radius: var(--neo-radius-md);
+.neo-card,
+.status-card,
+.compose.neo-card {
+  border-radius: var(--neo-card-radius, var(--neo-radius-md));
   border-width: var(--neo-chrome-border-width);
-  box-shadow: var(--neo-chrome-card-shadow);
+  border-style: var(--neo-border-style, solid);
+  box-shadow: var(--neo-chrome-card-shadow), var(--neo-card-extra-shadow, none);
+}
+
+.neo-input,
+.compose-input,
+.compose-cw-input,
+.chat-composer__field,
+.explore-search,
+.messages-search__input {
+  border-radius: var(--neo-input-radius, min(12px, var(--neo-radius-md)));
+  border-style: var(--neo-border-style, solid);
+}
+
+.compose.neo-card,
+.compose--compact .compose-pill,
+.compose--compact.compose--expanded {
+  border-radius: var(--neo-compose-radius, var(--neo-radius-md));
+}
+
+html[data-line='crayon'] .neo-card,
+html[data-line='crayon'] .status-card,
+html[data-line='crayon'] .compose,
+html[data-line='crayon'] .neo-btn:not(.neo-btn--icon),
+html[data-line='crayon'] .neo-input {
+  border-color: var(--neo-chrome-outline-color, var(--neo-border-color));
+  box-shadow: var(--neo-chrome-outline-shadow, var(--neo-chrome-card-shadow));
 }
 
 // ============================================
@@ -830,6 +858,18 @@ html[data-theme='nes'] {
   font-size: 1.0625rem;
 }
 
+[data-font-size='xlarge'] {
+  --neo-font-size-base: 1.1875rem;
+  --neo-leading-body: 1.6;
+  font-size: 1.1875rem;
+}
+
+[data-font-size='xxlarge'] {
+  --neo-font-size-base: 1.3125rem;
+  --neo-leading-body: 1.65;
+  font-size: 1.3125rem;
+}
+
 // ============================================
 // Radius sets (data-radius) — override chrome/theme corners
 // "match" leaves chrome + theme radius rules alone
@@ -861,6 +901,9 @@ html[data-radius='bubble'] {
   --neo-radius-md: 24px;
   --neo-radius-lg: 32px;
   --neo-radius-chrome: 20px;
+  --neo-card-radius: var(--neo-radius-lg);
+  --neo-input-radius: 12px;
+  --neo-compose-radius: 16px;
 }
 
 /* Asymmetric radii read as torn / stamp-cut when applied to cards & chrome */
@@ -869,61 +912,17 @@ html[data-radius='jagged'] {
   --neo-radius-md: 3px 18px 5px 14px / 14px 5px 18px 3px;
   --neo-radius-lg: 4px 28px 8px 20px / 20px 8px 28px 4px;
   --neo-radius-chrome: 2px 14px 4px 11px / 11px 4px 14px 2px;
-}
-
-/* Bubble: soft chrome — text fields / search shells stay moderate so glyphs aren't clipped */
-html[data-radius='bubble'] .neo-btn,
-html[data-radius='bubble'] .neo-card,
-html[data-radius='bubble'] .status-card,
-html[data-radius='bubble'] .compose,
-html[data-radius='bubble'] .messages-row {
-  border-radius: var(--neo-radius-lg) !important;
-}
-
-html[data-radius='bubble'] .neo-input,
-html[data-radius='bubble'] .compose-input,
-html[data-radius='bubble'] .compose-cw-input,
-html[data-radius='bubble'] .chat-composer__field,
-html[data-radius='bubble'] .explore-search,
-html[data-radius='bubble'] .messages-search__input,
-html[data-radius='bubble'] textarea,
-html[data-radius='bubble'] input[type='text'],
-html[data-radius='bubble'] input[type='search'],
-html[data-radius='bubble'] input[type='email'],
-html[data-radius='bubble'] input[type='url'] {
-  border-radius: 12px !important;
-}
-
-/* Keep circular controls circular even on bubble */
-html[data-radius='bubble'] .chat-composer__attach,
-html[data-radius='bubble'] .chat-composer__send {
-  border-radius: 50% !important;
-}
-
-/* Compose shells: big bubble radius + overflow clips the first glyphs — keep softer */
-html[data-radius='bubble'] .compose.neo-card,
-html[data-radius='bubble'] .compose--compact .compose-pill,
-html[data-radius='bubble'] .compose--compact.compose--expanded {
-  border-radius: 16px !important;
-}
-
-html[data-radius='bubble'] .neo-btn--icon,
-html[data-radius='bubble'] .profile-avatar,
-html[data-radius='bubble'] .messages-row__avatar,
-html[data-radius='bubble'] .sidebar__radius-mark {
-  border-radius: 999px !important;
-}
-
-/* Jagged: lean into uneven corners + a light “cut” shadow (clip-path would kill menus/shadows) */
-html[data-radius='jagged'] .neo-card,
-html[data-radius='jagged'] .status-card,
-html[data-radius='jagged'] .compose,
-html[data-radius='jagged'] .neo-btn:not(.neo-btn--icon),
-html[data-radius='jagged'] .neo-input {
-  border-radius: var(--neo-radius-md) !important;
-  box-shadow:
+  --neo-card-radius: var(--neo-radius-md);
+  --neo-card-extra-shadow:
     1px 0 0 color-mix(in srgb, var(--neo-text-primary) 12%, transparent),
     -1px 1px 0 color-mix(in srgb, var(--neo-text-primary) 8%, transparent);
+}
+
+:root {
+  --neo-card-radius: var(--neo-radius-md);
+  --neo-input-radius: min(12px, var(--neo-radius-md));
+  --neo-compose-radius: var(--neo-radius-md);
+  --neo-card-extra-shadow: none;
 }
 
 // ============================================
@@ -967,35 +966,14 @@ html[data-line='ink'] .settings-overlay .settings-modal {
   box-shadow: 1.5px 1.5px 0 color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
 }
 
-html[data-line='dashed'] .neo-card,
-html[data-line='dashed'] .status-card,
-html[data-line='dashed'] .compose,
-html[data-line='dashed'] .neo-btn:not(.neo-btn--icon),
-html[data-line='dashed'] .neo-input,
-html[data-line='dashed'] .messages-suggest__card,
-html[data-line='dashed'] .settings-chrome-card,
-html[data-line='dashed'] .settings-font-card,
-html[data-line='dashed'] .settings-radius-card {
-  border-style: dashed !important;
-  border-width: 1.5px !important;
+html[data-line='dashed'] {
+  --neo-chrome-outline-style: dashed;
 }
 
-/* Crayon: wobbly multi-edge “wax” outline */
-html[data-line='crayon'] .neo-card,
-html[data-line='crayon'] .status-card,
-html[data-line='crayon'] .compose,
-html[data-line='crayon'] .neo-btn:not(.neo-btn--icon),
-html[data-line='crayon'] .neo-input,
-html[data-line='crayon'] .messages-suggest__card,
-html[data-line='crayon'] .chat-composer__field,
-html[data-line='crayon'] .settings-chrome-card,
-html[data-line='crayon'] .settings-font-card,
-html[data-line='crayon'] .settings-radius-card,
-html[data-line='crayon'] .profile-tabs__tab--active {
-  border-style: solid !important;
-  border-width: 2.5px !important;
-  border-color: color-mix(in srgb, var(--neo-border-color) 88%, var(--neo-accent)) !important;
-  box-shadow:
+html[data-line='crayon'] {
+  --neo-chrome-outline-style: solid;
+  --neo-chrome-outline-color: color-mix(in srgb, var(--neo-border-color) 88%, var(--neo-accent));
+  --neo-chrome-outline-shadow:
     1px 0.5px 0 color-mix(in srgb, var(--neo-border-color) 55%, transparent),
     -0.8px 1px 0 color-mix(in srgb, var(--neo-border-color) 40%, transparent),
     0.6px -0.9px 0 color-mix(in srgb, var(--neo-accent) 28%, transparent),

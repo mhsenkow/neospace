@@ -40,10 +40,18 @@ export interface ConnectedInstance {
     description?: string
     /** From v2 instance configuration.statuses.max_characters */
     maxCharacters?: number
+    /** From v2 instance configuration.accounts.max_profile_fields */
+    maxProfileFields?: number
+    maxMediaAttachments?: number
+    imageSizeLimit?: number
+    videoSizeLimit?: number
+    mediaDescriptionLimit?: number
   } | null
   isConnecting: boolean
   error: string | null
   lastFetched: string | null
+  /** Token revoked/expired — keep profile under Signed in until user re-auths */
+  sessionExpired?: boolean
 }
 
 export interface ExtendedStatus extends mastodon.v1.Status {
@@ -60,6 +68,7 @@ export interface InstanceApiInfo {
     domainCount?: number
   }
   registrations?: boolean
+  registrationsUrl?: string | null
   languages?: string[]
   rules?: Array<{ id: string; text: string }>
 }
@@ -77,6 +86,8 @@ interface MultiInstanceState {
   previewError: string | null
   previewTimeline: mastodon.v1.Status[]
   previewInstanceInfo: Record<string, InstanceApiInfo>
+  /** Shown when the active account changes after a token dies */
+  authNotice: string | null
 }
 
 const STORAGE_KEY = 'neospace_instances'
@@ -148,6 +159,32 @@ function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
 let storageListenerBound = false
 let storageReloadTimer: ReturnType<typeof setTimeout> | null = null
 
+const INSTANCE_INFO_TTL_MS = 10 * 60_000
+const INSTANCE_INFO_FAIL_TTL_MS = 120_000
+type InstanceInfoCacheEntry = { at: number; ok: boolean; value: InstanceApiInfo | null }
+const instanceInfoRemoteCache = new Map<string, InstanceInfoCacheEntry>()
+
+function mapV2InstanceInfo(info: {
+  title: string
+  description?: string | null
+  usage?: { users?: { activeMonth?: number } | null } | null
+  registrations?: { enabled?: boolean; url?: string | null } | null
+  languages?: string[]
+  rules?: Array<{ id: string; text: string }> | null
+}): InstanceApiInfo {
+  return {
+    title: info.title,
+    description: info.description || '',
+    stats: {
+      userCount: info.usage?.users?.activeMonth,
+    },
+    registrations: info.registrations?.enabled,
+    registrationsUrl: info.registrations?.url ?? null,
+    languages: info.languages,
+    rules: info.rules?.map((r) => ({ id: r.id, text: r.text })),
+  }
+}
+
 const getRedirectUri = () => {
   if (typeof window === 'undefined') return 'http://localhost:3000/auth/callback'
   return `${window.location.origin}/auth/callback`
@@ -178,16 +215,21 @@ export const useInstancesStore = defineStore('instances', {
     previewError: null,
     previewTimeline: [],
     previewInstanceInfo: {},
+    authNotice: null,
   }),
 
   getters: {
     connectedInstances: (state): ConnectedInstance[] => state.instances,
 
     authenticatedInstances: (state): ConnectedInstance[] =>
-      state.instances.filter((i) => i.accessToken && i.user),
+      state.instances.filter((i) => i.accessToken && i.user && !i.sessionExpired),
+
+    /** Signed-in or expired sessions — never pure watch-only rows */
+    signedInInstances: (state): ConnectedInstance[] =>
+      state.instances.filter((i) => i.user),
 
     watchingInstances: (state): ConnectedInstance[] =>
-      state.instances.filter((i) => !i.accessToken),
+      state.instances.filter((i) => !i.accessToken && !i.user),
 
     hasAuthenticatedInstance: (state): boolean =>
       state.instances.some((i) => i.accessToken && i.user),
@@ -254,6 +296,36 @@ export const useInstancesStore = defineStore('instances', {
       const n = this.activeAccount?.instanceInfo?.maxCharacters
       if (typeof n === 'number' && n >= 100 && n <= 100_000) return n
       return 500
+    },
+
+    /** Media attachment limits from the active instance configuration. */
+    composeMediaLimits(): {
+      maxAttachments: number
+      maxFileBytes: number
+      altMax: number
+    } {
+      const info = this.activeAccount?.instanceInfo
+      const maxAttachments =
+        typeof info?.maxMediaAttachments === 'number' &&
+        info.maxMediaAttachments >= 1 &&
+        info.maxMediaAttachments <= 20
+          ? info.maxMediaAttachments
+          : 4
+      const imageLimit =
+        typeof info?.imageSizeLimit === 'number' && info.imageSizeLimit > 0
+          ? info.imageSizeLimit
+          : 40 * 1024 * 1024
+      const videoLimit =
+        typeof info?.videoSizeLimit === 'number' && info.videoSizeLimit > 0
+          ? info.videoSizeLimit
+          : imageLimit
+      const maxFileBytes = Math.max(imageLimit, videoLimit)
+      const altMax =
+        typeof info?.mediaDescriptionLimit === 'number' &&
+        info.mediaDescriptionLimit >= 100
+          ? info.mediaDescriptionLimit
+          : 1500
+      return { maxAttachments, maxFileBytes, altMax }
     },
 
     getInstanceById: (state) => (id: string): ConnectedInstance | undefined =>
@@ -549,7 +621,12 @@ export const useInstancesStore = defineStore('instances', {
 
     setActiveAccount(instanceId: string | null) {
       this.activeAccountId = instanceId
+      this.authNotice = null
       this.saveToStorage()
+    },
+
+    dismissAuthNotice() {
+      this.authNotice = null
     },
 
     updateActiveAccount(user: mastodon.v1.Account, instanceId?: string) {
@@ -597,6 +674,13 @@ export const useInstancesStore = defineStore('instances', {
           thumbnail: info.thumbnail?.url,
           description: info.description,
           maxCharacters: info.configuration?.statuses?.maxCharacters,
+          maxMediaAttachments: info.configuration?.statuses?.maxMediaAttachments,
+          maxProfileFields: info.configuration?.accounts?.maxProfileFields,
+          imageSizeLimit: info.configuration?.mediaAttachments?.imageSizeLimit,
+          videoSizeLimit: info.configuration?.mediaAttachments?.videoSizeLimit,
+          mediaDescriptionLimit: (
+            info.configuration?.mediaAttachments as { descriptionLimit?: number } | undefined
+          )?.descriptionLimit,
         }
         instance.isConnecting = false
         instance.lastFetched = new Date().toISOString()
@@ -802,6 +886,7 @@ export const useInstancesStore = defineStore('instances', {
           }
         }
         instance.accessToken = data.access_token
+        instance.sessionExpired = false
         instance.clientSecret = null
         // Keep secret for logout revoke across tabs/sessions
         persistClientSecret(instanceId, clientSecret)
@@ -938,6 +1023,13 @@ export const useInstancesStore = defineStore('instances', {
                 thumbnail: info.thumbnail?.url || instance.instanceInfo?.thumbnail,
                 description: info.description || instance.instanceInfo?.description,
                 maxCharacters: info.configuration?.statuses?.maxCharacters,
+                maxMediaAttachments: info.configuration?.statuses?.maxMediaAttachments,
+                maxProfileFields: info.configuration?.accounts?.maxProfileFields,
+                imageSizeLimit: info.configuration?.mediaAttachments?.imageSizeLimit,
+                videoSizeLimit: info.configuration?.mediaAttachments?.videoSizeLimit,
+                mediaDescriptionLimit: (
+            info.configuration?.mediaAttachments as { descriptionLimit?: number } | undefined
+          )?.descriptionLimit,
               }
             } catch {
               /* non-fatal */
@@ -946,7 +1038,7 @@ export const useInstancesStore = defineStore('instances', {
             const status = e?.status ?? e?.statusCode
             if (status === 401 || status === 403) {
               instance.accessToken = null
-              instance.user = null
+              instance.sessionExpired = true
               instance.error = 'Session expired — sign in again'
             } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
               instance.error = 'Offline — couldn’t verify your session'
@@ -960,13 +1052,21 @@ export const useInstancesStore = defineStore('instances', {
 
       await Promise.all(promises)
 
+      const staleActive = this.activeAccountId
       if (
-        this.activeAccountId &&
+        staleActive &&
         !this.instances.some(
-          (i) => i.id === this.activeAccountId && i.accessToken && i.user,
+          (i) => i.id === staleActive && i.accessToken && i.user && !i.sessionExpired,
         )
       ) {
-        this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
+        const expired = this.instances.find((i) => i.id === staleActive)
+        const next = this.authenticatedInstances[0] ?? null
+        if (expired?.user && next) {
+          this.authNotice = `Session for ${expired.user.displayName || expired.user.username} expired — now posting as ${next.user?.displayName || next.user?.username || next.name}.`
+        } else if (expired?.user) {
+          this.authNotice = `Session for ${expired.user.displayName || expired.user.username} expired — sign in again.`
+        }
+        this.activeAccountId = next?.id ?? null
       }
 
       this.saveToStorage()
@@ -1094,6 +1194,7 @@ export const useInstancesStore = defineStore('instances', {
       type: 'local' | 'federated' = 'local',
       limit: number = 20,
       maxIdOrCursors?: string | Record<string, string>,
+      opts?: { since?: boolean },
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
       const errors: string[] = []
@@ -1117,12 +1218,12 @@ export const useInstancesStore = defineStore('instances', {
           }
 
           const client = this.getClient(instance.id)
-          const maxId = cursors?.[instance.id] ?? legacyMaxId
+          const cursor = cursors?.[instance.id] ?? legacyMaxId
 
           const statuses = await client.v1.timelines.public.list({
             local: type === 'local',
             limit,
-            ...(maxId ? { maxId } : {}),
+            ...(cursor ? (opts?.since ? { sinceId: cursor } : { maxId: cursor }) : {}),
           })
 
           return statuses.map((s) => ({
@@ -1167,6 +1268,7 @@ export const useInstancesStore = defineStore('instances', {
     async fetchMergedHomeTimeline(
       limit: number = 20,
       cursors?: Record<string, string>,
+      opts?: { since?: boolean },
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
       // Active profile’s home only — multi-account merge made feeds feel identical.
@@ -1182,10 +1284,10 @@ export const useInstancesStore = defineStore('instances', {
             accessToken: instance.accessToken!,
           })
 
-          const maxId = cursors?.[instance.id]
+          const cursor = cursors?.[instance.id]
           const statuses = await client.v1.timelines.home.list({
             limit,
-            ...(maxId ? { maxId } : {}),
+            ...(cursor ? (opts?.since ? { sinceId: cursor } : { maxId: cursor }) : {}),
           })
 
           return statuses.map((s) => ({
@@ -1210,29 +1312,33 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {
-      if (this.previewInstanceInfo[domain]) {
-        return this.previewInstanceInfo[domain]
+      const key = domain.toLowerCase()
+      if (this.previewInstanceInfo[key]) {
+        return this.previewInstanceInfo[key]
+      }
+
+      const cached = instanceInfoRemoteCache.get(key)
+      if (cached) {
+        const ttl = cached.ok ? INSTANCE_INFO_TTL_MS : INSTANCE_INFO_FAIL_TTL_MS
+        if (Date.now() - cached.at < ttl) {
+          if (cached.ok && cached.value) {
+            this.previewInstanceInfo[key] = cached.value
+          }
+          return cached.value
+        }
       }
 
       try {
         const url = `https://${domain}`
         const client = createRestAPIClient({ url })
         const info = await client.v2.instance.fetch()
-        const apiInfo: InstanceApiInfo = {
-          title: info.title,
-          description: info.description || '',
-          stats: {
-            userCount: info.usage?.users?.activeMonth,
-          },
-          registrations: info.registrations?.enabled,
-          languages: info.languages,
-          rules: info.rules?.map((r) => ({ id: r.id, text: r.text })),
-        }
-
-        this.previewInstanceInfo[domain] = apiInfo
+        const apiInfo = mapV2InstanceInfo(info)
+        instanceInfoRemoteCache.set(key, { at: Date.now(), ok: true, value: apiInfo })
+        this.previewInstanceInfo[key] = apiInfo
         return apiInfo
       } catch (e) {
         logWarn(`Failed to fetch instance info for ${domain}:`, e)
+        instanceInfoRemoteCache.set(key, { at: Date.now(), ok: false, value: null })
         return null
       }
     },
@@ -1250,16 +1356,7 @@ export const useInstancesStore = defineStore('instances', {
 
         const info = await client.v2.instance.fetch()
         if (this.previewingInstance !== ticket) return
-        this.previewInstanceInfo[domain] = {
-          title: info.title,
-          description: info.description || '',
-          stats: {
-            userCount: info.usage?.users?.activeMonth,
-          },
-          registrations: info.registrations?.enabled,
-          languages: info.languages,
-          rules: info.rules?.map((r) => ({ id: r.id, text: r.text })),
-        }
+        this.previewInstanceInfo[domain] = mapV2InstanceInfo(info)
 
         try {
           const timeline = await client.v1.timelines.public.list({

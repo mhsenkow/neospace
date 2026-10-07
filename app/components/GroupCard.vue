@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /**
  * GroupCard Component
- * 
+ *
  * Displays a group as a friendly card.
- * The user doesn't need to know it's really a hashtag underneath!
  */
 
 import type { Group } from '~/stores/groups'
 import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
+import { useToastStore } from '~/stores/toast'
+import { categoryColor, categoryTint } from '~/composables/useShellAppearance'
 
 interface Props {
   group: Group
@@ -28,34 +29,46 @@ const emit = defineEmits<{
 
 const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
+const toastStore = useToastStore()
+const router = useRouter()
 
-const isJoining = ref(false)
-const isLeaving = ref(false)
+const isPending = computed(() => groupsStore.isTagPending(props.group.tag))
 
 const handleJoin = async () => {
   if (!instancesStore.isAuthenticated) {
-    // Could redirect to login or show a message
+    router.push('/login')
     return
   }
-  
-  isJoining.value = true
+
   try {
     await groupsStore.joinGroup(props.group.tag)
-  } catch (e) {
-    console.error('Failed to join group:', e)
-  } finally {
-    isJoining.value = false
+  } catch {
+    toastStore.show({
+      message: 'Couldn’t join group',
+      actionLabel: 'Retry',
+      duration: 5000,
+      onAction: () => { void handleJoin() },
+    })
   }
 }
 
 const handleLeave = async () => {
-  isLeaving.value = true
+  const leftTag = props.group.tag
   try {
-    await groupsStore.leaveGroup(props.group.tag)
-  } catch (e) {
-    console.error('Failed to leave group:', e)
-  } finally {
-    isLeaving.value = false
+    await groupsStore.leaveGroup(leftTag)
+    toastStore.show({
+      message: `Left #${leftTag}`,
+      actionLabel: 'Undo',
+      duration: 5000,
+      onAction: () => { void groupsStore.joinGroup(leftTag) },
+    })
+  } catch {
+    toastStore.show({
+      message: 'Couldn’t leave group',
+      actionLabel: 'Retry',
+      duration: 5000,
+      onAction: () => { void handleLeave() },
+    })
   }
 }
 
@@ -63,34 +76,27 @@ const handleView = () => {
   emit('view', props.group.tag)
 }
 
-const getCategoryColor = (category: string) => {
-  const colors: Record<string, string> = {
-    tech: '#c45c26',
-    creative: '#b8860b',
-    gaming: '#2f7d4a',
-    social: '#a84c1e',
-    news: '#3a6ea5',
-    trending: '#c45c26',
-    local: '#757575',
-    other: '#757575',
-  }
-  return colors[category] || colors.other
-}
+const catColor = computed(() =>
+  categoryColor(props.group.trending ? 'trending' : props.group.category),
+)
+const catTint = computed(() =>
+  categoryTint(props.group.trending ? 'trending' : props.group.category),
+)
 </script>
 
 <template>
-  <article 
-    class="group-card" 
+  <article
+    class="group-card"
     :class="{
       'group-card--compact': compact,
       'group-card--tile': tile,
       'group-card--member': group.isMember,
     }"
   >
-    <div class="group-card__icon" :style="{ backgroundColor: getCategoryColor(group.category) + '20' }">
-      <span class="group-card__emoji">{{ group.icon }}</span>
+    <div class="group-card__icon" :style="{ backgroundColor: catTint }">
+      <span class="group-card__emoji" aria-hidden="true">{{ group.icon }}</span>
     </div>
-    
+
     <div class="group-card__content">
       <h3 class="group-card__name">
         <NuxtLink
@@ -109,38 +115,44 @@ const getCategoryColor = (category: string) => {
       </p>
       <div v-if="!tile" class="group-card__meta">
         <span class="group-card__tag">#{{ group.tag }}</span>
-        <span
-          class="group-card__category"
-          :style="{ color: getCategoryColor(group.trending ? 'trending' : group.category) }"
-        >
+        <span class="group-card__category">
+          <span class="group-card__category-dot" :style="{ backgroundColor: catColor }" aria-hidden="true" />
           {{ group.trending ? 'trending' : group.category }}
         </span>
       </div>
     </div>
-    
+
     <div class="group-card__actions" @click.stop>
       <button
         v-if="group.isMember"
+        type="button"
         class="group-card__btn group-card__btn--leave"
-        :disabled="isLeaving"
+        :disabled="isPending"
+        :aria-pressed="true"
         @click="handleLeave"
       >
-        <span v-if="isLeaving">...</span>
-        <span v-else>{{ tile ? 'Joined' : 'Leave' }}</span>
+        <span v-if="isPending" class="group-card__spinner" aria-hidden="true" />
+        <span v-if="isPending" class="sr-only">Leaving…</span>
+        <span v-else class="group-card__btn-label">
+          <span class="group-card__btn-joined">{{ tile ? 'Joined' : 'Joined' }}</span>
+          <span class="group-card__btn-leave">Leave</span>
+        </span>
       </button>
       <button
         v-else
+        type="button"
         class="group-card__btn group-card__btn--join"
-        :disabled="isJoining || !instancesStore.isAuthenticated"
+        :disabled="isPending"
+        :aria-pressed="false"
         :title="instancesStore.isAuthenticated ? 'Join this group' : 'Log in to join groups'"
         @click="handleJoin"
       >
-        <span v-if="isJoining">...</span>
+        <span v-if="isPending" class="group-card__spinner" aria-hidden="true" />
+        <span v-if="isPending" class="sr-only">Joining…</span>
         <span v-else>Join</span>
       </button>
     </div>
 
-    <!-- Member badge -->
     <div v-if="group.isMember && !tile" class="group-card__badge">
       <NeoIcon name="check" :size="12" :stroke="2.5" />
     </div>
@@ -157,7 +169,7 @@ const getCategoryColor = (category: string) => {
   padding: 0.875rem;
   background: var(--neo-bg-card);
   border: 1px solid var(--neo-border-color);
-  border-radius: 4px;
+  border-radius: var(--neo-radius-md, 4px);
   cursor: default;
   transition: border-color 0.15s ease, background-color 0.15s ease;
   min-width: 0;
@@ -198,104 +210,34 @@ const getCategoryColor = (category: string) => {
     .group-card__emoji {
       font-size: 1.125rem;
     }
-
-    .group-card__name {
-      font-size: 0.875rem;
-      margin-bottom: 0.125rem;
-    }
-
-    .group-card__description {
-      display: none;
-    }
-
-    .group-card__actions {
-      display: none;
-    }
   }
 
   &--tile {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    width: 9.5rem;
-    flex: 0 0 auto;
-    padding: 1rem 0.75rem 0.85rem;
-    gap: 0.65rem;
-    height: auto;
+    flex: 0 0 11.5rem;
     scroll-snap-align: start;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+    min-height: 9.5rem;
+    padding: 0.875rem;
 
     .group-card__icon {
-      width: 64px;
-      height: 64px;
-      border-radius: 18px;
-    }
-
-    .group-card__emoji {
-      font-size: 1.75rem;
-    }
-
-    .group-card__content {
-      width: 100%;
-    }
-
-    .group-card__name {
-      font-size: 0.8125rem;
-      margin: 0 0 0.2rem;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-
-    .group-card__tagline {
-      margin: 0;
-      font-size: 0.6875rem;
-      color: var(--neo-text-muted);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .group-card__meta {
-      display: none;
+      width: 44px;
+      height: 44px;
     }
 
     .group-card__actions {
-      width: 100%;
-      align-self: stretch;
-    }
-
-    .group-card__btn {
-      width: 100%;
-      min-height: 32px;
-      padding: 0.3rem 0.5rem;
-      font-size: 0.75rem;
-      border-radius: 999px;
-    }
-
-    .group-card__btn--leave {
-      background: transparent;
-      color: var(--neo-text-muted);
-      border-color: var(--neo-border-color);
+      margin-top: auto;
     }
   }
 
   &__icon {
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     width: 44px;
     height: 44px;
-    border-radius: 4px;
-    transition: transform 0.15s ease;
-  }
-
-  &:hover &__icon {
-    @media (hover: hover) {
-      transform: scale(1.04);
-    }
+    border-radius: var(--neo-radius-md, 8px);
+    flex-shrink: 0;
   }
 
   &__emoji {
@@ -303,156 +245,144 @@ const getCategoryColor = (category: string) => {
     line-height: 1;
   }
 
-  &__content {
-    min-width: 0;
-  }
-
   &__name {
-    margin: 0 0 0.25rem;
+    margin: 0;
     font-size: 0.9375rem;
     font-weight: 700;
-    color: var(--neo-text-primary);
     line-height: 1.25;
-    overflow-wrap: anywhere;
-
-    @media (min-width: 480px) {
-      font-size: 1rem;
-    }
   }
 
   &__name-link {
-    color: inherit;
+    color: var(--neo-text-primary);
     text-decoration: none;
 
     &::after {
       content: '';
       position: absolute;
       inset: 0;
-      z-index: 0;
     }
 
     &:focus-visible {
       outline: 2px solid var(--neo-accent);
       outline-offset: 2px;
-      border-radius: 2px;
     }
   }
 
-  &__description {
-    margin: 0 0 0.5rem;
+  &__description,
+  &__tagline {
+    margin: 0.25rem 0 0;
     font-size: 0.8125rem;
-    color: var(--neo-text-secondary);
-    line-height: 1.45;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    color: var(--neo-text-muted);
+    line-height: 1.35;
   }
 
   &__meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.375rem 0.625rem;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
     font-size: 0.75rem;
   }
 
   &__tag {
     color: var(--neo-text-muted);
-    font-family: var(--neo-font-family-mono);
   }
 
   &__category {
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.6875rem;
-    letter-spacing: 0.04em;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--neo-text-secondary);
+    text-transform: capitalize;
+  }
+
+  &__category-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 
   &__actions {
-    align-self: center;
     position: relative;
-    z-index: 1;
+    z-index: 2;
   }
 
   &__btn {
-    min-height: 36px;
-    padding: 0.375rem 0.875rem;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--neo-radius-pill, 999px);
     font-size: 0.8125rem;
-    font-weight: 600;
-    border: none;
-    border-radius: 4px;
+    font-weight: 650;
     cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-    white-space: nowrap;
+    border: 1px solid transparent;
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      opacity: 0.7;
+      cursor: wait;
+    }
 
     &--join {
+      color: var(--neo-text-on-accent, var(--neo-text-inverse));
       background: var(--neo-accent);
-      color: var(--neo-text-inverse);
-
-      &:hover:not(:disabled) {
-        background: var(--neo-accent-hover);
-      }
-
-      &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
+      border-color: var(--neo-accent);
     }
 
     &--leave {
-      background: var(--neo-bg-tertiary);
       color: var(--neo-text-secondary);
-      border: 1px solid var(--neo-border-color);
+      background: var(--neo-bg-secondary);
+      border-color: var(--neo-border-color);
 
-      &:hover:not(:disabled) {
-        background: var(--neo-danger-soft);
-        color: var(--neo-danger);
-        border-color: var(--neo-danger-light);
+      .group-card__btn-leave {
+        display: none;
       }
 
-      &:disabled {
-        opacity: 0.5;
+      &:hover,
+      &:focus-visible {
+        .group-card__btn-joined {
+          display: none;
+        }
+        .group-card__btn-leave {
+          display: inline;
+          color: var(--neo-danger);
+        }
       }
     }
+  }
+
+  &__spinner {
+    display: inline-block;
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: group-card-spin 0.7s linear infinite;
   }
 
   &__badge {
     position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 18px;
-    height: 18px;
+    top: 0.5rem;
+    right: 0.5rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--neo-accent);
-    color: var(--neo-text-inverse);
-    font-size: 0.6875rem;
-    font-weight: 700;
+    width: 1.25rem;
+    height: 1.25rem;
     border-radius: 50%;
+    background: var(--neo-accent);
+    color: var(--neo-text-on-accent, var(--neo-text-inverse));
   }
 }
 
-// Narrow phones: stack action under content so Join isn't crushed
-@media (max-width: 379px) {
-  .group-card:not(.group-card--compact) {
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas:
-      'icon content'
-      'actions actions';
-
-    .group-card__icon { grid-area: icon; }
-    .group-card__content { grid-area: content; }
-    .group-card__actions {
-      grid-area: actions;
-      justify-self: stretch;
-
-      .group-card__btn {
-        width: 100%;
-      }
-    }
-  }
+@keyframes group-card-spin {
+  to { transform: rotate(360deg); }
 }
 </style>
-

@@ -51,11 +51,21 @@ Optional label (created automatically on first note if missing is fine — the A
 gh label create feedback --repo mhsenkow/neospace --color 0E8A16 --description "Leave-a-note from neospace.ibm.io" || true
 ```
 
+Optional **Cloudflare Turnstile** (recommended in production — Origin checks alone are spoofable by non-browsers):
+
+1. Create a Turnstile widget at [dash.cloudflare.com](https://dash.cloudflare.com/) → Turnstile.
+2. Set the **site key** at build time: `NUXT_PUBLIC_TURNSTILE_SITE_KEY=…` (shows the widget in Leave-a-note).
+3. Set the **secret key** on Pages: `npx wrangler pages secret put TURNSTILE_SECRET_KEY --project-name neospace`
+
+When `TURNSTILE_SECRET_KEY` is set, the API rejects requests without a valid token. Both keys are required for bot protection to work end-to-end.
+
 ### Docker
+
+Static Docker image (no `/api/feedback` — use Cloudflare Pages for the live API):
 
 ```bash
 docker build -t neospace .
-docker run -p 8080:80 neospace
+docker run -p 8080:8080 neospace
 ```
 
 ## Custom CSS (Chaos Mode)

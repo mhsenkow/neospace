@@ -6,10 +6,11 @@ import { useSettingsStore } from '~/stores/settings'
 import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeSheet'
 import { useToastStore } from '~/stores/toast'
 import { useOverlayStore } from '~/stores/overlay'
-import { activeClient, clientFor } from '~/composables/useMasto'
 import { sanitizeDisplayName, sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { useMobileViewport } from '~/composables/useBreakpoint'
+import { usePostActions } from '~/composables/usePostActions'
+import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
 
 interface Props {
   status: mastodon.v1.Status
@@ -78,7 +79,20 @@ const accountHandle = computed(() => {
 })
 const cardLabelId = computed(() => `status-author-${displayStatus.value.id}`)
 const isReblog = computed(() => !!props.status.reblog)
-const reblogger = computed(() => isReblog.value ? props.status.account : null)
+const reblogger = computed(() => (isReblog.value ? props.status.account : null))
+const collapsedRebloggers = computed(
+  () => (props.status as CollapsedReblogStatus)._collapsedRebloggers,
+)
+const reblogLabel = computed(() => {
+  const group = collapsedRebloggers.value
+  if (group && group.length > 1) {
+    const first = group[0]!.displayName || group[0]!.username || 'Someone'
+    const others = group.length - 1
+    return others === 1 ? `${first} and 1 other reposted` : `${first} and ${others} others reposted`
+  }
+  const who = reblogger.value?.displayName || reblogger.value?.username
+  return who ? `${who} reposted` : 'Reposted'
+})
 const isFlip = computed(() => props.variant === 'flip')
 const flipMedia = computed(() => {
   const media = displayStatus.value.mediaAttachments || []
@@ -87,14 +101,10 @@ const flipMedia = computed(() => {
 const flipAlign = computed(() => settingsStore.localPreferences.flipTextAlign || 'center')
 const flipSize = computed(() => settingsStore.localPreferences.flipTextSize || 'large')
 
-const isFavouriting = ref(false)
-const isBoosting = ref(false)
 const isMenuOpen = ref(false)
-const isBookmarking = ref(false)
 const isMuting = ref(false)
 const isBlocking = ref(false)
 const isOpeningReply = ref(false)
-const likePop = ref(false)
 const shareOpen = ref(false)
 const boostOpen = ref(false)
 
@@ -262,160 +272,43 @@ const rebloggerProfileTo = computed(() => {
   return { path: '/profile', query: { user: reblogger.value.acct } }
 })
 
-let _resolvedIdCache: string | null = null
-let _resolvedClientCache: mastodon.rest.Client | null = null
-
-/**
- * Determines the correct API client and status ID for performing actions.
- * Posts from foreign instances need either the source instance's client
- * (if we're authenticated there) or ID resolution through the primary instance.
- */
-const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: string } | null> => {
-  if (_resolvedClientCache && _resolvedIdCache) {
-    return { client: _resolvedClientCache, id: _resolvedIdCache }
-  }
-
-  const status = displayStatus.value
-  const ext = status as ExtendedStatus
-
-  // If we have auth on the source instance, use it directly — IDs match there
-  if (ext._instanceUrl) {
-    const source = instancesStore.getInstanceByUrl(ext._instanceUrl)
-    if (source?.accessToken) {
-      const client = clientFor(source.id)
-      _resolvedClientCache = client
-      _resolvedIdCache = status.id
-      return { client, id: status.id }
-    }
-  }
-
-  // Fall back to active account
-  if (!instancesStore.instanceUrl || !instancesStore.accessToken) return null
-
-  const primaryClient = activeClient()
-
-  // Check if the post is from the same domain as our primary instance
-  const url = statusUrl.value
-  if (url) {
-    try {
-      const statusDomain = new URL(url).hostname
-      const primaryDomain = new URL(instancesStore.instanceUrl).hostname
-      if (statusDomain === primaryDomain) {
-        _resolvedClientCache = primaryClient
-        _resolvedIdCache = status.id
-        return { client: primaryClient, id: status.id }
-      }
-    } catch { /* bad URL, fall through to resolve */ }
-  }
-
-  // Foreign / remapped feed — resolve the URL to a local ID on our instance
-  if (url) {
-    const localId = await statusStore.resolveStatus(url)
-    if (localId) {
-      _resolvedClientCache = primaryClient
-      _resolvedIdCache = localId
-      return { client: primaryClient, id: localId }
-    }
-  }
-
-  // Don't cache last-resort raw ids — they often 404 across instances
-  return { client: primaryClient, id: status.id }
-}
-
 const formatNumber = (num: number) => {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
   return num.toString()
 }
 
-// ========================================
-// Action Handlers
-// ========================================
-
-const handleFavourite = async () => {
-  if (!requireAuth() || isFavouriting.value) return
-
-  isFavouriting.value = true
-  displayStatus.value.favourited = !displayStatus.value.favourited
-  displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
-  if (displayStatus.value.favourited) {
-    likePop.value = true
-    setTimeout(() => { likePop.value = false }, 320)
-  }
-
-  try {
-    const ctx = await getActionContext()
-    if (!ctx) throw new Error('Not authenticated')
-
-    if (displayStatus.value.favourited) {
-      await ctx.client.v1.statuses.$select(ctx.id).favourite()
-    } else {
-      await ctx.client.v1.statuses.$select(ctx.id).unfavourite()
-    }
-  } catch (e) {
-    console.error('Favourite error:', e)
-    // Drop cached client/id — last-resort foreign ids often fail once
-    _resolvedClientCache = null
-    _resolvedIdCache = null
-    displayStatus.value.favourited = !displayStatus.value.favourited
-    displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
-    toastStore.show({
-      message: 'Couldn’t update like',
-      actionLabel: 'Retry',
-      onAction: () => void handleFavourite(),
-      duration: 5000,
-    })
-  } finally {
-    isFavouriting.value = false
-  }
+const requireAuth = () => {
+  if (canInteract.value) return true
+  router.push('/login')
+  return false
 }
+
+const {
+  isFavouriting,
+  isBoosting,
+  isBookmarking,
+  likePop,
+  handleFavourite,
+  toggleBoost,
+  handleBookmark: bookmarkAction,
+  getActionContext,
+} = usePostActions({
+  displayStatus,
+  statusUrl,
+  requireAuth,
+})
 
 const handleBoost = async () => {
   if (!canInteract.value) {
     router.push('/login')
     return
   }
-  // Already boosted — tap un-reposts. Otherwise open Threads-style Repost / Quote sheet.
   if (displayStatus.value.reblogged) {
     await toggleBoost(false)
     return
   }
   boostOpen.value = true
-}
-
-const toggleBoost = async (wantBoost: boolean) => {
-  if (!canInteract.value || isBoosting.value) return
-  if (displayStatus.value.reblogged === wantBoost) return
-
-  isBoosting.value = true
-  displayStatus.value.reblogged = wantBoost
-  displayStatus.value.reblogsCount += wantBoost ? 1 : -1
-
-  try {
-    const ctx = await getActionContext()
-    if (!ctx) throw new Error('Not authenticated')
-
-    if (wantBoost) {
-      await ctx.client.v1.statuses.$select(ctx.id).reblog()
-      toastStore.show({ message: 'Reposted', duration: 2200 })
-    } else {
-      await ctx.client.v1.statuses.$select(ctx.id).unreblog()
-    }
-  } catch (e) {
-    console.error('Boost error:', e)
-    _resolvedClientCache = null
-    _resolvedIdCache = null
-    displayStatus.value.reblogged = !displayStatus.value.reblogged
-    displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
-    toastStore.show({
-      message: 'Couldn’t update repost',
-      actionLabel: 'Retry',
-      onAction: () => void toggleBoost(wantBoost),
-      duration: 5000,
-    })
-  } finally {
-    isBoosting.value = false
-  }
 }
 
 const contextFromStatus = (): ComposeContextPost => {
@@ -428,12 +321,6 @@ const contextFromStatus = (): ComposeContextPost => {
     text: stripHtml(s.content).slice(0, 280),
     url: statusUrl.value,
   }
-}
-
-const requireAuth = () => {
-  if (canInteract.value) return true
-  router.push('/login')
-  return false
 }
 
 /** Phone + iPad: open the thread with the floating reply bar (Threads-style) */
@@ -586,35 +473,7 @@ const boostActions = computed(() => [
 // Menu
 // ========================================
 
-const handleBookmark = async () => {
-  if (!requireAuth() || isBookmarking.value) return
-
-  isBookmarking.value = true
-  displayStatus.value.bookmarked = !displayStatus.value.bookmarked
-
-  try {
-    const ctx = await getActionContext()
-    if (!ctx) throw new Error('Not authenticated')
-
-    if (displayStatus.value.bookmarked) {
-      await ctx.client.v1.statuses.$select(ctx.id).bookmark()
-    } else {
-      await ctx.client.v1.statuses.$select(ctx.id).unbookmark()
-    }
-  } catch (e) {
-    console.error('Bookmark error:', e)
-    displayStatus.value.bookmarked = !displayStatus.value.bookmarked
-    toastStore.show({
-      message: 'Couldn’t update bookmark',
-      actionLabel: 'Retry',
-      onAction: () => void handleBookmark(),
-      duration: 5000,
-    })
-  } finally {
-    isBookmarking.value = false
-    isMenuOpen.value = false
-  }
-}
+const handleBookmark = () => bookmarkAction(isMenuOpen)
 
 const handleMute = async () => {
   if (!canInteract.value || isMuting.value) return
@@ -818,10 +677,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         class="status-reblog-text status-reblog-text--link"
         @click="openProfile(reblogger?.acct, $event)"
       >
-        {{ reblogger!.displayName || reblogger!.username }} reposted
+        {{ reblogLabel }}
       </button>
       <span v-else class="status-reblog-text">
-        {{ reblogger!.displayName || reblogger!.username }} reposted
+        {{ reblogLabel }}
       </span>
     </div>
 
@@ -864,46 +723,16 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
 
       <!-- Content Column -->
       <div class="status-content-col">
-        <!-- Header: username + time + menu -->
-        <header class="status-header">
-          <button
-            v-if="accountProfileTo || displayStatus.account?.acct"
-            :id="cardLabelId"
-            type="button"
-            class="status-author"
-            @click="openProfile(displayStatus.account.acct, $event)"
-          >
-            <span class="status-display-name" v-html="safeDisplayName" />
-            <span class="status-handle">{{ accountHandle }}</span>
-          </button>
-          <a
-            v-else
-            :id="cardLabelId"
-            :href="displayStatus.account.url"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="status-author"
-          >
-            <span class="status-display-name" v-html="safeDisplayName" />
-            <span class="status-handle">{{ accountHandle }}</span>
-          </a>
-          <NuxtLink
-            v-if="threadTo"
-            :to="threadTo"
-            class="status-time"
-            @click.stop
-          >
-            <time
-              :datetime="displayStatus.createdAt"
-              :title="formatAbsoluteTime(displayStatus.createdAt)"
-            >{{ formatRelativeTime(displayStatus.createdAt) }}</time>
-          </NuxtLink>
-          <time
-            v-else
-            class="status-time"
-            :datetime="displayStatus.createdAt"
-            :title="formatAbsoluteTime(displayStatus.createdAt)"
-          >{{ formatRelativeTime(displayStatus.createdAt) }}</time>
+        <PostHeader
+          :account="displayStatus.account"
+          :safe-display-name="safeDisplayName"
+          :account-handle="accountHandle"
+          :card-label-id="cardLabelId"
+          :created-at="displayStatus.createdAt"
+          :thread-to="threadTo"
+          :in-app-profile="!!(accountProfileTo || displayStatus.account?.acct)"
+          @profile-click="openProfile(displayStatus.account.acct, $event)"
+        >
           <NeoMenu
             v-model:open="isMenuOpen"
             class="status-menu-container"
@@ -988,7 +817,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
               </template>
             </template>
           </NeoMenu>
-        </header>
+        </PostHeader>
 
         <!-- Content Warning / Spoiler -->
         <details

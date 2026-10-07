@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useInstancesStore } from '~/stores/instances'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
-import { friendlyServerError, isAuthGatedPublicHost } from '~/utils/instances'
+import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
+import { stripHtml } from '~/utils/stripHtml'
 
 const emit = defineEmits<{
   watched: [domain: string]
@@ -18,23 +19,34 @@ const curatedInfo = computed(() => (domain.value ? getByDomain(domain.value) : u
 
 const isWatching = computed(() => {
   if (!domain.value) return false
-  return instancesStore.instances.some((i) =>
-    i.url.toLowerCase().includes(domain.value!.toLowerCase()),
-  )
+  return instancesStore.instances.some((i) => hostnameMatches(i.url, domain.value!))
 })
 
 const isLoggedIn = computed(() => {
   if (!domain.value) return false
-  const instance = instancesStore.instances.find((i) =>
-    i.url.toLowerCase().includes(domain.value!.toLowerCase()),
-  )
+  const instance = instancesStore.instances.find((i) => hostnameMatches(i.url, domain.value!))
   return !!(instance?.accessToken && instance?.user)
 })
 
 const isGated = computed(() => !!domain.value && isAuthGatedPublicHost(domain.value))
 
 const isAdding = ref(false)
+const isSigningIn = ref(false)
 const addError = ref<string | null>(null)
+
+const registrationState = computed(() => {
+  const reg = instanceInfo.value?.registrations
+  if (reg === true) return 'open' as const
+  if (reg === false) return 'closed' as const
+  return 'unknown' as const
+})
+
+const signupUrl = computed(() => {
+  const d = domain.value
+  if (!d) return '#'
+  const url = instanceInfo.value?.registrationsUrl
+  return url || `https://${d}/auth/sign_up`
+})
 
 const close = () => {
   instancesStore.closePreview()
@@ -62,7 +74,8 @@ const handleWatch = async () => {
 }
 
 const handleLogin = async () => {
-  if (!domain.value) return
+  if (!domain.value || isSigningIn.value) return
+  isSigningIn.value = true
   addError.value = null
 
   try {
@@ -70,12 +83,9 @@ const handleLogin = async () => {
     window.location.href = authUrl
   } catch (e: any) {
     addError.value = friendlyServerError(e)
+    isSigningIn.value = false
   }
 }
-
-const createAccountUrl = computed(() =>
-  domain.value ? `https://${domain.value}/auth/sign_up` : '#',
-)
 
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr)
@@ -87,10 +97,6 @@ const formatDate = (dateStr: string) => {
   })
 }
 
-const stripHtml = (html: string) => {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return doc.body.textContent || ''
-}
 </script>
 
 <template>
@@ -148,7 +154,15 @@ const stripHtml = (html: string) => {
               </div>
               <div class="info-item">
                 <span class="label">Registration</span>
-                <span class="value">{{ instanceInfo.registrations ? 'Open' : 'Closed' }}</span>
+                <span class="value">
+                  {{
+                    registrationState === 'open'
+                      ? 'Open'
+                      : registrationState === 'closed'
+                        ? 'Closed'
+                        : 'Unknown'
+                  }}
+                </span>
               </div>
               <div class="info-item" v-if="instanceInfo.languages?.length">
                 <span class="label">Languages</span>
@@ -237,9 +251,11 @@ const stripHtml = (html: string) => {
               v-if="!isLoggedIn"
               type="button"
               class="action-btn action-btn--login"
+              :disabled="isSigningIn"
+              :aria-busy="isSigningIn"
               @click="handleLogin"
             >
-              Sign in to this server
+              {{ isSigningIn ? 'Signing in…' : 'Sign in to this server' }}
             </button>
             <div v-else class="logged-in-badge">Signed in</div>
 
@@ -255,8 +271,8 @@ const stripHtml = (html: string) => {
             <div v-else class="watching-badge">Watching</div>
 
             <a
-              v-if="instanceInfo?.registrations !== false"
-              :href="createAccountUrl"
+              v-if="registrationState !== 'closed'"
+              :href="signupUrl"
               target="_blank"
               rel="noopener noreferrer"
               class="action-btn action-btn--join"

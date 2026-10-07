@@ -11,11 +11,12 @@
  * Connects to real Mastodon API for 1:1 settings sync.
  */
 
-import { useSettingsStore, SETTINGS_CATEGORIES } from '~/stores/settings'
+import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import { useOverlayStore } from '~/stores/overlay'
 import { useToastStore } from '~/stores/toast'
 import {
+  applyAppearance,
   DENSITY_OPTIONS,
   FONT_OPTIONS,
   FONT_SIZE_OPTIONS,
@@ -73,8 +74,80 @@ const clearDeviceData = async () => {
   router.push('/login')
 }
 
+const DISPLAY_NAME_MAX = 30
+const NOTE_MAX = 500
+
+const profileBaseline = reactive({
+  displayName: '',
+  note: '',
+  locked: false,
+  bot: false,
+  discoverable: true,
+})
+
+const postingBaseline = reactive({
+  visibility: 'public' as 'public' | 'unlisted' | 'private' | 'direct',
+  sensitive: false,
+})
+
+const syncProfileBaseline = () => {
+  profileBaseline.displayName = profileForm.displayName
+  profileBaseline.note = profileForm.note
+  profileBaseline.locked = profileForm.locked
+  profileBaseline.bot = profileForm.bot
+  profileBaseline.discoverable = profileForm.discoverable
+}
+
+const syncPostingBaseline = () => {
+  postingBaseline.visibility = postingForm.visibility
+  postingBaseline.sensitive = postingForm.sensitive
+}
+
+const profileDirty = computed(
+  () =>
+    profileForm.displayName !== profileBaseline.displayName ||
+    profileForm.note !== profileBaseline.note ||
+    profileForm.bot !== profileBaseline.bot ||
+    profileForm.discoverable !== profileBaseline.discoverable,
+)
+
+const privacyDirty = computed(() => profileForm.locked !== profileBaseline.locked)
+
+const postingDirty = computed(
+  () =>
+    postingForm.visibility !== postingBaseline.visibility ||
+    postingForm.sensitive !== postingBaseline.sensitive,
+)
+
+const isDirty = computed(() => profileDirty.value || privacyDirty.value || postingDirty.value)
+
+const displayNameInvalid = computed(() => profileForm.displayName.length > DISPLAY_NAME_MAX)
+const noteInvalid = computed(() => profileForm.note.length > NOTE_MAX)
+const profileFormInvalid = computed(() => displayNameInvalid.value || noteInvalid.value)
+
+const confirmDiscard = async () => {
+  if (!isDirty.value) return true
+  return overlayStore.openConfirm({
+    title: 'Discard unsaved changes?',
+    body: 'You have settings that have not been saved yet.',
+    confirmLabel: 'Discard',
+    danger: true,
+  })
+}
+
+const tryClose = async () => {
+  if (!(await confirmDiscard())) return
+  settingsStore.close()
+}
+
+const trySetCategory = async (categoryId: string) => {
+  if (categoryId === settingsStore.activeCategory) return
+  if (!(await confirmDiscard())) return
+  settingsStore.setCategory(categoryId)
+}
+
 useFocusTrap(modalRef, isOpen, {
-  onEscape: () => settingsStore.close(),
+  onEscape: () => void tryClose(),
   initialFocus: '.settings-search__input, .settings-close',
 })
 
@@ -124,32 +197,29 @@ const flipSizeOptions = [
 watch(() => settingsStore.account, (account) => {
   if (account) {
     profileForm.displayName = account.displayName || ''
-    // Prefer source.note (plain text); rendered note is HTML and mangling it on save is worse
     const sourceNote = (account as { source?: { note?: string } }).source?.note
     profileForm.note =
       typeof sourceNote === 'string' ? sourceNote : stripHtml(account.note || '')
     profileForm.locked = account.locked || false
     profileForm.bot = account.bot || false
     profileForm.discoverable = account.discoverable !== false
+    syncProfileBaseline()
   }
 })
 
-watch(() => settingsStore.preferences, (prefs) => {
-  // Local overrides win; fall back to Mastodon prefs when present
-  postingForm.visibility = settingsStore.defaultVisibility
-  postingForm.sensitive = settingsStore.defaultSensitive
-  if (!prefs) return
-}, { immediate: true })
-
 watch(
   () => [
+    settingsStore.preferences,
     settingsStore.localPreferences.defaultVisibility,
     settingsStore.localPreferences.defaultSensitive,
+    settingsStore.localPreferences.postingDefaultsTouched,
   ],
   () => {
     postingForm.visibility = settingsStore.defaultVisibility
     postingForm.sensitive = settingsStore.defaultSensitive
+    syncPostingBaseline()
   },
+  { immediate: true },
 )
 
 watch(() => settingsStore.localPreferences, (prefs) => {
@@ -168,21 +238,19 @@ watch(() => settingsStore.localPreferences, (prefs) => {
   }
 }, { immediate: true })
 
-const mutedLoading = ref(false)
-const mutedLoaded = ref(false)
+const privacyListsLoaded = ref(false)
 
 watch(
   () => settingsStore.activeCategory,
   async (cat) => {
     if (contentEl.value) contentEl.value.scrollTop = 0
-    if (cat !== 'privacy' || mutedLoaded.value || mutedLoading.value) return
-    mutedLoading.value = true
-    try {
-      await settingsStore.loadMutedAccounts()
-      mutedLoaded.value = true
-    } finally {
-      mutedLoading.value = false
-    }
+    if (cat !== 'privacy' || privacyListsLoaded.value) return
+    privacyListsLoaded.value = true
+    await Promise.all([
+      settingsStore.loadMutedAccounts(),
+      settingsStore.loadBlockedAccounts(),
+      settingsStore.loadBlockedDomains(),
+    ])
   },
 )
 
@@ -190,23 +258,26 @@ watch(
   () => instancesStore.activeAccountId,
   () => {
     settingsStore.clearModerationLists()
-    mutedLoaded.value = false
+    privacyListsLoaded.value = false
   },
 )
 
 // Save handlers
 const saveProfile = async () => {
+  if (profileFormInvalid.value) return
   await settingsStore.updateProfile({
     displayName: profileForm.displayName,
     note: profileForm.note,
     bot: profileForm.bot,
     discoverable: profileForm.discoverable,
   })
+  syncProfileBaseline()
   settingsStore.clearSuccess()
 }
 
 const savePrivacy = async () => {
   await settingsStore.updateProfile({ locked: profileForm.locked })
+  syncProfileBaseline()
   settingsStore.clearSuccess()
 }
 
@@ -226,6 +297,7 @@ const savePostingDefaults = () => {
     visibility: postingForm.visibility,
     sensitive: postingForm.sensitive,
   })
+  syncPostingBaseline()
   settingsStore.clearSuccess()
 }
 
@@ -244,6 +316,128 @@ const saveAppearance = () => {
     flipTextSize: appearanceForm.flipTextSize,
   })
   settingsStore.clearSuccess()
+}
+
+const onThemeApply = () => {
+  const previous = settingsStore.localPreferences.theme
+  saveAppearance()
+  toastStore.show({
+    message: 'Theme updated',
+    actionLabel: 'Revert',
+    duration: 5000,
+    onAction: () => {
+      appearanceForm.theme = previous
+      saveAppearance()
+    },
+  })
+}
+
+const hoveredTheme = ref<NeoThemeId | null>(null)
+
+const previewTheme = (themeId: NeoThemeId) => {
+  hoveredTheme.value = themeId
+  applyAppearance({
+    theme: themeId,
+    ui: appearanceForm.ui,
+    font: appearanceForm.font,
+    fontSize: appearanceForm.fontSize,
+    radius: appearanceForm.radius,
+    density: appearanceForm.density,
+    line: appearanceForm.line,
+  })
+}
+
+const clearThemePreview = () => {
+  hoveredTheme.value = null
+  settingsStore.applyLocalAppearance()
+}
+
+const resetAppearance = () => {
+  settingsStore.resetAppearance()
+  Object.assign(appearanceForm, settingsStore.localPreferences)
+}
+
+const exportAppearance = () => {
+  const json = settingsStore.exportAppearanceJson()
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'neospace-appearance.json'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const importAppearanceInput = ref<HTMLInputElement | null>(null)
+
+const importAppearance = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    settingsStore.importAppearanceJson(text)
+    Object.assign(appearanceForm, settingsStore.localPreferences)
+    toastStore.show({ message: 'Appearance imported', duration: 2500 })
+  } catch (e) {
+    toastStore.show({
+      message: e instanceof Error ? e.message : 'Could not import appearance',
+      duration: 3500,
+    })
+  } finally {
+    input.value = ''
+  }
+}
+
+const newFilterTitle = ref('')
+const newFilterKeywords = ref('')
+const newFilterAction = ref<'warn' | 'hide'>('warn')
+const isCreatingFilter = ref(false)
+
+const createNewFilter = async () => {
+  const title = newFilterTitle.value.trim()
+  const keywords = newFilterKeywords.value
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean)
+  if (!title || !keywords.length) {
+    toastStore.show({ message: 'Enter a title and at least one keyword', duration: 3000 })
+    return
+  }
+  isCreatingFilter.value = true
+  try {
+    await settingsStore.createFilter({
+      title,
+      keywords,
+      context: ['home', 'notifications', 'public', 'thread'],
+      filterAction: newFilterAction.value,
+    })
+    newFilterTitle.value = ''
+    newFilterKeywords.value = ''
+    toastStore.show({ message: 'Filter created', duration: 2500 })
+  } catch {
+    /* store sets error */
+  } finally {
+    isCreatingFilter.value = false
+  }
+}
+
+const newBlockDomain = ref('')
+const isBlockingDomain = ref(false)
+
+const submitBlockDomain = async () => {
+  const domain = newBlockDomain.value.trim()
+  if (!domain) return
+  isBlockingDomain.value = true
+  try {
+    await settingsStore.blockDomain(domain)
+    newBlockDomain.value = ''
+    toastStore.show({ message: `Blocked ${domain}`, duration: 2500 })
+  } catch {
+    /* store sets error */
+  } finally {
+    isBlockingDomain.value = false
+  }
 }
 
 const onFontSizeChange = (value: string) => {
@@ -323,7 +517,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
-        @click.self="settingsStore.close"
+        @click.self="tryClose"
       >
         <div class="settings-modal">
           <!-- Header with search -->
@@ -348,7 +542,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               </div>
             </div>
             <div class="settings-header__right">
-              <button class="settings-close" @click="settingsStore.close" aria-label="Close settings">
+              <button class="settings-close" @click="tryClose" aria-label="Close settings">
                 <NeoIcon name="x" :size="18" :stroke="2" />
               </button>
             </div>
@@ -364,7 +558,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 :class="['settings-nav-item', { active: settingsStore.activeCategory === category.id }]"
                 :aria-label="category.label"
                 :aria-current="settingsStore.activeCategory === category.id ? 'page' : undefined"
-                @click="settingsStore.setCategory(category.id)"
+                @click="trySetCategory(category.id)"
               >
                 <span class="settings-nav-item__icon" aria-hidden="true"><NeoIcon :name="(category.icon as any)" :size="18" :stroke="1.75" /></span>
                 <span class="settings-nav-item__label">{{ category.label }}</span>
@@ -414,28 +608,57 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 </div>
 
                 <div class="settings-group">
-                  <label class="settings-label">
-                    <span class="settings-label__text">Display Name</span>
-                    <input
-                      v-model="profileForm.displayName"
-                      type="text"
-                      class="settings-input"
-                      placeholder="Your display name"
-                    />
-                  </label>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Profile details</legend>
+                    <label class="settings-label">
+                      <span class="settings-label__text">Display Name</span>
+                      <input
+                        v-model="profileForm.displayName"
+                        type="text"
+                        class="settings-input"
+                        placeholder="Your display name"
+                        :maxlength="DISPLAY_NAME_MAX"
+                        :aria-invalid="displayNameInvalid || undefined"
+                        aria-describedby="settings-display-name-hint settings-display-name-error"
+                      />
+                      <span id="settings-display-name-hint" class="settings-field-hint">
+                        {{ profileForm.displayName.length }}/{{ DISPLAY_NAME_MAX }}
+                      </span>
+                      <span
+                        v-if="displayNameInvalid"
+                        id="settings-display-name-error"
+                        class="settings-field-error"
+                        role="alert"
+                      >Display name must be {{ DISPLAY_NAME_MAX }} characters or fewer.</span>
+                    </label>
 
-                  <label class="settings-label">
-                    <span class="settings-label__text">Bio</span>
-                    <textarea
-                      v-model="profileForm.note"
-                      class="settings-textarea"
-                      placeholder="Tell the world about yourself..."
-                      rows="4"
-                    />
-                  </label>
+                    <label class="settings-label">
+                      <span class="settings-label__text">Bio</span>
+                      <textarea
+                        v-model="profileForm.note"
+                        class="settings-textarea"
+                        placeholder="Tell the world about yourself..."
+                        rows="4"
+                        :maxlength="NOTE_MAX"
+                        :aria-invalid="noteInvalid || undefined"
+                        aria-describedby="settings-note-hint settings-note-error"
+                      />
+                      <span id="settings-note-hint" class="settings-field-hint">
+                        {{ profileForm.note.length }}/{{ NOTE_MAX }}
+                      </span>
+                      <span
+                        v-if="noteInvalid"
+                        id="settings-note-error"
+                        class="settings-field-error"
+                        role="alert"
+                      >Bio must be {{ NOTE_MAX }} characters or fewer.</span>
+                    </label>
+                  </fieldset>
 
                   <div class="settings-divider" />
 
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Account flags</legend>
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
                       <span class="settings-toggle__label">Discoverable</span>
@@ -451,12 +674,13 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     </div>
                     <input v-model="profileForm.bot" type="checkbox" class="settings-checkbox" />
                   </label>
+                  </fieldset>
                 </div>
 
                 <div class="settings-actions">
                   <button 
                     class="settings-btn settings-btn--primary"
-                    :disabled="settingsStore.isSaving"
+                    :disabled="settingsStore.isSaving || profileFormInvalid || !profileDirty"
                     @click="saveProfile"
                   >
                     {{ settingsStore.isSaving ? 'Saving...' : 'Save Changes' }}
@@ -480,8 +704,8 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 </div>
 
                 <div class="settings-group">
-                  <h3 class="settings-subheading">Post Privacy</h3>
-                  
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Post Privacy</legend>
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
                       <span class="settings-toggle__label">Require follow approval</span>
@@ -493,19 +717,21 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <div class="settings-actions" style="margin-top: 1rem;">
                     <button
                       class="settings-btn settings-btn--primary"
-                      :disabled="settingsStore.isSaving"
+                      :disabled="settingsStore.isSaving || !privacyDirty"
                       @click="savePrivacy"
                     >
                       {{ settingsStore.isSaving ? 'Saving...' : 'Save Privacy' }}
                     </button>
                   </div>
+                  </fieldset>
 
                   <div class="settings-divider" />
                   
-                  <h3 class="settings-subheading">Muted Accounts</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Muted Accounts</legend>
                   <p class="settings-hint">Accounts you've muted won't appear in your timelines.</p>
                   
-                  <div v-if="mutedLoading" class="settings-empty" aria-busy="true">
+                  <div v-if="settingsStore.isLoadingMuted && !settingsStore.mutedAccounts.length" class="settings-empty" aria-busy="true">
                     Loading muted accounts…
                   </div>
                   <div v-else-if="settingsStore.mutedAccounts.length === 0" class="settings-empty">
@@ -524,26 +750,35 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small"
+                        :disabled="settingsStore.isModerationPending('unmute', account.id)"
                         @click="settingsStore.unmuteAccount(account.id)"
                       >
-                        Unmute
+                        {{ settingsStore.isModerationPending('unmute', account.id) ? 'Unmuting…' : 'Unmute' }}
                       </button>
                     </div>
                   </div>
 
-                  <button 
+                  <button
+                    v-if="settingsStore.hasMoreMuted"
                     class="settings-btn settings-btn--ghost"
-                    @click="settingsStore.loadMutedAccounts"
+                    :disabled="settingsStore.isLoadingMuted"
+                    @click="settingsStore.loadMutedAccounts({ more: true })"
                   >
-                    Load Muted Accounts
+                    {{ settingsStore.isLoadingMuted ? 'Loading…' : 'Load more muted accounts' }}
                   </button>
+
+                  </fieldset>
 
                   <div class="settings-divider" />
                   
-                  <h3 class="settings-subheading">Blocked Accounts</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Blocked Accounts</legend>
                   <p class="settings-hint">Blocked accounts cannot follow you or see your posts.</p>
                   
-                  <div v-if="settingsStore.blockedAccounts.length === 0" class="settings-empty">
+                  <div v-if="settingsStore.isLoadingBlocked && !settingsStore.blockedAccounts.length" class="settings-empty" aria-busy="true">
+                    Loading blocked accounts…
+                  </div>
+                  <div v-else-if="settingsStore.blockedAccounts.length === 0" class="settings-empty">
                     No blocked accounts
                   </div>
                   <div v-else class="settings-account-list">
@@ -559,19 +794,69 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small"
+                        :disabled="settingsStore.isModerationPending('unblock', account.id)"
                         @click="settingsStore.unblockAccount(account.id)"
                       >
-                        Unblock
+                        {{ settingsStore.isModerationPending('unblock', account.id) ? 'Unblocking…' : 'Unblock' }}
                       </button>
                     </div>
                   </div>
 
-                  <button 
+                  <button
+                    v-if="settingsStore.hasMoreBlocked"
                     class="settings-btn settings-btn--ghost"
-                    @click="settingsStore.loadBlockedAccounts"
+                    :disabled="settingsStore.isLoadingBlocked"
+                    @click="settingsStore.loadBlockedAccounts({ more: true })"
                   >
-                    Load Blocked Accounts
+                    {{ settingsStore.isLoadingBlocked ? 'Loading…' : 'Load more blocked accounts' }}
                   </button>
+                  </fieldset>
+
+                  <div class="settings-divider" />
+
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Blocked Domains</legend>
+                    <p class="settings-hint">Block every account from a server domain.</p>
+                    <form class="settings-inline-form" @submit.prevent="submitBlockDomain">
+                      <label class="sr-only" for="settings-block-domain">Domain to block</label>
+                      <input
+                        id="settings-block-domain"
+                        v-model="newBlockDomain"
+                        type="text"
+                        class="settings-input"
+                        placeholder="example.social"
+                        :disabled="isBlockingDomain"
+                      />
+                      <button
+                        type="submit"
+                        class="settings-btn settings-btn--primary"
+                        :disabled="isBlockingDomain || !newBlockDomain.trim()"
+                      >
+                        {{ isBlockingDomain ? 'Blocking…' : 'Block domain' }}
+                      </button>
+                    </form>
+                    <div v-if="settingsStore.blockedDomains.length === 0" class="settings-empty">
+                      No blocked domains
+                    </div>
+                    <div v-else class="settings-account-list">
+                      <div
+                        v-for="domain in settingsStore.blockedDomains"
+                        :key="domain"
+                        class="settings-account-item"
+                      >
+                        <div class="settings-account-info">
+                          <span class="settings-account-name">{{ domain }}</span>
+                        </div>
+                        <button
+                          class="settings-btn settings-btn--small"
+                          :disabled="settingsStore.isModerationPending('unblock-domain', domain)"
+                          @click="settingsStore.unblockDomain(domain)"
+                        >
+                          {{ settingsStore.isModerationPending('unblock-domain', domain) ? 'Unblocking…' : 'Unblock' }}
+                        </button>
+                      </div>
+                    </div>
+                  </fieldset>
                 </div>
               </section>
 
@@ -623,14 +908,18 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 </div>
 
                 <div class="settings-group">
-                  <h3 class="settings-subheading">Theme</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Theme</legend>
                   <p class="settings-hint">Color system — tap a swatch or use the sidebar cycle button.</p>
                   <div class="settings-theme-grid">
                     <label
                       v-for="option in themeOptions"
                       :key="option.value"
-                      :class="['settings-theme-swatch', { active: appearanceForm.theme === option.value }]"
-                      :title="option.desc"
+                      :class="['settings-theme-swatch', { active: appearanceForm.theme === option.value, 'is-previewing': hoveredTheme === option.value }]"
+                      @mouseenter="previewTheme(option.value)"
+                      @mouseleave="clearThemePreview"
+                      @focusin="previewTheme(option.value)"
+                      @focusout="clearThemePreview"
                     >
                       <input
                         v-model="appearanceForm.theme"
@@ -638,21 +927,30 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                         name="settings-theme"
                         :value="option.value"
                         class="settings-radio-hidden"
-                        @change="saveAppearance"
+                        @change="onThemeApply"
                       />
                       <span
                         class="settings-theme-swatch__chip"
                         :style="{ background: option.swatch, color: option.ink }"
                       >
                         <span class="settings-theme-swatch__dot"></span>
+                        <span class="settings-theme-swatch__ring" aria-hidden="true"></span>
+                        <span v-if="hoveredTheme === option.value" class="settings-theme-swatch__preview" aria-hidden="true">
+                          <span class="settings-theme-swatch__preview-bar"></span>
+                          <span class="settings-theme-swatch__preview-line"></span>
+                          <span class="settings-theme-swatch__preview-line settings-theme-swatch__preview-line--short"></span>
+                        </span>
                       </span>
                       <span class="settings-theme-swatch__label">{{ option.label }}</span>
+                      <span class="settings-theme-swatch__desc">{{ option.desc }}</span>
                     </label>
                   </div>
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Chrome</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Chrome</legend>
                   <p class="settings-hint">Full interface system — type, borders, labels. Corners follow Radius unless set to Match.</p>
                   <div class="settings-chrome-grid">
                     <label
@@ -675,10 +973,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <span class="settings-chrome-card__desc">{{ option.desc }}</span>
                     </label>
                   </div>
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Typography</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Typography</legend>
                   <p class="settings-hint">Reading face for posts &amp; pages — remapped through the active chrome.</p>
                   <div class="settings-font-grid">
                     <label
@@ -702,20 +1002,24 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <span class="settings-font-card__desc">{{ option.desc }}</span>
                     </label>
                   </div>
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Font Size</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Font Size</legend>
                   <NeoRadioGroup
                     :options="fontSizeOptions"
                     :model-value="appearanceForm.fontSize"
                     ariaLabel="Font size"
                     @update:model-value="onFontSizeChange"
                   />
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Corners</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Corners</legend>
                   <p class="settings-hint">
                     Border-radius set across cards, inputs, and chrome. Match keeps the active chrome’s corners
                     (Brutal / NES stay sharp when Match).
@@ -726,15 +1030,17 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     ariaLabel="Corners"
                     @update:model-value="onRadiusChange"
                   />
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Flip text</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Flip text</legend>
                   <p class="settings-hint">
                     How posts look in Flip mode (full-bleed swipe). Applies especially to text-only slides.
                   </p>
 
-                  <h3 class="settings-subheading settings-subheading--tight">Alignment</h3>
+                  <p class="settings-hint settings-subheading--tight">Alignment</p>
                   <NeoRadioGroup
                     :options="flipAlignOptions"
                     :model-value="appearanceForm.flipTextAlign"
@@ -742,17 +1048,19 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     @update:model-value="onFlipAlignChange"
                   />
 
-                  <h3 class="settings-subheading settings-subheading--tight">Size</h3>
+                  <p class="settings-hint settings-subheading--tight">Size</p>
                   <NeoRadioGroup
                     :options="flipSizeOptions"
                     :model-value="appearanceForm.flipTextSize"
                     ariaLabel="Flip text size"
                     @update:model-value="onFlipSizeChange"
                   />
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Density</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Density</legend>
                   <p class="settings-hint">How tightly cards and chrome pack the screen.</p>
                   <NeoRadioGroup
                     :options="densityRadioOptions"
@@ -760,10 +1068,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     ariaLabel="Density"
                     @update:model-value="onDensityChange"
                   />
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Lines</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Lines</legend>
                   <p class="settings-hint">Outline character — clean hairlines through crayon wiggles.</p>
                   <NeoRadioGroup
                     :options="lineRadioOptions"
@@ -771,9 +1081,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     ariaLabel="Lines"
                     @update:model-value="onLineChange"
                   />
+                  </fieldset>
 
                   <div class="settings-divider" />
 
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Motion &amp; accessibility</legend>
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
                       <span class="settings-toggle__label">Reduce motion</span>
@@ -786,10 +1099,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       @change="saveAppearance"
                     />
                   </label>
+                  </fieldset>
 
                   <div class="settings-divider" />
 
-                  <h3 class="settings-subheading">Custom profile CSS</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Custom profile CSS</legend>
                   <p class="settings-hint">
                     Optional Myspace-style skins. If your Mastodon profile has a field named
                     <code>css</code>, <code>custom_css</code>, <code>theme</code>, <code>style</code>, or
@@ -815,6 +1130,32 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       @change="saveAppearance"
                     />
                   </label>
+                  </fieldset>
+
+                  <div class="settings-divider" />
+
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Backup &amp; reset</legend>
+                    <p class="settings-hint">Reset appearance to defaults or move settings between devices.</p>
+                    <div class="settings-actions settings-actions--inline">
+                      <button type="button" class="settings-btn settings-btn--ghost" @click="resetAppearance">
+                        Reset appearance
+                      </button>
+                      <button type="button" class="settings-btn settings-btn--ghost" @click="exportAppearance">
+                        Export JSON
+                      </button>
+                      <button type="button" class="settings-btn settings-btn--ghost" @click="importAppearanceInput?.click()">
+                        Import JSON
+                      </button>
+                      <input
+                        ref="importAppearanceInput"
+                        type="file"
+                        accept="application/json,.json"
+                        class="settings-file-input"
+                        @change="importAppearance"
+                      />
+                    </div>
+                  </fieldset>
                 </div>
               </section>
 
@@ -834,7 +1175,8 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 </div>
 
                 <div class="settings-group">
-                  <h3 class="settings-subheading">Default Visibility</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Default Visibility</legend>
                   <p class="settings-hint">Choose who can see your posts by default.</p>
                   
                   <div class="settings-option-list">
@@ -866,16 +1208,33 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
+                      <span class="settings-toggle__label">Collapse duplicate reposts</span>
+                      <span class="settings-toggle__desc">In Home, show “Alice and 2 others reposted” instead of separate cards</span>
+                    </div>
+                    <input
+                      :checked="settingsStore.localPreferences.collapseReblogs"
+                      type="checkbox"
+                      class="settings-checkbox"
+                      @change="settingsStore.updateAppearance({ collapseReblogs: ($event.target as HTMLInputElement).checked })"
+                    />
+                  </label>
+
+                  <div class="settings-divider" />
+
+                  <label class="settings-toggle">
+                    <div class="settings-toggle__info">
                       <span class="settings-toggle__label">Mark media as sensitive by default</span>
                       <span class="settings-toggle__desc">Media will be hidden behind a warning</span>
                     </div>
                     <input v-model="postingForm.sensitive" type="checkbox" class="settings-checkbox" />
                   </label>
+                  </fieldset>
                 </div>
 
                 <div class="settings-actions">
                   <button 
                     class="settings-btn settings-btn--primary"
+                    :disabled="!postingDirty"
                     @click="savePostingDefaults"
                   >
                     Save Posting Defaults
@@ -899,7 +1258,43 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 </div>
 
                 <div class="settings-group">
-                  <h3 class="settings-subheading">Active Filters</h3>
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Create filter</legend>
+                    <form class="settings-filter-form" @submit.prevent="createNewFilter">
+                      <label class="settings-label">
+                        <span class="settings-label__text">Title</span>
+                        <input v-model="newFilterTitle" type="text" class="settings-input" placeholder="Politics" />
+                      </label>
+                      <label class="settings-label">
+                        <span class="settings-label__text">Keywords</span>
+                        <input
+                          v-model="newFilterKeywords"
+                          type="text"
+                          class="settings-input"
+                          placeholder="keyword1, keyword2"
+                        />
+                      </label>
+                      <label class="settings-label">
+                        <span class="settings-label__text">Action</span>
+                        <select v-model="newFilterAction" class="settings-input">
+                          <option value="warn">Warn</option>
+                          <option value="hide">Hide</option>
+                        </select>
+                      </label>
+                      <button
+                        type="submit"
+                        class="settings-btn settings-btn--primary"
+                        :disabled="isCreatingFilter"
+                      >
+                        {{ isCreatingFilter ? 'Creating…' : 'Create filter' }}
+                      </button>
+                    </form>
+                  </fieldset>
+
+                  <div class="settings-divider" />
+
+                  <fieldset class="settings-fieldset">
+                    <legend class="settings-subheading">Active Filters</legend>
                   <p class="settings-hint">Filters hide or warn about posts containing specific words.</p>
                   
                   <div v-if="settingsStore.filters.length === 0" class="settings-empty">
@@ -922,16 +1317,14 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small settings-btn--danger"
+                        :disabled="settingsStore.isModerationPending('delete-filter', filter.id)"
                         @click="confirmDeleteFilter(filter.id, filter.title)"
                       >
-                        Delete
+                        {{ settingsStore.isModerationPending('delete-filter', filter.id) ? 'Deleting…' : 'Delete' }}
                       </button>
                     </div>
                   </div>
 
-                  <p class="settings-hint" style="margin-top: 1rem;">
-                    To create new filters, use your instance's settings page.
-                  </p>
                   <a 
                     v-if="instancesStore.instanceUrl"
                     :href="`${instancesStore.instanceUrl}/settings/filters`"
@@ -940,6 +1333,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   >
                     Manage Filters on Instance →
                   </a>
+                  </fieldset>
                 </div>
               </section>
 
@@ -1533,20 +1927,82 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   gap: 0.625rem;
 }
 
+.settings-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+
+  .settings-subheading {
+    float: left;
+    width: 100%;
+    padding: 0;
+    margin: 0 0 0.5rem;
+  }
+}
+
+.settings-field-hint {
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+}
+
+.settings-field-error {
+  font-size: 0.75rem;
+  color: var(--neo-danger);
+}
+
+.settings-input[aria-invalid='true'],
+.settings-textarea[aria-invalid='true'] {
+  border-color: var(--neo-danger);
+}
+
+.settings-inline-form,
+.settings-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+
+  .settings-input {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+}
+
+.settings-filter-form {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-actions--inline {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .settings-theme-swatch {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.25rem;
   cursor: pointer;
   min-width: 0;
 
-  &.active .settings-theme-swatch__chip {
+  &.active .settings-theme-swatch__chip,
+  &.is-previewing .settings-theme-swatch__chip {
     outline: 2px solid var(--neo-accent);
     outline-offset: 2px;
   }
 
   &__chip {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1554,6 +2010,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     aspect-ratio: 1.35;
     border-radius: var(--neo-radius-sm, 4px);
     border: 1px solid var(--neo-border-color-dark);
+    overflow: hidden;
   }
 
   &__dot {
@@ -1561,15 +2018,61 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     height: 10px;
     border-radius: 50%;
     background: currentColor;
+    z-index: 1;
+  }
+
+  &__ring {
+    position: absolute;
+    inset: 4px;
+    border-radius: calc(var(--neo-radius-sm, 4px) - 2px);
+    border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+    pointer-events: none;
+  }
+
+  &__preview {
+    position: absolute;
+    inset: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px;
+    background: color-mix(in srgb, var(--neo-bg-secondary, #fff) 82%, transparent);
+    border-radius: 3px;
+    z-index: 2;
+  }
+
+  &__preview-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: currentColor;
+    opacity: 0.85;
+  }
+
+  &__preview-line {
+    height: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, currentColor 35%, transparent);
+
+    &--short {
+      width: 65%;
+    }
   }
 
   &__label {
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--neo-text-muted);
+    color: var(--neo-text-secondary);
     letter-spacing: 0.02em;
     text-align: center;
     line-height: 1.2;
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    text-align: center;
+    line-height: 1.25;
+    max-width: 9rem;
   }
 
   &.active &__label {

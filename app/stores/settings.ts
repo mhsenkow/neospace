@@ -142,6 +142,8 @@ interface SettingsState {
     defaultSensitive: boolean | null
     /** True only after the user saves Posting Defaults (avoids hard-coded public shadowing server prefs) */
     postingDefaultsTouched: boolean
+    /** Collapse consecutive reblogs of the same post in Home ("A and N others reposted") */
+    collapseReblogs: boolean
   }
   
   // Filters
@@ -151,12 +153,37 @@ interface SettingsState {
   mutedAccounts: mastodon.v1.Account[]
   blockedAccounts: mastodon.v1.Account[]
   blockedDomains: string[]
+  hasMoreMuted: boolean
+  hasMoreBlocked: boolean
+  isLoadingMuted: boolean
+  isLoadingBlocked: boolean
+  /** Per-item moderation actions in flight */
+  pendingModeration: Record<string, string>
   
   // Loading states
   isLoading: boolean
   isSaving: boolean
   error: string | null
   saveSuccess: boolean
+}
+
+const MODERATION_PAGE_SIZE = 40
+
+const DEFAULT_APPEARANCE: Pick<
+  SettingsState['localPreferences'],
+  'theme' | 'ui' | 'font' | 'fontSize' | 'radius' | 'density' | 'line' | 'reduceMotion' | 'customProfileCss' | 'flipTextAlign' | 'flipTextSize'
+> = {
+  theme: 'auto',
+  ui: 'braun',
+  font: 'sans',
+  fontSize: 'medium',
+  radius: 'match',
+  density: 'cozy',
+  line: 'clean',
+  reduceMotion: false,
+  customProfileCss: false,
+  flipTextAlign: 'center',
+  flipTextSize: 'large',
 }
 
 const LOCAL_PREFS_KEY = 'neospace_local_prefs'
@@ -189,12 +216,18 @@ export const useSettingsStore = defineStore('settings', {
       defaultVisibility: null,
       defaultSensitive: null,
       postingDefaultsTouched: false,
+      collapseReblogs: true,
     },
     
     filters: [],
     mutedAccounts: [],
     blockedAccounts: [],
     blockedDomains: [],
+    hasMoreMuted: true,
+    hasMoreBlocked: true,
+    isLoadingMuted: false,
+    isLoadingBlocked: false,
+    pendingModeration: {},
     
     isLoading: false,
     isSaving: false,
@@ -247,6 +280,16 @@ export const useSettingsStore = defineStore('settings', {
         return state.localPreferences.defaultSensitive
       }
       return state.preferences?.['posting:default:sensitive'] || false
+    },
+
+    /** Post language — server prefs, then browser locale. */
+    defaultLanguage: (state): string => {
+      const pref = state.preferences?.['posting:default:language']
+      if (pref && pref.trim()) return pref.trim()
+      if (typeof navigator !== 'undefined') {
+        return (navigator.language || 'en').split('-')[0] || 'en'
+      }
+      return 'en'
     },
   },
 
@@ -305,7 +348,6 @@ export const useSettingsStore = defineStore('settings', {
           const vis = parsed.defaultVisibility
           this.localPreferences = {
             ...this.localPreferences,
-            ...parsed,
             theme: normalizeTheme(parsed.theme),
             ui: normalizeUi(parsed.ui),
             font: normalizeFont(parsed.font),
@@ -332,6 +374,7 @@ export const useSettingsStore = defineStore('settings', {
               parsed.postingDefaultsTouched && typeof parsed.defaultSensitive === 'boolean'
                 ? parsed.defaultSensitive
                 : null,
+            collapseReblogs: parsed.collapseReblogs !== false,
           }
         }
         this.applyLocalAppearance()
@@ -453,29 +496,90 @@ export const useSettingsStore = defineStore('settings', {
       this.mutedAccounts = []
       this.blockedAccounts = []
       this.blockedDomains = []
+      this.hasMoreMuted = true
+      this.hasMoreBlocked = true
+      this.pendingModeration = {}
+    },
+
+    moderationPendingKey(action: string, id: string) {
+      return `${action}:${id}`
+    },
+
+    setModerationPending(action: string, id: string, pending: boolean) {
+      const key = this.moderationPendingKey(action, id)
+      if (pending) this.pendingModeration[key] = action
+      else delete this.pendingModeration[key]
+    },
+
+    isModerationPending(action: string, id: string) {
+      return !!this.pendingModeration[this.moderationPendingKey(action, id)]
     },
 
     /**
      * Load muted accounts
      */
-    async loadMutedAccounts() {
+    async loadMutedAccounts(opts?: { more?: boolean }) {
+      if (this.isLoadingMuted) return
+      this.isLoadingMuted = true
       try {
         const client = this.getClient()
-        this.mutedAccounts = await client.v1.mutes.list()
+        const maxId = opts?.more
+          ? this.mutedAccounts[this.mutedAccounts.length - 1]?.id
+          : undefined
+        const page = await client.v1.mutes.list({
+          limit: MODERATION_PAGE_SIZE,
+          maxId: maxId || undefined,
+        })
+        const items = Array.isArray(page) ? page : []
+        if (opts?.more) {
+          const seen = new Set(this.mutedAccounts.map((a) => a.id))
+          this.mutedAccounts = [
+            ...this.mutedAccounts,
+            ...items.filter((a) => !seen.has(a.id)),
+          ]
+        } else {
+          this.mutedAccounts = items
+        }
+        this.hasMoreMuted = items.length >= MODERATION_PAGE_SIZE
       } catch (e) {
         console.error('Failed to load muted accounts:', e)
+        this.error = e instanceof Error ? e.message : 'Failed to load muted accounts'
+      } finally {
+        this.isLoadingMuted = false
       }
     },
     
     /**
      * Load blocked accounts
      */
-    async loadBlockedAccounts() {
+    async loadBlockedAccounts(opts?: { more?: boolean }) {
+      if (this.isLoadingBlocked) return
+      this.isLoadingBlocked = true
       try {
         const client = this.getClient()
-        this.blockedAccounts = await client.v1.blocks.list()
+        const maxId = opts?.more
+          ? this.blockedAccounts[this.blockedAccounts.length - 1]?.id
+          : undefined
+        const page = await client.v1.blocks.list({
+          limit: MODERATION_PAGE_SIZE,
+          maxId: maxId || undefined,
+        })
+        const items = Array.isArray(page) ? page : []
+        if (opts?.more) {
+          const seen = new Set(this.blockedAccounts.map((a) => a.id))
+          this.blockedAccounts = [
+            ...this.blockedAccounts,
+            ...items.filter((a) => !seen.has(a.id)),
+          ]
+        } else {
+          this.blockedAccounts = items
+        }
+        this.hasMoreBlocked = items.length >= MODERATION_PAGE_SIZE
       } catch (e) {
         console.error('Failed to load blocked accounts:', e)
+        this.error = e instanceof Error ? e.message : 'Failed to load blocked accounts'
+      } finally {
+        this.isLoadingBlocked = false
       }
     },
     
@@ -488,6 +592,26 @@ export const useSettingsStore = defineStore('settings', {
         this.blockedDomains = await client.v1.domainBlocks.list()
       } catch (e) {
         console.error('Failed to load blocked domains:', e)
+      }
+    },
+
+    async blockDomain(domain: string) {
+      const normalized = domain.trim().toLowerCase().replace(/^@/, '')
+      if (!normalized) throw new Error('Enter a domain like example.social')
+      this.setModerationPending('block-domain', normalized, true)
+      this.error = null
+      try {
+        const client = this.getClient()
+        await client.v1.domainBlocks.create({ domain: normalized })
+        if (!this.blockedDomains.includes(normalized)) {
+          this.blockedDomains = [...this.blockedDomains, normalized].sort()
+        }
+        this.saveSuccess = true
+      } catch (e: unknown) {
+        this.error = e instanceof Error ? e.message : 'Failed to block domain'
+        throw e
+      } finally {
+        this.setModerationPending('block-domain', normalized, false)
       }
     },
     
@@ -598,6 +722,7 @@ export const useSettingsStore = defineStore('settings', {
         theme: normalizeTheme(data.theme ?? this.localPreferences.theme),
         ui: normalizeUi(data.ui ?? this.localPreferences.ui),
         font: normalizeFont(data.font ?? this.localPreferences.font),
+        fontSize: normalizeFontSize(data.fontSize ?? this.localPreferences.fontSize),
         radius: normalizeRadius(data.radius ?? this.localPreferences.radius),
         density: normalizeDensity(data.density ?? this.localPreferences.density),
         line: normalizeLine(data.line ?? this.localPreferences.line),
@@ -639,6 +764,51 @@ export const useSettingsStore = defineStore('settings', {
       const upcoming = nextLine(this.localPreferences.line)
       this.updateAppearance({ line: upcoming })
       return upcoming
+    },
+
+    resetAppearance() {
+      this.updateAppearance({ ...DEFAULT_APPEARANCE })
+    },
+
+    exportAppearanceJson() {
+      const payload = {
+        v: LOCAL_PREFS_VERSION,
+        ...DEFAULT_APPEARANCE,
+        theme: this.localPreferences.theme,
+        ui: this.localPreferences.ui,
+        font: this.localPreferences.font,
+        fontSize: this.localPreferences.fontSize,
+        radius: this.localPreferences.radius,
+        density: this.localPreferences.density,
+        line: this.localPreferences.line,
+        reduceMotion: this.localPreferences.reduceMotion,
+        customProfileCss: this.localPreferences.customProfileCss,
+        flipTextAlign: this.localPreferences.flipTextAlign,
+        flipTextSize: this.localPreferences.flipTextSize,
+      }
+      return JSON.stringify(payload, null, 2)
+    },
+
+    importAppearanceJson(raw: string) {
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') throw new Error('Invalid appearance JSON')
+      this.updateAppearance({
+        theme: normalizeTheme(parsed.theme),
+        ui: normalizeUi(parsed.ui),
+        font: normalizeFont(parsed.font),
+        fontSize: normalizeFontSize(parsed.fontSize),
+        radius: normalizeRadius(parsed.radius),
+        density: normalizeDensity(parsed.density),
+        line: normalizeLine(parsed.line),
+        reduceMotion: !!parsed.reduceMotion,
+        customProfileCss: !!parsed.customProfileCss,
+        flipTextAlign: (['left', 'center', 'right'].includes(parsed.flipTextAlign)
+          ? parsed.flipTextAlign
+          : 'center') as SettingsState['localPreferences']['flipTextAlign'],
+        flipTextSize: (['reading', 'large', 'display'].includes(parsed.flipTextSize)
+          ? parsed.flipTextSize
+          : 'large') as SettingsState['localPreferences']['flipTextSize'],
+      })
     },
     
     /**
@@ -684,19 +854,18 @@ export const useSettingsStore = defineStore('settings', {
      * Delete a filter
      */
     async deleteFilter(filterId: string) {
-      this.isSaving = true
-      
+      this.setModerationPending('delete-filter', filterId, true)
+      this.error = null
       try {
         const client = this.getClient()
         await client.v2.filters.$select(filterId).remove()
-        
         this.filters = this.filters.filter(f => f.id !== filterId)
         this.saveSuccess = true
-      } catch (e: any) {
-        this.error = e.message || 'Failed to delete filter'
+      } catch (e: unknown) {
+        this.error = e instanceof Error ? e.message : 'Failed to delete filter'
         throw e
       } finally {
-        this.isSaving = false
+        this.setModerationPending('delete-filter', filterId, false)
       }
     },
     
@@ -704,14 +873,17 @@ export const useSettingsStore = defineStore('settings', {
      * Unmute an account
      */
     async unmuteAccount(accountId: string) {
+      this.setModerationPending('unmute', accountId, true)
+      this.error = null
       try {
         const client = this.getClient()
         await client.v1.accounts.$select(accountId).unmute()
-        
         this.mutedAccounts = this.mutedAccounts.filter(a => a.id !== accountId)
-      } catch (e: any) {
-        this.error = e.message || 'Failed to unmute account'
+      } catch (e: unknown) {
+        this.error = e instanceof Error ? e.message : 'Failed to unmute account'
         throw e
+      } finally {
+        this.setModerationPending('unmute', accountId, false)
       }
     },
     
@@ -719,14 +891,17 @@ export const useSettingsStore = defineStore('settings', {
      * Unblock an account
      */
     async unblockAccount(accountId: string) {
+      this.setModerationPending('unblock', accountId, true)
+      this.error = null
       try {
         const client = this.getClient()
         await client.v1.accounts.$select(accountId).unblock()
-        
         this.blockedAccounts = this.blockedAccounts.filter(a => a.id !== accountId)
-      } catch (e: any) {
-        this.error = e.message || 'Failed to unblock account'
+      } catch (e: unknown) {
+        this.error = e instanceof Error ? e.message : 'Failed to unblock account'
         throw e
+      } finally {
+        this.setModerationPending('unblock', accountId, false)
       }
     },
     
@@ -734,14 +909,17 @@ export const useSettingsStore = defineStore('settings', {
      * Unblock a domain
      */
     async unblockDomain(domain: string) {
+      this.setModerationPending('unblock-domain', domain, true)
+      this.error = null
       try {
         const client = this.getClient()
         await client.v1.domainBlocks.remove({ domain })
-        
         this.blockedDomains = this.blockedDomains.filter(d => d !== domain)
-      } catch (e: any) {
-        this.error = e.message || 'Failed to unblock domain'
+      } catch (e: unknown) {
+        this.error = e instanceof Error ? e.message : 'Failed to unblock domain'
         throw e
+      } finally {
+        this.setModerationPending('unblock-domain', domain, false)
       }
     },
     

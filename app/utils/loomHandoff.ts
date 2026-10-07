@@ -3,16 +3,30 @@
  * Kept free of Pinia / browser APIs so smoke tests can run in Node.
  */
 
+import { MEDIA_ALT_MAX } from '~/utils/composeConstants'
+
 export const LOOM_ORIGINS = new Set([
   'https://loom.ibm.io',
   'https://loom-storyteller.mhsenkow.workers.dev',
 ])
 
-export const LOOM_STORY_RE =
-  /^https:\/\/(loom\.ibm\.io|loom-storyteller\.mhsenkow\.workers\.dev)\/s\/([a-z0-9]{8,16})\/?$/i
+function hostPatternFromOrigin(origin: string): string {
+  try {
+    return new URL(origin).hostname.replace(/\./g, '\\.')
+  } catch {
+    return origin.replace(/\./g, '\\.')
+  }
+}
 
-/** Mastodon media description soft limit (common default). */
-export const CHART_ALT_MAX = 1500
+const LOOM_HOSTS = [...LOOM_ORIGINS].map(hostPatternFromOrigin).join('|')
+
+export const LOOM_STORY_RE = new RegExp(
+  `^https:\\/\\/(${LOOM_HOSTS})\\/s\\/([a-z0-9]{8,16})\\/?$`,
+  'i',
+)
+
+/** @deprecated use MEDIA_ALT_MAX from composeConstants */
+export const CHART_ALT_MAX = MEDIA_ALT_MAX
 
 export function storyIdFromUrl(url: string): string | null {
   const m = url.trim().match(LOOM_STORY_RE)

@@ -7,6 +7,9 @@ import { activeClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useInstancesStore } from '~/stores/instances'
 
+const FOLLOWING_PAGE = 80
+const FOLLOWING_MAX = 400
+
 export function useAccountSearch() {
   const instancesStore = useInstancesStore()
   const results = ref<mastodon.v1.Account[]>([])
@@ -14,25 +17,43 @@ export function useAccountSearch() {
   const isSearching = ref(false)
   const isLoadingFollowing = ref(false)
   const error = ref<string | null>(null)
+  const followingError = ref<string | null>(null)
   const searchRace = createRaceGuard()
   let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-  const loadFollowing = async (limit = 40, force = false) => {
+  const loadFollowing = async (force = false) => {
     if (!instancesStore.currentUser?.id || !instancesStore.hasAuthenticatedInstance) {
       following.value = []
+      followingError.value = null
       return
     }
     if (following.value.length && !force) return
     isLoadingFollowing.value = true
+    followingError.value = null
     try {
       const client = activeClient()
-      const list = await client.v1.accounts
-        .$select(instancesStore.currentUser.id)
-        .following.list({ limit })
-      following.value = Array.isArray(list) ? list : []
+      const userId = instancesStore.currentUser.id
+      const collected: mastodon.v1.Account[] = []
+      let maxId: string | undefined
+
+      while (collected.length < FOLLOWING_MAX) {
+        const batch = await client.v1.accounts.$select(userId).following.list({
+          limit: FOLLOWING_PAGE,
+          maxId,
+        })
+        const list = Array.isArray(batch) ? batch : []
+        if (!list.length) break
+        collected.push(...list)
+        if (list.length < FOLLOWING_PAGE) break
+        maxId = list[list.length - 1]?.id
+        if (!maxId) break
+      }
+
+      following.value = collected
     } catch (e) {
       console.warn('Failed to load following:', e)
       following.value = []
+      followingError.value = 'Couldn’t load people you follow'
     } finally {
       isLoadingFollowing.value = false
     }
@@ -95,6 +116,7 @@ export function useAccountSearch() {
     isSearching,
     isLoadingFollowing,
     error,
+    followingError,
     loadFollowing,
     search,
     clear,

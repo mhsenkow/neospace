@@ -23,6 +23,8 @@ import { buildInsightsExport } from '../app/utils/loomExport'
 import { mastodonLength } from '../app/utils/mastodonLength'
 import { compareId, idLess } from '../app/utils/compareId'
 import { sanitizeProfileCss } from '../app/utils/sanitizeCss'
+import { collapseDuplicateReblogs, statusIdentity } from '../app/utils/statusIdentity'
+import { formatLogRingForFeedback, logError, logWarn } from '../app/utils/log'
 
 describe('loom handoff story URLs', () => {
   it('parses loom.ibm.io story ids', () => {
@@ -86,8 +88,8 @@ describe('OAuth callback errors', () => {
     expect(friendlyAuthError('missing oauth credentials')).toMatch(/interrupted/i)
   })
 
-  it('passes through short raw messages', () => {
-    expect(friendlyAuthError('Server said nope')).toBe('Server said nope')
+  it('never echoes arbitrary server text', () => {
+    expect(friendlyAuthError('Server said nope')).toMatch(/couldn’t finish signing you in/i)
   })
 
   it('falls back for long opaque errors', () => {
@@ -190,20 +192,36 @@ describe('rateLimit', () => {
   it('allows up to the limit then blocks within the window', async () => {
     const { allowRequest } = await import('../functions/utils/rateLimit')
     const key = `test-${Date.now()}-${Math.random()}`
-    expect(allowRequest(key, 2, 60_000)).toBe(true)
-    expect(allowRequest(key, 2, 60_000)).toBe(true)
-    expect(allowRequest(key, 2, 60_000)).toBe(false)
+    expect(allowRequest(key, 2, 60_000).allowed).toBe(true)
+    expect(allowRequest(key, 2, 60_000).allowed).toBe(true)
+    const blocked = allowRequest(key, 2, 60_000)
+    expect(blocked.allowed).toBe(false)
+    expect(blocked.retryAfterSec).toBeGreaterThan(0)
   })
 
-  it('prefers CF-Connecting-IP for clientIp', async () => {
+  it('uses CF-Connecting-IP only and buckets IPv6 by /64', async () => {
     const { clientIp } = await import('../functions/utils/rateLimit')
     const req = new Request('https://example.com', {
       headers: {
-        'CF-Connecting-IP': '1.2.3.4',
+        'CF-Connecting-IP': '2001:db8:85a3:1:0:0:0:1',
         'X-Forwarded-For': '9.9.9.9',
       },
     })
-    expect(clientIp(req)).toBe('1.2.3.4')
+    expect(clientIp(req)).toBe('2001:db8:85a3:1::/64')
+
+    const noCf = new Request('https://example.com', {
+      headers: { 'X-Forwarded-For': '9.9.9.9' },
+    })
+    expect(clientIp(noCf)).toBe('')
+  })
+})
+
+describe('feedbackConstants', () => {
+  it('whitelists note kinds', async () => {
+    const { isFeedbackKind, FEEDBACK_KINDS } = await import('../shared/feedbackConstants')
+    expect(FEEDBACK_KINDS).toContain('bug')
+    expect(isFeedbackKind('bug')).toBe(true)
+    expect(isFeedbackKind('spam')).toBe(false)
   })
 })
 
@@ -319,5 +337,31 @@ describe('insights aggregation', () => {
     expect(pack.preferred.kind).toBe('area')
     expect(pack.preferred.xField).toBe('date')
     expect(pack.preferred.yField).toBe('engagement')
+  })
+})
+
+describe('collapseDuplicateReblogs', () => {
+  it('merges consecutive reblogs of the same original', () => {
+    const original = { id: '1', uri: 'https://mastodon.social/users/x/statuses/1' }
+    const statuses = [
+      { id: '10', reblog: original, account: { username: 'alice' } },
+      { id: '11', reblog: original, account: { username: 'bob' } },
+      { id: '12', reblog: original, account: { username: 'carol' } },
+      { id: '20', content: 'plain' },
+    ]
+    const out = collapseDuplicateReblogs(statuses)
+    expect(out).toHaveLength(2)
+    expect(out[0]?._collapsedRebloggers?.length).toBe(3)
+    expect(statusIdentity(out[0]!.reblog!)).toBe(statusIdentity(original))
+  })
+})
+
+describe('log ring buffer', () => {
+  it('captures warn/error for feedback attachment', () => {
+    logWarn('timeline poll')
+    logError('chunk load')
+    const ring = formatLogRingForFeedback()
+    expect(ring).toContain('timeline poll')
+    expect(ring).toContain('chunk load')
   })
 })

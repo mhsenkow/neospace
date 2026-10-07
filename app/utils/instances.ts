@@ -23,6 +23,12 @@ export function hostnameOf(url: string): string {
   }
 }
 
+/** Exact hostname match — avoids `url.includes('c.im')` matching abc.im */
+export function hostnameMatches(url: string, domain: string): boolean {
+  const host = domain.includes('://') ? hostnameOf(domain) : domain.toLowerCase().split('/')[0] || ''
+  return hostnameOf(url) === host
+}
+
 export function isAuthGatedPublicHost(urlOrHost: string): boolean {
   const host = urlOrHost.includes('://') ? hostnameOf(urlOrHost) : urlOrHost.toLowerCase()
   return AUTH_GATED_PUBLIC_HOSTS.has(host)

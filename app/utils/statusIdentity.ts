@@ -62,3 +62,45 @@ export function dedupeStatusesByIdentity<
   }
   return out
 }
+
+export type CollapsedReblogStatus = {
+  id: string
+  uri?: string | null
+  url?: string | null
+  _instanceUrl?: string | null
+  reblog?: { id: string; uri?: string | null; url?: string | null } | null
+  account?: { displayName?: string | null; username?: string | null; acct?: string | null }
+  /** When set, consecutive reblogs of the same post were collapsed. */
+  _collapsedRebloggers?: Array<{ displayName?: string | null; username?: string | null; acct?: string | null }>
+}
+
+/** Collapse consecutive reblogs of the same original into one row ("A and N others reposted"). */
+export function collapseDuplicateReblogs<T extends CollapsedReblogStatus>(statuses: T[]): T[] {
+  const out: T[] = []
+  let i = 0
+  while (i < statuses.length) {
+    const current = statuses[i]!
+    if (!current.reblog) {
+      out.push(current)
+      i++
+      continue
+    }
+    const originalKey = statusIdentity(current.reblog)
+    const rebloggers: NonNullable<T['_collapsedRebloggers']> = []
+    if (current.account) rebloggers.push(current.account)
+    let j = i + 1
+    while (j < statuses.length) {
+      const next = statuses[j]!
+      if (!next.reblog || statusIdentity(next.reblog) !== originalKey) break
+      if (next.account) rebloggers.push(next.account)
+      j++
+    }
+    if (rebloggers.length <= 1) {
+      out.push(current)
+    } else {
+      out.push({ ...current, _collapsedRebloggers: rebloggers })
+    }
+    i = j
+  }
+  return out
+}

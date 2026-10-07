@@ -529,14 +529,22 @@ useHead({
           Older messages may be truncated by your server’s context limit.
         </p>
 
-        <MessageBubble
-          v-for="(status, index) in chatMessages"
-          :key="status.id"
-          :status="status"
-          :mine="isMine(status)"
-          :show-meta="showBubbleMeta(status, index)"
-          :day-label="dayLabelFor(status, index)"
-        />
+        <template v-for="(status, index) in chatMessages" :key="status.id">
+          <div
+            v-if="dayLabelFor(status, index)"
+            class="chat-day-separator"
+            role="separator"
+            :aria-label="dayLabelFor(status, index) || undefined"
+          >
+            <span>{{ dayLabelFor(status, index) }}</span>
+          </div>
+          <MessageBubble
+            :status="status"
+            :mine="isMine(status)"
+            :show-meta="showBubbleMeta(status, index)"
+            :participant-accts="recipientAccts"
+          />
+        </template>
         <div ref="chatEndEl" class="chat-end" />
       </div>
 
@@ -745,6 +753,16 @@ useHead({
   gap: 0.15rem;
   min-height: 40vh;
   padding: 0.5rem 0 1rem;
+}
+
+.chat-day-separator {
+  align-self: center;
+  margin: 0.85rem 0 0.45rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-primary) 6%, transparent);
+  font-size: 0.6875rem;
+  color: var(--neo-text-tertiary);
 }
 
 .chat-empty {

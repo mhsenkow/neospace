@@ -156,7 +156,9 @@ const openCompose = () => {
 .mobile-nav {
   // In-flow flex child of .neo-layout — fixed chrome was clipped by iOS Safari
   // when the parent used overflow:hidden (DevTools emulation did not reproduce it).
-  position: relative;
+  // sticky keeps it glued to the visible bottom if the shell ever overscrolls.
+  position: sticky;
+  bottom: 0;
   flex-shrink: 0;
   width: 100%;
   height: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px));

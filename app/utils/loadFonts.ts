@@ -2,7 +2,9 @@
  * Load only the Google Fonts needed for the active chrome + type face.
  * Avoids the previous ~15-family megabundle on every page.
  *
- * Skipped (too large for this pass): self-host via @nuxt/fonts / fontsource.
+ * Google Fonts remain remote (15+ families × weights — fontsource bundle is ~2MB+).
+ * OpenDyslexic is self-hosted under /public/fonts. To fully self-host, add @fontsource/*
+ * packages per active UI map entry and preload only the active chrome + type face.
  */
 
 import type { NeoFontId, NeoUiId } from './appearance'

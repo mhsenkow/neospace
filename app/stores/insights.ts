@@ -168,9 +168,12 @@ export const useInsightsStore = defineStore('insights', {
         }
 
         if (gen !== fetchGen) return
+        const exportable = collected.filter(
+          (s) => s.visibility !== 'direct' && s.visibility !== 'private',
+        )
         this.report = buildInsightsReport({
           account,
-          statuses: collected,
+          statuses: exportable,
           windowDays: days,
           truncated,
         })

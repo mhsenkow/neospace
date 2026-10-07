@@ -22,7 +22,7 @@
     var fonts = ["sans","serif","book","mono","dyslexic"]
     var f = fonts.indexOf(p.font) >= 0 ? p.font : 'sans'
     document.documentElement.setAttribute('data-font', f)
-    var sizes = ["small","medium","large"]
+    var sizes = ["small","medium","large","xlarge","xxlarge"]
     var s = sizes.indexOf(p.fontSize) >= 0 ? p.fontSize : 'medium'
     document.documentElement.setAttribute('data-font-size', s)
     var radii = ["match","sharp","business","soft","bubble","jagged"]

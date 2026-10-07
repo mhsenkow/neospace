@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "noImplicitAny": false
   },
-  "include": ["./**/*.ts"]
+  "include": ["./**/*.ts", "../shared/**/*.ts"]
 }

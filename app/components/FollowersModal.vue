@@ -34,13 +34,6 @@ const isOwnFollowersList = computed(() => {
   return !!viewing && viewing === instancesStore.currentUser?.id
 })
 
-useFocusTrap(modalRef, isOpen, {
-  onEscape: () => {
-    isOpen.value = false
-  },
-  initialFocus: '.close-btn',
-})
-
 const getClient = () => activeClient()
 
 const enrichPage = async (fetchedAccounts: mastodon.v1.Account[]) => {
@@ -78,17 +71,28 @@ const accounts = pager.items
 const isLoading = pager.isLoading
 const isLoadingMore = pager.isLoadingMore
 const hasMore = pager.hasMore
-
-const open = (tab?: 'followers' | 'following') => {
-  if (tab) activeTab.value = tab
-  isOpen.value = true
-  void loadAccounts()
-}
+const loadError = computed(() => {
+  const err = pager.error.value
+  if (!err) return null
+  return err instanceof Error ? err.message : String(err)
+})
 
 const close = () => {
   isOpen.value = false
   pager.reset()
   relationships.value = {}
+}
+
+useFocusTrap(modalRef, isOpen, {
+  onEscape: close,
+  initialFocus: '.close-btn',
+})
+
+const open = (tab?: 'followers' | 'following') => {
+  if (tab) activeTab.value = tab
+  else if (props.initialTab) activeTab.value = props.initialTab
+  isOpen.value = true
+  void loadAccounts()
 }
 
 const loadAccounts = async () => {
@@ -120,11 +124,11 @@ const handleFollow = async (accountId: string) => {
     const rel = relationships.value[accountId]
 
     if (rel?.following) {
-      await client.v1.accounts.$select(accountId).unfollow()
-      relationships.value[accountId] = { ...rel, following: false } as mastodon.v1.Relationship
+      const updated = await client.v1.accounts.$select(accountId).unfollow()
+      relationships.value[accountId] = updated
     } else {
-      await client.v1.accounts.$select(accountId).follow()
-      relationships.value[accountId] = { ...rel, following: true } as mastodon.v1.Relationship
+      const updated = await client.v1.accounts.$select(accountId).follow()
+      relationships.value[accountId] = updated
     }
   } catch (e) {
     console.error('Follow action failed:', e)
@@ -140,11 +144,11 @@ const handleMute = async (accountId: string) => {
     const rel = relationships.value[accountId]
 
     if (rel?.muting) {
-      await client.v1.accounts.$select(accountId).unmute()
-      relationships.value[accountId] = { ...rel, muting: false } as mastodon.v1.Relationship
+      const updated = await client.v1.accounts.$select(accountId).unmute()
+      relationships.value[accountId] = updated
     } else {
-      await client.v1.accounts.$select(accountId).mute()
-      relationships.value[accountId] = { ...rel, muting: true } as mastodon.v1.Relationship
+      const updated = await client.v1.accounts.$select(accountId).mute()
+      relationships.value[accountId] = updated
     }
   } catch (e) {
     console.error('Mute action failed:', e)
@@ -228,11 +232,8 @@ defineExpose({ open, close })
               :panels="false"
               controls-id="followers-modal-list"
             />
-            <button class="close-btn" @click="close" aria-label="Close">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+            <button type="button" class="close-btn" @click="close" aria-label="Close">
+              <NeoIcon name="x" :size="22" :stroke="2" />
             </button>
           </header>
 
@@ -241,9 +242,23 @@ defineExpose({ open, close })
               <FunLoader fill label="Loading" />
             </div>
 
+            <div v-else-if="loadError" class="empty-state" role="alert">
+              <NeoIcon name="alert" :size="32" :stroke="1.5" />
+              <p>{{ loadError }}</p>
+              <button type="button" class="load-more-btn" @click="loadAccounts">Retry</button>
+            </div>
+
             <div v-else-if="accounts.length === 0" class="empty-state">
               <NeoIcon name="user" :size="32" :stroke="1.5" />
-              <p>{{ activeTab === 'followers' ? 'No followers yet' : 'Not following anyone yet' }}</p>
+              <p>
+                {{
+                  isOwnFollowersList && activeTab === 'followers'
+                    ? 'No followers yet'
+                    : activeTab === 'followers'
+                      ? 'This account hides its follower list or has no followers'
+                      : 'Not following anyone yet'
+                }}
+              </p>
             </div>
 
             <div v-else class="account-list">
@@ -269,7 +284,7 @@ defineExpose({ open, close })
                       @click="close()"
                     >
                       {{ account.displayName || account.username }}
-                      <span v-if="account.bot" class="bot-badge">🤖</span>
+                      <span v-if="account.bot" class="bot-badge" title="Automated account">BOT</span>
                     </NuxtLink>
                     <span class="account-handle">@{{ account.acct }}</span>
                     <span
@@ -522,7 +537,8 @@ defineExpose({ open, close })
 }
 
 .action-btn {
-  min-height: 32px;
+  min-height: 44px;
+  min-width: 44px;
   padding: 0.35rem 0.75rem;
   border: 1px solid var(--neo-border-color);
   border-radius: var(--neo-radius-sm, 4px);

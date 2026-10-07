@@ -17,6 +17,7 @@ export function useLinkedProfileFeed() {
   const account = ref<mastodon.v1.Account | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const loadMoreError = ref<string | null>(null)
 
   const linkedAccounts = computed(() => instancesStore.authenticatedInstances)
 
@@ -52,8 +53,7 @@ export function useLinkedProfileFeed() {
       const client = clientFor(instanceId)
       const fresh = await client.v1.accounts.verifyCredentials()
       account.value = fresh
-      const inst = instancesStore.instances.find((i) => i.id === instanceId)
-      if (inst) inst.user = fresh
+      instancesStore.updateActiveAccount(fresh, instanceId)
     } catch (e: any) {
       if (!account.value) {
         throw e
@@ -113,7 +113,12 @@ export function useLinkedProfileFeed() {
 
   const loadMore = async () => {
     if (!hasMore.value || statusPager.isLoading.value || statusPager.isLoadingMore.value) return
+    loadMoreError.value = null
     await statusPager.loadMore()
+    const err = statusPager.error.value
+    if (err) {
+      loadMoreError.value = err instanceof Error ? err.message : 'Could not load more'
+    }
   }
 
   const selectAccount = (instanceId: string) => {
@@ -150,6 +155,7 @@ export function useLinkedProfileFeed() {
     isLoading,
     isLoadingStatuses: loadingStatuses,
     error,
+    loadMoreError,
     hasMore,
     selectAccount,
     refresh,

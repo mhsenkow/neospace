@@ -21,7 +21,7 @@ const isAdding = ref(false)
 const addError = ref<string | null>(null)
 const addSuccess = ref<string | null>(null)
 
-const signedIn = computed(() => instancesStore.authenticatedInstances)
+const signedIn = computed(() => instancesStore.signedInInstances)
 const watching = computed(() => instancesStore.watchingInstances)
 
 const hostOf = (instance: ConnectedInstance) =>
@@ -93,14 +93,26 @@ const removeAccount = async (instance: ConnectedInstance) => {
   toastStore.show({ message: `Removed ${handle}` })
 }
 
+const signInErrors = ref<Record<string, string>>({})
+
 const signIn = async (instance: ConnectedInstance) => {
+  signInErrors.value = { ...signInErrors.value, [instance.id]: '' }
   try {
     const authUrl = await instancesStore.startAuth(instance.id)
     window.location.href = authUrl
   } catch (e) {
-    console.error('Sign in error:', e)
-    toastStore.show({ message: 'Couldn’t start sign-in. Try again.' })
+    const msg = friendlyServerError(e)
+    signInErrors.value = { ...signInErrors.value, [instance.id]: msg }
+    toastStore.show({ message: msg })
+  } finally {
+    const row = instancesStore.instances.find((i) => i.id === instance.id)
+    if (row) row.isConnecting = false
   }
+}
+
+const makeMain = (instance: ConnectedInstance) => {
+  instancesStore.setPrimaryAccount(instance.id)
+  toastStore.show({ message: `${handleOf(instance)} is now your main profile` })
 }
 
 const signOut = async (instance: ConnectedInstance) => {
@@ -148,9 +160,7 @@ const isActive = (instance: ConnectedInstance) =>
               </p>
             </div>
             <button type="button" class="accounts-close" aria-label="Close" @click="closeAndReset">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <NeoIcon name="x" :size="20" :stroke="2" />
             </button>
           </header>
 
@@ -163,6 +173,10 @@ const isActive = (instance: ConnectedInstance) =>
                   + Link server
                 </button>
               </div>
+
+              <p v-if="signedIn.length" class="accounts-hint accounts-hint--inline">
+                Sign out keeps the server on your watch list; Remove deletes the account from this device.
+              </p>
 
               <div v-if="signedIn.length === 0" class="accounts-empty">
                 No accounts yet.
@@ -197,22 +211,47 @@ const isActive = (instance: ConnectedInstance) =>
                     </div>
                     <span class="account-row__handle">{{ handleOf(instance) }}</span>
                     <span class="account-row__server">{{ hostOf(instance) }}</span>
+                    <p v-if="instance.sessionExpired || !instance.accessToken" class="account-row__error" role="status">
+                      Session expired — sign in again
+                    </p>
                   </div>
                   <div class="account-row__actions">
-                    <button
-                      v-if="!isActive(instance)"
-                      type="button"
-                      class="action-label action-label--primary"
-                      @click="useForPosting(instance)"
-                    >
-                      Use for posting
-                    </button>
-                    <button type="button" class="action-label" @click="signOut(instance)">
-                      Sign out
-                    </button>
-                    <button type="button" class="action-label action-label--danger" @click="removeAccount(instance)">
-                      Remove
-                    </button>
+                    <template v-if="instance.sessionExpired || !instance.accessToken">
+                      <button
+                        type="button"
+                        class="action-label action-label--primary"
+                        :disabled="instance.isConnecting"
+                        @click="signIn(instance)"
+                      >
+                        {{ instance.isConnecting ? 'Signing in…' : 'Sign in again' }}
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        v-if="instance.id !== instancesStore.primaryAccount?.id"
+                        type="button"
+                        class="action-label"
+                        @click="makeMain(instance)"
+                      >
+                        Make main
+                      </button>
+                      <button
+                        v-if="!isActive(instance)"
+                        type="button"
+                        class="action-label action-label--primary"
+                        @click="useForPosting(instance)"
+                      >
+                        Use for posting
+                      </button>
+                      <button type="button" class="action-label" @click="signOut(instance)">
+                        Sign out
+                      </button>
+                    </template>
+                    <div class="account-row__actions-destructive">
+                      <button type="button" class="action-label action-label--danger" @click="removeAccount(instance)">
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 </li>
               </ul>
@@ -277,8 +316,11 @@ const isActive = (instance: ConnectedInstance) =>
                       :disabled="instance.isConnecting"
                       @click="signIn(instance)"
                     >
-                      Sign in
+                      {{ instance.isConnecting ? 'Signing in…' : 'Sign in' }}
                     </button>
+                    <p v-if="signInErrors[instance.id]" class="account-row__error" role="alert">
+                      {{ signInErrors[instance.id] }}
+                    </p>
                     <button type="button" class="action-label" @click="stopWatching(instance)">
                       Stop watching
                     </button>
@@ -297,12 +339,12 @@ const isActive = (instance: ConnectedInstance) =>
 .accounts-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--neo-z-modal, 1000);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--neo-bg-primary, #000) 55%, transparent);
   backdrop-filter: blur(4px);
 }
 
@@ -315,7 +357,8 @@ const isActive = (instance: ConnectedInstance) =>
   overflow: hidden;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
+  border-radius: var(--neo-radius-md, 12px);
+  box-shadow: var(--neo-shadow-xl);
 }
 
 .accounts-header {
@@ -436,7 +479,7 @@ const isActive = (instance: ConnectedInstance) =>
   padding: 0.875rem;
   background: var(--neo-bg-tertiary);
   border: 1px solid var(--neo-border-color);
-  border-radius: 10px;
+  border-radius: var(--neo-radius-sm, 10px);
 
   &--active {
     border-color: var(--neo-accent);
@@ -536,14 +579,26 @@ const isActive = (instance: ConnectedInstance) =>
   }
 }
 
+.account-row__actions-destructive {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--neo-border-color);
+
+  @media (min-width: 480px) {
+    margin-top: 0.5rem;
+  }
+}
+
 .action-label {
-  padding: 0.4rem 0.65rem;
-  font-size: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--neo-text-secondary);
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
-  border-radius: 5px;
+  border-radius: var(--neo-radius-sm, 5px);
   cursor: pointer;
   white-space: nowrap;
 

@@ -24,6 +24,7 @@ import {
   isPresenceField,
   mergePresenceIntoFields,
   normalizeFieldKey,
+  profileFieldLimit,
   readPresenceDraft,
 } from '~/utils/profileSources'
 import { createRaceGuard } from '~/composables/useRace'
@@ -145,9 +146,75 @@ const presenceSlotsUsed = computed(
     ).length,
 )
 
-const canAddCustomField = computed(
-  () => profileStore.editForm.fields.length + presenceSlotsUsed.value < 4,
+const maxProfileFields = computed(() =>
+  profileFieldLimit(instancesStore.activeAccount?.instanceInfo?.maxProfileFields),
 )
+
+const canAddCustomField = computed(
+  () => profileStore.editForm.fields.length + presenceSlotsUsed.value < maxProfileFields.value,
+)
+
+const fieldLimitMessage = computed(() => {
+  const cap = maxProfileFields.value
+  const used = profileStore.editForm.fields.length + presenceSlotsUsed.value
+  if (used <= cap) return ''
+  return `Your server allows ${cap} profile fields — remove ${used - cap} to save.`
+})
+
+const headerPreviewUrl = ref<string | null>(null)
+const headerObjectUrl = ref<string | null>(null)
+
+const profileHeaderUrl = computed(() => {
+  if (headerPreviewUrl.value) return headerPreviewUrl.value
+  return profileStore.viewedProfile?.header || profileStore.viewedProfile?.headerStatic || null
+})
+
+const softwareLabel = computed(() => {
+  const url = profileStore.viewedProfile?.url || instancesStore.activeAccount?.url || ''
+  if (/gotosocial|gts\./i.test(url)) return 'GoToSocial'
+  if (/akkoma|pleroma|misskey|pixelfed|friendica|peertube/i.test(url)) return 'Fediverse'
+  return 'Mastodon'
+})
+
+const fullHandle = computed(() => {
+  const p = profileStore.viewedProfile
+  if (!p) return ''
+  if (p.acct.includes('@')) return `@${p.acct}`
+  try {
+    const host = new URL(p.url || instancesStore.activeAccount?.url || '').hostname
+    return `@${p.username}@${host}`
+  } catch {
+    return `@${p.acct || p.username}`
+  }
+})
+
+const postsJoinLine = computed(() => {
+  const p = profileStore.viewedProfile
+  if (!p) return ''
+  const posts = `${formatCount(p.statusesCount ?? 0)} ${(p.statusesCount ?? 0) === 1 ? 'post' : 'posts'}`
+  const joined = profileStore.joinDate ? `Joined ${profileStore.joinDate}` : ''
+  return joined ? `${posts} · ${joined}` : posts
+})
+
+const relationshipChips = computed(() => {
+  const r = relationship.value
+  if (!r) return [] as string[]
+  const chips: string[] = []
+  if (r.followedBy) chips.push('Follows you')
+  if (r.muting) chips.push('Muted')
+  if (r.blocking) chips.push('Blocked')
+  if (r.domainBlocking) chips.push('Domain blocked')
+  return chips
+})
+
+const copyHandle = async () => {
+  try {
+    await navigator.clipboard.writeText(fullHandle.value)
+    toastStore.show({ message: 'Handle copied' })
+  } catch {
+    toastStore.show({ message: 'Couldn’t copy handle' })
+  }
+}
 
 const chromeTitle = computed(() => {
   const p = profileStore.viewedProfile
@@ -175,17 +242,14 @@ const headerInput = ref<HTMLInputElement | null>(null)
 
 const formatCount = (n: number) => formatCompact(n)
 
-const followerLabel = computed(() => {
+const followerCountLabel = computed(() => {
   const n = profileStore.viewedProfile?.followersCount ?? 0
   return `${formatCount(n)} follower${n === 1 ? '' : 's'}`
 })
 
-const statsLine = computed(() => {
-  const p = profileStore.viewedProfile
-  if (!p) return ''
-  const followers = `${formatCount(p.followersCount ?? 0)} follower${(p.followersCount ?? 0) === 1 ? '' : 's'}`
-  const following = `${formatCount(p.followingCount ?? 0)} following`
-  return `${followers} · ${following}`
+const followingCountLabel = computed(() => {
+  const n = profileStore.viewedProfile?.followingCount ?? 0
+  return `${formatCount(n)} following`
 })
 
 const openCompose = () => {
@@ -344,6 +408,7 @@ watch(
 onUnmounted(() => {
   profileRace.abort()
   statusesRace.abort()
+  if (headerObjectUrl.value) URL.revokeObjectURL(headerObjectUrl.value)
   if (!profileStore.isOwnProfile && themeStore.isChaosMode) {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   }
@@ -357,6 +422,17 @@ const followLabel = computed(() => {
 })
 
 const handleFollow = async () => {
+  if (relationship.value?.following) {
+    const name = profileStore.viewedProfile?.displayName || profileStore.viewedProfile?.username || 'this account'
+    const ok = await useOverlayStore().openConfirm({
+      title: `Unfollow ${name}?`,
+      body: 'Their posts will stop appearing in your home feed.',
+      confirmLabel: 'Unfollow',
+      danger: true,
+    })
+    if (!ok) return
+  }
+
   isFollowLoading.value = true
   const prev = relationship.value
   try {
@@ -389,9 +465,19 @@ const handleAvatarChange = (event: Event) => {
 
 const handleHeaderChange = (event: Event) => {
   const file = (event.target as HTMLInputElement).files?.[0]
-  if (file) {
-    profileStore.editForm.header = file
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    toastStore.show({ message: 'Header must be an image file' })
+    return
   }
+  if (file.size > 8 * 1024 * 1024) {
+    toastStore.show({ message: 'Header image must be under 8 MB' })
+    return
+  }
+  if (headerObjectUrl.value) URL.revokeObjectURL(headerObjectUrl.value)
+  headerObjectUrl.value = URL.createObjectURL(file)
+  headerPreviewUrl.value = headerObjectUrl.value
+  profileStore.editForm.header = file
 }
 
 const handleSaveProfile = async () => {
@@ -400,6 +486,7 @@ const handleSaveProfile = async () => {
     profileStore.editForm.fields = mergePresenceIntoFields(
       prevFields,
       presenceDraft.value,
+      maxProfileFields.value,
     )
     await profileStore.updateProfile()
   } catch {
@@ -463,15 +550,6 @@ useHead({
         >
           <NeoIcon name="share" :size="18" :stroke="1.75" />
         </button>
-        <button
-          v-if="!profileStore.isOwnProfile && profileStore.viewedProfile && instancesStore.hasAuthenticatedInstance"
-          type="button"
-          class="subview-chrome__btn neo-tip"
-          aria-label="Message"
-          @click="messageUser"
-        >
-          <NeoIcon name="message" :size="18" :stroke="1.75" />
-        </button>
       </template>
     </SubviewChrome>
 
@@ -510,7 +588,14 @@ useHead({
     <!-- Profile Content -->
     <template v-else-if="profileStore.viewedProfile">
       <section class="profile-hero">
-        <!-- Threads-style: name + handle left, avatar right -->
+        <div
+          v-if="profileHeaderUrl"
+          class="profile-header-banner"
+          :style="{ backgroundImage: `url(${profileHeaderUrl})` }"
+          role="img"
+          :aria-label="profileStore.isEditing ? 'Profile header preview' : 'Profile header'"
+        />
+
         <div class="profile-head">
           <div class="profile-head__text">
             <template v-if="profileStore.isEditing">
@@ -549,10 +634,11 @@ useHead({
             <h1 v-else class="profile-name" v-html="safeProfileName" />
 
             <p class="profile-handle">
-              <span class="profile-handle__acct">@{{ profileStore.viewedProfile.username }}</span>
-              <span class="profile-handle__badge" title="Mastodon">
-                <NeoIcon name="servers" :size="12" :stroke="2" />
-              </span>
+              <button type="button" class="profile-handle__acct" :title="fullHandle" @click="copyHandle">
+                {{ fullHandle }}
+              </button>
+              <span class="profile-handle__badge" :title="softwareLabel">{{ softwareLabel }}</span>
+              <span v-for="chip in relationshipChips" :key="chip" class="profile-chip profile-chip--rel">{{ chip }}</span>
               <span v-if="profileStore.viewedProfile.bot" class="profile-chip">bot</span>
               <span
                 v-if="profileStore.viewedProfile.locked"
@@ -631,13 +717,23 @@ useHead({
 
         <!-- Stats + open-web presence (Mastodon / Bluesky / SeenU / site) -->
         <div v-if="!profileStore.isEditing" class="profile-social">
-          <button
-            type="button"
-            class="profile-social__stats"
-            @click="followersModalRef?.open('followers')"
-          >
-            {{ statsLine }}
-          </button>
+          <p class="profile-social__posts">{{ postsJoinLine }}</p>
+          <div class="profile-social__stats-row">
+            <button
+              type="button"
+              class="profile-social__stat"
+              @click="followersModalRef?.open('followers')"
+            >
+              {{ followerCountLabel }}
+            </button>
+            <button
+              type="button"
+              class="profile-social__stat"
+              @click="followersModalRef?.open('following')"
+            >
+              {{ followingCountLabel }}
+            </button>
+          </div>
           <div v-if="presenceLinks.length" class="profile-social__links">
             <a
               v-for="link in presenceLinks"
@@ -776,6 +872,7 @@ useHead({
             <p class="profile-sources-editor__hint">
               Saved as Mastodon profile fields so anyone can find you. Mastodon is always linked from this account.
             </p>
+            <p v-if="fieldLimitMessage" class="profile-save-error" role="alert">{{ fieldLimitMessage }}</p>
           </div>
 
           <button type="button" class="neo-btn neo-btn--ghost" @click="triggerHeaderUpload">
@@ -941,6 +1038,72 @@ useHead({
   max-width: 640px;
   margin: 0 auto;
   padding: 0 0 2rem;
+}
+
+.profile-header-banner {
+  width: 100%;
+  height: 140px;
+  margin: 0 0 0.75rem;
+  border-radius: 12px;
+  background: var(--neo-bg-secondary) center / cover no-repeat;
+  border: 1px solid var(--neo-border-color);
+}
+
+.profile-handle__acct {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--neo-text-primary);
+    text-decoration: underline;
+  }
+}
+
+.profile-handle__badge {
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--neo-text-muted);
+  background: var(--neo-bg-tertiary);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+}
+
+.profile-chip--rel {
+  background: var(--neo-accent-soft);
+  color: var(--neo-text-secondary);
+}
+
+.profile-social__posts {
+  margin: 0 0 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+}
+
+.profile-social__stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+}
+
+.profile-social__stat {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--neo-text-primary);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .hidden-input {
@@ -1446,7 +1609,7 @@ useHead({
   background: var(--neo-bg-primary);
 
   @media (max-width: 1023px) {
-    top: 52px;
+    top: var(--neo-subview-chrome-height, 52px);
   }
 
   :deep(.neo-tabs__list) {

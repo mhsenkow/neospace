@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CuratedInstance } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
-import { friendlyServerError, isAuthGatedPublicHost } from '~/utils/instances'
+import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
 
 const props = defineProps<{
   instance: CuratedInstance
@@ -13,39 +13,59 @@ const emit = defineEmits<{
 }>()
 
 const instancesStore = useInstancesStore()
+const cardRef = ref<HTMLElement | null>(null)
 
 const liveData = ref<Awaited<ReturnType<typeof instancesStore.fetchInstanceInfo>>>(null)
-const loading = ref(true)
+const loading = ref(false)
+const loadScheduled = ref(false)
 const isAdding = ref(false)
+const isSigningIn = ref(false)
 const actionError = ref<string | null>(null)
 
-const isWatching = computed(() =>
-  instancesStore.instances.some((i) =>
-    i.url.toLowerCase().includes(props.instance.domain.toLowerCase()),
-  ),
+const instanceRow = computed(() =>
+  instancesStore.instances.find((i) => hostnameMatches(i.url, props.instance.domain)),
 )
 
-const isSignedIn = computed(() => {
-  const inst = instancesStore.instances.find((i) =>
-    i.url.toLowerCase().includes(props.instance.domain.toLowerCase()),
-  )
-  return !!(inst?.accessToken && inst?.user)
-})
+const isWatching = computed(() => !!instanceRow.value)
+
+const isSignedIn = computed(() => !!(instanceRow.value?.accessToken && instanceRow.value?.user))
 
 const isGated = computed(() => isAuthGatedPublicHost(props.instance.domain))
 
-onMounted(async () => {
+const fetchLive = async () => {
+  if (loading.value || liveData.value) return
+  loading.value = true
   try {
     liveData.value = await instancesStore.fetchInstanceInfo(props.instance.domain)
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  const el = cardRef.value
+  if (!el || typeof IntersectionObserver === 'undefined') {
+    void fetchLive()
+    return
+  }
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting) && !loadScheduled.value) {
+        loadScheduled.value = true
+        void fetchLive()
+        observer.disconnect()
+      }
+    },
+    { rootMargin: '120px' },
+  )
+  observer.observe(el)
+  onUnmounted(() => observer.disconnect())
 })
 
 const handleVisit = () => emit('visit', props.instance.domain)
 
 const handleWatch = async () => {
-  if (isWatching.value) return
+  if (isWatching.value || isAdding.value) return
   isAdding.value = true
   actionError.value = null
   try {
@@ -59,18 +79,21 @@ const handleWatch = async () => {
 }
 
 const handleSignIn = async () => {
+  if (isSigningIn.value) return
+  isSigningIn.value = true
   actionError.value = null
   try {
     const authUrl = await instancesStore.loginWithInstance(`https://${props.instance.domain}`)
     window.location.href = authUrl
   } catch (e) {
     actionError.value = friendlyServerError(e)
+    isSigningIn.value = false
   }
 }
 </script>
 
 <template>
-  <article class="instance-card">
+  <article ref="cardRef" class="instance-card">
     <header class="instance-card__head">
       <span class="instance-card__emoji" aria-hidden="true">{{ instance.emoji }}</span>
       <div class="instance-card__titles">
@@ -101,9 +124,13 @@ const handleSignIn = async () => {
         v-if="!isSignedIn"
         type="button"
         class="instance-card__btn instance-card__btn--primary"
+        :disabled="isSigningIn"
+        :aria-busy="isSigningIn"
         @click="handleSignIn"
       >
-        Sign in
+        <span v-if="isSigningIn" class="instance-card__spinner" aria-hidden="true" />
+        <span v-if="isSigningIn" class="sr-only">Signing in…</span>
+        <span v-else>Sign in</span>
       </button>
       <span v-else class="instance-card__badge">Signed in</span>
 
@@ -112,10 +139,13 @@ const handleSignIn = async () => {
         type="button"
         class="instance-card__btn"
         :disabled="isAdding"
+        :aria-busy="isAdding"
         :title="isGated ? 'You can still watch — public posts may need sign-in' : 'Browse public posts without an account'"
         @click="handleWatch"
       >
-        {{ isAdding ? '…' : 'Watch' }}
+        <span v-if="isAdding" class="instance-card__spinner" aria-hidden="true" />
+        <span v-if="isAdding" class="sr-only">Adding…</span>
+        <span v-else>Watch</span>
       </button>
       <span v-else class="instance-card__badge instance-card__badge--soft">Watching</span>
 
@@ -236,7 +266,8 @@ const handleSignIn = async () => {
 }
 
 .instance-card__btn {
-  min-height: 2rem;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
   padding: 0.35rem 0.7rem;
   font-family: var(--neo-font-family-ui);
   font-size: 0.8125rem;
@@ -246,6 +277,10 @@ const handleSignIn = async () => {
   border: 1px solid var(--neo-border-color-dark);
   border-radius: 4px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
 
   &:hover:not(:disabled) {
     border-color: var(--neo-accent);
@@ -253,8 +288,8 @@ const handleSignIn = async () => {
   }
 
   &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    opacity: 0.7;
+    cursor: wait;
   }
 
   &--primary {
@@ -273,10 +308,23 @@ const handleSignIn = async () => {
   }
 }
 
+.instance-card__spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: instance-card-spin 0.7s linear infinite;
+}
+
+@keyframes instance-card-spin {
+  to { transform: rotate(360deg); }
+}
+
 .instance-card__badge {
   display: inline-flex;
   align-items: center;
-  min-height: 2rem;
+  min-height: 2.75rem;
   padding: 0.35rem 0.65rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -288,5 +336,17 @@ const handleSignIn = async () => {
     color: var(--neo-text-secondary);
     background: var(--neo-bg-tertiary);
   }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

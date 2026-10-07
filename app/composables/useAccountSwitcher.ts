@@ -1,20 +1,22 @@
 /**
  * Shared open/close for the Threads-style account switcher sheet.
+ * State lives in the overlay store for stacking with confirm/lightbox.
  */
-const isOpen = ref(false)
+import { useOverlayStore } from '~/stores/overlay'
 
 export function useAccountSwitcher() {
-  const open = () => {
-    isOpen.value = true
-  }
+  const overlayStore = useOverlayStore()
 
-  const close = () => {
-    isOpen.value = false
-  }
+  const isOpen = computed({
+    get: () => overlayStore.accountSwitcher.open,
+    set: (open: boolean) => {
+      overlayStore.accountSwitcher.open = open
+    },
+  })
 
-  const toggle = () => {
-    isOpen.value = !isOpen.value
-  }
+  const open = () => overlayStore.openAccountSwitcher()
+  const close = () => overlayStore.closeAccountSwitcher()
+  const toggle = () => overlayStore.toggleAccountSwitcher()
 
   return {
     isOpen,

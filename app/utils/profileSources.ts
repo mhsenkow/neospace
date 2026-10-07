@@ -31,12 +31,21 @@ export function normalizeFieldKey(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
+function decodeHtmlEntities(url: string): string {
+  return url
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
 export function extractHttpUrl(raw: string): string | null {
   const plain = stripHtml(raw || '')
   const hrefMatch = raw?.match(/href=["'](https?:\/\/[^"']+)["']/i)
-  if (hrefMatch?.[1]) return hrefMatch[1]
+  if (hrefMatch?.[1]) return decodeHtmlEntities(hrefMatch[1])
   const bare = plain.match(/https?:\/\/[^\s<>"']+/i)
-  return bare?.[0] || null
+  return bare?.[0] ? decodeHtmlEntities(bare[0]) : null
 }
 
 function hostOf(url: string): string {
@@ -171,10 +180,16 @@ export function readPresenceDraft(fields: FieldLike[]): {
   return draft
 }
 
+export function profileFieldLimit(maxFromInstance?: number | null): number {
+  const n = maxFromInstance ?? 4
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 16) : 4
+}
+
 /** Merge dedicated source inputs into Mastodon fieldsAttributes list. */
 export function mergePresenceIntoFields(
   fields: { name: string; value: string }[],
   draft: { bluesky: string; seenu: string; website: string },
+  maxFields = 4,
 ): { name: string; value: string }[] {
   const presence: { name: string; value: string }[] = []
   const claimedHrefs = new Set<string>()
@@ -207,8 +222,9 @@ export function mergePresenceIntoFields(
     other.push({ name: f.name?.trim() || 'Other', value: href })
   }
 
-  const room = Math.max(0, 4 - other.length)
-  return [...other.slice(0, 4), ...presence.slice(0, room)].slice(0, 4)
+  const cap = profileFieldLimit(maxFields)
+  const room = Math.max(0, cap - other.length)
+  return [...other.slice(0, cap), ...presence.slice(0, room)].slice(0, cap)
 }
 
 export function buildPresenceLinks(opts: {

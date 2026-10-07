@@ -1,1 +1,2 @@
-/* /index.html 200
+# Cloudflare Pages serves SPA fallback via 404.html (see scripts/spa-fallback.mjs).
+# Netlify-style /* /index.html 200 rules are not used here.

@@ -6,11 +6,24 @@
 
 import {
   createGitHubIssue,
+  FeedbackError,
+  FEEDBACK_BODY_MAX,
+  FEEDBACK_TITLE_MAX,
   getGitHubNewIssueUrl,
   prepareScreenshot,
   type FeedbackKind,
 } from '~/utils/feedback'
 import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (el: HTMLElement, opts: Record<string, unknown>) => string
+      reset: (id?: string) => void
+      remove: (id: string) => void
+    }
+  }
+}
 
 const KINDS: { id: FeedbackKind; label: string }[] = [
   { id: 'ux', label: 'UX' },
@@ -19,7 +32,12 @@ const KINDS: { id: FeedbackKind; label: string }[] = [
   { id: 'other', label: 'Other' },
 ]
 
-const { open } = useFeedbackNotes()
+const config = useRuntimeConfig()
+const turnstileSiteKey = computed(
+  () => (config.public.turnstileSiteKey as string) || '',
+)
+
+const { open, close } = useFeedbackNotes()
 const kind = ref<FeedbackKind>('ux')
 const title = ref('')
 const body = ref('')
@@ -27,11 +45,23 @@ const shot = ref<string | null>(null)
 const busy = ref(false)
 const toast = ref<string | null>(null)
 const fallbackUrl = ref<string | null>(null)
+const turnstileToken = ref<string | null>(null)
+const turnstileWidgetId = ref<string | null>(null)
 const bodyRef = ref<HTMLTextAreaElement | null>(null)
 const fileRef = ref<HTMLInputElement | null>(null)
 const titleRef = ref<HTMLInputElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 const overlayRef = ref<HTMLElement | null>(null)
+const turnstileRef = ref<HTMLDivElement | null>(null)
+
+const submitDisabledReason = computed(() => {
+  if (busy.value) return 'Filing your note…'
+  if (!title.value.trim()) return 'Add a title first'
+  if (turnstileSiteKey.value && !turnstileToken.value) return 'Complete verification first'
+  return ''
+})
+
+const canSubmit = computed(() => !submitDisabledReason.value)
 
 /** visualViewport offset — keeps the sheet in the visible area above the keyboard */
 const viewportStyle = ref<Record<string, string>>({})
@@ -106,9 +136,59 @@ const onFocusField = (e: FocusEvent) => {
   }, 300)
 }
 
-const close = () => {
+const tryClose = () => {
   if (busy.value) return
-  open.value = false
+  close()
+}
+
+let turnstileScriptPromise: Promise<void> | null = null
+const loadTurnstileScript = () => {
+  if (typeof window === 'undefined') return Promise.resolve()
+  if (window.turnstile) return Promise.resolve()
+  if (turnstileScriptPromise) return turnstileScriptPromise
+  turnstileScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+    script.async = true
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('Turnstile failed to load'))
+    document.head.appendChild(script)
+  })
+  return turnstileScriptPromise
+}
+
+const mountTurnstile = async () => {
+  if (!turnstileSiteKey.value || !turnstileRef.value) return
+  try {
+    await loadTurnstileScript()
+    if (turnstileWidgetId.value) {
+      window.turnstile?.remove(turnstileWidgetId.value)
+      turnstileWidgetId.value = null
+    }
+    turnstileToken.value = null
+    turnstileWidgetId.value =
+      window.turnstile?.render(turnstileRef.value, {
+        sitekey: turnstileSiteKey.value,
+        callback: (token: string) => {
+          turnstileToken.value = token
+        },
+        'expired-callback': () => {
+          turnstileToken.value = null
+        },
+        'error-callback': () => {
+          turnstileToken.value = null
+        },
+      }) ?? null
+  } catch {
+    showToast('Verification widget failed to load.')
+  }
+}
+
+const resetTurnstile = () => {
+  if (turnstileWidgetId.value) {
+    window.turnstile?.reset(turnstileWidgetId.value)
+  }
+  turnstileToken.value = null
 }
 
 const onTitleEnter = (e: KeyboardEvent) => {
@@ -135,7 +215,7 @@ const onUpload = async (file: File | undefined) => {
 }
 
 const submit = async () => {
-  if (!title.value.trim() || busy.value) return
+  if (!canSubmit.value) return
   busy.value = true
   fallbackUrl.value = null
 
@@ -146,18 +226,23 @@ const submit = async () => {
     const url = await createGitHubIssue(fullTitle, fullBody, {
       kind: kind.value,
       imageBase64: shot.value,
+      turnstileToken: turnstileToken.value,
     })
     showToast('Note filed as a GitHub issue')
     fallbackUrl.value = url
     reset()
-    // Keep the panel open so the issue link is available (window.open is popup-blocked after await)
+    resetTurnstile()
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    const status = (e as { status?: number })?.status
-    const fallback = getGitHubNewIssueUrl(fullTitle, fullBody)
+    const err = e instanceof FeedbackError ? e : null
+    const msg = err?.message ?? (e instanceof Error ? e.message : String(e))
+    const status = err?.status
+    const fallback = await getGitHubNewIssueUrl(fullTitle, fullBody)
     if (status === 429) {
       showToast('Too many notes — wait a bit and try again.')
-    } else if (status === 503 || msg.includes('GITHUB_TOKEN') || msg.includes('not configured')) {
+    } else if (status === 403 && err?.code?.startsWith('TURNSTILE')) {
+      showToast('Verification failed — try again.')
+      resetTurnstile()
+    } else if (status === 503 || err?.code === 'NOT_CONFIGURED') {
       fallbackUrl.value = fallback
       showToast('API unavailable — use the GitHub link below.')
     } else if (/network|fetch|offline|failed to fetch/i.test(msg)) {
@@ -172,7 +257,7 @@ const submit = async () => {
 }
 
 useFocusTrap(overlayRef, open, {
-  onEscape: () => close(),
+  onEscape: () => tryClose(),
   initialFocus: 'input, textarea, .notes-panel__close',
 })
 
@@ -184,12 +269,19 @@ watch(open, async (isOpen) => {
     window.visualViewport?.addEventListener('resize', syncViewport)
     window.visualViewport?.addEventListener('scroll', syncViewport)
     window.addEventListener('resize', syncViewport)
+    await nextTick()
+    void mountTurnstile()
   } else {
     unlockScroll()
     window.visualViewport?.removeEventListener('resize', syncViewport)
     window.visualViewport?.removeEventListener('scroll', syncViewport)
     window.removeEventListener('resize', syncViewport)
     viewportStyle.value = {}
+    if (turnstileWidgetId.value) {
+      window.turnstile?.remove(turnstileWidgetId.value)
+      turnstileWidgetId.value = null
+    }
+    turnstileToken.value = null
   }
 })
 
@@ -226,7 +318,7 @@ onUnmounted(() => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="neospace-notes-title"
-        @click.self="close"
+        @click.self="tryClose"
         @keydown="onFormKeydown"
       >
         <div ref="panelRef" class="notes-panel">
@@ -237,7 +329,7 @@ onUnmounted(() => {
               class="notes-panel__close"
               aria-label="Close"
               :disabled="busy"
-              @click="close"
+              @click="tryClose"
             >
               <NeoIcon name="x" :size="16" :stroke="2" />
             </button>
@@ -248,20 +340,23 @@ onUnmounted(() => {
             The current page URL and any screenshot are included.
           </p>
 
-          <div class="notes-kinds" role="radiogroup" aria-label="Note type">
-            <button
+          <fieldset class="notes-kinds">
+            <legend class="notes-kinds__legend">Note type</legend>
+            <label
               v-for="k in KINDS"
               :key="k.id"
-              type="button"
-              role="radio"
               class="notes-kind"
               :class="{ 'notes-kind--active': kind === k.id }"
-              :aria-checked="kind === k.id"
-              @click="kind = k.id"
             >
-              {{ k.label }}
-            </button>
-          </div>
+              <input
+                v-model="kind"
+                type="radio"
+                name="neospace-note-kind"
+                :value="k.id"
+              />
+              <span>{{ k.label }}</span>
+            </label>
+          </fieldset>
 
           <label class="notes-label" for="neospace-note-title">Title</label>
           <input
@@ -271,14 +366,19 @@ onUnmounted(() => {
             type="text"
             class="notes-input"
             placeholder="Short title"
+            :maxlength="FEEDBACK_TITLE_MAX"
             enterkeyhint="next"
             autocomplete="off"
             autocorrect="on"
             required
             aria-required="true"
+            aria-describedby="neospace-note-title-count"
             @focus="onFocusField"
             @keydown.enter="onTitleEnter"
           />
+          <p id="neospace-note-title-count" class="notes-counter">
+            {{ title.length }}/{{ FEEDBACK_TITLE_MAX }}
+          </p>
 
           <label class="notes-label" for="neospace-note-body">Details</label>
           <textarea
@@ -288,9 +388,14 @@ onUnmounted(() => {
             class="notes-textarea"
             placeholder="What happened / what would help…"
             rows="4"
+            :maxlength="FEEDBACK_BODY_MAX"
             enterkeyhint="done"
+            aria-describedby="neospace-note-body-count"
             @focus="onFocusField"
           />
+          <p id="neospace-note-body-count" class="notes-counter">
+            {{ body.length }}/{{ FEEDBACK_BODY_MAX }}
+          </p>
 
           <div class="notes-shot-row">
             <input
@@ -317,22 +422,39 @@ onUnmounted(() => {
 
           <img v-if="shot" :src="shot" alt="Screenshot preview" class="notes-preview" />
 
+          <div
+            v-if="turnstileSiteKey"
+            ref="turnstileRef"
+            class="notes-turnstile"
+            aria-label="Bot verification"
+          />
+
           <p v-if="fallbackUrl" class="notes-fallback" role="status">
             <a :href="fallbackUrl" target="_blank" rel="noopener noreferrer">Open on GitHub</a>
           </p>
 
           <div class="notes-actions">
-            <button type="button" class="notes-cancel" :disabled="busy" @click="close">Cancel</button>
+            <button type="button" class="notes-cancel" :disabled="busy" @click="tryClose">
+              Cancel
+            </button>
             <button
               type="button"
               class="notes-submit"
-              :disabled="!title.trim() || busy"
-              :title="!title.trim() ? 'Add a title first' : undefined"
+              :disabled="!canSubmit"
+              :title="submitDisabledReason || undefined"
+              :aria-describedby="submitDisabledReason ? 'neospace-note-submit-hint' : undefined"
               @click="submit"
             >
               {{ busy ? 'Filing…' : 'File note' }}
             </button>
           </div>
+          <p
+            v-if="submitDisabledReason && !busy"
+            id="neospace-note-submit-hint"
+            class="notes-submit-hint"
+          >
+            {{ submitDisabledReason }}
+          </p>
         </div>
       </div>
     </Transition>
@@ -350,7 +472,7 @@ onUnmounted(() => {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
   bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
-  z-index: 90;
+  z-index: var(--neo-z-shell-header, 90);
   display: grid;
   place-items: center;
   width: 2.5rem;
@@ -363,11 +485,9 @@ onUnmounted(() => {
   cursor: pointer;
   transition: color var(--neo-transition-fast), border-color var(--neo-transition-fast);
 
-  &:hover,
-  &:focus-visible {
+  &:hover {
     color: var(--neo-text-primary);
     border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
-    outline: none;
   }
 
   /* Desktop: note lives in the sidebar footer */
@@ -378,7 +498,7 @@ onUnmounted(() => {
 
 .notes-overlay {
   position: fixed;
-  z-index: 1100;
+  z-index: var(--neo-z-modal-backdrop, 1040);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -443,6 +563,26 @@ onUnmounted(() => {
   }
 }
 
+.notes-counter {
+  margin: -0.25rem 0 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--neo-text-disabled);
+  text-align: right;
+}
+
+.notes-submit-hint {
+  margin: 0.35rem 0 0;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  text-align: right;
+}
+
+.notes-turnstile {
+  flex-shrink: 0;
+  margin-bottom: 0.5rem;
+}
+
 .notes-panel__lede {
   margin: 0 0 0.75rem;
   flex-shrink: 0;
@@ -473,10 +613,23 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 0.35rem;
   flex-shrink: 0;
-  margin-bottom: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  border: none;
+}
+
+.notes-kinds__legend {
+  width: 100%;
+  margin: 0 0 0.35rem;
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
 }
 
 .notes-kind {
+  display: inline-flex;
+  align-items: center;
   padding: 0.4rem 0.65rem;
   font-size: 0.75rem;
   font-weight: 500;
@@ -485,6 +638,20 @@ onUnmounted(() => {
   border: 1px solid var(--neo-border-color);
   border-radius: 4px;
   cursor: pointer;
+
+  input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+  }
+
+  &:has(input:focus-visible) {
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--neo-bg-primary);
+  }
 
   &--active {
     color: var(--neo-text-primary);
@@ -504,12 +671,7 @@ onUnmounted(() => {
   background: var(--neo-bg-primary);
   border: 1px solid var(--neo-border-color-dark);
   border-radius: 6px;
-  outline: none;
   box-sizing: border-box;
-
-  &:focus {
-    border-color: var(--neo-accent);
-  }
 
   &::placeholder {
     color: var(--neo-text-disabled);
@@ -539,6 +701,14 @@ onUnmounted(() => {
   flex-wrap: wrap;
   flex-shrink: 0;
   margin-bottom: 0.5rem;
+  border-radius: 4px;
+
+  &:focus-within .notes-shot-btn {
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--neo-bg-primary);
+    border-color: var(--neo-focus, var(--neo-accent));
+  }
 }
 
 .notes-shot-btn {
@@ -629,7 +799,7 @@ onUnmounted(() => {
   position: fixed;
   left: 50%;
   bottom: max(5.5rem, calc(env(safe-area-inset-bottom) + 4.5rem));
-  z-index: 1200;
+  z-index: var(--neo-z-toast, 1080);
   transform: translateX(-50%);
   max-width: min(90vw, 22rem);
   pointer-events: none;

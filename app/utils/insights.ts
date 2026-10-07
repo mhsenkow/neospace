@@ -183,9 +183,12 @@ export function buildInsightsReport(opts: {
   now?: Date
 }): InsightsReport {
   const now = opts.now || new Date()
-  const cutoff = new Date(now.getTime() - opts.windowDays * 86_400_000)
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const cutoff = new Date(startToday)
+  cutoff.setDate(cutoff.getDate() - (opts.windowDays - 1))
   const rows = opts.statuses
     .map(statusToInsightRow)
+    .filter((r) => r.visibility !== 'direct' && r.visibility !== 'private')
     .filter((r) => {
       const t = Date.parse(r.created_at)
       return Number.isFinite(t) && t >= cutoff.getTime() && t <= now.getTime()

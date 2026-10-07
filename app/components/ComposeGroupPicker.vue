@@ -6,6 +6,7 @@
 import { useGroupsStore, type Group } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { createRaceGuard } from '~/composables/useRace'
+import { useKeyboardViewport } from '~/composables/useKeyboardViewport'
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +31,8 @@ const isSearching = ref(false)
 const sheetRef = ref<HTMLElement | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const searchRace = createRaceGuard()
+
+const { viewportStyle, onFocusField } = useKeyboardViewport(open, { lockScroll: true })
 
 useFocusTrap(sheetRef, open, {
   onEscape: () => {
@@ -222,18 +225,22 @@ onBeforeUnmount(() => {
       </button>
     </template>
 
-    <Teleport to="body">
-      <Transition name="group-pick-sheet">
-        <div
-          v-if="open"
-          ref="sheetRef"
-          class="group-pick-sheet"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="group-pick-title"
-        >
-          <button type="button" class="group-pick-sheet__backdrop" tabindex="-1" aria-hidden="true" @click="open = false" />
-          <div class="group-pick-sheet__panel">
+    <NeoSheet
+      :open="open"
+      :z-index="240"
+      desktop-width="compact"
+      max-height="min(78dvh, 560px)"
+      @close="open = false"
+    >
+      <div
+        ref="sheetRef"
+        class="group-pick-sheet__inner"
+        :style="viewportStyle"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="group-pick-title"
+        @focusin="onFocusField"
+      >
             <header class="group-pick-sheet__header">
               <h2 id="group-pick-title" class="group-pick-sheet__title">Community or topic</h2>
               <button type="button" class="group-pick-sheet__close" aria-label="Close" @click="open = false">
@@ -339,10 +346,8 @@ onBeforeUnmount(() => {
                 </p>
               </template>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+      </div>
+    </NeoSheet>
   </div>
 </template>
 
@@ -501,7 +506,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   justify-content: flex-end;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     justify-content: center;
     align-items: center;
     padding: 1.5rem;
@@ -531,7 +536,7 @@ onBeforeUnmount(() => {
   padding-bottom: env(safe-area-inset-bottom, 0);
   overflow: hidden;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     max-width: 420px;
     border-radius: 12px;
     border-bottom: 1px solid var(--neo-border-color);
@@ -701,7 +706,7 @@ onBeforeUnmount(() => {
   .group-pick-sheet__panel {
     transform: translateY(18px);
 
-    @media (min-width: 1024px) {
+    @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
       transform: translateY(8px) scale(0.98);
     }
   }

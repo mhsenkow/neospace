@@ -50,9 +50,16 @@ watch(
   },
 )
 
+const windowBusy = ref(false)
+
 const setWindow = async (days: InsightsWindowDays) => {
   if (insights.windowDays === days && report.value) return
-  await load(days)
+  windowBusy.value = true
+  try {
+    await load(days)
+  } finally {
+    windowBusy.value = false
+  }
 }
 
 const onExportLoom = async () => {
@@ -206,8 +213,8 @@ const kpi = computed(() => {
     { label: 'Engagement', value: formatCompact(t.engagement) },
     { label: 'Avg / post', value: formatCompact(t.avgEngagement) },
     { label: 'Favourites', value: formatCompact(t.favourites) },
-    { label: 'Boosts', value: formatCompact(t.reblogs) },
-    { label: 'Replies', value: formatCompact(t.repliesRecv) },
+    { label: 'Boosts received', value: formatCompact(t.reblogs) },
+    { label: 'Replies received', value: formatCompact(t.repliesRecv) },
   ]
 })
 </script>
@@ -219,7 +226,8 @@ const kpi = computed(() => {
         <h2 class="insights__title">Insights</h2>
         <p class="insights__sub">
           Known engagement from your posts — favourites, boosts, replies, quotes.
-          Mastodon does not expose views or reach.
+          Mastodon does not expose views or reach. Direct and private posts are excluded from
+          charts and CSV/Loom export.
         </p>
       </div>
       <div class="insights__windows" role="group" aria-label="Time window">
@@ -247,6 +255,12 @@ const kpi = computed(() => {
     </div>
 
     <template v-else-if="report">
+      <div
+        class="insights__body"
+        :class="{ 'insights__body--busy': windowBusy || (insights.isLoading && !!report) }"
+        :aria-busy="windowBusy || insights.isLoading"
+      >
+      <p v-if="windowBusy || (insights.isLoading && report)" class="insights__updating" role="status">Updating…</p>
       <div class="insights__actions">
         <button
           type="button"
@@ -431,20 +445,10 @@ const kpi = computed(() => {
         <h3 class="insights__card-title">Top posts</h3>
         <ol class="insights__tops">
           <li v-for="post in report.topPosts" :key="post.id">
-            <a
-              v-if="post.url"
-              :href="post.url"
-              class="insights__top-link"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
+            <NuxtLink :to="`/status/${post.id}`" class="insights__top-link">
               <span class="insights__top-score">{{ formatCompact(post.engagement) }}</span>
               <span class="insights__top-preview">{{ post.preview || '(no text)' }}</span>
-            </a>
-            <div v-else class="insights__top-link">
-              <span class="insights__top-score">{{ formatCompact(post.engagement) }}</span>
-              <span class="insights__top-preview">{{ post.preview || '(no text)' }}</span>
-            </div>
+            </NuxtLink>
           </li>
         </ol>
       </div>
@@ -453,7 +457,9 @@ const kpi = computed(() => {
         <h3 class="insights__card-title">Hashtags</h3>
         <ul class="insights__tags">
           <li v-for="tag in report.topTags" :key="tag.name">
-            <span class="insights__tag-name">#{{ tag.name }}</span>
+            <NuxtLink :to="`/groups/${encodeURIComponent(tag.name)}`" class="insights__tag-name">
+              #{{ tag.name }}
+            </NuxtLink>
             <span class="insights__tag-meta">
               {{ tag.count }} · {{ formatCompact(tag.engagement) }} eng
             </span>
@@ -489,6 +495,7 @@ const kpi = computed(() => {
           · last active {{ new Date(report.account.lastStatusAt).toLocaleDateString() }}
         </template>
       </p>
+      </div>
     </template>
   </section>
 </template>
@@ -499,6 +506,23 @@ const kpi = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+
+    &--busy {
+      opacity: 0.72;
+      pointer-events: none;
+    }
+  }
+
+  &__updating {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+  }
 }
 
 .insights__head {

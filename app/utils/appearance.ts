@@ -26,7 +26,7 @@ export type NeoUiId =
   | 'nyt'
 
 export type NeoFontId = 'sans' | 'serif' | 'book' | 'mono' | 'dyslexic'
-export type NeoFontSizeId = 'small' | 'medium' | 'large'
+export type NeoFontSizeId = 'small' | 'medium' | 'large' | 'xlarge' | 'xxlarge'
 /** Corner system — match follows chrome/theme; others override --neo-radius-* */
 export type NeoRadiusId =
   | 'match'
@@ -87,6 +87,8 @@ export const FONT_SIZE_OPTIONS: { id: NeoFontSizeId; label: string }[] = [
   { id: 'small', label: 'Small' },
   { id: 'medium', label: 'Medium' },
   { id: 'large', label: 'Large' },
+  { id: 'xlarge', label: 'XL' },
+  { id: 'xxlarge', label: 'XXL' },
 ]
 
 export const RADIUS_OPTIONS: { id: NeoRadiusId; label: string; desc: string }[] = [

@@ -1,13 +1,63 @@
-/** NeoSpace GitHub repo for leave-a-note → issues */
-export const FEEDBACK_GITHUB_REPO = 'mhsenkow/neospace'
+/** NeoSpace leave-a-note → GitHub issues */
 
-export type FeedbackKind = 'ux' | 'bug' | 'idea' | 'other'
+import { formatLogRingForFeedback } from '~/utils/log'
+import {
+  FEEDBACK_GITHUB_REPO,
+  FEEDBACK_SCREENSHOT_CLIENT_MAX,
+  GITHUB_NEW_ISSUE_URL_MAX,
+  type FeedbackKind,
+} from '../../shared/feedbackConstants'
 
-export function getGitHubNewIssueUrl(title: string, body: string): string {
+export type { FeedbackKind }
+export {
+  FEEDBACK_GITHUB_REPO,
+  FEEDBACK_TITLE_MAX,
+  FEEDBACK_BODY_MAX,
+} from '../../shared/feedbackConstants'
+
+export class FeedbackError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message)
+    this.name = 'FeedbackError'
+  }
+}
+
+export async function getGitHubNewIssueUrl(
+  title: string,
+  body: string,
+): Promise<string> {
+  const fullTitle = title.trim()
+  const fullBody = body.trim()
   const params = new URLSearchParams()
-  if (title.trim()) params.set('title', title.trim())
-  if (body.trim()) params.set('body', body.trim())
-  return `https://github.com/${FEEDBACK_GITHUB_REPO}/issues/new?${params.toString()}`
+  if (fullTitle) params.set('title', fullTitle)
+  if (fullBody) params.set('body', fullBody)
+  let url = `https://github.com/${FEEDBACK_GITHUB_REPO}/issues/new?${params.toString()}`
+
+  if (url.length <= GITHUB_NEW_ISSUE_URL_MAX) return url
+
+  const note = '\n\n[Full text copied to clipboard — URL truncated]'
+  const room = GITHUB_NEW_ISSUE_URL_MAX - note.length - 80
+  const truncatedBody = `${fullBody.slice(0, Math.max(0, room - fullTitle.length))}${note}`
+  const fallbackParams = new URLSearchParams()
+  if (fullTitle) fallbackParams.set('title', fullTitle)
+  if (truncatedBody) fallbackParams.set('body', truncatedBody)
+  url = `https://github.com/${FEEDBACK_GITHUB_REPO}/issues/new?${fallbackParams.toString()}`
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(
+        `# ${fullTitle}\n\n${fullBody}`,
+      )
+    } catch {
+      /* clipboard optional */
+    }
+  }
+
+  return url.slice(0, GITHUB_NEW_ISSUE_URL_MAX)
 }
 
 export async function createGitHubIssue(
@@ -17,32 +67,52 @@ export async function createGitHubIssue(
     kind?: FeedbackKind
     imageBase64?: string | null
     href?: string
+    turnstileToken?: string | null
   },
 ): Promise<string> {
+  const logRing = formatLogRingForFeedback()
+  const bodyWithLogs = logRing
+    ? `${body.trim()}\n\n<details><summary>Recent client logs</summary>\n\n\`\`\`\n${logRing}\n\`\`\`\n</details>`
+    : body
+
   const res = await fetch('/api/feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       title,
-      body,
-      kind: options?.kind || 'feedback',
+      body: bodyWithLogs,
+      kind: options?.kind || 'other',
       imageBase64: options?.imageBase64 ?? null,
-      // Only send path area — never full URL with DM/status ids
       href:
         options?.href ??
         (typeof window !== 'undefined' ? window.location.pathname : ''),
+      turnstileToken: options?.turnstileToken ?? null,
     }),
   })
 
-  const json = (await res.json()) as { url?: string; error?: string }
-  if (!res.ok || !json.url) {
-    throw new Error(json.error || `Feedback failed (${res.status})`)
-  }
-  return json.url
-}
+  const contentType = res.headers.get('Content-Type') || ''
+  let data: { url?: string; error?: string; code?: string }
 
-/** Keep under GitHub issue body limits (~65k) with room for text */
-const MAX_SHOT_CHARS = 40_000
+  if (contentType.includes('application/json')) {
+    data = (await res.json()) as typeof data
+  } else {
+    const text = await res.text()
+    throw new FeedbackError(
+      text.slice(0, 120) || `Feedback failed (${res.status})`,
+      res.status,
+      'BAD_RESPONSE',
+    )
+  }
+
+  if (!res.ok || !data.url) {
+    throw new FeedbackError(
+      data.error || `Feedback failed (${res.status})`,
+      res.status,
+      data.code,
+    )
+  }
+  return data.url
+}
 
 export async function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -55,7 +125,7 @@ export async function readFileAsDataUrl(file: File): Promise<string> {
 
 export async function shrinkImageDataUrl(
   dataUrl: string,
-  maxChars: number = MAX_SHOT_CHARS,
+  maxChars: number = FEEDBACK_SCREENSHOT_CLIENT_MAX,
 ): Promise<string | null> {
   try {
     const img = new Image()
@@ -94,7 +164,7 @@ export async function shrinkImageDataUrl(
 
 export async function prepareScreenshot(file: File): Promise<string> {
   let dataUrl = await readFileAsDataUrl(file)
-  if (dataUrl.length > MAX_SHOT_CHARS) {
+  if (dataUrl.length > FEEDBACK_SCREENSHOT_CLIENT_MAX) {
     const smaller = await shrinkImageDataUrl(dataUrl)
     if (!smaller) {
       throw new Error('Screenshot too large — try a smaller image.')

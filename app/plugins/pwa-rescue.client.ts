@@ -17,7 +17,13 @@ export default defineNuxtPlugin(() => {
 
   if (!('serviceWorker' in navigator)) return
 
+  let lastUpdate = 0
+  const UPDATE_THROTTLE_MS = 60_000
+
   const ping = () => {
+    const now = Date.now()
+    if (now - lastUpdate < UPDATE_THROTTLE_MS) return
+    lastUpdate = now
     navigator.serviceWorker
       .getRegistration()
       .then((reg) => {
@@ -30,5 +36,4 @@ export default defineNuxtPlugin(() => {
     if (document.visibilityState === 'visible') ping()
   })
   window.addEventListener('focus', ping)
-  ping()
 })

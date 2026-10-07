@@ -7,11 +7,11 @@ import type { mastodon } from 'masto'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
-import { activeClient } from '~/composables/useMasto'
-import { createRaceGuard } from '~/composables/useRace'
+import { useFediverseSearch } from '~/composables/useFediverseSearch'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
 import { stripHtml } from '~/utils/sanitizeHtml'
-import { mapErrorToMessage } from '~/utils/friendlyError'
+import { tagHistorySummary } from '~/utils/hashtag'
+import { useToastStore } from '~/stores/toast'
 
 type ExploreTab = 'all' | 'people' | 'posts' | 'tags' | 'servers'
 
@@ -37,6 +37,7 @@ const STARTER_TOPICS = [
 const { categories, getByCategory, search: searchServers, featured } = useCuratedInstances()
 const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
+const toastStore = useToastStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -48,16 +49,29 @@ const customBusy = ref(false)
 const watchToast = ref<string | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
-const searchBusy = ref(false)
-const searchError = ref<string | null>(null)
-const accounts = ref<mastodon.v1.Account[]>([])
-const statuses = ref<mastodon.v1.Status[]>([])
-const hashtags = ref<mastodon.v1.Tag[]>([])
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
-const searchRace = createRaceGuard()
-
+const loadMoreSentinel = ref<HTMLElement | null>(null)
 const isSignedIn = computed(() => instancesStore.hasAuthenticatedInstance)
+
+const {
+  searchBusy,
+  searchError,
+  accounts,
+  statuses,
+  hashtags,
+  relationships,
+  followedTags,
+  searchHasMore,
+  loadMoreBusy,
+  clearResults: clearFediverseResults,
+  runSearch: runFediverseSearch,
+  loadMore: loadMoreSearch,
+  shouldResolveQuery,
+  toggleFollowAccount,
+  toggleFollowTag,
+} = useFediverseSearch({ query, tab, isSignedIn })
+
 const hasQuery = computed(() => query.value.trim().length >= 2)
 
 const filteredInstances = computed(() => {
@@ -213,71 +227,6 @@ const lookUpCustom = async () => {
   }
 }
 
-const clearFediverseResults = () => {
-  searchRace.abort()
-  accounts.value = []
-  statuses.value = []
-  hashtags.value = []
-  searchError.value = null
-}
-
-const shouldResolveQuery = (q: string) =>
-  /@[\w.-]+@[\w.-]+/.test(q) || /^https?:\/\//i.test(q.trim())
-
-const runFediverseSearch = async (q: string, opts?: { resolve?: boolean }) => {
-  const trimmed = q.trim()
-  if (trimmed.length < 2) {
-    clearFediverseResults()
-    return
-  }
-  if (tab.value === 'servers') {
-    clearFediverseResults()
-    return
-  }
-  if (!isSignedIn.value) {
-    clearFediverseResults()
-    return
-  }
-
-  const ticket = searchRace.next()
-  searchBusy.value = true
-  searchError.value = null
-  try {
-    const client = activeClient()
-    const type =
-      tab.value === 'people'
-        ? 'accounts'
-        : tab.value === 'posts'
-          ? 'statuses'
-          : tab.value === 'tags'
-            ? 'hashtags'
-            : undefined
-
-    const resolve = opts?.resolve ?? shouldResolveQuery(trimmed)
-    const res = await client.v2.search.fetch({
-      q: trimmed,
-      limit: 16,
-      resolve,
-      ...(type ? { type } : {}),
-    })
-
-    if (!ticket.isCurrent()) return
-    accounts.value = res.accounts || []
-    statuses.value = res.statuses || []
-    hashtags.value = res.hashtags || []
-  } catch (e: any) {
-    if (!ticket.isCurrent()) return
-    if (e?.name === 'AbortError') return
-    const friendly = mapErrorToMessage(e)
-    searchError.value = friendly.detail || friendly.title || 'Search failed'
-    accounts.value = []
-    statuses.value = []
-    hashtags.value = []
-  } finally {
-    if (ticket.isCurrent()) searchBusy.value = false
-  }
-}
-
 const onSearchEnter = () => {
   if (tab.value === 'servers' || (tab.value === 'all' && looksLikeHostname(query.value))) {
     void lookUpCustom()
@@ -289,14 +238,6 @@ const onSearchEnter = () => {
 const looksLikeHostname = (raw: string) => {
   const q = raw.trim().toLowerCase()
   return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(q) && !q.includes(' ')
-}
-
-const openAccount = (acct: string) => {
-  router.push({ path: '/profile', query: { user: acct } })
-}
-
-const openHashtag = (tag: string) => {
-  router.push(`/groups/${encodeURIComponent(tag.replace(/^#/, ''))}`)
 }
 
 const applyTopic = (tag: string) => {
@@ -322,6 +263,40 @@ watch(query, (q) => {
     }
     persistRoute()
   }, 260)
+})
+
+const handleFollowPerson = async (account: mastodon.v1.Account, e: Event) => {
+  e.preventDefault()
+  e.stopPropagation()
+  try {
+    await toggleFollowAccount(account)
+  } catch {
+    toastStore.show({ message: 'Couldn’t update follow' })
+  }
+}
+
+const handleFollowTag = async (tag: mastodon.v1.Tag, e: Event) => {
+  e.preventDefault()
+  e.stopPropagation()
+  try {
+    await toggleFollowTag(tag)
+  } catch {
+    toastStore.show({ message: 'Couldn’t update tag follow' })
+  }
+}
+
+let loadMoreObserver: IntersectionObserver | null = null
+watch(loadMoreSentinel, (el) => {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+  if (!el) return
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((x) => x.isIntersecting)) loadMoreSearch()
+    },
+    { rootMargin: '120px' },
+  )
+  loadMoreObserver.observe(el)
 })
 
 watch(tab, () => {
@@ -364,7 +339,7 @@ useHead({
 onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
   if (searchTimer) clearTimeout(searchTimer)
-  searchRace.next()
+  loadMoreObserver?.disconnect()
 })
 </script>
 
@@ -427,11 +402,16 @@ onUnmounted(() => {
         href="https://joinmastodon.org/servers"
         target="_blank"
         rel="noopener"
-        class="explore-btn explore-btn--primary"
+        class="neo-btn neo-btn--primary"
       >
         Create a free account
       </a>
-      <NuxtLink to="/login" class="explore-btn explore-btn--ghost">I already have an account</NuxtLink>
+      <NuxtLink to="/login" class="neo-btn neo-btn--ghost">I already have an account</NuxtLink>
+      <p class="explore-cta-row__hint">
+        Pick a server from the
+        <a href="https://joinmastodon.org/servers" target="_blank" rel="noopener">joinmastodon directory</a>,
+        then sign in here.
+      </p>
     </div>
 
     <template v-if="!hasQuery">
@@ -441,7 +421,7 @@ onUnmounted(() => {
           class="explore-empty"
         >
           <p>Sign in to search {{ tab }}.</p>
-          <button type="button" class="explore-btn explore-btn--primary" @click="goSignIn">
+          <button type="button" class="neo-btn neo-btn--primary" @click="goSignIn">
             Sign in
           </button>
         </div>
@@ -533,10 +513,10 @@ onUnmounted(() => {
       >
         <p>Sign in to search people, posts, and tags.</p>
         <div class="explore-empty__actions">
-          <button type="button" class="explore-btn explore-btn--primary" @click="goSignIn">
+          <button type="button" class="neo-btn neo-btn--primary" @click="goSignIn">
             Sign in
           </button>
-          <button type="button" class="explore-btn explore-btn--ghost" @click="setTab('servers')">
+          <button type="button" class="neo-btn neo-btn--ghost" @click="setTab('servers')">
             Servers
           </button>
         </div>
@@ -545,39 +525,65 @@ onUnmounted(() => {
       <template v-else>
         <section v-if="showPeople" class="explore-people">
           <h2 class="explore-section-title">People</h2>
-          <NuxtLink
+          <article
             v-for="acct in accounts"
             :key="acct.id"
-            :to="{ path: '/profile', query: { user: acct.acct } }"
-            class="explore-person"
+            class="explore-person-row"
           >
-            <img :src="acct.avatar" alt="" class="explore-person__avatar" loading="lazy" />
-            <span class="explore-person__meta">
-              <strong>{{ acct.displayName || acct.username }}</strong>
-              <em>@{{ acct.acct }}</em>
-              <span v-if="acct.note" class="explore-person__bio">{{ stripHtml(acct.note) }}</span>
-            </span>
-          </NuxtLink>
-          <button
-            v-if="tab === 'all' && accounts.length >= 8"
-            type="button"
-            class="explore-text-link"
-            @click="setTab('people')"
-          >
-            More people →
-          </button>
+            <NuxtLink
+              :to="{ path: '/profile', query: { user: acct.acct } }"
+              class="explore-person"
+            >
+              <img :src="acct.avatar" alt="" class="explore-person__avatar" loading="lazy" />
+              <span class="explore-person__meta">
+                <strong>{{ acct.displayName || acct.username }}</strong>
+                <em>@{{ acct.acct }}</em>
+                <span v-if="relationships[acct.id]?.followedBy" class="explore-chip">Follows you</span>
+                <span v-if="acct.note" class="explore-person__bio">{{ stripHtml(acct.note) }}</span>
+              </span>
+            </NuxtLink>
+            <button
+              v-if="isSignedIn"
+              type="button"
+              class="neo-btn neo-btn--sm"
+              :class="relationships[acct.id]?.following || relationships[acct.id]?.requested ? 'neo-btn--secondary' : 'neo-btn--primary'"
+              @click="handleFollowPerson(acct, $event)"
+            >
+              {{
+                relationships[acct.id]?.following
+                  ? 'Following'
+                  : relationships[acct.id]?.requested
+                    ? 'Requested'
+                    : 'Follow'
+              }}
+            </button>
+          </article>
         </section>
 
-        <section v-if="showTags" class="explore-people">
+        <section v-if="showTags" class="explore-tags">
           <h2 class="explore-section-title">Tags</h2>
-          <NuxtLink
+          <article
             v-for="tag in hashtags"
             :key="tag.name"
-            :to="`/groups/${encodeURIComponent(tag.name.replace(/^#/, ''))}`"
-            class="explore-tag"
+            class="explore-tag-row"
           >
-            #{{ tag.name }}
-          </NuxtLink>
+            <NuxtLink
+              :to="`/groups/${encodeURIComponent(tag.name.replace(/^#/, ''))}`"
+              class="explore-tag-hit"
+            >
+              <strong>#{{ tag.name }}</strong>
+              <span v-if="tagHistorySummary(tag)" class="explore-tag-hit__meta">{{ tagHistorySummary(tag) }}</span>
+            </NuxtLink>
+            <button
+              v-if="isSignedIn"
+              type="button"
+              class="neo-btn neo-btn--sm"
+              :class="followedTags.has(tag.name.toLowerCase()) ? 'neo-btn--secondary' : 'neo-btn--ghost'"
+              @click="handleFollowTag(tag, $event)"
+            >
+              {{ followedTags.has(tag.name.toLowerCase()) ? 'Following' : 'Follow tag' }}
+            </button>
+          </article>
         </section>
 
         <section v-if="showPosts" class="explore-posts">
@@ -605,7 +611,7 @@ onUnmounted(() => {
           <button
             v-if="tab === 'all'"
             type="button"
-            class="explore-btn explore-btn--ghost"
+            class="neo-btn neo-btn--ghost"
             :disabled="customBusy"
             @click="lookUpCustom"
           >
@@ -618,7 +624,7 @@ onUnmounted(() => {
           class="explore-empty"
         >
           <p>No curated servers match that search.</p>
-          <button type="button" class="explore-btn explore-btn--ghost" @click="lookUpCustom">
+          <button type="button" class="neo-btn neo-btn--ghost" @click="lookUpCustom">
             Look up “{{ query }}” as a server name
           </button>
         </div>
@@ -629,37 +635,32 @@ onUnmounted(() => {
             <button
               v-if="tab !== 'servers'"
               type="button"
-              class="explore-btn explore-btn--ghost"
+              class="neo-btn neo-btn--ghost"
               @click="setTab('servers')"
             >
               Try servers
             </button>
-            <button type="button" class="explore-btn explore-btn--ghost" @click="lookUpCustom">
+            <button type="button" class="neo-btn neo-btn--ghost" @click="lookUpCustom">
               Look up as hostname
             </button>
           </div>
         </div>
+
+        <div
+          v-if="searchHasMore && hasQuery && tab !== 'servers' && isSignedIn"
+          ref="loadMoreSentinel"
+          class="explore-loadmore"
+          role="status"
+          aria-live="polite"
+          :aria-busy="loadMoreBusy"
+        >
+          {{ loadMoreBusy ? 'Loading more…' : 'Scroll for more' }}
+        </div>
       </template>
     </template>
 
-    <p class="explore-catalog-note">
-      <a href="https://joinmastodon.org/servers" target="_blank" rel="noopener">Directory</a>
-      · type a hostname to look it up.
-    </p>
-
     <section class="explore-help">
       <h2 class="explore-section-title explore-help__heading">Get started</h2>
-      <div v-if="!isSignedIn" class="explore-help__card">
-        <h3>Create</h3>
-        <a
-          href="https://joinmastodon.org/servers"
-          target="_blank"
-          rel="noopener"
-          class="explore-text-link"
-        >
-          Directory →
-        </a>
-      </div>
       <div v-if="!isSignedIn" class="explore-help__card">
         <h3>Sign in</h3>
         <button type="button" class="explore-text-link" @click="goSignIn">Continue →</button>
@@ -892,6 +893,62 @@ onUnmounted(() => {
   margin-bottom: 1.25rem;
   padding-bottom: 1.15rem;
   border-bottom: 1px solid var(--neo-border-color);
+
+  &__hint {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+    line-height: 1.45;
+  }
+}
+
+.explore-person-row,
+.explore-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--neo-border-color);
+}
+
+.explore-chip {
+  display: inline-block;
+  margin-top: 0.15rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-style: normal;
+  color: var(--neo-text-secondary);
+  background: var(--neo-accent-soft);
+  border-radius: 999px;
+}
+
+.explore-tag-hit {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0;
+  text-decoration: none;
+  color: inherit;
+
+  strong {
+    display: block;
+    color: var(--neo-accent);
+  }
+
+  &__meta {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+}
+
+.explore-loadmore {
+  padding: 1rem 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
 }
 
 .explore-btn {
@@ -1055,10 +1112,10 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 0.7rem;
-  width: 100%;
-  padding: 0.65rem 0.15rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0;
   border: none;
-  border-bottom: 1px solid var(--neo-border-color);
   background: transparent;
   color: inherit;
   text-align: left;

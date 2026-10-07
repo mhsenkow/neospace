@@ -22,9 +22,10 @@ const route = useRoute()
 const router = useRouter()
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
-let pendingNavTimer: ReturnType<typeof setTimeout> | null = null
 let longPressFired = false
 let lastTapAt = 0
+let pressStartX = 0
+let pressStartY = 0
 
 const accounts = computed(() => instancesStore.authenticatedInstances)
 const multi = computed(() => accounts.value.length > 1)
@@ -61,26 +62,17 @@ const onTriggerClick = (e: MouseEvent) => {
     return
   }
 
-  // Nav + multi: delay profile so double-tap can cycle; single tap → profile
-  // Long-press opens the sheet (Threads pattern)
+  // Nav + multi: single tap → profile immediately; double-tap cycles account
   if (isNav.value && multi.value) {
     const now = Date.now()
     if (now - lastTapAt < 320) {
       lastTapAt = 0
-      if (pendingNavTimer) {
-        clearTimeout(pendingNavTimer)
-        pendingNavTimer = null
-      }
       e.preventDefault()
       void cycleAccount()
       return
     }
     lastTapAt = now
-    if (pendingNavTimer) clearTimeout(pendingNavTimer)
-    pendingNavTimer = setTimeout(() => {
-      pendingNavTimer = null
-      goProfile()
-    }, 320)
+    goProfile()
     return
   }
 
@@ -100,15 +92,13 @@ const clearLongPress = () => {
   }
 }
 
-const onPointerDown = () => {
+const onPointerDown = (e: PointerEvent) => {
   longPressFired = false
+  pressStartX = e.clientX
+  pressStartY = e.clientY
   clearLongPress()
   longPressTimer = setTimeout(() => {
     longPressFired = true
-    if (pendingNavTimer) {
-      clearTimeout(pendingNavTimer)
-      pendingNavTimer = null
-    }
     openMenu()
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
@@ -120,12 +110,34 @@ const onPointerDown = () => {
   }, 380)
 }
 
+const onPointerMove = (e: PointerEvent) => {
+  if (!longPressTimer) return
+  const dx = Math.abs(e.clientX - pressStartX)
+  const dy = Math.abs(e.clientY - pressStartY)
+  if (dx > 8 || dy > 8) clearLongPress()
+}
+
 const onPointerUp = () => clearLongPress()
 const onPointerLeave = () => clearLongPress()
 
+const onTriggerKeydown = (e: KeyboardEvent) => {
+  if (!multi.value) return
+  if (e.key === 'ArrowDown' || (e.key === 'Enter' && e.shiftKey)) {
+    e.preventDefault()
+    openMenu()
+  }
+}
+
+const triggerLabel = computed(() => {
+  const name =
+    instancesStore.userDisplayName ||
+    instancesStore.activeAccount?.user?.username ||
+    'Profile'
+  return multi.value ? `${name}, switch accounts` : name
+})
+
 onUnmounted(() => {
   clearLongPress()
-  if (pendingNavTimer) clearTimeout(pendingNavTimer)
 })
 </script>
 
@@ -146,11 +158,13 @@ onUnmounted(() => {
           ? 'Profile · hold to switch accounts · double-tap to cycle'
           : 'Profile'
       "
-      :aria-label="multi ? 'Profile, hold to switch accounts' : 'Profile'"
+      :aria-label="triggerLabel"
       :aria-expanded="menuOpen"
       aria-haspopup="dialog"
       @click="onTriggerClick"
+      @keydown="onTriggerKeydown"
       @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerLeave"
       @pointerleave="onPointerLeave"

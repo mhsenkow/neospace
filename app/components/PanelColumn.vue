@@ -503,105 +503,71 @@ onUnmounted(() => {
     @dragover="onColumnDragOver"
     @drop="onColumnDrop"
   >
-    <div class="column-header">
-      <button
-        v-if="canReorder"
-        type="button"
-        class="neo-chrome-btn column-drag-handle"
-        draggable="true"
-        title="Drag to reorder"
-        aria-label="Drag to reorder column"
-        @click.stop
-        @dragstart="onColumnDragStart"
-        @dragend="onColumnDragEnd"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="9" cy="6" r="1.5" />
-          <circle cx="15" cy="6" r="1.5" />
-          <circle cx="9" cy="12" r="1.5" />
-          <circle cx="15" cy="12" r="1.5" />
-          <circle cx="9" cy="18" r="1.5" />
-          <circle cx="15" cy="18" r="1.5" />
-        </svg>
-      </button>
-
-      <button
-        v-if="isProfilePeek"
-        type="button"
-        class="neo-chrome-btn"
-        title="Back"
-        aria-label="Back to previous feed"
-        @click="exitPeek"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
-
-      <span class="column-feed-label">{{ title }}</span>
-
-      <div v-if="canReorder && !isProfilePeek" class="column-reorder">
+    <ColumnChrome
+      :column-id="column.id"
+      :can-reorder="canReorder"
+      :is-first="isFirst"
+      :is-last="isLast"
+      @column-drag-start="emit('column-drag-start', $event)"
+      @column-drag-end="emit('column-drag-end')"
+      @column-drag-over="emit('column-drag-over', $event)"
+      @column-drop="emit('column-drop', $event)"
+      @move-left="emit('move-left')"
+      @move-right="emit('move-right')"
+    >
+      <template #lead>
         <button
+          v-if="isProfilePeek"
           type="button"
           class="neo-chrome-btn"
-          title="Move left"
-          aria-label="Move column left"
-          :disabled="isFirst"
-          @pointerdown.stop
-          @click.stop="emit('move-left')"
+          title="Back"
+          aria-label="Back to previous feed"
+          @click="exitPeek"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
+      </template>
+      <template #title>
+        <span class="column-feed-label">{{ title }}</span>
+      </template>
+      <template #actions>
         <button
           type="button"
           class="neo-chrome-btn"
-          title="Move right"
-          aria-label="Move column right"
-          :disabled="isLast"
+          :class="{ 'neo-chrome-btn--on': focused && column.feedType !== 'profile' }"
+          :title="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
+          :aria-label="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
+          :aria-pressed="column.feedType === 'profile' ? undefined : focused"
           @pointerdown.stop
-          @click.stop="emit('move-right')"
+          @click.stop="onFocusClick"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polyline points="9 18 15 12 9 6" />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 3 21 3 21 9" />
+            <polyline points="9 21 3 21 3 15" />
+            <line x1="21" y1="3" x2="14" y2="10" />
+            <line x1="3" y1="21" x2="10" y2="14" />
           </svg>
         </button>
-      </div>
-
-      <button
-        type="button"
-        class="neo-chrome-btn"
-        :class="{ 'neo-chrome-btn--on': focused && column.feedType !== 'profile' }"
-        :title="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
-        :aria-label="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
-        :aria-pressed="column.feedType === 'profile' ? undefined : focused"
-        @pointerdown.stop
-        @click.stop="onFocusClick"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="15 3 21 3 21 9" />
-          <polyline points="9 21 3 21 3 15" />
-          <line x1="21" y1="3" x2="14" y2="10" />
-          <line x1="3" y1="21" x2="10" y2="14" />
-        </svg>
-      </button>
-
-      <button
-        v-if="canRemove"
-        type="button"
-        class="neo-chrome-btn neo-chrome-btn--danger column-close"
-        title="Remove column"
-        aria-label="Remove column"
-        @pointerdown.stop
-        @click.stop="emit('remove')"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-    </div>
+      </template>
+      <template #close>
+        <button
+          v-if="canRemove"
+          type="button"
+          class="neo-chrome-btn neo-chrome-btn--danger column-close"
+          title="Remove column"
+          aria-label="Remove column"
+          @pointerdown.stop
+          @click.stop="emit('remove')"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </template>
+    </ColumnChrome>
 
     <div class="panel-scroll">
       <!-- Profile peek (other person) -->

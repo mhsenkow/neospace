@@ -2,6 +2,7 @@
 import { useNotificationsStore, type ExtendedNotification, type NotificationFilterType, type SortOrder } from '~/stores/notifications'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
+import { clientFor } from '~/composables/useMasto'
 import type { mastodon } from 'masto'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
@@ -147,7 +148,50 @@ const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
 
 const ensureNotifAccount = (notif: ExtendedNotification) => {
   if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
+    const inst = instancesStore.instances.find((i) => i.id === notif._instanceId)
     instancesStore.setActiveAccount(notif._instanceId)
+    const handle = inst?.user?.acct || inst?.name || 'account'
+    toastStore.show({ message: `Switched to @${handle}`, duration: 3200 })
+  }
+}
+
+const followRequestBusy = ref<Record<string, boolean>>({})
+
+const authorizeFollowRequest = async (notif: ExtendedNotification, e?: Event) => {
+  e?.stopPropagation()
+  if (!notif.account?.id || !notif._instanceId) return
+  const key = notif._key
+  followRequestBusy.value = { ...followRequestBusy.value, [key]: true }
+  try {
+    const client = clientFor(notif._instanceId)
+    await client.v1.followRequests.$select(notif.account.id).authorize()
+    notificationsStore.dismissNotification(key)
+    toastStore.show({ message: 'Follow request accepted' })
+  } catch {
+    toastStore.show({ message: 'Couldn’t accept request' })
+  } finally {
+    const next = { ...followRequestBusy.value }
+    delete next[key]
+    followRequestBusy.value = next
+  }
+}
+
+const rejectFollowRequest = async (notif: ExtendedNotification, e?: Event) => {
+  e?.stopPropagation()
+  if (!notif.account?.id || !notif._instanceId) return
+  const key = notif._key
+  followRequestBusy.value = { ...followRequestBusy.value, [key]: true }
+  try {
+    const client = clientFor(notif._instanceId)
+    await client.v1.followRequests.$select(notif.account.id).reject()
+    notificationsStore.dismissNotification(key)
+    toastStore.show({ message: 'Follow request rejected' })
+  } catch {
+    toastStore.show({ message: 'Couldn’t reject request' })
+  } finally {
+    const next = { ...followRequestBusy.value }
+    delete next[key]
+    followRequestBusy.value = next
   }
 }
 
@@ -388,46 +432,30 @@ onDeactivated(() => {
                 <NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" />
               </div>
 
-              <!-- Avatar → profile -->
-              <button
-                v-if="notif.account"
-                type="button"
-                class="notif-item__avatar"
-                tabindex="-1"
-                :aria-label="`Open ${notif.account.displayName || notif.account.username}'s profile`"
-                @click="openNotifProfile(notif)"
-              >
+              <!-- Avatar → profile (decorative for keyboard) -->
+              <div v-if="notif.account" class="notif-item__avatar" aria-hidden="true">
                 <img
                   :src="notif.account.avatar"
                   alt=""
                   loading="lazy"
                 />
-              </button>
+              </div>
 
               <!-- Content: name → profile; rest → post -->
               <div class="notif-item__body">
                 <div class="notif-item__headline">
-                  <p class="notif-item__who">
-                    <button
-                      v-if="notif.account"
-                      type="button"
-                      class="notif-item__name"
-                      @click="openNotifProfile(notif)"
-                    >
-                      {{ actorLabel(notif) }}
-                    </button>
-                    <button
-                      type="button"
-                      class="notif-item__action-btn"
-                      @click="openNotification(notif)"
-                    >
-                      <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
-                      <span
-                        v-if="showAccountHost && notif._instanceUrl"
-                        class="notif-item__host"
-                      >· {{ hostLabel(notif._instanceUrl) }}</span>
-                    </button>
-                  </p>
+                  <button
+                    type="button"
+                    class="notif-item__open-headline"
+                    @click="openNotification(notif)"
+                  >
+                    <span v-if="notif.account" class="notif-item__name">{{ actorLabel(notif) }}</span>
+                    <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
+                    <span
+                      v-if="showAccountHost && notif._instanceUrl"
+                      class="notif-item__host"
+                    >· {{ hostLabel(notif._instanceUrl) }}</span>
+                  </button>
                   <time
                     class="notif-item__time"
                     :datetime="notif.createdAt"
@@ -462,15 +490,28 @@ onDeactivated(() => {
                     </span>
                   </div>
                 </button>
-                <button
-                  v-else
-                  type="button"
-                  class="notif-item__open notif-item__open--bare"
-                  :aria-label="`Open ${notifLabel(notif.type)}`"
-                  @click="openNotification(notif)"
+
+                <div
+                  v-if="notif.type === 'follow_request' && notif.account"
+                  class="notif-item__follow-actions"
                 >
-                  <span class="sr-only">Open</span>
-                </button>
+                  <button
+                    type="button"
+                    class="neo-btn neo-btn--primary neo-btn--sm"
+                    :disabled="followRequestBusy[notif._key]"
+                    @click="authorizeFollowRequest(notif, $event)"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    class="neo-btn neo-btn--ghost neo-btn--sm"
+                    :disabled="followRequestBusy[notif._key]"
+                    @click="rejectFollowRequest(notif, $event)"
+                  >
+                    Reject
+                  </button>
+                </div>
               </div>
 
               <!-- Dismiss -->
@@ -956,27 +997,41 @@ onDeactivated(() => {
     flex-shrink: 0;
     width: 44px;
     height: 44px;
-    padding: 0;
-    border: none;
     border-radius: 50%;
     overflow: hidden;
     background: var(--neo-bg-tertiary);
     margin-top: 0.125rem;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
 
     img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
-      pointer-events: none;
     }
+  }
+
+  &__open-headline {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
 
     &:focus-visible {
       outline: 2px solid var(--neo-accent);
       outline-offset: 2px;
     }
+  }
+
+  &__follow-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
   }
 
   &__body {

@@ -273,6 +273,7 @@ const parkSlideNow = (el: HTMLElement, slideIndex: number) => {
   if (!child) return
   el.scrollLeft = child.offsetLeft
   el.style.scrollSnapType = 'none'
+  el.style.touchAction = ''
   el.classList.remove('columns-container--settling', 'columns-container--swiping')
   armParkCooldown()
 }
@@ -551,12 +552,38 @@ const onColumnsScroll = () => {
 
   const index = nearestSlideIndex()
   carouselSlideIndex.value = index
-  if (!carouselSettling) syncBoardPortalFromSlide(index)
+  // Never sync portal chrome mid-gesture — hint thrash feels like vibration
+  if (!carouselSettling && !carouselGesture && !nativeTookOver) {
+    syncBoardPortalFromSlide(index)
+  }
   const feeds = columnsStore.columns.length
   // Only remap tab highlight while parked on a real feed
   if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
     activeColumnIndex.value = index - EDGE_LEFT
   }
+}
+
+/** Wait until scrollLeft stops changing before parking (Android momentum). */
+const whenScrollIdle = (el: HTMLElement, cb: () => void) => {
+  window.clearTimeout(nativeParkTimer)
+  let last = el.scrollLeft
+  let stable = 0
+  const tick = () => {
+    if (carouselGesture || carouselSettling) return
+    const x = el.scrollLeft
+    if (Math.abs(x - last) < 1) {
+      stable += 1
+      if (stable >= 3) {
+        cb()
+        return
+      }
+    } else {
+      stable = 0
+      last = x
+    }
+    nativeParkTimer = window.setTimeout(tick, 48)
+  }
+  nativeParkTimer = window.setTimeout(tick, 48)
 }
 
 /** Native scroll / momentum ended — park on the nearest full slide */
@@ -690,6 +717,8 @@ const onCarouselTouchMove = (e: TouchEvent) => {
     g.locked = Math.abs(dx) > Math.abs(dy) * 1.05 ? 'x' : 'y'
     if (g.locked === 'x') {
       el.style.scrollSnapType = 'none'
+      // Claim the gesture fully so Android doesn't also scroll underneath us
+      el.style.touchAction = 'none'
       el.classList.add('columns-container--swiping')
     }
   }
@@ -700,6 +729,7 @@ const onCarouselTouchMove = (e: TouchEvent) => {
   // Calling preventDefault then is ignored (Intervention) and fighting
   // native scrollLeft makes the board vibrate / bounce.
   if (!e.cancelable) {
+    el.style.touchAction = ''
     el.classList.remove('columns-container--swiping')
     nativeTookOver = true
     carouselGesture = null
@@ -716,12 +746,12 @@ const onCarouselTouchMove = (e: TouchEvent) => {
 }
 
 const scheduleNativePark = () => {
-  window.clearTimeout(nativeParkTimer)
-  nativeParkTimer = window.setTimeout(() => {
+  const el = columnsContainer.value
+  if (!el || !isMobileUi.value) return
+  whenScrollIdle(el, () => {
     if (carouselGesture || carouselSettling || portalActionLock) return
-    if (!isMobileUi.value) return
     settleCarousel(nearestSlideIndex(), 'auto')
-  }, 100)
+  })
 }
 
 const finishCarouselGesture = (e: TouchEvent) => {
@@ -744,6 +774,7 @@ const finishCarouselGesture = (e: TouchEvent) => {
   nativeTookOver = false
   if (!el || !wasX) return
 
+  el.style.touchAction = ''
   el.classList.remove('columns-container--swiping')
 
   // Mobile — instant park on a full-width slide (±1 on a clear flick)
@@ -796,6 +827,7 @@ const unbindCarouselGestures = () => {
   nativeTookOver = false
   parkCooldownUntil = 0
   el.style.scrollSnapType = ''
+  el.style.touchAction = ''
   el.classList.remove('columns-container--swiping', 'columns-container--settling')
   carouselGesture = null
 }

@@ -2,10 +2,20 @@
  * Shared compose media attachments — drag/drop, paste, upload, previews, alt text.
  */
 
-import type { mastodon } from 'masto'
 import { markRaw } from 'vue'
 import { useStatusStore } from '~/stores/status'
-import { CHART_ALT_MAX } from '~/utils/loomHandoff'
+import { useInstancesStore } from '~/stores/instances'
+import {
+  COMPOSE_IMAGE_ACCEPT,
+  COMPOSE_MAX_IMAGE_DIMENSION,
+  COMPOSE_MEDIA_ACCEPT,
+  DEFAULT_MAX_ATTACHMENTS,
+  DEFAULT_MAX_FILE_BYTES,
+  MEDIA_ALT_MAX,
+  uploadTimeoutForBytes,
+} from '~/utils/composeConstants'
+
+export type ComposeAttachmentSource = 'user' | 'handoff'
 
 export interface ComposeAttachment {
   localId: string
@@ -16,24 +26,65 @@ export interface ComposeAttachment {
   error: string | null
   /** Accessibility description sent to Mastodon as media description */
   description: string
+  source: ComposeAttachmentSource
 }
 
-const MAX_ATTACHMENTS = 4
-const MAX_FILE_BYTES = 40 * 1024 * 1024 // Mastodon default often 40MB images
-const ACCEPT = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/i
-export const COMPOSE_MEDIA_ACCEPT =
-  'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime'
+type RejectedFile = { name: string; reason: string }
 
 function uid() {
   return `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+async function downscaleImageFile(file: File, maxDim = COMPOSE_MAX_IMAGE_DIMENSION): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file
+  if (typeof createImageBitmap === 'undefined') return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    if (bitmap.width <= maxDim && bitmap.height <= maxDim) {
+      bitmap.close()
+      return file
+    }
+    const scale = maxDim / Math.max(bitmap.width, bitmap.height)
+    const w = Math.round(bitmap.width * scale)
+    const h = Math.round(bitmap.height * scale)
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      bitmap.close()
+      return file
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h)
+    bitmap.close()
+    const outType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, outType, outType === 'image/jpeg' ? 0.92 : undefined)
+    })
+    if (!blob) return file
+    const ext = outType === 'image/png' ? '.png' : '.jpg'
+    const base = file.name.replace(/\.[^.]+$/, '') || 'image'
+    return new File([blob], `${base}${ext}`, { type: outType })
+  } catch {
+    return file
+  }
+}
+
 export function useComposeMedia() {
   const statusStore = useStatusStore()
+  const instancesStore = useInstancesStore()
   const attachments = ref<ComposeAttachment[]>([])
   const isDragging = ref(false)
+  const uploadAnnounce = ref('')
   let dragDepth = 0
   const altTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const uploadControllers = new Map<string, AbortController>()
+
+  const maxAttachments = computed(
+    () => instancesStore.composeMediaLimits.maxAttachments,
+  )
+  const maxFileBytes = computed(() => instancesStore.composeMediaLimits.maxFileBytes)
+  const altMax = computed(() => instancesStore.composeMediaLimits.altMax)
 
   const isUploading = computed(() => attachments.value.some((a) => a.uploading))
   const hasMedia = computed(() => attachments.value.length > 0)
@@ -45,7 +96,19 @@ export function useComposeMedia() {
       attachments.value.length === 0 ||
       attachments.value.every((a) => a.remoteId && !a.uploading && !a.error),
   )
-  const canAddMore = computed(() => attachments.value.length < MAX_ATTACHMENTS)
+  const canAddMore = computed(() => attachments.value.length < maxAttachments.value)
+
+  const announce = (message: string) => {
+    uploadAnnounce.value = ''
+    nextTick(() => {
+      uploadAnnounce.value = message
+    })
+  }
+
+  const abortUpload = (localId: string) => {
+    uploadControllers.get(localId)?.abort()
+    uploadControllers.delete(localId)
+  }
 
   const revokeAll = () => {
     for (const a of attachments.value) {
@@ -54,6 +117,7 @@ export function useComposeMedia() {
   }
 
   const removeAttachment = (localId: string) => {
+    abortUpload(localId)
     const timer = altTimers.get(localId)
     if (timer) {
       clearTimeout(timer)
@@ -66,10 +130,18 @@ export function useComposeMedia() {
   }
 
   const clearAttachments = () => {
+    for (const a of attachments.value) abortUpload(a.localId)
+    uploadControllers.clear()
     for (const t of altTimers.values()) clearTimeout(t)
     altTimers.clear()
     revokeAll()
     attachments.value = []
+  }
+
+  const clearHandoffAttachments = () => {
+    for (const a of attachments.value.filter((x) => x.source === 'handoff')) {
+      removeAttachment(a.localId)
+    }
   }
 
   /** Always mutate via attachments.value so Vue tracks uploading/error/remoteId. */
@@ -83,27 +155,38 @@ export function useComposeMedia() {
   const uploadOne = async (localId: string) => {
     const draft = patchAttachment(localId, { uploading: true, error: null })
     if (!draft) return
+    abortUpload(localId)
+    const controller = new AbortController()
+    uploadControllers.set(localId, controller)
+    const label = draft.file.name || 'Attachment'
+    announce(`Uploading ${label}`)
     try {
       const remote = await statusStore.uploadMedia(
         draft.file,
         draft.description.trim() || undefined,
+        {
+          signal: controller.signal,
+          timeoutMs: uploadTimeoutForBytes(draft.file.size),
+        },
       )
+      if (controller.signal.aborted) return
       const current = attachments.value.find((a) => a.localId === localId)
       if (!current) return
       current.remoteId = remote.id
-      // Prefer server preview if available
-      // Keep blob preview to avoid flicker; remote URL is used after post
+      announce(`${label} uploaded`)
     } catch (e: any) {
+      if (controller.signal.aborted) return
+      const msg = e?.message || 'Upload failed'
       patchAttachment(localId, {
-        error: e?.message || 'Upload failed',
+        error: msg,
         remoteId: null,
       })
+      announce(`${label} upload failed`)
     } finally {
+      uploadControllers.delete(localId)
       patchAttachment(localId, { uploading: false })
     }
   }
-
-  type RejectedFile = { name: string; reason: string }
 
   /**
    * @param descriptions Optional parallel alt-text hints (e.g. Loom chart title).
@@ -112,8 +195,10 @@ export function useComposeMedia() {
   const addFiles = async (
     files: FileList | File[] | null | undefined,
     descriptions?: (string | null | undefined)[],
+    opts?: { source?: ComposeAttachmentSource },
   ): Promise<{ accepted: number; rejected: RejectedFile[] }> => {
     const rejected: RejectedFile[] = []
+    const source = opts?.source ?? 'user'
     if (!files || files.length === 0) return { accepted: 0, rejected }
 
     const list = Array.from(files)
@@ -139,25 +224,27 @@ export function useComposeMedia() {
       return { accepted: 0, rejected }
     }
 
-    const room = MAX_ATTACHMENTS - attachments.value.length
+    const limit = maxAttachments.value
+    const maxBytes = maxFileBytes.value
+    const room = limit - attachments.value.length
     if (room <= 0) {
       for (const file of list) {
-        rejected.push({ name: file.name, reason: 'Attachment limit reached (4)' })
+        rejected.push({ name: file.name, reason: `Attachment limit reached (${limit})` })
       }
       return { accepted: 0, rejected }
     }
 
-    // Filter first so oversize/wrong-type don't consume slots
     const candidates: { file: File; hint?: string | null }[] = []
     let descIdx = 0
     for (const file of list) {
-      if (!ACCEPT.test(file.type)) {
+      if (!COMPOSE_IMAGE_ACCEPT.test(file.type)) {
         rejected.push({ name: file.name, reason: 'Unsupported file type' })
         descIdx += 1
         continue
       }
-      if (file.size > MAX_FILE_BYTES) {
-        rejected.push({ name: file.name, reason: 'File too large (max 40MB)' })
+      if (file.size > maxBytes) {
+        const mb = Math.round(maxBytes / (1024 * 1024))
+        rejected.push({ name: file.name, reason: `File too large (max ${mb}MB)` })
         descIdx += 1
         continue
       }
@@ -167,18 +254,23 @@ export function useComposeMedia() {
 
     const take = candidates.slice(0, room)
     for (const extra of candidates.slice(room)) {
-      rejected.push({ name: extra.file.name, reason: 'Attachment limit reached (4)' })
+      rejected.push({ name: extra.file.name, reason: `Attachment limit reached (${limit})` })
     }
 
-    const accepted: ComposeAttachment[] = take.map(({ file, hint }) => ({
-      localId: uid(),
-      file: markRaw(file),
-      previewUrl: URL.createObjectURL(file),
-      remoteId: null,
-      uploading: true,
-      error: null,
-      description: (hint || '').trim().slice(0, CHART_ALT_MAX),
-    }))
+    const accepted: ComposeAttachment[] = []
+    for (const { file, hint } of take) {
+      const prepared = file.type.startsWith('image/') ? await downscaleImageFile(file) : file
+      accepted.push({
+        localId: uid(),
+        file: markRaw(prepared),
+        previewUrl: URL.createObjectURL(prepared),
+        remoteId: null,
+        uploading: true,
+        error: null,
+        description: (hint || '').trim().slice(0, altMax.value),
+        source,
+      })
+    }
 
     if (accepted.length === 0) return { accepted: 0, rejected }
     attachments.value.push(...accepted)
@@ -208,7 +300,7 @@ export function useComposeMedia() {
 
   const setDescription = (localId: string, value: string) => {
     const draft = patchAttachment(localId, {
-      description: value.slice(0, CHART_ALT_MAX),
+      description: value.slice(0, altMax.value),
     })
     if (!draft?.remoteId) return
 
@@ -285,7 +377,7 @@ export function useComposeMedia() {
     )
     const files: File[] = []
     for (const item of Array.from(items)) {
-      if (item.kind === 'file' && ACCEPT.test(item.type)) {
+      if (item.kind === 'file' && COMPOSE_IMAGE_ACCEPT.test(item.type)) {
         const file = item.getAsFile()
         if (file) files.push(file)
       }
@@ -297,6 +389,8 @@ export function useComposeMedia() {
   }
 
   onUnmounted(() => {
+    for (const a of attachments.value) abortUpload(a.localId)
+    uploadControllers.clear()
     for (const t of altTimers.values()) clearTimeout(t)
     altTimers.clear()
     revokeAll()
@@ -310,12 +404,14 @@ export function useComposeMedia() {
     mediaIds,
     allReady,
     canAddMore,
-    maxAttachments: MAX_ATTACHMENTS,
-    altMax: CHART_ALT_MAX,
+    maxAttachments,
+    altMax,
+    uploadAnnounce,
     addFiles,
     retryUpload,
     removeAttachment,
     clearAttachments,
+    clearHandoffAttachments,
     setDescription,
     flushAltDescriptions,
     onDragEnter,
@@ -326,4 +422,4 @@ export function useComposeMedia() {
   }
 }
 
-export type { mastodon }
+export { COMPOSE_MEDIA_ACCEPT }

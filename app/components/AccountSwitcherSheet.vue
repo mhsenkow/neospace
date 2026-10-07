@@ -16,7 +16,7 @@ const sheetRef = ref<HTMLElement | null>(null)
 
 useFocusTrap(sheetRef, menuOpen, {
   onEscape: closeMenu,
-  initialFocus: '.acct-sheet__close, .acct-sheet__avatar-btn, button',
+  initialFocus: '.acct-sheet__avatar-btn--active, .acct-sheet__row--active, .acct-sheet__avatar-btn, .acct-sheet__row',
 })
 
 const switchedToast = ref<string | null>(null)
@@ -82,6 +82,20 @@ const makeMain = (id: string) => {
   closeMenu()
 }
 
+const signOutAccount = async (id: string) => {
+  const account = accounts.value.find((a) => a.id === id)
+  if (!account) return
+  const ok = await useOverlayStore().openConfirm({
+    title: 'Sign out?',
+    body: `Sign out of ${handleOf(account)}? You can keep watching public posts.`,
+    confirmLabel: 'Sign out',
+    danger: true,
+  })
+  if (!ok) return
+  await instancesStore.logoutInstance(id)
+  if (!accounts.value.length) closeMenu()
+}
+
 watch(menuOpen, (open) => {
   if (typeof document === 'undefined') return
   document.documentElement.classList.toggle('acct-sheet-open', open)
@@ -95,11 +109,11 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-    <Transition name="acct-toast">
-      <div v-if="switchedToast" class="acct-switch__toast" role="status">
-        {{ switchedToast }}
-      </div>
-    </Transition>
+    <div class="acct-switch__toast" role="status" aria-live="polite" aria-atomic="true">
+      <Transition name="acct-toast">
+        <span v-if="switchedToast">{{ switchedToast }}</span>
+      </Transition>
+    </div>
 
     <Transition name="acct-sheet">
       <div
@@ -128,7 +142,7 @@ onUnmounted(() => {
           </header>
 
           <ul v-if="accounts.length <= 4" class="acct-sheet__avatars">
-            <li v-for="account in accounts" :key="account.id">
+            <li v-for="account in accounts" :key="account.id" class="acct-sheet__avatar-item">
               <button
                 type="button"
                 class="acct-sheet__avatar-btn"
@@ -154,8 +168,17 @@ onUnmounted(() => {
                 </span>
                 <span class="acct-sheet__avatar-name">
                   {{ account.user?.displayName || account.user?.username }}
+                  <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
                 </span>
-                <span class="acct-sheet__avatar-host">{{ hostOf(account) }}</span>
+                <span class="acct-sheet__avatar-host">{{ handleOf(account) }}</span>
+              </button>
+              <button
+                type="button"
+                class="acct-sheet__signout"
+                :aria-label="`Sign out of ${handleOf(account)}`"
+                @click="signOutAccount(account.id)"
+              >
+                Sign out
               </button>
             </li>
 
@@ -415,7 +438,19 @@ onUnmounted(() => {
   justify-content: center;
 }
 
+.acct-sheet__avatar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .acct-sheet__avatar-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.2rem;
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--neo-text-primary);
@@ -424,6 +459,22 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
+}
+
+.acct-sheet__signout {
+  border: none;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+
+  &:hover {
+    color: var(--neo-danger);
+    background: color-mix(in srgb, var(--neo-danger) 10%, transparent);
+  }
 }
 
 .acct-sheet__avatar-host {

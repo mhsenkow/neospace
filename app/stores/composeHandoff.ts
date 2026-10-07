@@ -35,9 +35,21 @@ type StoredShare = {
   imageName?: string
 }
 
+type StoryPhase = 'idle' | 'loading' | 'ready' | 'error'
+
+type StoryState = {
+  phase: StoryPhase
+  hasImage: boolean
+  error: string | null
+}
+
 const MAX_HANDOFF_BYTES = 25 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = /^image\/(png|jpeg|webp|gif|avif)$/
 const DATA_URL_IMAGE = /^data:image\/(png|jpeg|webp);base64,/
+
+function storyKey(share: StoredShare): string {
+  return share.story || `local:${share.text}|${share.imageName || ''}`
+}
 
 async function fetchAsFile(url: string, filename: string, typeHint?: string): Promise<File | null> {
   try {
@@ -98,7 +110,6 @@ function handoffNotice(hasImage: boolean): string {
 
 export function persistLoomShare(share: StoredShare) {
   try {
-    // Prefer not storing huge data URLs — story URL is enough to re-fetch
     const slim: StoredShare = {
       text: share.text,
       story: share.story,
@@ -129,9 +140,8 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     pending: null as ComposeHandoffDraft | null,
     loading: false,
     error: null as string | null,
-    /** Dedupe repeated Loom postMessages / query ingest. */
-    lastIngestKey: null as string | null,
-    /** In-flight ingest per story — avoids double chart upload. */
+    /** Per-story ingest state — avoids convoluted string keys and dropped text-only reshares. */
+    storyStates: {} as Record<string, StoryState>,
     _ingestPromises: {} as Record<string, Promise<boolean>>,
   }),
 
@@ -154,49 +164,61 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       return draft
     },
 
+    _getStoryState(key: string): StoryState {
+      return this.storyStates[key] || { phase: 'idle', hasImage: false, error: null }
+    },
+
+    _setStoryState(key: string, patch: Partial<StoryState>) {
+      this.storyStates[key] = { ...this._getStoryState(key), ...patch }
+    },
+
+    /** Don't replace an image draft with a later text-only ingest for the same story. */
+    _shouldSkipTextOnlyUpdate(key: string, hasNewImage: boolean): boolean {
+      const state = this._getStoryState(key)
+      return state.phase === 'ready' && state.hasImage && !hasNewImage
+    },
+
+    _commitDraft(key: string, draft: ComposeHandoffDraft, hasImage: boolean) {
+      this.pending = draft
+      this._setStoryState(key, { phase: 'ready', hasImage, error: null })
+    },
+
     async ingestStored(share: StoredShare) {
-      const base = share.story ? storyBase(share.story) : null
-      const storyKey = share.story || `${share.text || ''}|${share.imageName || ''}`
-      const inflight = this._ingestPromises[storyKey]
+      const key = storyKey(share)
+      const inflight = this._ingestPromises[key]
       if (inflight) return inflight
 
-      const run = this._ingestStoredOnce(share, base)
-      this._ingestPromises[storyKey] = run
+      const run = this._ingestStoredOnce(share, key)
+      this._ingestPromises[key] = run
       try {
         return await run
       } finally {
-        delete this._ingestPromises[storyKey]
+        delete this._ingestPromises[key]
       }
     },
 
-    async _ingestStoredOnce(share: StoredShare, base: string | null) {
-      // Key without img flag first — we upgrade after fetch
-      const provisionalKey = `${share.story || ''}|${share.text || ''}`
-      if (
-        this.lastIngestKey?.startsWith(provisionalKey) &&
-        this.lastIngestKey.endsWith('|img') &&
-        (this.pending || this.hasPending)
-      ) {
-        // Already have image-bearing draft for this story
-        if (!share.imageDataUrl) return true
-      }
-
+    async _ingestStoredOnce(share: StoredShare, key: string) {
       this.loading = true
       this.error = null
+      this._setStoryState(key, { phase: 'loading', error: null })
+      const base = share.story ? storyBase(share.story) : null
+
       try {
         const files: File[] = []
         const imageName = share.imageName || 'loom-chart.png'
 
-        // 1) Prefer live story image (KV — works cross-colo)
         if (base) {
           const img = await fetchStoryImage(base, imageName)
           if (img) files.push(img)
         }
 
-        // 2) Fallback: data URL from postMessage / session
         if (!files.length && share.imageDataUrl) {
           const f = await fileFromDataUrl(share.imageDataUrl, imageName)
           if (f) files.push(f)
+        }
+
+        if (this._shouldSkipTextOnlyUpdate(key, files.length > 0)) {
+          return true
         }
 
         let lineageLine: string | null = null
@@ -222,26 +244,21 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
           ? [suggestedChartAlt({ caption: text, lineage: lineageLine })]
           : []
 
-        const key = `${share.story || ''}|${share.text || ''}|${files.length ? 'img' : 'noimg'}`
-        // Don't replace an image draft with a later text-only one
-        if (
-          this.lastIngestKey?.startsWith(`${share.story || ''}|`) &&
-          this.lastIngestKey.endsWith('|img') &&
-          !files.length
-        ) {
-          return true
-        }
-
-        this.lastIngestKey = key
-        this.pending = {
-          text,
-          files: files.map((f) => markRaw(f)),
-          descriptions,
-          notice: handoffNotice(files.length > 0),
-        }
+        this._commitDraft(
+          key,
+          {
+            text,
+            files: files.map((f) => markRaw(f)),
+            descriptions,
+            notice: handoffNotice(files.length > 0),
+          },
+          files.length > 0,
+        )
         return true
       } catch (e: any) {
-        this.error = e?.message || 'Failed to load Loom share'
+        const msg = e?.message || 'Failed to load Loom share'
+        this.error = msg
+        this._setStoryState(key, { phase: 'error', error: msg })
         return false
       } finally {
         this.loading = false
@@ -257,10 +274,6 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       })
     },
 
-    /**
-     * Optional live postMessage from Loom (may include PNG bytes).
-     * Still re-fetches story.img when possible — more reliable for large charts.
-     */
     async ingestFromMessage(data: {
       text?: string
       story?: string
@@ -274,7 +287,6 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       let imageDataUrl: string | undefined
       if (data.image?.buffer && data.image.buffer.byteLength > 0) {
         try {
-          // Only keep small images in sessionStorage; large ones use story fetch
           if (data.image.buffer.byteLength < 400_000) {
             imageDataUrl = bufferToDataUrl(data.image.buffer, imageType)
           }
@@ -291,22 +303,24 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       }
       persistLoomShare(share)
 
-      // If we have bytes and no story URL yet, use them directly
       if (data.image?.buffer && data.image.buffer.byteLength > 0 && !share.story) {
-        const key = `|${share.text || ''}|img`
-        if (this.lastIngestKey === key && (this.pending || this.hasPending)) return true
+        const key = storyKey(share)
+        if (this._shouldSkipTextOnlyUpdate(key, true)) return true
         this.loading = true
         this.error = null
         try {
           const file = markRaw(new File([data.image.buffer], imageName, { type: imageType }))
           const text = (share.text || '').trim()
-          this.lastIngestKey = key
-          this.pending = {
-            text,
-            files: [file],
-            descriptions: [suggestedChartAlt({ caption: text })],
-            notice: handoffNotice(true),
-          }
+          this._commitDraft(
+            key,
+            {
+              text,
+              files: [file],
+              descriptions: [suggestedChartAlt({ caption: text })],
+              notice: handoffNotice(true),
+            },
+            true,
+          )
           return true
         } finally {
           this.loading = false

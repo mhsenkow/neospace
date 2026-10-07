@@ -149,8 +149,9 @@ ul, ol {
 // Card Component — flat instrument face (chrome sets radius/border)
 .neo-card {
   background-color: var(--neo-bg-card);
-  border: var(--neo-chrome-border-width, 1px) solid var(--neo-border-color);
-  border-radius: var(--neo-radius-md);
+  border: var(--neo-chrome-border-width, 1px) var(--neo-border-style, solid) var(--neo-border-color);
+  border-radius: var(--neo-card-radius, var(--neo-radius-md));
+  box-shadow: var(--neo-card-extra-shadow, none);
   box-shadow: var(--neo-chrome-card-shadow, none);
   padding: var(--neo-spacing-6);
   transition: border-color var(--neo-transition-fast);
@@ -422,7 +423,7 @@ ul, ol {
   color: var(--neo-text-primary);
   border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
   /* Cap so theme “bubble” radii never clip typed glyphs */
-  border-radius: min(12px, var(--neo-radius-md));
+  border-radius: var(--neo-input-radius, min(12px, var(--neo-radius-md)));
   transition: border-color var(--neo-transition), box-shadow var(--neo-transition), background-color var(--neo-transition);
   box-sizing: border-box;
   

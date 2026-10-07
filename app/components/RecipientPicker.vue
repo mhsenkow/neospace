@@ -12,35 +12,131 @@ const emit = defineEmits<{
 }>()
 
 const query = ref('')
-const { results, following, isSearching, isLoadingFollowing, loadFollowing, search, clear } =
-  useAccountSearch()
+const listIndex = ref(-1)
+const listRef = ref<HTMLElement | null>(null)
+const statusAnnounce = ref('')
 
-const showResults = computed(() => query.value.trim().length > 0)
+const {
+  results,
+  following,
+  isSearching,
+  isLoadingFollowing,
+  followingError,
+  error: searchError,
+  loadFollowing,
+  search,
+  clear,
+} = useAccountSearch()
+
+const trimmedQuery = computed(() => query.value.trim())
+const hasQuery = computed(() => trimmedQuery.value.length > 0)
+
+const localMatches = computed(() => {
+  const q = trimmedQuery.value.toLowerCase().replace(/^@/, '')
+  if (!q) return following.value
+  return following.value.filter((a) => {
+    const name = (a.displayName || a.username || '').toLowerCase()
+    const acct = a.acct.toLowerCase()
+    return name.includes(q) || acct.includes(q) || a.username.toLowerCase().includes(q)
+  })
+})
+
+const displayAccounts = computed(() => {
+  if (!hasQuery.value) return following.value
+  const seen = new Set<string>()
+  const merged: mastodon.v1.Account[] = []
+  for (const a of localMatches.value) {
+    if (seen.has(a.id)) continue
+    seen.add(a.id)
+    merged.push(a)
+  }
+  for (const a of results.value) {
+    if (seen.has(a.id)) continue
+    seen.add(a.id)
+    merged.push(a)
+  }
+  return merged
+})
+
+const listStatus = computed(() => {
+  if (followingError.value) return followingError.value
+  if (searchError.value) return searchError.value
+  if (hasQuery.value && isSearching.value) return 'Searching…'
+  if (hasQuery.value && !displayAccounts.value.length) return 'No one matched.'
+  if (!hasQuery.value && isLoadingFollowing.value) return 'Loading people you follow…'
+  if (!hasQuery.value && !following.value.length && !followingError.value) {
+    return 'You’re not following anyone yet.'
+  }
+  if (displayAccounts.value.length) {
+    return `${displayAccounts.value.length} ${displayAccounts.value.length === 1 ? 'person' : 'people'}`
+  }
+  return ''
+})
+
+watch(listStatus, (msg) => {
+  if (!msg) return
+  statusAnnounce.value = ''
+  nextTick(() => {
+    statusAnnounce.value = msg
+  })
+})
+
+watch(query, (q) => {
+  listIndex.value = -1
+  search(q)
+})
 
 onMounted(() => {
   void loadFollowing()
 })
 
-watch(query, (q) => search(q))
-
 const pick = (account: mastodon.v1.Account) => {
   emit('select', account)
   clear()
   query.value = ''
+  listIndex.value = -1
+}
+
+const retryFollowing = () => {
+  void loadFollowing(true)
+}
+
+const onListKeydown = (e: KeyboardEvent) => {
+  const count = displayAccounts.value.length
+  if (!count) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    listIndex.value = (listIndex.value + 1) % count
+    scrollActiveIntoView()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    listIndex.value = (listIndex.value - 1 + count) % count
+    scrollActiveIntoView()
+  } else if (e.key === 'Enter' && listIndex.value >= 0) {
+    e.preventDefault()
+    const pickAccount = displayAccounts.value[listIndex.value]
+    if (pickAccount) pick(pickAccount)
+  }
+}
+
+const scrollActiveIntoView = () => {
+  nextTick(() => {
+    const el = listRef.value?.querySelector<HTMLElement>('[data-active="true"]')
+    el?.scrollIntoView({ block: 'nearest' })
+  })
 }
 
 onUnmounted(() => clear())
 </script>
 
 <template>
-  <div class="recipient-picker" aria-labelledby="recipient-picker-title">
-    <header class="recipient-picker__header">
-      <button type="button" class="neo-btn neo-btn--tertiary recipient-picker__cancel" @click="emit('cancel')">
-        Cancel
-      </button>
-      <h2 id="recipient-picker-title" class="recipient-picker__title">Message someone</h2>
-      <span class="recipient-picker__spacer" />
-    </header>
+  <div
+    class="recipient-picker"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="recipient-picker-title"
+  >
+    <NeoSheetHeader title="Message someone" title-id="recipient-picker-title" @cancel="emit('cancel')" />
 
     <p class="recipient-picker__hint">
       No separate friends list — pick someone you follow, or search the fediverse.
@@ -58,29 +154,37 @@ onUnmounted(() => clear())
         autocorrect="off"
         autocapitalize="off"
         spellcheck="false"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-controls="recipient-picker-list"
+        :aria-expanded="displayAccounts.length > 0"
+        @keydown="onListKeydown"
       />
     </div>
 
-    <div class="recipient-picker__list">
-      <template v-if="showResults">
-        <p v-if="isSearching" class="recipient-picker__status">Searching…</p>
-        <p v-else-if="!results.length" class="recipient-picker__status">No one matched.</p>
-        <button
-          v-for="account in results"
-          :key="account.id"
-          type="button"
-          class="recipient-picker__row"
-          @click="pick(account)"
-        >
-          <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
-          <span class="recipient-picker__meta">
-            <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
-            <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
-          </span>
-        </button>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ statusAnnounce }}</p>
+
+    <div
+      id="recipient-picker-list"
+      ref="listRef"
+      class="recipient-picker__list"
+      role="listbox"
+      aria-label="People"
+    >
+      <p v-if="followingError" class="recipient-picker__status">
+        {{ followingError }}
+        <button type="button" class="recipient-picker__retry" @click="retryFollowing">Retry</button>
+      </p>
+
+      <template v-else-if="hasQuery && isSearching && !displayAccounts.length">
+        <p class="recipient-picker__status">Searching…</p>
       </template>
 
-      <template v-else>
+      <template v-else-if="hasQuery && !displayAccounts.length">
+        <p class="recipient-picker__status">No one matched.</p>
+      </template>
+
+      <template v-else-if="!hasQuery">
         <p class="recipient-picker__section">People you follow</p>
         <p v-if="isLoadingFollowing" class="recipient-picker__status">Loading…</p>
         <p v-else-if="!following.length" class="recipient-picker__status">
@@ -90,20 +194,25 @@ onUnmounted(() => clear())
           </NuxtLink>
           — then they’ll show up here.
         </p>
-        <button
-          v-for="account in following"
-          :key="account.id"
-          type="button"
-          class="recipient-picker__row"
-          @click="pick(account)"
-        >
-          <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
-          <span class="recipient-picker__meta">
-            <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
-            <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
-          </span>
-        </button>
       </template>
+
+      <button
+        v-for="(account, index) in displayAccounts"
+        :key="account.id"
+        type="button"
+        class="recipient-picker__row"
+        role="option"
+        :aria-selected="listIndex === index"
+        :data-active="listIndex === index ? 'true' : undefined"
+        @click="pick(account)"
+        @mouseenter="listIndex = index"
+      >
+        <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
+        <span class="recipient-picker__meta">
+          <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
+          <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
+        </span>
+      </button>
     </div>
   </div>
 </template>
@@ -115,34 +224,6 @@ onUnmounted(() => clear())
   height: 100%;
   min-height: 0;
   background: var(--neo-bg-primary);
-}
-
-.recipient-picker__header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  border-bottom: 1px solid var(--neo-border-color);
-  flex-shrink: 0;
-}
-
-.recipient-picker__cancel {
-  min-width: auto;
-  min-height: 40px;
-  padding: 0.35rem 0.65rem;
-  font-weight: 600;
-}
-
-.recipient-picker__title {
-  flex: 1;
-  margin: 0;
-  text-align: center;
-  font-size: 0.9375rem;
-  font-weight: 700;
-}
-
-.recipient-picker__spacer {
-  width: 4.5rem;
 }
 
 .recipient-picker__hint {
@@ -189,6 +270,19 @@ onUnmounted(() => clear())
   line-height: 1.45;
 }
 
+.recipient-picker__retry {
+  margin-left: 0.35rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--neo-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .recipient-picker__link {
   color: var(--neo-accent);
   font-weight: 600;
@@ -211,6 +305,7 @@ onUnmounted(() => clear())
   cursor: pointer;
   min-height: 56px;
 
+  &[data-active='true'],
   &:hover,
   &:active {
     background: var(--neo-bg-tertiary);

@@ -4,4 +4,10 @@ node_modules
 .git
 *.md
 .DS_Store
-
+.env
+.env.*
+.dev.vars
+.wrangler
+coverage
+playwright-report
+test-results

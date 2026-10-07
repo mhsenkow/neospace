@@ -24,6 +24,8 @@ export interface CuratedInstance {
   blurb: string
   /** Show on login shortlist */
   featured?: boolean
+  /** ISO date when this entry was last verified still online */
+  verifiedAt?: string
   /** Soft accent for cards (instrument chrome, not Meta purple) */
   color: string
   emoji: string
@@ -44,6 +46,7 @@ const CATALOG: CuratedInstance[] = [
     description: 'The flagship Mastodon server — a bit of everything and everyone.',
     blurb: 'Most popular',
     featured: true,
+    verifiedAt: '2026-10-01',
     color: '#c45c26',
     emoji: '🌐',
     tags: ['general', 'beginner', 'popular'],
@@ -56,6 +59,7 @@ const CATALOG: CuratedInstance[] = [
     description: 'For free and open source software lovers — Linux, privacy, and hacking.',
     blurb: 'Open source & tech',
     featured: true,
+    verifiedAt: '2026-10-01',
     color: '#2f7d4a',
     emoji: '🐧',
     tags: ['foss', 'linux', 'privacy'],
@@ -68,6 +72,7 @@ const CATALOG: CuratedInstance[] = [
     description: 'A carefully moderated tech community for engineers, designers, and builders.',
     blurb: 'Welcoming community',
     featured: true,
+    verifiedAt: '2026-10-01',
     color: '#3d6b8e',
     emoji: '💻',
     tags: ['tech', 'engineering'],
@@ -80,6 +85,7 @@ const CATALOG: CuratedInstance[] = [
     description: 'Information security professionals sharing research, news, and war stories.',
     blurb: 'Security folks',
     featured: true,
+    verifiedAt: '2026-10-01',
     color: '#8b3a3a',
     emoji: '🔐',
     tags: ['security', 'infosec'],
@@ -92,6 +98,7 @@ const CATALOG: CuratedInstance[] = [
     description: 'A cozy home for artists, illustrators, and creative folks.',
     blurb: 'Artists & makers',
     featured: true,
+    verifiedAt: '2026-10-01',
     color: '#a84d6a',
     emoji: '🎨',
     tags: ['art', 'illustration'],
@@ -225,6 +232,7 @@ const CATALOG: CuratedInstance[] = [
     description: 'A large, well-moderated general server popular across Europe.',
     blurb: 'General · EU',
     featured: true,
+    verifiedAt: '2026-10-01',
     color: '#5a6a8a',
     emoji: '🇪🇺',
     tags: ['general', 'europe'],

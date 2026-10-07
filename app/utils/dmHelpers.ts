@@ -71,9 +71,8 @@ export function dayKey(iso: string): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
 
-export function daySeparatorLabel(iso: string): string {
+export function daySeparatorLabel(iso: string, now: Date = new Date()): string {
   const date = new Date(iso)
-  const now = new Date()
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const startThat = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const diffDays = Math.round((startToday.getTime() - startThat.getTime()) / 86_400_000)

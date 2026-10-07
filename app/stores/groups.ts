@@ -12,9 +12,13 @@ import { useInstancesStore } from './instances'
 import { useSettingsStore } from './settings'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { guessCategory as guessCategoryUtil } from '~/utils/guessCategory'
+import { isValidHashtag, normalizeHashtagInput } from '~/utils/hashtag'
+import { logWarn, logError } from '~/utils/log'
 
 /** Prevent concurrent initializeGroups races that double-push trending tags */
 let groupsInitPromise: Promise<void> | null = null
+const GROUPS_INIT_TTL_MS = 5 * 60 * 1000
+let groupsInitializedAt = 0
 
 export type GroupCategory =
   | 'tech'
@@ -66,6 +70,18 @@ interface GroupsState {
   maxId: string | null
   /** Followed-tags fetch failed — membership flags may be stale */
   followedTagsError: string | null
+  /** Per-tag join/leave in flight */
+  pendingTags: Record<string, boolean>
+  /** Per-tag timeline + scroll cache when navigating back */
+  timelineCache: Record<
+    string,
+    {
+      timeline: mastodon.v1.Status[]
+      maxId: string | null
+      hasMore: boolean
+      scrollY: number
+    }
+  >
 }
 
 // Predefined/suggested groups - friendly wrappers over popular hashtags
@@ -430,6 +446,8 @@ export const useGroupsStore = defineStore('groups', {
     hasMore: true,
     maxId: null,
     followedTagsError: null,
+    pendingTags: {},
+    timelineCache: {},
   }),
 
   getters: {
@@ -537,7 +555,14 @@ export const useGroupsStore = defineStore('groups', {
      * Initialize groups - curated + live trending hashtags from your server.
      * Single-flight so home + columns + menu can't race and double-push tags.
      */
-    async initializeGroups() {
+    async initializeGroups(force = false) {
+      if (
+        !force &&
+        groupsInitializedAt &&
+        Date.now() - groupsInitializedAt < GROUPS_INIT_TTL_MS
+      ) {
+        return
+      }
       if (groupsInitPromise) return groupsInitPromise
 
       groupsInitPromise = (async () => {
@@ -548,11 +573,24 @@ export const useGroupsStore = defineStore('groups', {
           const prevMembers = new Map(
             this.groups.map((g) => [g.tag.toLowerCase(), g.isMember]),
           )
-          this.groups = FEATURED_GROUPS.map((g) => ({
-            ...g,
-            isMember: prevMembers.get(g.tag.toLowerCase()) ?? false,
-            trending: false,
-          }))
+          const prevByTag = new Map(this.groups.map((g) => [g.tag.toLowerCase(), g]))
+          const merged: Group[] = []
+          for (const f of FEATURED_GROUPS) {
+            const key = f.tag.toLowerCase()
+            const prev = prevByTag.get(key)
+            merged.push({
+              ...f,
+              isMember: prev?.isMember ?? prevMembers.get(key) ?? false,
+              trending: false,
+              postsCount: prev?.postsCount,
+              description: prev?.description ?? f.description,
+            })
+            prevByTag.delete(key)
+          }
+          for (const g of prevByTag.values()) {
+            merged.push({ ...g })
+          }
+          this.groups = merged
 
           const instancesStore = useInstancesStore()
           await Promise.all([
@@ -560,9 +598,10 @@ export const useGroupsStore = defineStore('groups', {
             instancesStore.isAuthenticated ? this.fetchFollowedTags() : Promise.resolve(),
           ])
           this.dedupeGroups()
+          groupsInitializedAt = Date.now()
         } catch (e: any) {
           this.error = e.message || 'Failed to initialize groups'
-          console.error('Groups init error:', e)
+          logError('Groups init error:', e)
         } finally {
           this.isLoading = false
         }
@@ -673,8 +712,7 @@ export const useGroupsStore = defineStore('groups', {
           })
         }
       } catch (e: any) {
-        // Trending is best-effort; curated list still works
-        console.warn('Trending tags unavailable:', e?.message || e)
+        logWarn('Trending tags unavailable:', e?.message || e)
       }
     },
 
@@ -688,7 +726,18 @@ export const useGroupsStore = defineStore('groups', {
       try {
         this.followedTagsError = null
         const client = this.getClient()
-        const tags = await client.v1.followedTags.list()
+        const tags: mastodon.v1.Tag[] = []
+        let maxId: string | undefined
+        for (;;) {
+          const batch = await client.v1.followedTags.list({
+            limit: 100,
+            ...(maxId ? { maxId } : {}),
+          })
+          if (!batch.length) break
+          tags.push(...batch)
+          if (batch.length < 100) break
+          maxId = batch[batch.length - 1]!.name
+        }
         this.followedTags = tags
 
         // Update membership status for known groups
@@ -715,8 +764,12 @@ export const useGroupsStore = defineStore('groups', {
         }
       } catch (e: any) {
         this.followedTagsError = e.message || 'Failed to load joined groups'
-        console.error('Failed to fetch followed tags:', e)
+        logError('Failed to fetch followed tags:', e)
       }
+    },
+
+    isTagPending(tag: string): boolean {
+      return !!this.pendingTags[tag.toLowerCase()]
     },
 
     /**
@@ -728,14 +781,21 @@ export const useGroupsStore = defineStore('groups', {
         throw new Error('Must be logged in to join groups')
       }
 
+      const key = tag.toLowerCase()
+      this.pendingTags = { ...this.pendingTags, [key]: true }
+
+      const groupIndex = this.groups.findIndex((g) => g.tag.toLowerCase() === key)
+      const wasMember = groupIndex !== -1 ? this.groups[groupIndex]!.isMember : false
+      if (groupIndex !== -1) {
+        this.groups[groupIndex]!.isMember = true
+      }
+
       try {
         const client = this.getClient()
         const result = await client.v1.tags.$select(tag).follow()
-        
-        // Update local state
-        const groupIndex = this.groups.findIndex(g => g.tag.toLowerCase() === tag.toLowerCase())
+
         if (groupIndex !== -1) {
-          this.groups[groupIndex].isMember = true
+          this.groups[groupIndex]!.isMember = true
         } else {
           // Add as new group
           this.groups.push({
@@ -755,8 +815,15 @@ export const useGroupsStore = defineStore('groups', {
 
         return result
       } catch (e: any) {
-        console.error('Failed to join group:', e)
+        if (groupIndex !== -1) {
+          this.groups[groupIndex]!.isMember = wasMember
+        }
+        logError('Failed to join group:', e)
         throw e
+      } finally {
+        const next = { ...this.pendingTags }
+        delete next[key]
+        this.pendingTags = next
       }
     },
 
@@ -769,23 +836,30 @@ export const useGroupsStore = defineStore('groups', {
         throw new Error('Must be logged in to leave groups')
       }
 
+      const key = tag.toLowerCase()
+      this.pendingTags = { ...this.pendingTags, [key]: true }
+      const groupIndex = this.groups.findIndex((g) => g.tag.toLowerCase() === key)
+      const wasMember = groupIndex !== -1 ? this.groups[groupIndex]!.isMember : true
+      if (groupIndex !== -1) {
+        this.groups[groupIndex]!.isMember = false
+      }
+      const prevFollowed = this.followedTags
+      this.followedTags = this.followedTags.filter((t) => t.name.toLowerCase() !== key)
+
       try {
         const client = this.getClient()
         await client.v1.tags.$select(tag).unfollow()
-        
-        // Update local state
-        const groupIndex = this.groups.findIndex(g => g.tag.toLowerCase() === tag.toLowerCase())
-        if (groupIndex !== -1) {
-          this.groups[groupIndex].isMember = false
-        }
-
-        // Update followed tags
-        this.followedTags = this.followedTags.filter(
-          t => t.name.toLowerCase() !== tag.toLowerCase()
-        )
       } catch (e: any) {
-        console.error('Failed to leave group:', e)
+        if (groupIndex !== -1) {
+          this.groups[groupIndex]!.isMember = wasMember
+        }
+        this.followedTags = prevFollowed
+        logError('Failed to leave group:', e)
         throw e
+      } finally {
+        const next = { ...this.pendingTags }
+        delete next[key]
+        this.pendingTags = next
       }
     },
 
@@ -827,14 +901,14 @@ export const useGroupsStore = defineStore('groups', {
           : statuses
         
         if (statuses.length > 0) {
-          this.maxId = statuses[statuses.length - 1].id
+          this.maxId = statuses[statuses.length - 1]?.id ?? null
         }
         
         this.hasMore = statuses.length === 20
       } catch (e: any) {
         if (requestId !== timelineRequestId) return
         this.error = e.message || 'Failed to fetch group timeline'
-        console.error('Group timeline error:', e)
+        logError('Group timeline error:', e)
       } finally {
         if (requestId === timelineRequestId) this.isLoadingTimeline = false
       }
@@ -872,13 +946,13 @@ export const useGroupsStore = defineStore('groups', {
               }))
             : statuses
           this.groupTimeline = [...this.groupTimeline, ...tagged]
-          this.maxId = statuses[statuses.length - 1].id
+          this.maxId = statuses[statuses.length - 1]?.id ?? null
         }
         
         this.hasMore = statuses.length === 20
       } catch (e: any) {
         if (requestId !== timelineRequestId) return
-        console.error('Load more error:', e)
+        logError('Load more error:', e)
         throw e
       } finally {
         if (requestId === timelineRequestId) this.isLoadingMore = false
@@ -889,7 +963,7 @@ export const useGroupsStore = defineStore('groups', {
      * Search/discover groups by hashtag — any tag on the network can be a group
      */
     async searchGroups(query: string) {
-      const q = query.trim().replace(/^#/, '')
+      const q = normalizeHashtagInput(query)
       if (!q) return []
 
       try {
@@ -922,9 +996,8 @@ export const useGroupsStore = defineStore('groups', {
           }
         })
 
-        // Always offer an exact-match join for whatever they typed
         const exact = q.toLowerCase()
-        if (!mapped.some((g) => g.tag.toLowerCase() === exact)) {
+        if (isValidHashtag(q) && !mapped.some((g) => g.tag.toLowerCase() === exact)) {
           const existing = this.groups.find((g) => g.tag.toLowerCase() === exact)
           mapped.unshift(
             existing || {
@@ -942,7 +1015,8 @@ export const useGroupsStore = defineStore('groups', {
 
         return mapped
       } catch (e: any) {
-        console.error('Group search error:', e)
+        logError('Group search error:', e)
+        if (!isValidHashtag(q)) return []
         return [
           {
             tag: q,
@@ -956,6 +1030,28 @@ export const useGroupsStore = defineStore('groups', {
           },
         ]
       }
+    },
+
+    cacheTimeline(tag: string, scrollY = 0) {
+      const key = tag.toLowerCase()
+      this.timelineCache[key] = {
+        timeline: [...this.groupTimeline],
+        maxId: this.maxId,
+        hasMore: this.hasMore,
+        scrollY,
+      }
+    },
+
+    restoreTimeline(tag: string): number | null {
+      const key = tag.toLowerCase()
+      const cached = this.timelineCache[key]
+      if (!cached) return null
+      this.groupTimeline = [...cached.timeline]
+      this.maxId = cached.maxId
+      this.hasMore = cached.hasMore
+      this.currentGroupTag = tag
+      this.error = null
+      return cached.scrollY
     },
 
     /**
@@ -1000,7 +1096,10 @@ export const useGroupsStore = defineStore('groups', {
     /**
      * Clear the current group timeline
      */
-    clearTimeline() {
+    clearTimeline(tag?: string, scrollY = 0) {
+      if (tag && this.groupTimeline.length) {
+        this.cacheTimeline(tag, scrollY)
+      }
       this.groupTimeline = []
       this.currentGroupTag = null
       this.maxId = null

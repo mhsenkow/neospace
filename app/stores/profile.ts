@@ -10,6 +10,11 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient } from '~/composables/useMasto'
 import { stripHtml } from '~/utils/sanitizeHtml'
+import {
+  ACCOUNT_STATUS_PAGE_SIZE,
+  accountStatusHasMore,
+  dedupeStatusPage,
+} from '~/composables/useAccountPager'
 
 interface ProfileState {
   // Viewed profile (can be self or other user)
@@ -127,16 +132,15 @@ export const useProfileStore = defineStore('profile', {
         if (accountId) {
           this.viewedProfile = await client.v1.accounts.$select(accountId).fetch()
         } else {
-          // Fetch own profile
           this.viewedProfile = await client.v1.accounts.verifyCredentials()
         }
 
-        // Initialize edit form with current values
         this.initEditForm()
 
-        // Fetch statuses (Threads-style: originals first)
-        await this.fetchStatuses(true, { excludeReplies: true })
-        await this.fetchPinnedStatuses()
+        await Promise.all([
+          this.fetchStatuses(true, { excludeReplies: true }),
+          this.fetchPinnedStatuses(),
+        ])
 
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch profile'
@@ -155,15 +159,27 @@ export const useProfileStore = defineStore('profile', {
 
       try {
         const client = this.getClient()
-        
-        // Search for the account
-        const results = await client.v1.accounts.lookup({ acct: username })
-        
-        if (results) {
-          this.viewedProfile = results
+        let account: mastodon.v1.Account | null = null
+
+        try {
+          account = await client.v1.accounts.lookup({ acct: username })
+        } catch {
+          const res = await client.v2.search.fetch({
+            q: username,
+            type: 'accounts',
+            resolve: true,
+            limit: 1,
+          })
+          account = res.accounts?.[0] || null
+        }
+
+        if (account) {
+          this.viewedProfile = account
           this.initEditForm()
-          await this.fetchStatuses(true, { excludeReplies: true })
-          await this.fetchPinnedStatuses()
+          await Promise.all([
+            this.fetchStatuses(true, { excludeReplies: true }),
+            this.fetchPinnedStatuses(),
+          ])
         } else {
           this.error = 'User not found'
         }
@@ -193,24 +209,20 @@ export const useProfileStore = defineStore('profile', {
         const client = this.getClient()
         
         const statuses = await client.v1.accounts.$select(this.viewedProfile.id).statuses.list({
-          limit: 20,
+          limit: ACCOUNT_STATUS_PAGE_SIZE,
           maxId: this.maxStatusId || undefined,
           excludeReplies: opts?.excludeReplies ?? false,
           excludeReblogs: false,
           onlyMedia: opts?.onlyMedia ?? false,
         } as any)
 
-        if (refresh) {
-          this.statuses = statuses
-        } else {
-          this.statuses = [...this.statuses, ...statuses]
-        }
+        this.statuses = dedupeStatusPage(this.statuses, statuses, refresh)
 
         if (statuses.length > 0) {
-          this.maxStatusId = statuses[statuses.length - 1].id
+          this.maxStatusId = statuses[statuses.length - 1]?.id ?? null
         }
-        
-        this.hasMoreStatuses = statuses.length === 20
+
+        this.hasMoreStatuses = accountStatusHasMore(statuses.length)
 
       } catch (e: any) {
         console.error('Failed to fetch statuses:', e)

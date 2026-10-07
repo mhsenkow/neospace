@@ -7,7 +7,7 @@ import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
-import { useComposeMedia } from '~/composables/useComposeMedia'
+import { COMPOSE_MEDIA_ACCEPT, useComposeMedia } from '~/composables/useComposeMedia'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
@@ -36,6 +36,14 @@ const props = withDefaults(
     inReplyToId?: string
     /** Append this URL when quoting (fediverse-friendly quote) */
     quoteUrl?: string
+    /** Quoted post preview + id for quoted_status_id when supported */
+    quoteContext?: {
+      id: string
+      name: string
+      handle: string
+      avatar?: string | null
+      text: string
+    } | null
     placeholder?: string
     title?: string
     /** Slimmer chrome for sticky thread reply bars */
@@ -83,6 +91,7 @@ const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
 )
 const showCW = ref(false)
 const markSensitive = ref(settingsStore.defaultSensitive)
+const postLanguage = ref(settingsStore.defaultLanguage)
 const isPosting = ref(false)
 const error = ref<string | null>(null)
 const handoffNotice = ref<string | null>(null)
@@ -173,6 +182,8 @@ const {
   addFiles,
   removeAttachment,
   clearAttachments,
+  clearHandoffAttachments,
+  uploadAnnounce,
   retryUpload,
   setDescription,
   flushAltDescriptions,
@@ -281,6 +292,29 @@ const visibilityOptions = [
   { value: 'private', label: 'Followers only', icon: '🔒' },
   { value: 'direct', label: 'Direct', icon: '✉️' },
 ] as const
+
+const BASE_LANGUAGE_OPTIONS = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'fr', label: 'French' },
+  { code: 'de', label: 'German' },
+  { code: 'it', label: 'Italian' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh', label: 'Chinese' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'pl', label: 'Polish' },
+  { code: 'ru', label: 'Russian' },
+] as const
+
+const languageOptions = computed(() => {
+  const cur = postLanguage.value
+  if (cur && !BASE_LANGUAGE_OPTIONS.some((o) => o.code === cur)) {
+    return [{ code: cur, label: cur.toUpperCase() }, ...BASE_LANGUAGE_OPTIONS]
+  }
+  return [...BASE_LANGUAGE_OPTIONS]
+})
 
 const mentionFlipUp = ref(false)
 
@@ -439,6 +473,8 @@ const handlePost = async () => {
       mediaIds: mediaIds.value,
       sensitive: markSensitive.value || undefined,
       inReplyToId: props.inReplyToId,
+      language: postLanguage.value || undefined,
+      quotedStatusId: props.quoteContext?.id || undefined,
     })
     clearDraft()
     resetForm()
@@ -549,10 +585,10 @@ const applyHandoff = async () => {
       content.value = `${content.value.trim()}\n\n${draft.text}`
     }
   }
-  // Replace any prior handoff media so retries don't stack duplicates
+  // Replace prior handoff media only — keep attachments the user added themselves
   if (draft.files.length) {
-    clearAttachments()
-    await addFiles(draft.files, draft.descriptions)
+    clearHandoffAttachments()
+    await addFiles(draft.files, draft.descriptions, { source: 'handoff' })
   }
   if (handoffNoticeTimer) {
     clearTimeout(handoffNoticeTimer)
@@ -761,6 +797,22 @@ onUnmounted(() => {
       </div>
     </template>
 
+    <article v-if="quoteUrl && quoteContext" class="compose-quote" @click.stop>
+      <img
+        v-if="quoteContext.avatar"
+        :src="quoteContext.avatar"
+        alt=""
+        class="compose-quote__avatar"
+      />
+      <div class="compose-quote__body">
+        <p class="compose-quote__meta">
+          <strong>{{ quoteContext.name }}</strong>
+          <span>@{{ quoteContext.handle }}</span>
+        </p>
+        <p class="compose-quote__text">{{ quoteContext.text }}</p>
+      </div>
+    </article>
+
     <div v-if="showCW" class="compose-cw" @click.stop>
       <input
         ref="cwInputRef"
@@ -835,6 +887,8 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ uploadAnnounce }}</p>
+
     <div v-if="handoffNotice" class="compose-handoff" role="status">
       <span>{{ handoffNotice }}</span>
       <button type="button" class="compose-handoff__dismiss" @click="dismissHandoffNotice">Dismiss</button>
@@ -853,7 +907,7 @@ onUnmounted(() => {
           ref="fileInputRef"
           type="file"
           class="compose-file"
-          accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
+          :accept="COMPOSE_MEDIA_ACCEPT"
           multiple
           @change="onFilePicked"
         />
@@ -896,6 +950,24 @@ onUnmounted(() => {
           <NeoIcon name="message" :size="14" :stroke="2" />
           Direct
         </span>
+
+        <label v-if="!isDirectCompose" class="compose-language">
+          <span class="sr-only">Post language</span>
+          <select
+            v-model="postLanguage"
+            class="compose-language-select"
+            :disabled="isPosting"
+            aria-label="Post language"
+          >
+            <option
+              v-for="opt in languageOptions"
+              :key="opt.code"
+              :value="opt.code"
+            >
+              {{ opt.label }}
+            </option>
+          </select>
+        </label>
 
         <span v-if="hasMedia" class="compose-media-count">
           {{ attachments.length }}/{{ maxAttachments }}
@@ -1400,6 +1472,63 @@ onUnmounted(() => {
   color: var(--neo-danger);
   font-size: 0.8125rem;
   cursor: default;
+}
+
+.compose-quote {
+  display: flex;
+  gap: 0.65rem;
+  margin: 0 0 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--neo-radius-md, 12px);
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
+}
+
+.compose-quote__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.compose-quote__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.compose-quote__meta {
+  margin: 0 0 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+
+  strong {
+    color: var(--neo-text-primary);
+    font-weight: 600;
+  }
+}
+
+.compose-quote__text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--neo-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.compose-language-select {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: var(--neo-radius-sm, 6px);
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary);
+  color: var(--neo-text-secondary);
 }
 
 .compose-handoff {

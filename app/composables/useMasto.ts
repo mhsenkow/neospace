@@ -92,11 +92,7 @@ export function activeClient(): mastodon.rest.Client {
  */
 export function publicClient(url?: string | null): mastodon.rest.Client {
   const store = useInstancesStore()
-  const preferred =
-    url ||
-    store.activeAccount?.url ||
-    store.instances[0]?.url ||
-    null
+  const preferred = url || store.activeAccount?.url || null
 
   if (preferred) {
     const preferredUrl = normalizeUrl(preferred)

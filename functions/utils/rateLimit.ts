@@ -6,39 +6,62 @@
 type Bucket = { count: number; resetAt: number }
 
 const buckets = new Map<string, Bucket>()
+let lastPruneAt = 0
 
-/** Prune occasionally so isolates don't grow unbounded */
+/** Prune stale buckets at most once per minute */
 function prune(now: number) {
+  if (now - lastPruneAt < 60_000) return
   if (buckets.size < 500) return
+  lastPruneAt = now
   for (const [k, b] of buckets) {
     if (now > b.resetAt) buckets.delete(k)
   }
 }
 
+export type RateLimitResult = {
+  allowed: boolean
+  retryAfterSec?: number
+}
+
 /**
- * @returns true if the request is allowed
+ * @returns whether the request is allowed and optional Retry-After seconds
  */
 export function allowRequest(
   key: string,
   limit: number,
   windowMs: number,
-): boolean {
+): RateLimitResult {
   const now = Date.now()
   prune(now)
   const b = buckets.get(key)
   if (!b || now > b.resetAt) {
     buckets.set(key, { count: 1, resetAt: now + windowMs })
-    return true
+    return { allowed: true }
   }
-  if (b.count >= limit) return false
+  if (b.count >= limit) {
+    return {
+      allowed: false,
+      retryAfterSec: Math.max(1, Math.ceil((b.resetAt - now) / 1000)),
+    }
+  }
   b.count += 1
-  return true
+  return { allowed: true }
 }
 
+/** Bucket IPv6 addresses by /64 prefix */
+function ipv6Bucket(ip: string): string {
+  if (!ip.includes(':')) return ip
+  const parts = ip.split(':').filter(Boolean)
+  if (parts.length < 4) return ip
+  return `${parts.slice(0, 4).join(':')}::/64`
+}
+
+/**
+ * Client IP from Cloudflare only — never trust X-Forwarded-For.
+ * Returns empty string when CF-Connecting-IP is missing (local dev).
+ */
 export function clientIp(request: Request): string {
-  return (
-    request.headers.get('CF-Connecting-IP') ||
-    request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ||
-    'unknown'
-  )
+  const cf = request.headers.get('CF-Connecting-IP')?.trim()
+  if (!cf) return ''
+  return ipv6Bucket(cf)
 }

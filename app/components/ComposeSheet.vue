@@ -79,38 +79,26 @@ const onPick = async (account: mastodon.v1.Account) => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="compose-sheet">
-      <div
-        v-if="sheet.open"
-        ref="panelRef"
-        class="compose-sheet"
-        :style="viewportStyle"
-        role="dialog"
-        aria-modal="true"
-        :aria-labelledby="sheetTitleId"
-      >
-        <button
-          type="button"
-          class="compose-sheet__backdrop"
-          tabindex="-1"
-          aria-hidden="true"
-          @click="requestClose"
-        />
-        <div class="compose-sheet__panel">
+  <NeoSheet :open="sheet.open" :z-index="200" @close="requestClose">
+    <div
+      ref="panelRef"
+      class="compose-sheet__inner"
+      :style="viewportStyle"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="sheetTitleId"
+    >
           <RecipientPicker
             v-if="sheet.pickRecipient"
             @select="onPick"
             @cancel="sheet.hide()"
           />
           <template v-else>
-            <header class="compose-sheet__header">
-              <button type="button" class="compose-sheet__close neo-btn neo-btn--tertiary" @click="requestClose">
-                Cancel
-              </button>
-              <span :id="sheetTitleId" class="compose-sheet__title">{{ sheet.title || 'New post' }}</span>
-              <span class="compose-sheet__spacer" />
-            </header>
+            <NeoSheetHeader
+              :title="sheet.title || 'New post'"
+              :title-id="sheetTitleId"
+              @cancel="requestClose"
+            />
             <div class="compose-sheet__body" @focusin="onFocusField">
               <article v-if="sheet.contextPost" class="compose-sheet__context">
                 <img
@@ -149,69 +137,24 @@ const onPick = async (account: mastodon.v1.Account) => {
                 :title="sheet.title || undefined"
                 :in-reply-to-id="sheet.inReplyToId || undefined"
                 :quote-url="sheet.quoteUrl || undefined"
+                :quote-context="sheet.contextPost && sheet.quoteUrl ? sheet.contextPost : undefined"
                 :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
                 @posted="onPosted"
               />
             </div>
           </template>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+    </div>
+  </NeoSheet>
 </template>
 
 <style lang="scss" scoped>
-.compose-sheet {
-  position: fixed;
-  /* Fallback when visualViewport style isn't applied yet */
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  /* When :style sets top/left/width/height, clear inset so keyboard fit works */
-  box-sizing: border-box;
-
-  // Mouse desktop only — iPad keeps the bottom sheet (keyboard-friendly)
-  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-    justify-content: center;
-    align-items: center;
-    padding: 1.5rem;
-  }
-}
-
-.compose-sheet__backdrop {
-  position: absolute;
-  inset: 0;
-  border: none;
-  background: var(--neo-bg-overlay);
-  cursor: pointer;
-}
-
-.compose-sheet__panel {
-  position: relative;
-  z-index: 1;
+.compose-sheet__inner {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: min(92dvh, 100%);
-  min-height: min(56dvh, 420px, 100%);
-  background: var(--neo-bg-primary);
-  border-radius: 16px 16px 0 0;
-  border: 1px solid var(--neo-border-color);
-  border-bottom: none;
-  box-shadow: var(--neo-shadow-xl);
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  height: 100%;
+  min-height: inherit;
   overflow: hidden;
-
-  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-    max-width: 560px;
-    max-height: min(80vh, 720px);
-    min-height: min(70vh, 560px);
-    border-radius: 12px;
-    border-bottom: 1px solid var(--neo-border-color);
-    padding-bottom: 0;
-  }
 }
 
 .compose-sheet__header {

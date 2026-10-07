@@ -10,6 +10,8 @@ import type { mastodon } from 'masto'
 import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore } from '~/stores/columns'
+import { categoryColor } from '~/composables/useShellAppearance'
+import { logError } from '~/utils/log'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,27 +68,32 @@ const onGroupPosted = (status: mastodon.v1.Status) => {
   groupsStore.prependToTimeline(tag.value, status)
 }
 
-// Initialize on mount
+const loadTimeline = async (newTag: string) => {
+  const restoredScroll = groupsStore.restoreTimeline(newTag)
+  if (restoredScroll != null) {
+    await nextTick()
+    window.scrollTo({ top: restoredScroll, behavior: 'auto' })
+    return
+  }
+  await groupsStore.fetchGroupTimeline(newTag, true)
+}
+
 onMounted(async () => {
-  // Make sure groups are initialized
   if (groupsStore.groups.length === 0) {
     await groupsStore.initializeGroups()
   }
-  
-  // Fetch the group timeline
-  await groupsStore.fetchGroupTimeline(tag.value, true)
+  await loadTimeline(tag.value)
 })
 
-// Watch for tag changes (if user navigates to different group)
-watch(tag, async (newTag) => {
-  if (newTag) {
-    await groupsStore.fetchGroupTimeline(newTag, true)
+watch(tag, async (newTag, oldTag) => {
+  if (oldTag && oldTag !== newTag) {
+    groupsStore.cacheTimeline(oldTag, window.scrollY)
   }
+  if (newTag) await loadTimeline(newTag)
 })
 
-// Cleanup on unmount
 onUnmounted(() => {
-  groupsStore.clearTimeline()
+  groupsStore.clearTimeline(tag.value, window.scrollY)
 })
 
 // Handle join
@@ -100,7 +107,7 @@ const handleJoin = async () => {
   try {
     await groupsStore.joinGroup(tag.value)
   } catch (e) {
-    console.error('Failed to join:', e)
+    logError('Failed to join:', e)
     void showActionError('Couldn’t join group', () => { void handleJoin() })
   } finally {
     isJoining.value = false
@@ -124,7 +131,7 @@ const handleLeave = async () => {
       },
     })
   } catch (e) {
-    console.error('Failed to leave:', e)
+    logError('Failed to leave:', e)
     void showActionError('Couldn’t leave group', () => { void handleLeave() })
   } finally {
     isLeaving.value = false
@@ -159,20 +166,6 @@ const addToBoard = () => {
   if (id) router.push('/')
 }
 
-// Get category color
-const getCategoryColor = (category: string) => {
-  const colors: Record<string, string> = {
-    tech: '#c45c26',
-    creative: '#b8860b',
-    gaming: '#2f7d4a',
-    social: '#a84c1e',
-    news: '#3a6ea5',
-    local: '#757575',
-    other: '#757575'
-  }
-  return colors[category] || colors.other
-}
-
 // Page meta
 useHead({
   title: computed(() => `${displayGroup.value.name} - Groups - NeoSpace`),
@@ -188,7 +181,7 @@ useHead({
 <template>
   <div class="group-detail">
     <!-- Header -->
-    <header class="group-header" :style="{ '--category-color': getCategoryColor(displayGroup.category) }">
+    <header class="group-header" :style="{ '--category-color': categoryColor(displayGroup.category) }">
       <button class="back-btn" @click="goBack">
         <NeoIcon name="chevron-left" :size="18" :stroke="2" />
         <span>All Groups</span>
@@ -710,22 +703,6 @@ useHead({
   gap: 0.75rem;
 }
 
-.loading-spinner {
-  font-size: 2.5rem;
-  animation: spin 1s linear infinite;
-  margin-bottom: 0.75rem;
-
-  @media (min-width: 480px) {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-  }
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 .timeline-error {
   span {
     font-size: 2.5rem;
@@ -878,7 +855,7 @@ useHead({
 // Post Hint (for non-authenticated users)
 .post-hint {
   position: fixed;
-  bottom: 0.75rem;
+  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.75rem);
   left: 0.5rem;
   right: 0.5rem;
   padding: 0.75rem 1rem;
