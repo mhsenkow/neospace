@@ -323,6 +323,12 @@ const requireAuth = () => {
   return false
 }
 
+/** Phone + iPad: open the thread with the floating reply bar (Threads-style) */
+const preferThreadReplyDock = () => {
+  if (typeof window === 'undefined') return true
+  return window.matchMedia('(max-width: 1023px), (hover: none), (pointer: coarse)').matches
+}
+
 const openReplyComposer = async () => {
   if (!requireAuth() || isOpeningReply.value) return
   isOpeningReply.value = true
@@ -342,6 +348,14 @@ const openReplyComposer = async () => {
     }
     const handle = displayStatus.value.account.acct
     const isDm = displayStatus.value.visibility === 'direct'
+    // Touch: land on the thread dock so you type above the keyboard
+    if (!isDm && preferThreadReplyDock()) {
+      await router.push({
+        path: `/status/${replyId}`,
+        query: statusUrl.value ? { url: statusUrl.value } : undefined,
+      })
+      return
+    }
     composeSheet.show({
       title: isDm ? 'Message' : 'Reply',
       placeholder: isDm ? `Message @${handle}…` : `Reply to @${handle}…`,

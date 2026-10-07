@@ -625,8 +625,9 @@ ul, ol {
   }
 }
 
-// iOS zooms focused inputs under 16px — keep touch keyboards stable
-@media (max-width: 1023px) {
+// iOS/iPadOS zooms focused inputs under 16px — keep touch keyboards stable
+// (include iPad desktop-width layout: coarse pointer, not only max-width 1023)
+@media (max-width: 1023px), (hover: none), (pointer: coarse) {
   .neo-input,
   .compose-input,
   .chat-composer__input,
@@ -764,8 +765,8 @@ body {
   overscroll-behavior-x: none;
 }
 
-// Better tap targets on mobile — chrome controls, not every inline link
-@media (max-width: 1023px) {
+// Better tap targets on phones + iPad (coarse) — chrome controls, not every inline link
+@media (max-width: 1023px), (hover: none), (pointer: coarse) {
   button,
   [role="button"],
   .neo-btn,
@@ -799,6 +800,12 @@ body {
     min-width: 0;
     display: inline-flex;
     align-items: center;
+  }
+
+  // Room for 44px chrome buttons inside column headers (iPad board)
+  .column-header {
+    height: 56px;
+    min-height: 56px;
   }
 }
 

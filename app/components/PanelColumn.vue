@@ -472,12 +472,28 @@ onUnmounted(() => {
       <span class="column-feed-label">{{ title }}</span>
 
       <div v-if="canReorder && !isProfilePeek" class="column-reorder">
-        <button type="button" class="neo-chrome-btn" title="Move left" aria-label="Move column left" :disabled="isFirst" @click="emit('move-left')">
+        <button
+          type="button"
+          class="neo-chrome-btn"
+          title="Move left"
+          aria-label="Move column left"
+          :disabled="isFirst"
+          @pointerdown.stop
+          @click.stop="emit('move-left')"
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-        <button type="button" class="neo-chrome-btn" title="Move right" aria-label="Move column right" :disabled="isLast" @click="emit('move-right')">
+        <button
+          type="button"
+          class="neo-chrome-btn"
+          title="Move right"
+          aria-label="Move column right"
+          :disabled="isLast"
+          @pointerdown.stop
+          @click.stop="emit('move-right')"
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <polyline points="9 18 15 12 9 6" />
           </svg>
@@ -491,7 +507,8 @@ onUnmounted(() => {
         :title="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
         :aria-label="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
         :aria-pressed="column.feedType === 'profile' ? undefined : focused"
-        @click="onFocusClick"
+        @pointerdown.stop
+        @click.stop="onFocusClick"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="15 3 21 3 21 9" />
@@ -507,7 +524,8 @@ onUnmounted(() => {
         class="neo-chrome-btn neo-chrome-btn--danger column-close"
         title="Remove column"
         aria-label="Remove column"
-        @click="emit('remove')"
+        @pointerdown.stop
+        @click.stop="emit('remove')"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18" />

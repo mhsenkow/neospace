@@ -8,7 +8,6 @@
 import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
-import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel } from '~/utils/dmHelpers'
 
@@ -16,7 +15,6 @@ const route = useRoute()
 const router = useRouter()
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
-const composeSheet = useComposeSheetStore()
 const conversationsStore = useConversationsStore()
 
 const isLoading = ref(true)
@@ -138,21 +136,6 @@ const dayLabelFor = (status: mastodon.v1.Status, index: number) => {
   return null
 }
 
-const contextFromStatus = (s: mastodon.v1.Status) => {
-  const text = (s.content || '')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]*>/g, '')
-    .trim()
-  return {
-    id: s.id,
-    name: s.account.displayName || s.account.username,
-    handle: s.account.acct,
-    avatar: s.account.avatar,
-    text: text.slice(0, 280),
-    url: s.url || s.uri,
-  }
-}
-
 /** Show avatar/name when speaker changes */
 const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
   if (isMine(status)) return false
@@ -161,25 +144,37 @@ const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
   return !prev || prev.account.id !== status.account.id
 }
 
-const openFocusReply = async () => {
-  const s = replyTarget.value
-  if (!s || !canReply.value) return
-  // Public threads still use the sheet; DMs type inline via ChatComposer
-  if (isDirectThread.value) return
-  const replyId =
-    (await statusStore.resolveReplyId({
-      id: s.id,
-      url: s.url || s.uri || queryUrl.value,
-    })) || s.id
-  const handle = s.account.acct
-  composeSheet.show({
-    title: 'Reply',
-    placeholder: `Reply to @${handle}…`,
-    initialText: `@${handle} `,
-    inReplyToId: replyId,
-    contextPost: contextFromStatus(s),
-    onPosted: onReplyPosted,
-  })
+/** Resolved local id for public inline reply (foreign URLs) */
+const publicReplyId = ref<string | null>(null)
+
+watch(
+  () => [replyTarget.value?.id, replyTarget.value?.url, replyTarget.value?.uri, isDirectThread.value] as const,
+  async ([id, url, uri, isDm]) => {
+    if (!id || isDm) {
+      publicReplyId.value = null
+      return
+    }
+    publicReplyId.value =
+      (await statusStore.resolveReplyId({
+        id,
+        url: (typeof url === 'string' && url) || (typeof uri === 'string' && uri) || queryUrl.value,
+      })) || id
+  },
+  { immediate: true },
+)
+
+/** Keep public reply dock above the soft keyboard (iOS visualViewport) */
+const replyDockStyle = ref<Record<string, string>>({})
+
+const syncReplyDockOffset = () => {
+  if (typeof window === 'undefined') return
+  const vv = window.visualViewport
+  if (!vv) {
+    replyDockStyle.value = { bottom: '0px' }
+    return
+  }
+  const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+  replyDockStyle.value = { bottom: `${inset}px` }
 }
 
 const scrollChatToEnd = async () => {
@@ -263,6 +258,10 @@ const onReplyPosted = async (status: mastodon.v1.Status) => {
   }
   await loadThread({ quiet: true })
   if (isDirectThread.value) await scrollChatToEnd()
+  else {
+    await nextTick()
+    chatEndEl.value?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }
 }
 
 const goProfile = () => {
@@ -290,11 +289,18 @@ const startThreadPoll = () => {
 onMounted(() => {
   void loadThread().then(() => startThreadPoll())
   conversationsStore.startLiveRefresh()
+  syncReplyDockOffset()
+  window.visualViewport?.addEventListener('resize', syncReplyDockOffset)
+  window.visualViewport?.addEventListener('scroll', syncReplyDockOffset)
+  window.addEventListener('resize', syncReplyDockOffset)
 })
 
 onUnmounted(() => {
   stopThreadPoll()
   conversationsStore.stopLiveRefresh()
+  window.visualViewport?.removeEventListener('resize', syncReplyDockOffset)
+  window.visualViewport?.removeEventListener('scroll', syncReplyDockOffset)
+  window.removeEventListener('resize', syncReplyDockOffset)
 })
 
 watch(() => [route.params.id, route.query.url], () => {
@@ -473,24 +479,29 @@ useHead({
         <p v-if="!descendants.length && !ancestors.length" class="thread-lonely">
           No replies yet — be the first.
         </p>
+
+        <div ref="chatEndEl" class="chat-end" aria-hidden="true" />
       </div>
 
-      <button
-        v-if="focusStatus && canReply"
-        type="button"
-        class="thread-reply-bar"
-        @click="openFocusReply"
+      <!-- Threads-style: type in the bar above the keyboard -->
+      <div
+        v-if="focusStatus && canReply && publicReplyId"
+        class="thread-reply-dock"
+        :style="replyDockStyle"
       >
-        <img
-          v-if="instancesStore.userAvatar"
-          :src="instancesStore.userAvatar"
-          alt=""
-          class="thread-reply-bar__avatar"
-        />
-        <span class="thread-reply-bar__placeholder">
-          Reply to @{{ focusStatus.account.acct }}…
-        </span>
-      </button>
+        <div class="thread-reply-dock__inner">
+          <RealComposeBox
+            :key="publicReplyId"
+            compact
+            :accept-handoff="false"
+            :in-reply-to-id="publicReplyId"
+            :initial-text="replyPrefill"
+            :placeholder="`Reply to @${focusStatus.account.acct}…`"
+            title="Reply"
+            @posted="onReplyPosted"
+          />
+        </div>
+      </div>
 
       <div v-else-if="focusStatus && !canReply" class="thread-signin-hint">
         <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in to reply</NuxtLink>
@@ -508,7 +519,7 @@ useHead({
   box-sizing: border-box;
 
   &--can-reply {
-    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0));
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0));
   }
 
   &--signin-hint {
@@ -725,54 +736,41 @@ useHead({
   }
 }
 
-.thread-reply-bar {
+.thread-reply-dock {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 40;
   display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  width: 100%;
-  min-height: 52px;
-  padding: 0.55rem 0.85rem calc(0.55rem + env(safe-area-inset-bottom, 0));
+  justify-content: center;
+  padding: 0.55rem 0.75rem calc(0.65rem + env(safe-area-inset-bottom, 0px));
   background: color-mix(in srgb, var(--neo-bg-primary) 96%, transparent);
-  border: none;
   border-top: 1px solid var(--neo-border-color);
-  backdrop-filter: blur(12px);
-  cursor: pointer;
-  text-align: left;
-  color: inherit;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 
   @media (min-width: 1024px) {
-    left: 64px;
-    padding: 0.65rem 1rem 0.75rem;
+    left: var(--neo-sidebar-w, 248px);
+    padding: 0.7rem 1rem 0.85rem;
   }
 
-  &--chat {
-    /* Hide mobile bottom nav overlap — messages already hide nav on /status */
+  &__inner {
+    width: 100%;
+    max-width: 40rem;
   }
 
-  &__avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
+  :deep(.compose--compact) {
+    width: 100%;
   }
 
-  &__placeholder {
-    flex: 1;
-    min-width: 0;
-    padding: 0.55rem 0.85rem;
-    border-radius: 999px;
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-muted);
-    font-size: 0.9375rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  :deep(.compose-input) {
+    font-size: max(16px, 1rem);
+  }
+
+  :deep(.compose-submit) {
+    min-height: 36px;
+    min-width: 4.25rem;
   }
 }
 

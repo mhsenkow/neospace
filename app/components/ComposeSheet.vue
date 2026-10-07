@@ -125,7 +125,8 @@ const onPick = async (account: mastodon.v1.Account) => {
   /* When :style sets top/left/width/height, clear inset so keyboard fit works */
   box-sizing: border-box;
 
-  @media (min-width: 1024px) {
+  // Mouse desktop only — iPad keeps the bottom sheet (keyboard-friendly)
+  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     justify-content: center;
     align-items: center;
     padding: 1.5rem;
@@ -156,7 +157,7 @@ const onPick = async (account: mastodon.v1.Account) => {
   padding-bottom: env(safe-area-inset-bottom, 0);
   overflow: hidden;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     max-width: 560px;
     max-height: min(80vh, 720px);
     min-height: min(70vh, 560px);
@@ -300,7 +301,7 @@ const onPick = async (account: mastodon.v1.Account) => {
   }
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   .compose-sheet-enter-from,
   .compose-sheet-leave-to {
     .compose-sheet__panel {

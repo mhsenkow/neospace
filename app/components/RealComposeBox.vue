@@ -484,12 +484,12 @@ onMounted(() => {
         type="button"
         class="compose-submit neo-btn neo-btn--primary"
         :disabled="!canPost"
-        :title="isUploading ? 'Waiting for uploads…' : 'Post (⌘↵)'"
+        :title="isUploading ? 'Waiting for uploads…' : inReplyToId ? 'Reply (⌘↵)' : 'Post (⌘↵)'"
         @click="handlePost"
       >
-        <span v-if="isPosting">Posting…</span>
+        <span v-if="isPosting">{{ inReplyToId ? 'Replying…' : 'Posting…' }}</span>
         <span v-else-if="isUploading">…</span>
-        <span v-else>Post</span>
+        <span v-else>{{ inReplyToId ? 'Reply' : 'Post' }}</span>
       </button>
     </div>
 

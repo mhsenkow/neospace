@@ -385,7 +385,12 @@ const onCarouselTouchStart = (e: TouchEvent) => {
   if (!el) return
   const t = e.touches[0]!
   const target = e.target as HTMLElement | null
-  if (target?.closest('input, textarea, select, [contenteditable="true"], .mobile-feed-tabs')) {
+  // Don't steal taps from column chrome / compose / menus (iPad move/close/focus)
+  if (
+    target?.closest(
+      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .mobile-feed-tabs, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill',
+    )
+  ) {
     return
   }
   const now = performance.now()
