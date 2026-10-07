@@ -18,6 +18,14 @@ import {
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useColumnsStore } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
+import {
+  THEME_OPTIONS,
+  UI_OPTIONS,
+  RADIUS_OPTIONS,
+  DENSITY_OPTIONS,
+  LINE_OPTIONS,
+  resolveTheme,
+} from '~/utils/appearance'
 
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
@@ -72,6 +80,7 @@ const loadSidebarRail = () => {
   if (typeof window === 'undefined') return
   try {
     sidebarRail.value = localStorage.getItem(SIDEBAR_RAIL_KEY) === '1'
+    if (sidebarRail.value) lookOpen.value = true
   } catch {
     sidebarRail.value = false
   }
@@ -80,6 +89,8 @@ const loadSidebarRail = () => {
 const toggleSidebarRail = () => {
   sidebarRail.value = !sidebarRail.value
   inboxMenuOpen.value = false
+  // Rail hides text labels — keep Look cycles reachable as icon buttons
+  if (sidebarRail.value) lookOpen.value = true
   try {
     localStorage.setItem(SIDEBAR_RAIL_KEY, sidebarRail.value ? '1' : '0')
   } catch {
@@ -219,11 +230,31 @@ const onHomeClick = () => {
   columnsStore.clearColumnFocus()
 }
 
-const currentThemeLabel = computed(() => settingsStore.localPreferences.theme)
-const currentUiLabel = computed(() => settingsStore.localPreferences.ui)
-const currentRadiusLabel = computed(() => settingsStore.localPreferences.radius)
-const currentDensityLabel = computed(() => settingsStore.localPreferences.density)
-const currentLineLabel = computed(() => settingsStore.localPreferences.line)
+const currentThemeLabel = computed(() => {
+  const theme = settingsStore.localPreferences.theme
+  if (theme === 'auto') {
+    const resolved = resolveTheme('auto')
+    const name = THEME_OPTIONS.find((t) => t.id === resolved)?.label || resolved
+    return `Auto · ${name}`
+  }
+  return THEME_OPTIONS.find((t) => t.id === theme)?.label || theme
+})
+const currentUiLabel = computed(
+  () => UI_OPTIONS.find((u) => u.id === settingsStore.localPreferences.ui)?.label
+    || settingsStore.localPreferences.ui,
+)
+const currentRadiusLabel = computed(
+  () => RADIUS_OPTIONS.find((r) => r.id === settingsStore.localPreferences.radius)?.label
+    || settingsStore.localPreferences.radius,
+)
+const currentDensityLabel = computed(
+  () => DENSITY_OPTIONS.find((d) => d.id === settingsStore.localPreferences.density)?.label
+    || settingsStore.localPreferences.density,
+)
+const currentLineLabel = computed(
+  () => LINE_OPTIONS.find((l) => l.id === settingsStore.localPreferences.line)?.label
+    || settingsStore.localPreferences.line,
+)
 
 onMounted(async () => {
   // Mobile chrome metrics — header collapse toggles --neo-mobile-chrome-top
@@ -708,7 +739,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             </button>
           </div>
 
-          <div v-show="lookOpen || sidebarRail" class="sidebar__section-list">
+          <div v-show="lookOpen" class="sidebar__section-list">
             <button
               type="button"
               class="sidebar__row"

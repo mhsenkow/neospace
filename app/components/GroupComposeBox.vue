@@ -207,6 +207,7 @@ const onFilePicked = async (e: Event) => {
           type="button"
           class="group-compose__photo"
           title="Add photo"
+          aria-label="Add photo"
           :disabled="!canAddMore || isPosting"
           @click="openFilePicker"
         >

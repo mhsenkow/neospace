@@ -114,8 +114,14 @@ const stripHtml = (html: string) => {
                 </a>
               </div>
             </div>
-            <button class="close-btn" @click="close">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button
+              type="button"
+              class="close-btn neo-tip"
+              title="Close"
+              aria-label="Close"
+              @click="close"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M18 6L6 18M6 6l12 12"/>
               </svg>
             </button>

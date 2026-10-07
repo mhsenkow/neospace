@@ -716,6 +716,7 @@ useHead({ title: 'Home | NeoSpace' })
         type="button"
         class="neo-btn neo-btn--tertiary neo-btn--icon add-column-btn"
         :title="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+        :aria-label="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
         @click="addMenuOpen = !addMenuOpen"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -962,6 +963,25 @@ useHead({ title: 'Home | NeoSpace' })
         flex: 0 0 30%;
         min-width: 320px;
         max-width: 520px;
+      }
+    }
+
+    // Single column: Board toggle still changes width (was a silent no-op before)
+    .columns-page:not(.columns-page--multi).columns-page--roomy & {
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 0 1 auto;
+        width: min(100%, 520px);
+        max-width: 520px;
+      }
+    }
+
+    .columns-page:not(.columns-page--multi).columns-page--packed & {
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 1 1 auto;
+        width: 100%;
+        max-width: none;
       }
     }
   }
