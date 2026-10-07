@@ -36,15 +36,25 @@ const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
 const isDesk = useDeskViewport()
 useAppShellHeight()
 
+/** Column board owns its scrollers; every other mobile page scrolls `main`. */
+const isBoardRoute = computed(() => path.value === '/')
 /** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
 const isThreadRoute = computed(() => path.value.startsWith('/status/'))
 const isProfileRoute = computed(
   () => path.value === '/profile' || path.value.startsWith('/profile/'),
 )
 const isMessagesRoute = computed(() => path.value === '/messages')
+const isNotificationsRoute = computed(() => path.value === '/notifications')
+/** Single group page — not the /groups hub */
+const isGroupsDetailRoute = computed(() => /^\/groups\/.+/.test(path.value))
 /** Nested mobile screens — own chrome, no global header/tabs */
 const isMobileSubview = computed(
-  () => isThreadRoute.value || isProfileRoute.value || isMessagesRoute.value,
+  () =>
+    isThreadRoute.value ||
+    isProfileRoute.value ||
+    isMessagesRoute.value ||
+    isNotificationsRoute.value ||
+    isGroupsDetailRoute.value,
 )
 const showMobileNav = computed(() => !isMobileSubview.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
@@ -151,6 +161,7 @@ watch(
     class="neo-layout"
     :class="{
       'chaos-active': themeStore.isChaosMode,
+      'neo-layout--board': isBoardRoute,
       'neo-layout--thread': isThreadRoute,
       'neo-layout--profile': isProfileRoute,
       'neo-layout--subview': isMobileSubview,
@@ -189,6 +200,7 @@ watch(
     <MobileTabBar v-if="showMobileNav" />
 
     <LazyComposeSheet />
+    <LazyAlgorithmSheet />
     <LazyInstanceManager />
     <AccountSwitcherSheet v-if="instancesStore.hasAuthenticatedInstance" />
     <FeedbackNotes v-if="!isMobileSubview" />
@@ -196,7 +208,10 @@ watch(
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
     <div
       class="neo-bottom-dock"
-      :class="{ 'neo-bottom-dock--subview': isMobileSubview }"
+      :class="{
+        'neo-bottom-dock--subview': isMobileSubview,
+        'neo-bottom-dock--thread': isThreadRoute,
+      }"
     >
       <InstallAppBanner />
       <SuiteMenu />
@@ -280,7 +295,7 @@ watch(
 .neo-bottom-dock {
   position: fixed;
   right: max(10px, env(safe-area-inset-right));
-  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
+  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
   z-index: var(--neo-z-shell-header, 90);
   display: flex;
   flex-direction: column-reverse;
@@ -294,10 +309,23 @@ watch(
     bottom: calc(env(safe-area-inset-bottom, 0px) + 0.65rem);
   }
 
+  /* Threads / chats pin a reply bar to the bottom — the waffle sat on Send */
+  &--thread {
+    @media (max-width: 1023px) {
+      display: none;
+    }
+  }
+
   @media (max-width: 1023px) {
     left: max(0.75rem, env(safe-area-inset-left));
     right: max(0.75rem, env(safe-area-inset-right));
     max-width: none;
+
+    // Waffle shares the bottom row with the note FAB (bottom-left); the full-width
+    // install banner stacks above both instead of sliding under the FAB.
+    :deep(.suite-menu) {
+      order: -1;
+    }
   }
 
   @media (min-width: 1024px) {
@@ -330,7 +358,9 @@ watch(
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
 
-  /* Mobile: fill remaining space between in-flow header + tab bar */
+  /* Mobile: fill remaining space between in-flow header + tab bar.
+     The shell is viewport-locked, so `main` is the page's scroll container
+     (search, groups, threads…). Only the column board opts out below. */
   @media (max-width: 1023px) {
     display: flex;
     flex-direction: column;
@@ -338,8 +368,23 @@ watch(
     min-height: 0;
     height: auto;
     max-height: none;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
     padding: 0.5rem 0.5rem 0;
+
+    // Flex items default to min-width:auto and won't shrink below content
+    // (a wide post laid group detail out at 670px inside a 375px viewport).
+    > * {
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    .neo-layout--board & {
+      overflow: hidden;
+    }
   }
 
   @media (min-width: 600px) and (max-width: 1023px) {
@@ -367,22 +412,6 @@ watch(
     /* Nested mobile screens: own top bar, no global header/tabs */
     padding-top: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
-
-    // Board keeps overflow:hidden; focused screens must scroll their own content
-    @media (max-width: 1023px) {
-      overflow-x: hidden;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior-y: contain;
-
-      // Flex items default to min-width:auto and won't shrink below content
-      // (profile was laying out at 640px inside a 390px viewport and clipping).
-      > * {
-        min-width: 0;
-        max-width: 100%;
-        box-sizing: border-box;
-      }
-    }
 
     @media (min-width: 1024px) {
       padding: 1.25rem;

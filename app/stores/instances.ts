@@ -868,6 +868,9 @@ export const useInstancesStore = defineStore('instances', {
         const data = (await parseOAuthResponse(response)) as {
           access_token?: string
         }
+        // A 200 without a token (proxy/HTML error page) must not leave a
+        // half-signed-in slot — and must not revoke the token we still have
+        if (!data.access_token) throw new Error('Token exchange failed: no access token returned')
         // Revoke any previous token on this slot before overwriting
         const previousToken = instance.accessToken
         if (previousToken && previousToken !== data.access_token && instance.clientId) {
@@ -1309,6 +1312,48 @@ export const useInstancesStore = defineStore('instances', {
       )
 
       return dedupeStatusesByIdentity(allStatuses).slice(0, Math.max(limit, limit * Math.max(1, authInstances.length)))
+    },
+
+    /** Liked posts for the active account (Mastodon favourites). */
+    async fetchFavourites(limit: number = 20, maxId?: string): Promise<ExtendedStatus[]> {
+      const active = this.activeAccount
+      if (!active?.accessToken) {
+        throw new Error('Sign in to view liked posts')
+      }
+      const client = createRestAPIClient({
+        url: active.url,
+        accessToken: active.accessToken,
+      })
+      const statuses = await client.v1.favourites.list({
+        limit,
+        ...(maxId ? { maxId } : {}),
+      })
+      return statuses.map((s) => ({
+        ...s,
+        _instanceId: active.id,
+        _instanceUrl: active.url,
+      }))
+    },
+
+    /** Saved posts for the active account (Mastodon bookmarks). */
+    async fetchBookmarks(limit: number = 20, maxId?: string): Promise<ExtendedStatus[]> {
+      const active = this.activeAccount
+      if (!active?.accessToken) {
+        throw new Error('Sign in to view saved posts')
+      }
+      const client = createRestAPIClient({
+        url: active.url,
+        accessToken: active.accessToken,
+      })
+      const statuses = await client.v1.bookmarks.list({
+        limit,
+        ...(maxId ? { maxId } : {}),
+      })
+      return statuses.map((s) => ({
+        ...s,
+        _instanceId: active.id,
+        _instanceUrl: active.url,
+      }))
     },
 
     async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {

@@ -25,6 +25,14 @@ import { compareId, idLess } from '../app/utils/compareId'
 import { sanitizeProfileCss } from '../app/utils/sanitizeCss'
 import { collapseDuplicateReblogs, statusIdentity } from '../app/utils/statusIdentity'
 import { formatLogRingForFeedback, logError, logWarn } from '../app/utils/log'
+import { formatCompactRelativeTime } from '../app/utils/relativeTime'
+import { stripParticipantMentions } from '../app/utils/dmMentions'
+import {
+  decodeAlgorithmShare,
+  encodeAlgorithmShare,
+  sharePayloadToRecipe,
+  statusMatchesRecipe,
+} from '../app/utils/algorithms'
 
 describe('loom handoff story URLs', () => {
   it('parses loom.ibm.io story ids', () => {
@@ -363,5 +371,105 @@ describe('log ring buffer', () => {
     const ring = formatLogRingForFeedback()
     expect(ring).toContain('timeline poll')
     expect(ring).toContain('chunk load')
+  })
+})
+
+describe('algorithm recipes', () => {
+  it('round-trips share encode/decode with curator attribution', () => {
+    const recipe = {
+      id: 'algo_test',
+      name: 'Cats only',
+      description: 'Soft media',
+      source: 'local' as const,
+      mediaOnly: true,
+      includeTags: ['cats'],
+      authorAcct: 'alice@example.com',
+      authorName: 'Alice',
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const encoded = encodeAlgorithmShare(recipe)
+    const payload = decodeAlgorithmShare(encoded)
+    expect(payload?.n).toBe('Cats only')
+    expect(payload?.s).toBe('local')
+    expect(payload?.m).toBe(1)
+    expect(payload?.it).toEqual(['cats'])
+    expect(payload?.a).toBe('alice@example.com')
+    const restored = sharePayloadToRecipe(payload!)
+    expect(restored.name).toBe('Cats only')
+    expect(restored.mediaOnly).toBe(true)
+    expect(statusMatchesRecipe(
+      {
+        reblog: null,
+        inReplyToId: null,
+        mediaAttachments: [{ id: '1' }],
+        tags: [{ name: 'cats' }],
+        content: '<p>hello</p>',
+      } as any,
+      restored,
+    )).toBe(true)
+    expect(statusMatchesRecipe(
+      {
+        reblog: null,
+        inReplyToId: null,
+        mediaAttachments: [],
+        tags: [{ name: 'cats' }],
+        content: '<p>hello</p>',
+      } as any,
+      restored,
+    )).toBe(false)
+  })
+
+  it('rejects garbage share payloads', () => {
+    expect(decodeAlgorithmShare('not-valid!!!')).toBeNull()
+    expect(decodeAlgorithmShare('')).toBeNull()
+  })
+})
+
+describe('formatCompactRelativeTime', () => {
+  const now = new Date('2026-10-07T12:00:00Z')
+  const ago = (s: number) => new Date(now.getTime() - s * 1000)
+
+  it('uses narrow units inside a week', () => {
+    expect(formatCompactRelativeTime(ago(20), now, 'en')).toBe('now')
+    expect(formatCompactRelativeTime(ago(5 * 60), now, 'en')).toBe('5m')
+    expect(formatCompactRelativeTime(ago(3 * 3600), now, 'en')).toBe('3h')
+    expect(formatCompactRelativeTime(ago(2 * 86_400), now, 'en')).toBe('2d')
+  })
+
+  it('falls back to a short date, with year only when it differs', () => {
+    expect(formatCompactRelativeTime(new Date('2026-09-03T12:00:00Z'), now, 'en')).toBe('Sep 3')
+    expect(formatCompactRelativeTime(new Date('2024-09-03T12:00:00Z'), now, 'en')).toBe('Sep 3, 2024')
+  })
+
+  it('treats future timestamps (clock skew) as now', () => {
+    expect(formatCompactRelativeTime(ago(-30), now, 'en')).toBe('now')
+  })
+})
+
+describe('stripParticipantMentions', () => {
+  const hcard = (user: string, url: string) =>
+    `<span class="h-card" translate="no"><a href="${url}" class="u-url mention">@<span>${user}</span></a></span>`
+
+  it('drops leading h-card mentions of participants', () => {
+    const html = `<p>${hcard('fediversecounter', 'https://mastodon.social/@fediversecounter')} hi there</p>`
+    expect(stripParticipantMentions(html, ['fediversecounter'])).toBe('<p>hi there</p>')
+  })
+
+  it('uses status.mentions to tell same-named people on other servers apart', () => {
+    const html = `<p>${hcard('alice', 'https://b.social/@alice')} look</p>`
+    const mentions = [{ url: 'https://b.social/@alice', acct: 'alice@b.social' }]
+    expect(stripParticipantMentions(html, ['alice@a.social'], mentions)).toBe(html)
+    expect(stripParticipantMentions(html, ['alice@b.social'], mentions)).toBe('<p>look</p>')
+  })
+
+  it('keeps everything when any leading mention is not a participant', () => {
+    const html = `<p>${hcard('bob', 'https://x.social/@bob')} ${hcard('carol', 'https://x.social/@carol')} hey</p>`
+    expect(stripParticipantMentions(html, ['bob'])).toBe(html)
+  })
+
+  it('leaves non-mention text and mid-sentence mentions alone', () => {
+    const html = `<p>@home tonight, ${hcard('bob', 'https://x.social/@bob')}?</p>`
+    expect(stripParticipantMentions(html, ['bob'])).toBe(html)
   })
 })

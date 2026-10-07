@@ -44,6 +44,16 @@ export const ICONS = {
       fill: filled ? 'currentColor' : 'none',
     }),
   ],
+  bookmark: ({ filled }: IconCtx) => [
+    h('path', {
+      d: 'M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z',
+      fill: filled ? 'currentColor' : 'none',
+    }),
+  ],
+  /** Filter / algorithm glyph */
+  filter: () => [
+    h('polygon', { points: '22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3' }),
+  ],
   reblog: () => [
     h('polyline', { points: '17 1 21 5 17 9' }),
     h('path', { d: 'M3 11V9a4 4 0 014-4h14' }),
@@ -82,6 +92,7 @@ export const ICONS = {
     h('line', { x1: 6, y1: 6, x2: 18, y2: 18 }),
   ],
   'chevron-left': () => [h('polyline', { points: '15 18 9 12 15 6' })],
+  'chevron-right': () => [h('polyline', { points: '9 18 15 12 9 6' })],
   'chevron-down': () => [h('polyline', { points: '6 9 12 15 18 9' })],
   send: ({ filled }: IconCtx) => [
     h('line', { x1: 22, y1: 2, x2: 11, y2: 13 }),

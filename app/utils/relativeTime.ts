@@ -49,6 +49,48 @@ export function formatRelativeTime(
   return rtf.format(Math.round(duration), 'year')
 }
 
+const COMPACT_UNITS: { seconds: number; unit: 'minute' | 'hour' | 'day' }[] = [
+  { seconds: 86_400, unit: 'day' },
+  { seconds: 3_600, unit: 'hour' },
+  { seconds: 60, unit: 'minute' },
+]
+
+/**
+ * Narrow timestamp for tight rows on phones: "now", "5m", "3h", "2d", then a
+ * short date ("Oct 3", or "Oct 3, 2024" outside the current year).
+ */
+export function formatCompactRelativeTime(
+  date: Date | string | number,
+  now: Date | string | number = Date.now(),
+  locale?: string,
+): string {
+  const then = toDate(date)
+  const base = toDate(now)
+  if (!Number.isFinite(then.getTime()) || !Number.isFinite(base.getTime())) return ''
+
+  const loc = locale || (typeof navigator !== 'undefined' ? navigator.language : 'en')
+  const elapsed = Math.max(0, (base.getTime() - then.getTime()) / 1000)
+
+  if (elapsed < 7 * 86_400) {
+    for (const { seconds, unit } of COMPACT_UNITS) {
+      if (elapsed >= seconds) {
+        return new Intl.NumberFormat(loc, {
+          style: 'unit',
+          unit,
+          unitDisplay: 'narrow',
+        }).format(Math.round(elapsed / seconds))
+      }
+    }
+    return getRtf(loc).format(0, 'second')
+  }
+
+  return new Intl.DateTimeFormat(loc, {
+    month: 'short',
+    day: 'numeric',
+    ...(then.getFullYear() !== base.getFullYear() ? { year: 'numeric' as const } : {}),
+  }).format(then)
+}
+
 /** Full localized date/time for `<time title>` / tooltips. */
 export function formatAbsoluteTime(
   date: Date | string | number,

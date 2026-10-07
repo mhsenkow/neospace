@@ -18,6 +18,7 @@ import {
   type ColumnFeedType,
 } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
+import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useSettingsStore } from '~/stores/settings'
 import { useConversationsStore } from '~/stores/conversations'
 import { useNotificationsStore } from '~/stores/notifications'
@@ -37,6 +38,7 @@ const { setBoardPortal } = useBoardPortal()
 const router = useRouter()
 
 const addMenuOpen = ref(false)
+const addAlgorithmsExpanded = ref(true)
 const addGroupsExpanded = ref(true)
 const addGroupQuery = ref('')
 const columnsContainer = ref<HTMLElement | null>(null)
@@ -74,11 +76,17 @@ const localHostLabel = computed(() => {
   return hostnameOf(preferred) || 'this server'
 })
 
+const algorithmsStore = useAlgorithmsStore()
+algorithmsStore.hydrate()
+
 const columnTabLabels = computed(() =>
   columnsStore.columns.map((column) => {
     if (column.feedType === 'group' && column.groupTag) {
       const group = groupsStore.getGroup(column.groupTag)
       return group ? `${group.icon} ${group.name}` : `#${column.groupTag}`
+    }
+    if (column.feedType === 'algorithm' && column.algorithmId) {
+      return algorithmsStore.getRecipe(column.algorithmId)?.name || 'Algorithm'
     }
     if (column.feedType === 'local') {
       return `Local (${localHostLabel.value})`
@@ -213,6 +221,7 @@ const addGroupAsColumn = (tag: string) => {
 watch(addMenuOpen, (open) => {
   if (!open) {
     addGroupQuery.value = ''
+    addAlgorithmsExpanded.value = true
     addGroupsExpanded.value = true
   }
 })
@@ -962,6 +971,8 @@ useHead({ title: 'Home | NeoSpace' })
       <NeoTabs
         class="desk-feed-tabs__neo"
         :tabs="feedTabs"
+        controls-id="feed-columns"
+        aria-label="Feeds"
         :model-value="activeFeedTabId"
         :panels="false"
         @update:model-value="(id) => (activeFeedTabId = id)"
@@ -980,8 +991,47 @@ useHead({ title: 'Home | NeoSpace' })
           <template #items>
             <span class="add-column-menu__title">Add feed</span>
             <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
-            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">Local</button>
-            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+            <div class="add-column-menu__divider" role="separator" />
+            <button type="button" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+              <span>Algorithms</span>
+              <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <template v-if="addAlgorithmsExpanded">
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
+                Local ({{ localHostLabel }})
+              </button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('favourites')"
+              >Liked</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('bookmarks')"
+              >Saved</button>
+              <button
+                v-for="recipe in algorithmsStore.allRecipes"
+                :key="recipe.id"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('algorithm', recipe.id)"
+              >{{ recipe.name }}</button>
+              <button
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="algorithmsStore.openEditor(); addMenuOpen = false"
+              >Create algorithm…</button>
+            </template>
           </template>
         </NeoMenu>
       </div>
@@ -993,6 +1043,8 @@ useHead({ title: 'Home | NeoSpace' })
         <NeoTabs
           class="mobile-feed-tabs__neo"
           :tabs="feedTabs"
+          controls-id="feed-columns"
+          aria-label="Feeds"
           :model-value="activeFeedTabId"
           :panels="false"
           @update:model-value="(id) => (activeFeedTabId = id)"
@@ -1063,6 +1115,8 @@ useHead({ title: 'Home | NeoSpace' })
             v-model:open="addMenuOpen"
             class="add-column-neo add-column-neo--mobile"
             align="end"
+            teleport
+            panel-class="add-column-menu-panel"
             :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1072,8 +1126,47 @@ useHead({ title: 'Home | NeoSpace' })
             <template #items>
               <span class="add-column-menu__title">Add Feed</span>
               <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">Local</button>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+                <span>Algorithms</span>
+                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addAlgorithmsExpanded">
+                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
+                  Local ({{ localHostLabel }})
+                </button>
+                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+                <button
+                  v-if="instancesStore.hasAuthenticatedInstance"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('favourites')"
+                >Liked</button>
+                <button
+                  v-if="instancesStore.hasAuthenticatedInstance"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('bookmarks')"
+                >Saved</button>
+                <button
+                  v-for="recipe in algorithmsStore.allRecipes"
+                  :key="`m-${recipe.id}`"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('algorithm', recipe.id)"
+                >{{ recipe.name }}</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="algorithmsStore.openEditor(); addMenuOpen = false"
+                >Create algorithm…</button>
+              </template>
               <div class="add-column-menu__divider" role="separator" />
               <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
               <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
@@ -1137,8 +1230,7 @@ useHead({ title: 'Home | NeoSpace' })
                 </div>
               </template>
               <span class="add-column-menu__hint">
-                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }}
-                <template v-if="instancesStore.isAuthenticated"> · syncs to your profile</template>
+                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} feeds on this device
               </span>
             </template>
           </NeoMenu>
@@ -1148,6 +1240,7 @@ useHead({ title: 'Home | NeoSpace' })
 
     <div
       ref="columnsContainer"
+      id="feed-columns"
       class="columns-container"
       @scroll.passive="onColumnsScroll"
     >
@@ -1477,22 +1570,71 @@ useHead({ title: 'Home | NeoSpace' })
             </svg>
             For You
           </button>
-          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+          <div class="add-column-menu__divider" role="separator" />
+          <button type="button" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+            <span>Algorithms</span>
+            <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9" />
             </svg>
-            Local
           </button>
-          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M2 12h20" />
-              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-            </svg>
-            Federated
-          </button>
+          <template v-if="addAlgorithmsExpanded">
+            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+              </svg>
+              Local ({{ localHostLabel }})
+            </button>
+            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20" />
+                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+              </svg>
+              Federated
+            </button>
+            <button
+              v-if="instancesStore.hasAuthenticatedInstance"
+              type="button"
+              role="menuitem"
+              class="add-column-menu__item"
+              @click="addColumn('favourites')"
+            >
+              <NeoIcon name="heart" :size="16" :stroke="1.5" />
+              Liked
+            </button>
+            <button
+              v-if="instancesStore.hasAuthenticatedInstance"
+              type="button"
+              role="menuitem"
+              class="add-column-menu__item"
+              @click="addColumn('bookmarks')"
+            >
+              <NeoIcon name="bookmark" :size="16" :stroke="1.5" />
+              Saved
+            </button>
+            <button
+              v-for="recipe in algorithmsStore.allRecipes"
+              :key="`d-${recipe.id}`"
+              type="button"
+              role="menuitem"
+              class="add-column-menu__item"
+              @click="addColumn('algorithm', recipe.id)"
+            >
+              <NeoIcon name="filter" :size="16" :stroke="1.5" />
+              {{ recipe.name }}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="add-column-menu__item"
+              @click="algorithmsStore.openEditor(); addMenuOpen = false"
+            >
+              <NeoIcon name="plus" :size="16" :stroke="1.5" />
+              Create algorithm…
+            </button>
+          </template>
           <div class="add-column-menu__divider" role="separator" />
           <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -1579,8 +1721,7 @@ useHead({ title: 'Home | NeoSpace' })
             </div>
           </template>
           <span class="add-column-menu__hint">
-            {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns
-            <template v-if="instancesStore.isAuthenticated"> · syncs to profile</template>
+            {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns on this device
           </span>
         </template>
       </NeoMenu>
@@ -2075,6 +2216,11 @@ useHead({ title: 'Home | NeoSpace' })
     border: 1px solid var(--neo-border-color);
     background: var(--neo-bg-card, var(--neo-bg-secondary));
     color: var(--neo-text-secondary);
+
+    &:focus-within {
+      border-color: var(--neo-accent);
+      box-shadow: 0 0 0 3px var(--neo-accent-soft);
+    }
   }
 
   &__search-input {
@@ -2279,10 +2425,11 @@ useHead({ title: 'Home | NeoSpace' })
       text-overflow: ellipsis;
       border-radius: 8px;
       box-shadow: none;
-      color: var(--neo-text-quaternary);
+      // Column switcher is primary nav on phones — quaternary read ~2:1
+      color: var(--neo-text-tertiary);
 
       &[aria-selected='true'] {
-        color: var(--neo-text-secondary);
+        color: var(--neo-text-primary);
         background: var(--neo-bg-tertiary);
         box-shadow: none;
       }
@@ -2629,4 +2776,18 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
+</style>
+
+<!-- Teleported Add Feed panel lives on <body>; scoped :deep() cannot reach it. -->
+<style lang="scss">
+.add-column-menu-panel.neo-menu__panel {
+  width: 240px;
+  max-height: min(70vh, 28rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--neo-bg-secondary);
+  border-radius: 12px;
+  box-shadow: var(--neo-shadow-xl);
+  padding: 0.5rem;
+}
 </style>

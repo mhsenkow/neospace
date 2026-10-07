@@ -14,6 +14,8 @@ const props = withDefaults(
     teleport?: boolean
     /** Where the panel opens relative to the trigger when teleporting. */
     placement?: 'bottom' | 'end'
+    /** Extra class on the panel (needed when teleported — parent :deep() no longer reaches it). */
+    panelClass?: string
   }>(),
   { align: 'end', teleport: false, placement: 'bottom' },
 )
@@ -47,26 +49,37 @@ function toggle() {
   open.value = !open.value
 }
 
-function updatePanelPos() {
+function updatePanelPos(remeasure = true) {
   if (!props.teleport || !triggerRef.value) return
   const rect = triggerRef.value.getBoundingClientRect()
-  if (props.placement === 'end') {
-    panelStyle.value = {
-      position: 'fixed',
-      left: `${Math.round(rect.right + 6)}px`,
-      top: `${Math.round(rect.top)}px`,
-      minWidth: '12.5rem',
-      zIndex: 'var(--neo-z-dropdown, 1000)',
-    }
-  } else {
-    panelStyle.value = {
-      position: 'fixed',
-      left: `${Math.round(rect.left)}px`,
-      top: `${Math.round(rect.bottom + 4)}px`,
-      minWidth: `${Math.max(Math.round(rect.width), 180)}px`,
-      zIndex: 'var(--neo-z-dropdown, 1000)',
-    }
+  const base =
+    props.placement === 'end'
+      ? { left: rect.right + 6, top: rect.top, minWidth: '12.5rem' }
+      : { left: rect.left, top: rect.bottom + 4, minWidth: `${Math.max(Math.round(rect.width), 180)}px` }
+
+  // Clamp in the same pass (no raw-then-corrected flicker while scrolling).
+  // The panel is display:none on the first open, so measure again after render.
+  const panel = menuRef.value
+  const w = panel?.offsetWidth || 0
+  const h = panel?.offsetHeight || 0
+  const margin = 8
+  let { left, top } = base
+  if (w && left + w > window.innerWidth - margin) {
+    left = Math.max(margin, window.innerWidth - w - margin)
   }
+  // Flip above the trigger when there's no room below (and there is above)
+  if (h && top + h > window.innerHeight - margin && rect.top - h - 4 >= margin) {
+    top = rect.top - h - 4
+  }
+  panelStyle.value = {
+    position: 'fixed',
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+    minWidth: base.minWidth,
+    // Popover tier: teleported panels may open from inside modals (followers list)
+    zIndex: 'var(--neo-z-popover, 1060)',
+  }
+  if ((!w || !h) && remeasure) void nextTick(() => open.value && updatePanelPos(false))
 }
 
 async function onOpen() {
@@ -90,7 +103,7 @@ watch(
 /** Close after choosing an item — not on filter/section chrome clicks */
 function onPanelClick(e: MouseEvent) {
   const el = e.target as HTMLElement | null
-  if (el?.closest?.('[role="menuitem"]')) close()
+  if (el?.closest?.('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')) close()
 }
 
 function onTriggerKeydown(e: KeyboardEvent) {
@@ -107,6 +120,23 @@ function onTriggerKeydown(e: KeyboardEvent) {
   }
 }
 
+const TABBABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/** Focus the tabbable element before/after the trigger (within an open modal, if any). */
+function focusPastTrigger(step: 1 | -1) {
+  const trigger = triggerRef.value
+  if (!trigger) return
+  const scope = trigger.closest<HTMLElement>('[aria-modal="true"]') || document.body
+  const menu = menuRef.value
+  const list = Array.from(scope.querySelectorAll<HTMLElement>(TABBABLE)).filter(
+    (el) => !(menu && menu.contains(el)) && el.getClientRects().length > 0,
+  )
+  const i = list.indexOf(trigger)
+  const target = i < 0 ? trigger : list[(i + step + list.length) % list.length]
+  ;(target ?? trigger).focus()
+}
+
 function onMenuKeydown(e: KeyboardEvent) {
   const list = items()
   if (!list.length) return
@@ -116,6 +146,15 @@ function onMenuKeydown(e: KeyboardEvent) {
     e.preventDefault()
     e.stopPropagation()
     close()
+    return
+  }
+  // APG menu: Tab closes the menu and moves on from the *trigger*. Done by hand:
+  // a teleported panel sits at the end of <body>, so the browser's own Tab would
+  // continue from there (wrapping behind modals) instead of from the trigger.
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    open.value = false
+    focusPastTrigger(e.shiftKey ? -1 : 1)
     return
   }
   if (e.key === 'ArrowDown') {
@@ -193,7 +232,7 @@ defineExpose({ open, close, toggle })
         :id="menuId"
         ref="menuRef"
         class="neo-menu__panel"
-        :class="{ 'neo-menu__panel--portal': teleport }"
+        :class="[{ 'neo-menu__panel--portal': teleport }, panelClass]"
         role="menu"
         :aria-label="label"
         :style="teleport ? panelStyle : undefined"

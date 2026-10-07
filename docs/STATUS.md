@@ -30,7 +30,8 @@ NeoSpace aims to be a **production-quality, multi-column Fediverse client** in t
 Deploy path: `npm run generate` → `.output/public` → Wrangler Pages upload (`npm run cf:deploy`).
 
 **Working today:**
-- Full multi-column board (home, local, federated, group, profile, search, notifications, messages)
+- Full multi-column board (home, local, federated, group, liked, saved, custom algorithms, profile, search, notifications, messages)
+- Algorithms section: Local / Federated / Liked / Saved + named client-side recipes (filters) with shareable curator links (`/algorithms/import`)
 - OAuth login, multi-account, public preview without auth
 - Compose (mentions autocomplete, CW, visibility, media + alt text, drafts)
 - DMs, notifications, explore/search, groups, profile + insights

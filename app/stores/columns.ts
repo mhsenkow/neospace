@@ -14,6 +14,9 @@ export type ColumnFeedType =
   | 'local'
   | 'federated'
   | 'group'
+  | 'favourites'
+  | 'bookmarks'
+  | 'algorithm'
   | 'profile'
   | 'search'
   | 'notifications'
@@ -35,7 +38,15 @@ function normalizeDeskDensity(value: unknown): DeskDensity {
 /** Mobile reading mode — flow = Threads list, flip = full-bleed snap */
 export type ColumnViewMode = 'flow' | 'flip'
 
-export const TIMELINE_FEED_TYPES: ColumnFeedType[] = ['home', 'local', 'federated', 'group']
+export const TIMELINE_FEED_TYPES: ColumnFeedType[] = [
+  'home',
+  'local',
+  'federated',
+  'group',
+  'favourites',
+  'bookmarks',
+  'algorithm',
+]
 export const PANEL_FEED_TYPES: ColumnFeedType[] = ['profile', 'search', 'notifications', 'messages']
 
 /** Single source for feed labels (board menus, tabs, TimelineColumn). */
@@ -44,6 +55,9 @@ export const FEED_CATALOG: { type: ColumnFeedType; label: string }[] = [
   { type: 'local', label: 'Local' },
   { type: 'federated', label: 'Federated' },
   { type: 'group', label: 'Group' },
+  { type: 'favourites', label: 'Liked' },
+  { type: 'bookmarks', label: 'Saved' },
+  { type: 'algorithm', label: 'Algorithm' },
   { type: 'profile', label: 'Profile' },
   { type: 'search', label: 'Search' },
   { type: 'notifications', label: 'Notifications' },
@@ -59,7 +73,15 @@ export const FEED_LABELS: Record<ColumnFeedType, string> = FEED_CATALOG.reduce(
 )
 
 export function isTimelineFeed(type: ColumnFeedType): boolean {
-  return type === 'home' || type === 'local' || type === 'federated' || type === 'group'
+  return (
+    type === 'home' ||
+    type === 'local' ||
+    type === 'federated' ||
+    type === 'group' ||
+    type === 'favourites' ||
+    type === 'bookmarks' ||
+    type === 'algorithm'
+  )
 }
 
 export function isPanelFeed(type: ColumnFeedType): boolean {
@@ -70,6 +92,8 @@ export interface ColumnConfig {
   id: string
   feedType: ColumnFeedType
   groupTag?: string
+  /** Custom / shared algorithm recipe id */
+  algorithmId?: string
   /** Device-local; not synced via profile field */
   viewMode?: ColumnViewMode
   /**
@@ -79,7 +103,7 @@ export interface ColumnConfig {
    */
   profileAcct?: string
   /** Restore this feed when leaving a profile peek */
-  returnFeed?: { feedType: ColumnFeedType; groupTag?: string }
+  returnFeed?: { feedType: ColumnFeedType; groupTag?: string; algorithmId?: string }
 }
 
 type StoredLayoutMeta = {
@@ -119,6 +143,9 @@ const FEED_TYPES: ColumnFeedType[] = [
   'local',
   'federated',
   'group',
+  'favourites',
+  'bookmarks',
+  'algorithm',
   'profile',
   'search',
   'notifications',
@@ -150,7 +177,7 @@ function stripHtml(value: string) {
   return value.replace(/<[^>]*>/g, '').trim()
 }
 
-/** Compact wire format: home|local|federated|group:tag — peeks encode their return feed */
+/** Compact wire format: home|local|federated|group:tag|algo:id — peeks encode their return feed */
 export function encodeColumns(columns: ColumnConfig[]): string {
   return columns
     .map((c) => {
@@ -160,6 +187,9 @@ export function encodeColumns(columns: ColumnConfig[]): string {
           : c
       if (feed.feedType === 'group' && feed.groupTag) {
         return `group:${feed.groupTag.replace(/[|:]/g, '')}`
+      }
+      if (feed.feedType === 'algorithm' && feed.algorithmId) {
+        return `algo:${feed.algorithmId.replace(/[|:]/g, '')}`
       }
       if (feed.feedType === 'profile' && (feed as ColumnConfig).profileAcct) {
         return 'home'
@@ -184,7 +214,13 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       columns.push({ id: generateId(), feedType: 'group', groupTag: tag })
       continue
     }
-    if ((FEED_TYPES as string[]).includes(part) && part !== 'group') {
+    if (part.startsWith('algo:')) {
+      const algorithmId = part.slice(5).trim()
+      if (!algorithmId) continue
+      columns.push({ id: generateId(), feedType: 'algorithm', algorithmId })
+      continue
+    }
+    if ((FEED_TYPES as string[]).includes(part) && part !== 'group' && part !== 'algorithm') {
       columns.push({ id: generateId(), feedType: part as ColumnFeedType })
       continue
     }
@@ -208,8 +244,10 @@ function defaultColumns(preferHome: boolean): ColumnConfig[] {
   return [{ id: generateId(), feedType: preferHome ? 'home' : 'local', viewMode: 'flow' }]
 }
 
-function feedKey(c: Pick<ColumnConfig, 'feedType' | 'groupTag'>) {
-  return c.feedType === 'group' && c.groupTag ? `group:${c.groupTag}` : c.feedType
+function feedKey(c: Pick<ColumnConfig, 'feedType' | 'groupTag' | 'algorithmId'>) {
+  if (c.feedType === 'group' && c.groupTag) return `group:${c.groupTag}`
+  if (c.feedType === 'algorithm' && c.algorithmId) return `algo:${c.algorithmId}`
+  return c.feedType
 }
 
 /** Keep Flow/Flip choice when profile sync regenerates column ids */
@@ -434,12 +472,21 @@ export const useColumnsStore = defineStore('columns', {
       this.saveDeskLayout()
     },
 
-    /** Add a column, or return the existing one for singleton panel views. */
-    addColumn(feedType: ColumnFeedType = 'local', groupTag?: string) {
-      // Own-profile / search / inbox are singletons; profile peeks (profileAcct) are not
-      if (isPanelFeed(feedType)) {
+    /**
+     * Add a column, or return the existing one for singleton views.
+     * `feedParam` is groupTag for groups, algorithmId for algorithms.
+     */
+    addColumn(feedType: ColumnFeedType = 'local', feedParam?: string) {
+      // Own-profile / search / inbox / liked / saved are singletons; profile peeks are not
+      if (isPanelFeed(feedType) || feedType === 'favourites' || feedType === 'bookmarks') {
         const existing = this.columns.find(
           (c) => c.feedType === feedType && !c.profileAcct,
+        )
+        if (existing) return existing.id
+      }
+      if (feedType === 'algorithm' && feedParam) {
+        const existing = this.columns.find(
+          (c) => c.feedType === 'algorithm' && c.algorithmId === feedParam,
         )
         if (existing) return existing.id
       }
@@ -447,9 +494,12 @@ export const useColumnsStore = defineStore('columns', {
       const col: ColumnConfig = {
         id: generateId(),
         feedType,
-        viewMode: feedType === 'home' || isPanelFeed(feedType) ? 'flow' : 'flip',
+        // Always start in Flow — Flip is an intentional reading mode, not a feed default.
+        // (Local/Federated used to open Flip and felt “broken” on mobile.)
+        viewMode: 'flow',
       }
-      if (groupTag) col.groupTag = groupTag
+      if (feedType === 'group' && feedParam) col.groupTag = feedParam
+      if (feedType === 'algorithm' && feedParam) col.algorithmId = feedParam
       this.columns.push(col)
       this.persist()
       return col.id
@@ -458,13 +508,16 @@ export const useColumnsStore = defineStore('columns', {
     /**
      * Open a view on the board (add if needed) and focus it.
      * Always focuses (does not toggle off) — use clearColumnFocus / toggleColumnFocus to leave.
+     * `feedParam` is groupTag for groups, algorithmId for algorithms.
      */
-    ensureFocusedView(feedType: ColumnFeedType, groupTag?: string) {
-      const match = this.columns.find((c) =>
-        feedType === 'group'
-          ? c.feedType === 'group' && c.groupTag === groupTag
-          : c.feedType === feedType,
-      )
+    ensureFocusedView(feedType: ColumnFeedType, feedParam?: string) {
+      const match = this.columns.find((c) => {
+        if (feedType === 'group') return c.feedType === 'group' && c.groupTag === feedParam
+        if (feedType === 'algorithm') {
+          return c.feedType === 'algorithm' && c.algorithmId === feedParam
+        }
+        return c.feedType === feedType
+      })
       if (match) {
         if (this.focusedColumnId !== match.id) {
           this.focusedColumnId = match.id
@@ -481,7 +534,7 @@ export const useColumnsStore = defineStore('columns', {
           this.removeColumn(disposable.id)
         }
       }
-      const id = this.addColumn(feedType, groupTag)
+      const id = this.addColumn(feedType, feedParam)
       if (id) {
         this.focusedColumnId = id
         this.saveDeskLayout()
@@ -522,7 +575,9 @@ export const useColumnsStore = defineStore('columns', {
         const label =
           removed.feedType === 'group' && removed.groupTag
             ? `#${removed.groupTag}`
-            : FEED_LABELS[removed.feedType] || 'Column'
+            : removed.feedType === 'algorithm' && removed.algorithmId
+              ? 'Algorithm'
+              : FEED_LABELS[removed.feedType] || 'Column'
         useToastStore().show({
           message: `${label} removed`,
           actionLabel: 'Undo',
@@ -541,11 +596,12 @@ export const useColumnsStore = defineStore('columns', {
       })
     },
 
-    updateColumnFeedType(columnId: string, feedType: ColumnFeedType, groupTag?: string) {
+    updateColumnFeedType(columnId: string, feedType: ColumnFeedType, feedParam?: string) {
       const column = this.columns.find((c) => c.id === columnId)
       if (column) {
         column.feedType = feedType
-        column.groupTag = feedType === 'group' ? groupTag : undefined
+        column.groupTag = feedType === 'group' ? feedParam : undefined
+        column.algorithmId = feedType === 'algorithm' ? feedParam : undefined
         column.profileAcct = undefined
         column.returnFeed = undefined
         this.persist()
@@ -566,11 +622,13 @@ export const useColumnsStore = defineStore('columns', {
         column.returnFeed = {
           feedType: column.feedType,
           groupTag: column.groupTag,
+          algorithmId: column.algorithmId,
         }
       }
       column.feedType = 'profile'
       column.profileAcct = handle
       column.groupTag = undefined
+      column.algorithmId = undefined
       // Stay on the board: clear another column's focus so this peel is visible
       if (this.focusedColumnId && this.focusedColumnId !== columnId) {
         this.focusedColumnId = null
@@ -589,9 +647,11 @@ export const useColumnsStore = defineStore('columns', {
       if (back) {
         column.feedType = back.feedType
         column.groupTag = back.feedType === 'group' ? back.groupTag : undefined
+        column.algorithmId = back.feedType === 'algorithm' ? back.algorithmId : undefined
       } else {
         column.feedType = 'home'
         column.groupTag = undefined
+        column.algorithmId = undefined
       }
       if (this.focusedColumnId === columnId) {
         this.focusedColumnId = null
