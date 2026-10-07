@@ -374,6 +374,14 @@ watch(
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-y: contain;
+
+      // Flex items default to min-width:auto and won't shrink below content
+      // (profile was laying out at 640px inside a 390px viewport and clipping).
+      > * {
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
     }
 
     @media (min-width: 1024px) {

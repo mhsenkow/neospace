@@ -1035,9 +1035,12 @@ useHead({
 
 <style lang="scss" scoped>
 .profile-page {
+  width: 100%;
   max-width: 640px;
+  min-width: 0;
   margin: 0 auto;
   padding: 0 0 2rem;
+  box-sizing: border-box;
 }
 
 .profile-header-banner {

@@ -636,6 +636,7 @@ useHead({
 .thread-page {
   width: 100%;
   max-width: 40rem;
+  min-width: 0;
   margin: 0 auto;
   padding: 0.5rem 0.5rem 1.5rem;
   box-sizing: border-box;

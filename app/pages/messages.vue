@@ -506,10 +506,13 @@ useHead(() => ({ title: pageTitle.value }))
 
 <style lang="scss" scoped>
 .messages-page {
+  width: 100%;
   max-width: 640px;
+  min-width: 0;
   margin: 0 auto;
   min-height: 50vh;
   padding-bottom: 2rem;
+  box-sizing: border-box;
 }
 
 .messages-privacy {

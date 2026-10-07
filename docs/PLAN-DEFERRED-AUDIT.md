@@ -2,6 +2,8 @@
 
 Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from that pass is done; these need their own slices.
 
+**Context:** [STATUS.md](./STATUS.md) (where things are) · [README](../README.md) (product overview) · [docs index](./README.md)
+
 **Enable anytime (not code):** Turnstile — set `NUXT_PUBLIC_TURNSTILE_SITE_KEY` at build time and `TURNSTILE_SECRET_KEY` as a Pages secret. Widget + server verify are already plumbed.
 
 ---
