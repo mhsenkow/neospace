@@ -10,12 +10,17 @@ import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel } from '~/utils/dmHelpers'
+import { createRaceGuard } from '~/composables/useRace'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 
 const route = useRoute()
 const router = useRouter()
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 const conversationsStore = useConversationsStore()
+const loadRace = createRaceGuard()
+let skipNextRouteWatch = false
+let dmRefreshActive = false
 
 const isLoading = ref(true)
 const isRefreshing = ref(false)
@@ -26,6 +31,7 @@ const descendants = ref<mastodon.v1.Status[]>([])
 const focusEl = ref<HTMLElement | null>(null)
 const chatEndEl = ref<HTMLElement | null>(null)
 let threadPoll: ReturnType<typeof setInterval> | null = null
+let resolvedThreadId: string | null = null
 
 const paramId = computed(() => String(route.params.id || ''))
 const queryUrl = computed(() => {
@@ -183,17 +189,39 @@ const syncReplyDockOffset = () => {
   replyDockStyle.value = { bottom: `${inset}px` }
 }
 
+const preferReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+    document.documentElement.classList.contains('reduce-motion'))
+
 const scrollChatToEnd = async () => {
   await nextTick()
-  chatEndEl.value?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  chatEndEl.value?.scrollIntoView({
+    block: 'end',
+    behavior: preferReducedMotion() ? 'auto' : 'smooth',
+  })
+}
+
+const syncDmLiveRefresh = (isDm: boolean) => {
+  if (isDm && instancesStore.isAuthenticated) {
+    if (!dmRefreshActive) {
+      conversationsStore.startLiveRefresh()
+      dmRefreshActive = true
+    }
+  } else if (dmRefreshActive) {
+    conversationsStore.stopLiveRefresh()
+    dmRefreshActive = false
+  }
 }
 
 const loadThread = async (opts: { quiet?: boolean } = {}) => {
+  const ticket = loadRace.next()
   if (!opts.quiet) {
     isLoading.value = true
     focusStatus.value = null
     ancestors.value = []
     descendants.value = []
+    resolvedThreadId = null
   } else {
     isRefreshing.value = true
   }
@@ -201,28 +229,39 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
 
   try {
     await instancesStore.initialize()
+    if (!ticket.isCurrent()) return
 
-    const resolvedId = await statusStore.resolveThreadId({
-      id: paramId.value,
-      url: queryUrl.value,
-    })
+    let resolvedId = resolvedThreadId
+    if (!resolvedId || !opts.quiet) {
+      resolvedId = await statusStore.resolveThreadId({
+        id: paramId.value,
+        url: queryUrl.value,
+      })
+    }
+    if (!ticket.isCurrent()) return
 
     if (!resolvedId) {
       error.value = 'Couldn’t find that post on your server.'
       return
     }
+    resolvedThreadId = resolvedId
 
     if (resolvedId !== paramId.value) {
+      skipNextRouteWatch = true
       await router.replace({
         path: `/status/${resolvedId}`,
         query: queryUrl.value ? { url: queryUrl.value } : undefined,
       })
+      if (!ticket.isCurrent()) return
     }
 
     const thread = await statusStore.fetchThread(resolvedId)
+    if (!ticket.isCurrent()) return
     focusStatus.value = thread.status
     ancestors.value = thread.ancestors
     descendants.value = thread.descendants
+
+    syncDmLiveRefresh(thread.status.visibility === 'direct')
 
     if (thread.status.visibility === 'direct' && instancesStore.isAuthenticated) {
       const statusIds = [
@@ -238,17 +277,26 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
 
     if (!opts.quiet) {
       await nextTick()
+      if (!ticket.isCurrent()) return
+      const behavior = preferReducedMotion() ? 'auto' : 'smooth'
       if (thread.status.visibility === 'direct') {
         await scrollChatToEnd()
       } else {
-        focusEl.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        focusEl.value?.scrollIntoView({ block: 'center', behavior })
+        focusEl.value?.focus?.({ preventScroll: true })
       }
     }
   } catch (e: any) {
-    if (!opts.quiet) error.value = e?.message || 'Failed to load thread'
+    if (!ticket.isCurrent()) return
+    if (!opts.quiet) {
+      const friendly = mapErrorToMessage(e)
+      error.value = friendly.detail || friendly.title || e?.message || 'Failed to load thread'
+    }
   } finally {
-    isLoading.value = false
-    isRefreshing.value = false
+    if (ticket.isCurrent()) {
+      isLoading.value = false
+      isRefreshing.value = false
+    }
   }
 }
 
@@ -294,7 +342,6 @@ const startThreadPoll = () => {
 
 onMounted(() => {
   void loadThread().then(() => startThreadPoll())
-  conversationsStore.startLiveRefresh()
   syncReplyDockOffset()
   window.visualViewport?.addEventListener('resize', syncReplyDockOffset)
   window.visualViewport?.addEventListener('scroll', syncReplyDockOffset)
@@ -303,18 +350,25 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopThreadPoll()
-  conversationsStore.stopLiveRefresh()
+  loadRace.abort()
+  syncDmLiveRefresh(false)
   window.visualViewport?.removeEventListener('resize', syncReplyDockOffset)
   window.visualViewport?.removeEventListener('scroll', syncReplyDockOffset)
   window.removeEventListener('resize', syncReplyDockOffset)
 })
 
 watch(() => [route.params.id, route.query.url], () => {
+  if (skipNextRouteWatch) {
+    skipNextRouteWatch = false
+    return
+  }
   stopThreadPoll()
+  resolvedThreadId = null
   void loadThread().then(() => startThreadPoll())
 })
 
 watch(isDirectThread, (dm) => {
+  syncDmLiveRefresh(dm)
   if (dm) startThreadPoll()
   else stopThreadPoll()
 })
@@ -407,7 +461,7 @@ useHead({
       <FunLoader variant="region" :label="isDirectThread ? 'Loading messages' : 'Loading conversation'" />
     </div>
 
-    <div v-else-if="error" class="thread-state thread-state--error">
+    <div v-else-if="error" class="thread-state thread-state--error" role="alert">
       <p>{{ error }}</p>
       <div class="thread-state__actions">
         <button type="button" class="neo-btn neo-btn--secondary" @click="loadThread()">Retry</button>
@@ -419,7 +473,13 @@ useHead({
 
     <!-- Chat view -->
     <template v-else-if="isDirectThread">
-      <div class="chat-stream">
+      <div
+        class="chat-stream"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Conversation messages"
+      >
         <p v-if="chatMessages.length <= 1" class="chat-empty">
           Private conversation — everyone mentioned can see these messages.
         </p>
@@ -463,7 +523,7 @@ useHead({
           @replied="onReplyPosted"
         />
 
-        <div ref="focusEl" class="thread-focus">
+        <div ref="focusEl" class="thread-focus" tabindex="-1" aria-current="true">
           <RealPostCard
             v-if="focusStatus"
             :status="focusStatus"

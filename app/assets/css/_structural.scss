@@ -130,6 +130,10 @@
   
   // === Z-Index Scale ===
   --neo-z-base: #{vars.$z-index-base};
+  --neo-z-shell-header: 90;
+  --neo-z-shell-overlay: 95;
+  --neo-z-shell-nav: 100;
+  --neo-z-shell-popover: 200;
   --neo-z-dropdown: #{vars.$z-index-dropdown};
   --neo-z-sticky: #{vars.$z-index-sticky};
   --neo-z-fixed: #{vars.$z-index-fixed};
@@ -139,6 +143,17 @@
   --neo-z-tooltip: #{vars.$z-index-tooltip};
   --neo-z-toast: #{vars.$z-index-toast};
   --neo-z-chaos-overlay: #{vars.$z-index-chaos-overlay};
+  --neo-z-skip: 10000;
+
+  // Group category accents (sidebar / chips)
+  --neo-cat-tech: #c45c26;
+  --neo-cat-creative: #b8860b;
+  --neo-cat-gaming: #2f7d4a;
+  --neo-cat-social: #a84c1e;
+  --neo-cat-news: #3a6ea5;
+  --neo-cat-trending: #c45c26;
+  --neo-cat-local: #757575;
+  --neo-cat-other: #757575;
   
   // === Layout ===
   --neo-content-width-narrow: #{vars.$content-width-narrow};

@@ -41,16 +41,59 @@ export interface SettingsCategory {
   label: string
   icon: string
   description?: string
+  keywords?: string[]
 }
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
-  { id: 'profile', label: 'Profile', icon: 'user', description: 'Your public profile information' },
-  { id: 'privacy', label: 'Privacy & Safety', icon: 'lock', description: 'Control who can see your content' },
-  { id: 'notifications', label: 'Notifications', icon: 'bell', description: 'Manage your notification preferences' },
-  { id: 'appearance', label: 'Appearance', icon: 'palette', description: 'Customize how NeoSpace looks' },
-  { id: 'posting', label: 'Posting Defaults', icon: 'pen', description: 'Default settings for new posts' },
-  { id: 'filters', label: 'Filters', icon: 'ban', description: 'Content filters and muted words' },
-  { id: 'account', label: 'Account', icon: 'settings', description: 'Account settings and data' },
+  {
+    id: 'profile',
+    label: 'Profile',
+    icon: 'user',
+    description: 'Your public profile information',
+    keywords: ['name', 'bio', 'avatar', 'header', 'display', 'about', 'fields', 'website'],
+  },
+  {
+    id: 'privacy',
+    label: 'Privacy & Safety',
+    icon: 'lock',
+    description: 'Control who can see your content',
+    keywords: ['mute', 'block', 'locked', 'discoverable', 'safety', 'hide', 'domain'],
+  },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    icon: 'bell',
+    description: 'Manage your notification preferences',
+    keywords: ['alerts', 'mentions', 'push', 'email', 'activity'],
+  },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    icon: 'palette',
+    description: 'Customize how NeoSpace looks',
+    keywords: ['theme', 'dark', 'light', 'font', 'dyslexic', 'density', 'radius', 'ui', 'contrast', 'motion', 'css'],
+  },
+  {
+    id: 'posting',
+    label: 'Posting Defaults',
+    icon: 'pen',
+    description: 'Default settings for new posts',
+    keywords: ['visibility', 'public', 'unlisted', 'followers', 'sensitive', 'cw', 'language', 'compose'],
+  },
+  {
+    id: 'filters',
+    label: 'Filters',
+    icon: 'ban',
+    description: 'Content filters and muted words',
+    keywords: ['mute', 'keyword', 'hide', 'words', 'phrases'],
+  },
+  {
+    id: 'account',
+    label: 'Account',
+    icon: 'settings',
+    description: 'Account settings and data',
+    keywords: ['logout', 'sign out', 'clear', 'data', 'export', 'instance', 'linked', 'accounts'],
+  },
 ]
 
 // Mastodon preferences structure
@@ -116,6 +159,7 @@ interface SettingsState {
 }
 
 const LOCAL_PREFS_KEY = 'neospace_local_prefs'
+const LOCAL_PREFS_VERSION = 1
 
 export const useSettingsStore = defineStore('settings', {
   state: (): SettingsState => ({
@@ -161,11 +205,13 @@ export const useSettingsStore = defineStore('settings', {
      */
     filteredCategories: (state): SettingsCategory[] => {
       if (!state.searchQuery.trim()) return SETTINGS_CATEGORIES
-      
+
       const query = state.searchQuery.toLowerCase()
-      return SETTINGS_CATEGORIES.filter(cat => 
-        cat.label.toLowerCase().includes(query) ||
-        cat.description?.toLowerCase().includes(query)
+      return SETTINGS_CATEGORIES.filter(
+        (cat) =>
+          cat.label.toLowerCase().includes(query) ||
+          cat.description?.toLowerCase().includes(query) ||
+          cat.keywords?.some((k) => k.includes(query) || query.includes(k)),
       )
     },
     
@@ -248,7 +294,11 @@ export const useSettingsStore = defineStore('settings', {
       try {
         const saved = localStorage.getItem(LOCAL_PREFS_KEY)
         if (saved) {
-          const parsed = JSON.parse(saved)
+          const raw = JSON.parse(saved)
+          const parsed =
+            raw && typeof raw === 'object' && typeof raw.v === 'number'
+              ? (({ v: _v, ...rest }) => rest)(raw)
+              : raw
           const vis = parsed.defaultVisibility
           this.localPreferences = {
             ...this.localPreferences,
@@ -333,7 +383,10 @@ export const useSettingsStore = defineStore('settings', {
       if (typeof window === 'undefined') return
       
       try {
-        localStorage.setItem(LOCAL_PREFS_KEY, JSON.stringify(this.localPreferences))
+        localStorage.setItem(
+          LOCAL_PREFS_KEY,
+          JSON.stringify({ v: LOCAL_PREFS_VERSION, ...this.localPreferences }),
+        )
       } catch (e) {
         console.error('Failed to save local preferences:', e)
       }
@@ -476,7 +529,7 @@ export const useSettingsStore = defineStore('settings', {
     },
     
     /**
-     * Update posting preferences — persisted locally (Mastodon prefs API is read-only)
+     * Update posting defaults — local cache + server via updateCredentials source.
      */
     async updatePostingDefaults(data: {
       visibility?: 'public' | 'unlisted' | 'private' | 'direct'
@@ -497,7 +550,26 @@ export const useSettingsStore = defineStore('settings', {
           this.preferences['posting:default:sensitive'] = data.sensitive
         }
       }
+      if (data.language !== undefined && this.preferences) {
+        this.preferences['posting:default:language'] = data.language
+      }
       this.saveLocalPreferences()
+
+      // Mastodon accepts source[privacy|sensitive|language] on update_credentials
+      const source: Record<string, string | boolean> = {}
+      if (data.visibility) source.privacy = data.visibility
+      if (data.sensitive !== undefined) source.sensitive = data.sensitive
+      if (data.language !== undefined) source.language = data.language
+
+      if (Object.keys(source).length) {
+        try {
+          const client = this.getClient()
+          await client.v1.accounts.updateCredentials({ source } as any)
+        } catch (e) {
+          console.warn('Could not sync posting defaults to server:', e)
+        }
+      }
+
       this.saveSuccess = true
     },
     

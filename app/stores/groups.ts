@@ -9,6 +9,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
+import { useSettingsStore } from './settings'
 import { activeClient, publicClient } from '~/composables/useMasto'
 
 /** Prevent concurrent initializeGroups races that double-push trending tags */
@@ -443,6 +444,9 @@ const CATEGORY_KEYWORDS: Array<{ category: GroupCategory; words: string[] }> = [
   },
 ]
 
+/** Bumps on each timeline fetch so a slow prior tag cannot overwrite the current one */
+let timelineRequestId = 0
+
 export const useGroupsStore = defineStore('groups', {
   state: (): GroupsState => ({
     groups: [],
@@ -620,8 +624,13 @@ export const useGroupsStore = defineStore('groups', {
 
     guessCategory(tag: string): GroupCategory {
       const lower = tag.toLowerCase()
+      // Tokenize so 'ai' does not match rain/Taiwan/mail, 'cat' does not match education
+      const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean)
+      const tokenSet = new Set(tokens)
       for (const bucket of CATEGORY_KEYWORDS) {
-        if (bucket.words.some((w) => lower.includes(w))) return bucket.category
+        if (bucket.words.some((w) => tokenSet.has(w) || tokens.some((t) => t === w))) {
+          return bucket.category
+        }
       }
       return 'other'
     },
@@ -632,6 +641,7 @@ export const useGroupsStore = defineStore('groups', {
     async fetchTrendingTags() {
       try {
         const instancesStore = useInstancesStore()
+        const settingsStore = useSettingsStore()
         const client = instancesStore.isAuthenticated
           ? this.getClient()
           : this.getPublicClient()
@@ -640,9 +650,34 @@ export const useGroupsStore = defineStore('groups', {
         const tags = await client.v1.trends.tags.list({ limit: 20 })
         if (!tags?.length) return
 
+        const filterKeywords = (settingsStore.filters || [])
+          .flatMap((f) => (f.keywords || []).map((k) => (k.keyword || '').toLowerCase().trim()))
+          .filter(Boolean)
+
         for (const tag of tags) {
           const name = tag.name
           const key = name.toLowerCase()
+
+          if (filterKeywords.some((kw) => key.includes(kw))) {
+            continue
+          }
+
+          // history[].accounts = accounts that used the tag that day (when provided)
+          const history = tag.history || []
+          const hasAccountsField = history.some(
+            (day) =>
+              (day as { accounts?: string | number }).accounts != null &&
+              (day as { accounts?: string | number }).accounts !== '',
+          )
+          if (hasAccountsField) {
+            const accountPeak = Math.max(
+              ...history.map((day) => Number((day as { accounts?: string | number }).accounts || 0)),
+            )
+            if (!Number.isFinite(accountPeak) || accountPeak < 2) {
+              continue
+            }
+          }
+
           // Re-check after await — concurrent inits may have already pushed this tag
           const existing = this.groups.find((g) => g.tag.toLowerCase() === key)
           if (existing) {
@@ -788,6 +823,7 @@ export const useGroupsStore = defineStore('groups', {
      */
     async fetchGroupTimeline(tag: string, refresh = false) {
       const instancesStore = useInstancesStore()
+      const requestId = ++timelineRequestId
       
       if (refresh) {
         this.groupTimeline = []
@@ -801,19 +837,21 @@ export const useGroupsStore = defineStore('groups', {
 
       try {
         const client = this.getPublicClient()
+        const fetchAccount =
+          instancesStore.activeAccount ||
+          instancesStore.instances.find((i) => i.accessToken)
         const statuses = await client.v1.timelines.tag.$select(tag).list({
           limit: 20
         })
 
-        // Prefer authed home so status ids match favourite/boost APIs
-        const account =
-          instancesStore.activeAccount ||
-          instancesStore.instances.find((i) => i.accessToken)
-        this.groupTimeline = account
+        if (requestId !== timelineRequestId || this.currentGroupTag !== tag) return
+
+        // Stamp with the account that owns the client used for fetch
+        this.groupTimeline = fetchAccount
           ? statuses.map((s) => ({
               ...s,
-              _instanceId: account.id,
-              _instanceUrl: account.url,
+              _instanceId: fetchAccount.id,
+              _instanceUrl: fetchAccount.url,
             }))
           : statuses
         
@@ -823,10 +861,11 @@ export const useGroupsStore = defineStore('groups', {
         
         this.hasMore = statuses.length === 20
       } catch (e: any) {
+        if (requestId !== timelineRequestId) return
         this.error = e.message || 'Failed to fetch group timeline'
         console.error('Group timeline error:', e)
       } finally {
-        this.isLoadingTimeline = false
+        if (requestId === timelineRequestId) this.isLoadingTimeline = false
       }
     },
 
@@ -836,25 +875,29 @@ export const useGroupsStore = defineStore('groups', {
     async loadMoreTimeline() {
       if (this.isLoadingMore || !this.hasMore || !this.maxId || !this.currentGroupTag) return
 
+      const tag = this.currentGroupTag
+      const requestId = timelineRequestId
       this.isLoadingMore = true
 
       try {
         const instancesStore = useInstancesStore()
         const client = this.getPublicClient()
-        const statuses = await client.v1.timelines.tag.$select(this.currentGroupTag).list({
+        const fetchAccount =
+          instancesStore.activeAccount ||
+          instancesStore.instances.find((i) => i.accessToken)
+        const statuses = await client.v1.timelines.tag.$select(tag).list({
           maxId: this.maxId,
           limit: 20
         })
 
+        if (requestId !== timelineRequestId || this.currentGroupTag !== tag) return
+
         if (statuses.length > 0) {
-          const account =
-            instancesStore.activeAccount ||
-            instancesStore.instances.find((i) => i.accessToken)
-          const tagged = account
+          const tagged = fetchAccount
             ? statuses.map((s) => ({
                 ...s,
-                _instanceId: account.id,
-                _instanceUrl: account.url,
+                _instanceId: fetchAccount.id,
+                _instanceUrl: fetchAccount.url,
               }))
             : statuses
           this.groupTimeline = [...this.groupTimeline, ...tagged]
@@ -863,9 +906,10 @@ export const useGroupsStore = defineStore('groups', {
         
         this.hasMore = statuses.length === 20
       } catch (e: any) {
+        if (requestId !== timelineRequestId) return
         console.error('Load more error:', e)
       } finally {
-        this.isLoadingMore = false
+        if (requestId === timelineRequestId) this.isLoadingMore = false
       }
     },
 
@@ -967,12 +1011,17 @@ export const useGroupsStore = defineStore('groups', {
      * Format a hashtag as a readable group name
      */
     formatTagAsName(tag: string): string {
-      // Convert camelCase and snake_case to spaces, capitalize first letter of each word
+      // Convert camelCase and snake_case to spaces; keep all-caps tokens (LGBTQ, NixOS)
       return tag
         .replace(/([a-z])([A-Z])/g, '$1 $2')
         .replace(/_/g, ' ')
         .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .filter(Boolean)
+        .map((word) => {
+          if (word.length > 1 && word === word.toUpperCase()) return word
+          if (/^[A-Z]{2,}[a-z]/.test(word)) return word // e.g. NixOS
+          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        })
         .join(' ')
     },
 
@@ -985,7 +1034,13 @@ export const useGroupsStore = defineStore('groups', {
       this.maxId = null
       this.hasMore = true
       this.error = null
-    }
+    },
+
+    /** Prepend a freshly posted status onto the open group timeline */
+    prependToTimeline(tag: string, status: mastodon.v1.Status) {
+      if (this.currentGroupTag?.toLowerCase() !== tag.toLowerCase()) return
+      this.groupTimeline = [status, ...this.groupTimeline]
+    },
   }
 })
 

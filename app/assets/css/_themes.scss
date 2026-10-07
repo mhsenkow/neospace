@@ -30,16 +30,6 @@
   $mark,
   $scheme: light
 ) {
-  --bg: #{$bg};
-  --face: #{$face};
-  --ink: #{$ink};
-  --mute: #{$mute};
-  --rule: #{$rule};
-  --hair: #{$hair};
-  --accent: #{$accent};
-  --accent-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
-  --mark: #{$mark};
-
   --neo-bg-primary: #{$bg};
   --neo-bg-secondary: #{$face};
   --neo-bg-tertiary: #{$hair};
@@ -57,8 +47,6 @@
   --neo-text-muted: var(--neo-text-secondary);
   --neo-text-disabled: color-mix(in srgb, #{$mute} 55%, #{$bg});
   --neo-text-inverse: #{$bg};
-  --neo-text-link: color-mix(in srgb, #{$accent} 82%, #{$ink});
-  --neo-text-link-hover: color-mix(in srgb, #{$accent} 70%, #{$ink});
 
   // Interactive chrome (icon controls, column headers, quiet UI)
   --neo-chrome-fg: var(--neo-text-secondary);
@@ -66,7 +54,10 @@
   --neo-chrome-label: var(--neo-text-primary);
 
   --neo-accent: #{$accent};
+  // One accent-hover mix; link + hover aliases reuse it
   --neo-accent-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
+  --neo-text-link: var(--neo-accent-hover);
+  --neo-text-link-hover: color-mix(in srgb, #{$accent} 70%, #{$ink});
   --neo-accent-light: color-mix(in srgb, #{$accent} 18%, transparent);
   --neo-accent-dark: color-mix(in srgb, #{$accent} 75%, #{$ink});
   --neo-accent-soft: color-mix(in srgb, #{$accent} 12%, transparent);
@@ -128,13 +119,16 @@
     #ffffff,
     #666666,
     #ffff00,
-    #ffff00,
+    #ff6b6b,
     dark
   );
   --neo-border-width: 2px;
   --neo-text-inverse: #000000;
   --neo-text-on-accent: #000000;
   --neo-accent-soft: color-mix(in srgb, #ffff00 22%, transparent);
+  // Distinct danger (≥4.5 on black) — not the yellow accent
+  --neo-danger: #ff6b6b;
+  --neo-danger-soft: color-mix(in srgb, #ff6b6b 18%, transparent);
 }
 
 [data-theme='paper'] {
@@ -157,7 +151,7 @@
     #e8eef8,
     #f4f7fc,
     #0f172a,
-    #64748b,
+    #666666,
     #c5d0e0,
     #d6deeb,
     #7c3aed,
@@ -250,6 +244,7 @@
 
 [data-theme='brutal'] {
   // hair must stay light — it's used for panel chrome; borders use rule (black)
+  // Accent #d00000 keeps white-on-accent and link contrast ≥4.5:1
   @include neo-from-braun(
     #ffffff,
     #ffffff,
@@ -257,7 +252,7 @@
     #444444,
     #000000,
     #f2f2f2,
-    #ff0000,
+    #d00000,
     #000000,
     light
   );
@@ -302,12 +297,15 @@
     #23475a,
     #1d3b22,
     #57a253,
-    #c33b3b,
+    #ff6b6b,
     dark
   );
   --neo-text-inverse: #0b1a22;
   --neo-text-on-accent: #0b1a22;
   --neo-border-width: 2px;
+  // Brighter danger for ≥4.5:1 on tank bg
+  --neo-danger: #ff6b6b;
+  --neo-danger-soft: color-mix(in srgb, #ff6b6b 14%, transparent);
 }
 
 [data-theme='nes'] {

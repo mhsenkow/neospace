@@ -5,6 +5,7 @@
  */
 
 import { nextTick, onUnmounted, watch, type Ref } from 'vue'
+import { useScrollLock } from '~/composables/useScrollLock'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -102,9 +103,11 @@ export function useFocusTrap(
     initialFocus?: string
   },
 ) {
+  const scrollLock = useScrollLock()
   let previous: HTMLElement | null = null
   let entry: TrapEntry | null = null
   let locked = false
+  let scrollHeld = false
 
   const activate = async () => {
     previous = (document.activeElement as HTMLElement) || null
@@ -117,6 +120,10 @@ export function useFocusTrap(
     trapStack.push(entry)
     ensureListening()
     document.documentElement.classList.add('neo-dialog-open')
+    if (!scrollHeld) {
+      scrollLock.lock()
+      scrollHeld = true
+    }
     await nextTick()
     const root = containerRef.value
     if (!root) return
@@ -136,6 +143,10 @@ export function useFocusTrap(
     }
     if (!trapStack.length) {
       document.documentElement.classList.remove('neo-dialog-open')
+    }
+    if (scrollHeld) {
+      scrollLock.unlock()
+      scrollHeld = false
     }
     maybeStopListening()
     const restore = previous

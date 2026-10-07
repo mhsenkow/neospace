@@ -14,6 +14,7 @@ import {
 
 const PAGE_LIMIT = 40
 const MAX_PAGES = 12 // up to ~480 statuses
+const CACHE_TTL_MS = 5 * 60_000
 
 type AnnualLite = {
   year: number
@@ -21,6 +22,13 @@ type AnnualLite = {
   archetype?: string | null
   topHashtags: { name: string; count: number }[]
   timeSeries: { month: number; statuses: number; followers: number }[]
+}
+
+type CacheEntry = {
+  statuses: mastodon.v1.Status[]
+  truncated: boolean
+  fetchedAt: number
+  windowDays: InsightsWindowDays
 }
 
 interface InsightsState {
@@ -32,6 +40,11 @@ interface InsightsState {
   error: string | null
   accountId: string | null
 }
+
+/** Module-level race + cache (not in Pinia so AbortController isn't serialized). */
+let fetchGen = 0
+let fetchController: AbortController | null = null
+const statusCache = new Map<string, CacheEntry>()
 
 function coerceAnnual(raw: mastodon.v1.AnnualReport): AnnualLite {
   const data = (raw.data || {}) as Record<string, unknown>
@@ -64,6 +77,11 @@ function coerceAnnual(raw: mastodon.v1.AnnualReport): AnnualLite {
   }
 }
 
+function statusesCoverWindow(entry: CacheEntry, windowDays: InsightsWindowDays): boolean {
+  // Longer window covers shorter ones when cache is fresh
+  return entry.windowDays >= windowDays
+}
+
 export const useInsightsStore = defineStore('insights', {
   state: (): InsightsState => ({
     windowDays: 30,
@@ -80,50 +98,92 @@ export const useInsightsStore = defineStore('insights', {
       this.windowDays = days
     },
 
+    abortInFlight() {
+      fetchController?.abort()
+      fetchController = null
+      fetchGen += 1
+    },
+
     async fetchInsights(account: mastodon.v1.Account, windowDays?: InsightsWindowDays) {
       if (windowDays) this.windowDays = windowDays
+      const days = this.windowDays
       this.isLoading = true
       this.error = null
       this.accountId = account.id
 
+      const gen = ++fetchGen
+      fetchController?.abort()
+      fetchController = new AbortController()
+      const { signal } = fetchController
+
       try {
-        const client = activeClient()
-        const collected: mastodon.v1.Status[] = []
-        let maxId: string | undefined
-        let truncated = false
-        const cutoff = Date.now() - this.windowDays * 86_400_000
+        const cached = statusCache.get(account.id)
+        const fresh =
+          cached &&
+          Date.now() - cached.fetchedAt < CACHE_TTL_MS &&
+          statusesCoverWindow(cached, days)
 
-        for (let page = 0; page < MAX_PAGES; page++) {
-          const batch = await client.v1.accounts.$select(account.id).statuses.list({
-            limit: PAGE_LIMIT,
-            maxId,
-            excludeReplies: false,
-            excludeReblogs: false,
-          } as any)
+        let collected: mastodon.v1.Status[]
+        let truncated: boolean
 
-          if (!batch.length) break
-          collected.push(...batch)
+        if (fresh && cached) {
+          collected = cached.statuses
+          truncated = cached.truncated
+        } else {
+          const client = activeClient()
+          collected = []
+          truncated = false
+          let maxId: string | undefined
+          // Always fetch up to 90d so shorter windows reuse the cache
+          const fetchDays = Math.max(days, 90) as InsightsWindowDays
+          const cutoff = Date.now() - fetchDays * 86_400_000
 
-          const oldest = batch[batch.length - 1]
-          maxId = oldest?.id
-          const oldestTs = oldest?.createdAt ? Date.parse(oldest.createdAt) : NaN
-          if (Number.isFinite(oldestTs) && oldestTs < cutoff) break
-          if (batch.length < PAGE_LIMIT) break
-          if (page === MAX_PAGES - 1) truncated = true
+          for (let page = 0; page < MAX_PAGES; page++) {
+            if (signal.aborted || gen !== fetchGen) return
+            const batch = await client.v1.accounts.$select(account.id).statuses.list({
+              limit: PAGE_LIMIT,
+              maxId,
+              excludeReplies: false,
+              excludeReblogs: false,
+            } as any)
+
+            if (!batch.length) break
+            collected.push(...batch)
+
+            const oldest = batch[batch.length - 1]
+            maxId = oldest?.id
+            const oldestTs = oldest?.createdAt ? Date.parse(oldest.createdAt) : NaN
+            if (Number.isFinite(oldestTs) && oldestTs < cutoff) break
+            if (batch.length < PAGE_LIMIT) break
+            if (page === MAX_PAGES - 1) truncated = true
+          }
+
+          if (gen !== fetchGen) return
+          statusCache.set(account.id, {
+            statuses: collected,
+            truncated,
+            fetchedAt: Date.now(),
+            windowDays: Math.max(days, 90) as InsightsWindowDays,
+          })
         }
 
+        if (gen !== fetchGen) return
         this.report = buildInsightsReport({
           account,
           statuses: collected,
-          windowDays: this.windowDays,
+          windowDays: days,
           truncated,
         })
       } catch (e: any) {
+        if (e?.name === 'AbortError' || gen !== fetchGen) return
         console.error('Insights fetch failed:', e)
         this.error = e?.message || 'Could not load insights'
         this.report = null
       } finally {
-        this.isLoading = false
+        if (gen === fetchGen) {
+          this.isLoading = false
+          fetchController = null
+        }
       }
     },
 
@@ -142,6 +202,7 @@ export const useInsightsStore = defineStore('insights', {
     },
 
     clear() {
+      this.abortInFlight()
       this.report = null
       this.annual = []
       this.error = null

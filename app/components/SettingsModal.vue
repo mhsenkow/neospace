@@ -13,6 +13,8 @@
 
 import { useSettingsStore, SETTINGS_CATEGORIES } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
+import { useOverlayStore } from '~/stores/overlay'
+import { useToastStore } from '~/stores/toast'
 import {
   DENSITY_OPTIONS,
   FONT_OPTIONS,
@@ -34,9 +36,42 @@ import { stripHtml } from '~/utils/sanitizeHtml'
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
+const overlayStore = useOverlayStore()
+const toastStore = useToastStore()
+const router = useRouter()
 const contentEl = ref<HTMLElement | null>(null)
 const modalRef = ref<HTMLElement | null>(null)
 const isOpen = computed(() => settingsStore.isOpen)
+const linkedAccounts = computed(() => instancesStore.authenticatedInstances)
+
+const signOutAll = async () => {
+  const ok = await overlayStore.openConfirm({
+    title: 'Sign out of all accounts?',
+    body: 'You will need to sign in again on each instance.',
+    confirmLabel: 'Sign out all',
+    danger: true,
+  })
+  if (!ok) return
+  await instancesStore.logoutAll()
+  settingsStore.close()
+  toastStore.show({ message: 'Signed out of all accounts', duration: 2500 })
+  router.push('/login')
+}
+
+const clearDeviceData = async () => {
+  const ok = await overlayStore.openConfirm({
+    title: 'Clear data on this device?',
+    body: 'Removes local drafts, settings, columns, and cached accounts from this browser. Remote posts are not deleted.',
+    confirmLabel: 'Clear data',
+    danger: true,
+  })
+  if (!ok) return
+  await instancesStore.logoutAll()
+  instancesStore.clearLocalDeviceData()
+  settingsStore.close()
+  toastStore.show({ message: 'Local data cleared', duration: 2500 })
+  router.push('/login')
+}
 
 useFocusTrap(modalRef, isOpen, {
   onEscape: () => settingsStore.close(),
@@ -89,8 +124,10 @@ const flipSizeOptions = [
 watch(() => settingsStore.account, (account) => {
   if (account) {
     profileForm.displayName = account.displayName || ''
-    // Mastodon returns HTML; strip to plain text for the editor (API accepts plain)
-    profileForm.note = stripHtml(account.note || '')
+    // Prefer source.note (plain text); rendered note is HTML and mangling it on save is worse
+    const sourceNote = (account as { source?: { note?: string } }).source?.note
+    profileForm.note =
+      typeof sourceNote === 'string' ? sourceNote : stripHtml(account.note || '')
     profileForm.locked = account.locked || false
     profileForm.bot = account.bot || false
     profileForm.discoverable = account.discoverable !== false
@@ -175,6 +212,36 @@ const saveAppearance = () => {
   settingsStore.clearSuccess()
 }
 
+const onFontSizeChange = (value: string) => {
+  appearanceForm.fontSize = value as typeof appearanceForm.fontSize
+  saveAppearance()
+}
+
+const onRadiusChange = (value: string) => {
+  appearanceForm.radius = value as typeof appearanceForm.radius
+  saveAppearance()
+}
+
+const onFlipAlignChange = (value: string) => {
+  appearanceForm.flipTextAlign = value as typeof appearanceForm.flipTextAlign
+  saveAppearance()
+}
+
+const onFlipSizeChange = (value: string) => {
+  appearanceForm.flipTextSize = value as typeof appearanceForm.flipTextSize
+  saveAppearance()
+}
+
+const onDensityChange = (value: string) => {
+  appearanceForm.density = value as typeof appearanceForm.density
+  saveAppearance()
+}
+
+const onLineChange = (value: string) => {
+  appearanceForm.line = value as typeof appearanceForm.line
+  saveAppearance()
+}
+
 const hasProfileCss = computed(() => !!instancesStore.userCustomCSS)
 
 // Visibility options
@@ -200,8 +267,11 @@ const uiOptions = UI_OPTIONS
 const fontOptions = FONT_OPTIONS
 const fontSizeOptions = FONT_SIZE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
 const radiusOptions = RADIUS_OPTIONS
+const radiusRadioOptions = RADIUS_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
 const densityOptions = DENSITY_OPTIONS
+const densityRadioOptions = DENSITY_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
 const lineOptions = LINE_OPTIONS
+const lineRadioOptions = LINE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
 
 const fontPreviewStack = (fontId: NeoFontId) => {
   const ui = appearanceForm.ui || 'braun'
@@ -252,16 +322,26 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
           <div class="settings-body">
             <!-- Sidebar -->
-            <nav class="settings-sidebar">
+            <nav class="settings-sidebar" aria-label="Settings categories">
               <button
                 v-for="category in settingsStore.filteredCategories"
                 :key="category.id"
+                type="button"
                 :class="['settings-nav-item', { active: settingsStore.activeCategory === category.id }]"
+                :aria-label="category.label"
+                :aria-current="settingsStore.activeCategory === category.id ? 'page' : undefined"
                 @click="settingsStore.setCategory(category.id)"
               >
-                <span class="settings-nav-item__icon"><NeoIcon :name="(category.icon as any)" :size="18" :stroke="1.75" /></span>
+                <span class="settings-nav-item__icon" aria-hidden="true"><NeoIcon :name="(category.icon as any)" :size="18" :stroke="1.75" /></span>
                 <span class="settings-nav-item__label">{{ category.label }}</span>
               </button>
+              <p
+                v-if="settingsStore.searchQuery.trim() && !settingsStore.filteredCategories.length"
+                class="settings-search-empty"
+                role="status"
+              >
+                No settings match “{{ settingsStore.searchQuery.trim() }}”.
+              </p>
             </nav>
 
             <!-- Content -->
@@ -525,6 +605,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <input
                         v-model="appearanceForm.theme"
                         type="radio"
+                        name="settings-theme"
                         :value="option.value"
                         class="settings-radio-hidden"
                         @change="saveAppearance"
@@ -554,6 +635,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <input
                         v-model="appearanceForm.ui"
                         type="radio"
+                        name="settings-chrome"
                         :value="option.id"
                         class="settings-radio-hidden"
                         @change="saveAppearance"
@@ -577,6 +659,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <input
                         v-model="appearanceForm.font"
                         type="radio"
+                        name="settings-font"
                         :value="option.id"
                         class="settings-radio-hidden"
                         @change="saveAppearance"
@@ -593,17 +676,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <div class="settings-divider" />
 
                   <h3 class="settings-subheading">Font Size</h3>
-                  <div class="settings-segmented">
-                    <button
-                      v-for="option in fontSizeOptions"
-                      :key="option.value"
-                      type="button"
-                      :class="['settings-segmented__btn', { active: appearanceForm.fontSize === option.value }]"
-                      @click="appearanceForm.fontSize = option.value; saveAppearance()"
-                    >
-                      {{ option.label }}
-                    </button>
-                  </div>
+                  <NeoRadioGroup
+                    :options="fontSizeOptions"
+                    :model-value="appearanceForm.fontSize"
+                    ariaLabel="Font size"
+                    @update:model-value="onFontSizeChange"
+                  />
 
                   <div class="settings-divider" />
 
@@ -612,24 +690,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     Border-radius set across cards, inputs, and chrome. Match keeps the active chrome’s corners
                     (Brutal / NES stay sharp when Match).
                   </p>
-                  <div class="settings-radius-grid">
-                    <button
-                      v-for="option in radiusOptions"
-                      :key="option.id"
-                      type="button"
-                      :class="['settings-radius-card', { active: appearanceForm.radius === option.id }]"
-                      :title="option.desc"
-                      @click="appearanceForm.radius = option.id; saveAppearance()"
-                    >
-                      <span
-                        class="settings-radius-card__preview"
-                        :data-radius-preview="option.id"
-                        aria-hidden="true"
-                      />
-                      <span class="settings-radius-card__label">{{ option.label }}</span>
-                      <span class="settings-radius-card__desc">{{ option.desc }}</span>
-                    </button>
-                  </div>
+                  <NeoRadioGroup
+                    :options="radiusRadioOptions"
+                    :model-value="appearanceForm.radius"
+                    ariaLabel="Corners"
+                    @update:model-value="onRadiusChange"
+                  />
 
                   <div class="settings-divider" />
 
@@ -639,78 +705,42 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   </p>
 
                   <h3 class="settings-subheading settings-subheading--tight">Alignment</h3>
-                  <div class="settings-segmented">
-                    <button
-                      v-for="option in flipAlignOptions"
-                      :key="option.value"
-                      type="button"
-                      :class="['settings-segmented__btn', { active: appearanceForm.flipTextAlign === option.value }]"
-                      @click="appearanceForm.flipTextAlign = option.value; saveAppearance()"
-                    >
-                      {{ option.label }}
-                    </button>
-                  </div>
+                  <NeoRadioGroup
+                    :options="flipAlignOptions"
+                    :model-value="appearanceForm.flipTextAlign"
+                    ariaLabel="Flip text alignment"
+                    @update:model-value="onFlipAlignChange"
+                  />
 
                   <h3 class="settings-subheading settings-subheading--tight">Size</h3>
-                  <div class="settings-segmented">
-                    <button
-                      v-for="option in flipSizeOptions"
-                      :key="option.value"
-                      type="button"
-                      :class="['settings-segmented__btn', { active: appearanceForm.flipTextSize === option.value }]"
-                      @click="appearanceForm.flipTextSize = option.value; saveAppearance()"
-                    >
-                      {{ option.label }}
-                    </button>
-                  </div>
+                  <NeoRadioGroup
+                    :options="flipSizeOptions"
+                    :model-value="appearanceForm.flipTextSize"
+                    ariaLabel="Flip text size"
+                    @update:model-value="onFlipSizeChange"
+                  />
 
                   <div class="settings-divider" />
 
                   <h3 class="settings-subheading">Density</h3>
                   <p class="settings-hint">How tightly cards and chrome pack the screen.</p>
-                  <div class="settings-density-grid">
-                    <button
-                      v-for="option in densityOptions"
-                      :key="option.id"
-                      type="button"
-                      :class="['settings-density-card', { active: appearanceForm.density === option.id }]"
-                      :title="option.desc"
-                      @click="appearanceForm.density = option.id; saveAppearance()"
-                    >
-                      <span
-                        class="settings-density-card__preview"
-                        :data-density-preview="option.id"
-                        aria-hidden="true"
-                      >
-                        <i /><i /><i />
-                      </span>
-                      <span class="settings-density-card__label">{{ option.label }}</span>
-                      <span class="settings-density-card__desc">{{ option.desc }}</span>
-                    </button>
-                  </div>
+                  <NeoRadioGroup
+                    :options="densityRadioOptions"
+                    :model-value="appearanceForm.density"
+                    ariaLabel="Density"
+                    @update:model-value="onDensityChange"
+                  />
 
                   <div class="settings-divider" />
 
                   <h3 class="settings-subheading">Lines</h3>
                   <p class="settings-hint">Outline character — clean hairlines through crayon wiggles.</p>
-                  <div class="settings-line-grid">
-                    <button
-                      v-for="option in lineOptions"
-                      :key="option.id"
-                      type="button"
-                      :class="['settings-line-card', { active: appearanceForm.line === option.id }]"
-                      :title="option.desc"
-                      @click="appearanceForm.line = option.id; saveAppearance()"
-                    >
-                      <span
-                        class="settings-line-card__preview"
-                        :data-line-preview="option.id"
-                        aria-hidden="true"
-                      />
-                      <span class="settings-line-card__label">{{ option.label }}</span>
-                      <span class="settings-line-card__desc">{{ option.desc }}</span>
-                    </button>
-                  </div>
+                  <NeoRadioGroup
+                    :options="lineRadioOptions"
+                    :model-value="appearanceForm.line"
+                    ariaLabel="Lines"
+                    @update:model-value="onLineChange"
+                  />
 
                   <div class="settings-divider" />
 
@@ -924,6 +954,61 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </span>
                     </div>
                   </div>
+
+                  <h3 class="settings-subheading">Linked accounts</h3>
+                  <ul v-if="linkedAccounts.length" class="settings-linked-list">
+                    <li
+                      v-for="acct in linkedAccounts"
+                      :key="acct.id"
+                      class="settings-linked-item"
+                    >
+                      <img
+                        v-if="acct.user?.avatar"
+                        :src="acct.user.avatar"
+                        alt=""
+                        class="settings-linked-item__avatar"
+                      />
+                      <div class="settings-linked-item__info">
+                        <span class="settings-linked-item__name">
+                          {{ acct.user?.displayName || acct.user?.username || 'Account' }}
+                        </span>
+                        <span class="settings-linked-item__handle">
+                          @{{ acct.user?.acct || acct.url.replace(/^https?:\/\//, '') }}
+                        </span>
+                      </div>
+                      <span
+                        v-if="acct.id === instancesStore.activeAccountId"
+                        class="settings-linked-item__badge"
+                      >Active</span>
+                    </li>
+                  </ul>
+                  <p v-else class="settings-hint">No signed-in accounts.</p>
+                  <NuxtLink
+                    to="/login"
+                    class="settings-btn settings-btn--ghost"
+                    @click="settingsStore.close()"
+                  >
+                    Add account
+                  </NuxtLink>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Sign out</h3>
+                  <p class="settings-hint">Revoke tokens and leave NeoSpace on this device.</p>
+                  <button
+                    type="button"
+                    class="settings-btn settings-btn--ghost"
+                    @click="signOutAll"
+                  >
+                    Sign out all accounts
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-btn settings-btn--danger"
+                    @click="clearDeviceData"
+                  >
+                    Clear data on this device
+                  </button>
 
                   <div class="settings-divider" />
 
@@ -1205,10 +1290,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   gap: 0.5rem;
   padding: 0.75rem 1rem;
   margin-bottom: 1rem;
-  background: #10b98120;
-  border: 1px solid #10b981;
+  background: var(--neo-success-soft);
+  border: 1px solid var(--neo-success);
   border-radius: 8px;
-  color: #10b981;
+  color: var(--neo-success);
   font-size: 0.9375rem;
   font-weight: 500;
 }
@@ -1219,10 +1304,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   gap: 0.5rem;
   padding: 0.75rem 1rem;
   margin-bottom: 1rem;
-  background: #ef444420;
-  border: 1px solid #ef4444;
+  background: var(--neo-danger-soft);
+  border: 1px solid var(--neo-danger);
   border-radius: 8px;
-  color: #ef4444;
+  color: var(--neo-danger);
   font-size: 0.9375rem;
 }
 
@@ -1995,6 +2080,68 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 }
 
+.settings-search-empty {
+  margin: 0.75rem 0.5rem;
+  padding: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+  line-height: 1.35;
+}
+
+.settings-linked-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-linked-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: var(--neo-bg-secondary);
+
+  &__avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  &__info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__name {
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    font-size: 0.875rem;
+  }
+
+  &__handle {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__badge {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--neo-accent);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+}
+
 // Filter Items
 .settings-filter-list {
   display: flex;
@@ -2157,7 +2304,17 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     justify-content: center;
     padding: 0.625rem;
 
-    &__label { display: none; }
+    &__label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     &__icon { font-size: 1.125rem; }
   }
 

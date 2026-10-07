@@ -27,12 +27,44 @@ const mainHandle = computed(() => {
   return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
 })
 
+const resetConnecting = () => {
+  isConnecting.value = false
+  connectingTo.value = null
+}
+
+const onPageShow = (e: PageTransitionEvent) => {
+  // bfcache restore after OAuth Back leaves a stuck spinner
+  if (e.persisted) resetConnecting()
+}
+
 onMounted(async () => {
+  window.addEventListener('pageshow', onPageShow)
+
+  // Fast path: stored tokens mean we're already signed in — don't wait on network verify
+  if (!isAddMode.value && typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('neospace_instances')
+      if (raw) {
+        const parsed = JSON.parse(raw) as { instances?: { accessToken?: string }[] }
+        const hasToken = parsed?.instances?.some((i) => !!i.accessToken)
+        if (hasToken) {
+          router.replace('/')
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   await instancesStore.initialize()
   settingsStore.loadLocalPreferences()
   if (instancesStore.isAuthenticated && !isAddMode.value) {
     router.replace('/')
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('pageshow', onPageShow)
 })
 
 const startLogin = async (url: string) => {
@@ -47,12 +79,10 @@ const startLogin = async (url: string) => {
       else sessionStorage.removeItem('neospace_auth_add')
     }
     const authUrl = await instancesStore.loginWithInstance(url)
-    await new Promise((r) => setTimeout(r, 280))
     window.location.href = authUrl
   } catch (e) {
     pickerRef.value?.setError(friendlyServerError(e))
-    isConnecting.value = false
-    connectingTo.value = null
+    resetConnecting()
   }
 }
 
@@ -93,6 +123,9 @@ definePageMeta({
         <div class="login__spinner" aria-hidden="true"></div>
         <p class="login__connecting-title">Taking you to {{ connectingTo }}</p>
         <p class="login__connecting-hint">Sign in there if asked, then approve NeoSpace.</p>
+        <button type="button" class="neo-btn neo-btn--secondary" @click="resetConnecting">
+          Cancel
+        </button>
       </div>
 
       <template v-else>
@@ -163,7 +196,7 @@ definePageMeta({
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.1em;
-  color: #fafaf8;
+  color: var(--neo-text-on-accent);
   background: var(--neo-accent);
   border-radius: 2px;
 }

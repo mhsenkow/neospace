@@ -6,6 +6,7 @@
 import { useConversationsStore } from '~/stores/conversations'
 import { useInstancesStore } from '~/stores/instances'
 import { useComposeSheetStore } from '~/stores/composeSheet'
+import { useOverlayStore } from '~/stores/overlay'
 import { useAccountSearch } from '~/composables/useAccountSearch'
 import {
   openOrComposeDirect,
@@ -60,6 +61,18 @@ const formatTime = (dateString?: string | null) => {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+const formatTimeLong = (dateString?: string | null) => {
+  if (!dateString) return ''
+  try {
+    return new Date(dateString).toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
+  } catch {
+    return dateString
+  }
+}
+
 const suggestedPeople = computed(() => {
   const chatting = new Set(
     conversationsStore.conversations.flatMap((c) => (c.accounts || []).map((a) => a.id)),
@@ -89,7 +102,13 @@ const openConversation = async (c: mastodon.v1.Conversation) => {
 const archiveConversation = async (c: mastodon.v1.Conversation, e: Event) => {
   e.stopPropagation()
   e.preventDefault()
-  if (!confirm('Remove this chat from your inbox? Messages stay on the server.')) return
+  const ok = await useOverlayStore().openConfirm({
+    title: 'Remove this chat?',
+    body: 'Messages stay on the server. This only removes it from your inbox.',
+    confirmLabel: 'Remove',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await conversationsStore.remove(c.id)
   } catch {
@@ -112,8 +131,9 @@ const messageAccount = async (account: mastodon.v1.Account) => {
 
 const refreshInbox = async () => {
   if (!canView.value) return
+  // User-initiated — show pull indicator (not quiet)
   await Promise.all([
-    conversationsStore.fetchConversations({ force: true, quiet: !!conversationsStore.conversations.length }),
+    conversationsStore.fetchConversations({ force: true }),
     loadFollowing(80, true),
   ])
 }
@@ -144,23 +164,37 @@ const onTouchEnd = async () => {
   if (shouldRefresh) await refreshInbox()
 }
 
+let liveRefreshStarted = false
+
+const startPolling = () => {
+  if (liveRefreshStarted) return
+  conversationsStore.startLiveRefresh()
+  liveRefreshStarted = true
+}
+
+const stopPolling = () => {
+  if (!liveRefreshStarted) return
+  conversationsStore.stopLiveRefresh()
+  liveRefreshStarted = false
+}
+
 onMounted(() => {
   if (canView.value) {
     void refreshInbox()
-    conversationsStore.startLiveRefresh()
+    startPolling()
   }
 })
 
 onUnmounted(() => {
-  conversationsStore.stopLiveRefresh()
+  stopPolling()
 })
 
 watch(canView, (ok) => {
   if (ok) {
     void refreshInbox()
-    conversationsStore.startLiveRefresh()
+    startPolling()
   } else {
-    conversationsStore.stopLiveRefresh()
+    stopPolling()
   }
 })
 
@@ -204,6 +238,11 @@ useHead({ title: 'Messages | NeoSpace' })
         </button>
       </template>
     </SubviewChrome>
+
+    <p v-if="canView" class="messages-privacy" role="note">
+      Direct messages are <strong>not end-to-end encrypted</strong>. They’re visible to recipients
+      and admins of their servers; mentioning someone adds them to the thread.
+    </p>
 
     <div
       v-if="canView && conversationsStore.conversations.length"
@@ -316,7 +355,7 @@ useHead({ title: 'Messages | NeoSpace' })
                     v-for="(acct, i) in (c.accounts || []).slice(0, 2)"
                     :key="acct.id"
                     :src="acct.avatar"
-                    :alt="acct.displayName || acct.username"
+                    alt=""
                     class="messages-row__avatar"
                     :class="{ 'messages-row__avatar--stack': i > 0 }"
                   />
@@ -324,7 +363,13 @@ useHead({ title: 'Messages | NeoSpace' })
                 <div class="messages-row__body">
                   <div class="messages-row__top">
                     <span class="messages-row__name">{{ participantLabel(c) }}</span>
-                    <time class="messages-row__time">{{ formatTime(c.lastStatus?.createdAt) }}</time>
+                    <time
+                      class="messages-row__time"
+                      :datetime="c.lastStatus?.createdAt || undefined"
+                      :title="formatTimeLong(c.lastStatus?.createdAt)"
+                    >
+                      {{ formatTime(c.lastStatus?.createdAt) }}
+                    </time>
                   </div>
                   <p class="messages-row__preview">
                     {{
@@ -335,13 +380,15 @@ useHead({ title: 'Messages | NeoSpace' })
                   </p>
                   <p v-if="participantAccts(c)" class="messages-row__accts">{{ participantAccts(c) }}</p>
                 </div>
-                <span v-if="c.unread" class="messages-row__dot" aria-label="Unread" />
+                <span v-if="c.unread" class="messages-row__dot">
+                  <span class="sr-only">Unread</span>
+                </span>
               </button>
               <button
                 type="button"
                 class="messages-row__archive"
-                title="Remove from inbox"
-                aria-label="Remove from inbox"
+                :title="`Remove chat with ${participantLabel(c)}`"
+                :aria-label="`Remove chat with ${participantLabel(c)}`"
                 @click="archiveConversation(c, $event)"
               >
                 <NeoIcon name="x" :size="16" :stroke="2" />
@@ -407,6 +454,22 @@ useHead({ title: 'Messages | NeoSpace' })
   margin: 0 auto;
   min-height: 50vh;
   padding-bottom: 2rem;
+}
+
+.messages-privacy {
+  margin: 0.5rem 1rem 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--neo-radius-sm, 8px);
+  background: color-mix(in srgb, var(--neo-text-primary) 5%, transparent);
+  border: 1px solid var(--neo-border-color);
+  font-size: var(--neo-font-size-xs, 0.75rem);
+  line-height: 1.4;
+  color: var(--neo-text-secondary);
+
+  strong {
+    color: var(--neo-text-primary);
+    font-weight: 600;
+  }
 }
 
 .messages-toolbar {

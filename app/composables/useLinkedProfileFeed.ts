@@ -6,6 +6,7 @@
 import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { clientFor } from '~/composables/useMasto'
+import { usePager } from '~/composables/usePager'
 
 const PAGE_SIZE = 20
 
@@ -14,12 +15,8 @@ export function useLinkedProfileFeed() {
 
   const viewingInstanceId = ref<string | null>(null)
   const account = ref<mastodon.v1.Account | null>(null)
-  const statuses = ref<ExtendedStatus[]>([])
   const isLoading = ref(false)
-  const isLoadingStatuses = ref(false)
   const error = ref<string | null>(null)
-  const maxStatusId = ref<string | null>(null)
-  const hasMore = ref(true)
 
   const linkedAccounts = computed(() => instancesStore.authenticatedInstances)
 
@@ -64,55 +61,35 @@ export function useLinkedProfileFeed() {
     }
   }
 
-  const fetchStatuses = async (refresh = false) => {
+  const statusPager = usePager<ExtendedStatus>(async ({ maxId, signal }) => {
     const instanceId = resolvedInstanceId.value
     const user = account.value
-    if (!instanceId || !user) return
+    if (!instanceId || !user) return []
 
-    if (refresh) {
-      statuses.value = []
-      maxStatusId.value = null
-      hasMore.value = true
-    }
+    const client = clientFor(instanceId)
+    const instanceUrl = viewingInstance.value?.url || ''
+    void signal
+    const page = await client.v1.accounts.$select(user.id).statuses.list({
+      limit: PAGE_SIZE,
+      maxId,
+      excludeReplies: true,
+      excludeReblogs: false,
+    } as any)
 
-    isLoadingStatuses.value = true
-    try {
-      const client = clientFor(instanceId)
-      const instanceUrl = viewingInstance.value?.url || ''
-      const page = await client.v1.accounts.$select(user.id).statuses.list({
-        limit: PAGE_SIZE,
-        maxId: maxStatusId.value || undefined,
-        excludeReplies: true,
-        excludeReblogs: false,
-      } as any)
+    return page.map((s) => ({
+      ...s,
+      _instanceId: instanceId,
+      _instanceUrl: instanceUrl,
+    }))
+  })
 
-      const tagged: ExtendedStatus[] = page.map((s) => ({
-        ...s,
-        _instanceId: instanceId,
-        _instanceUrl: instanceUrl,
-      }))
-
-      if (refresh) {
-        statuses.value = tagged
-      } else {
-        statuses.value = [...statuses.value, ...tagged]
-      }
-
-      if (tagged.length > 0) {
-        maxStatusId.value = tagged[tagged.length - 1].id
-      }
-      hasMore.value = tagged.length === PAGE_SIZE
-    } catch (e: any) {
-      error.value = e?.message || 'Failed to load posts'
-    } finally {
-      isLoadingStatuses.value = false
-    }
-  }
+  const statuses = statusPager.items
+  const hasMore = statusPager.hasMore
 
   const refresh = async () => {
     if (!ensureViewingId()) {
       account.value = null
-      statuses.value = []
+      statusPager.reset()
       error.value = null
       return
     }
@@ -124,18 +101,19 @@ export function useLinkedProfileFeed() {
     error.value = null
     try {
       await fetchAccount(instanceId)
-      await fetchStatuses(true)
+      statusPager.reset()
+      await statusPager.loadInitial()
     } catch (e: any) {
       error.value = e?.message || 'Failed to load profile'
-      statuses.value = []
+      statusPager.reset()
     } finally {
       isLoading.value = false
     }
   }
 
   const loadMore = async () => {
-    if (!hasMore.value || isLoadingStatuses.value) return
-    await fetchStatuses(false)
+    if (!hasMore.value || statusPager.isLoading.value || statusPager.isLoadingMore.value) return
+    await statusPager.loadMore()
   }
 
   const selectAccount = (instanceId: string) => {
@@ -157,6 +135,11 @@ export function useLinkedProfileFeed() {
     },
   )
 
+  // Initial load also uses isLoadingStatuses for the first page — expose combined busy
+  const loadingStatuses = computed(
+    () => statusPager.isLoading.value || statusPager.isLoadingMore.value,
+  )
+
   return {
     viewingInstanceId,
     resolvedInstanceId,
@@ -165,7 +148,7 @@ export function useLinkedProfileFeed() {
     account,
     statuses,
     isLoading,
-    isLoadingStatuses,
+    isLoadingStatuses: loadingStatuses,
     error,
     hasMore,
     selectAccount,

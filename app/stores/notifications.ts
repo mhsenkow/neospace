@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { createRestAPIClient, type mastodon } from 'masto'
+import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { logWarn } from '~/utils/log'
@@ -37,6 +37,8 @@ interface NotificationsState {
   unreadCount: number
   /** Per-account last-read notification ids */
   lastReadByInstance: Record<string, string>
+  /** Hosts that failed during the last fetch (partial failure banner) */
+  failedHosts: string[]
 }
 
 const FILTER_TO_TYPES: Record<NotificationFilterType, string[] | undefined> = {
@@ -78,6 +80,7 @@ export const useNotificationsStore = defineStore('notifications', {
     sortOrder: 'newest',
     unreadCount: 0,
     lastReadByInstance: {},
+    failedHosts: [],
   }),
 
   getters: {
@@ -189,11 +192,14 @@ export const useNotificationsStore = defineStore('notifications', {
     recomputeUnread() {
       let total = 0
       for (const n of this.notifications) {
-        const last = this.lastReadByInstance[n._instanceId]
-        if (!last || idGreater(n.id, last)) total += 1
+        if (this.isUnread(n)) total += 1
       }
-      // First visit per account: don't explode badge — seed from loaded list tops
       this.unreadCount = total
+    },
+
+    isUnread(n: ExtendedNotification): boolean {
+      const last = this.lastReadByInstance[n._instanceId]
+      return !last || idGreater(n.id, last)
     },
 
     /**
@@ -214,11 +220,8 @@ export const useNotificationsStore = defineStore('notifications', {
       await Promise.all(
         authed.map(async (inst) => {
           try {
-            const client = createRestAPIClient({
-              url: inst.url,
-              accessToken: inst.accessToken!,
-            })
-            const items = await client.v1.notifications.list({ limit: 40 } as any)
+            const client = clientFor(inst.id)
+            const items = await client.v1.notifications.list({ limit: 40 })
             if (!items.length) return
 
             const last = map[inst.id]
@@ -258,16 +261,14 @@ export const useNotificationsStore = defineStore('notifications', {
       this.loadLastRead()
       this.isLoading = true
       this.error = null
+      this.failedHosts = []
 
       try {
         const batches = await Promise.all(
           authed.map(async (inst) => {
             try {
-              const client = createRestAPIClient({
-                url: inst.url,
-                accessToken: inst.accessToken!,
-              })
-              const items = await client.v1.notifications.list({ limit: 30 } as any)
+              const client = clientFor(inst.id)
+              const items = await client.v1.notifications.list({ limit: 30 })
               if (items.length && !this.lastReadByInstance[inst.id]) {
                 this.persistLastRead(inst.id, items[0]!.id)
               }
@@ -275,19 +276,36 @@ export const useNotificationsStore = defineStore('notifications', {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
                 items,
+                ok: true as const,
               }
             } catch (e: any) {
               logWarn(`Notifications fetch failed for ${inst.url}:`, e)
-              return { instanceId: inst.id, instanceUrl: inst.url, items: [] as mastodon.v1.Notification[] }
+              return {
+                instanceId: inst.id,
+                instanceUrl: inst.url,
+                items: [] as mastodon.v1.Notification[],
+                ok: false as const,
+              }
             }
           }),
         )
 
         const merged: ExtendedNotification[] = []
         const nextCursors: Record<string, string> = {}
+        const failed: string[] = []
         let anyFull = false
+        let anyOk = false
 
         for (const batch of batches) {
+          if (!batch.ok) {
+            try {
+              failed.push(new URL(batch.instanceUrl).hostname)
+            } catch {
+              failed.push(batch.instanceUrl)
+            }
+            continue
+          }
+          anyOk = true
           for (const n of batch.items) {
             merged.push(tagNotification(n, batch.instanceId, batch.instanceUrl))
           }
@@ -297,6 +315,7 @@ export const useNotificationsStore = defineStore('notifications', {
           if (batch.items.length >= 30) anyFull = true
         }
 
+        this.failedHosts = failed
         merged.sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         )
@@ -304,6 +323,9 @@ export const useNotificationsStore = defineStore('notifications', {
         this.cursors = nextCursors
         this.hasMore = anyFull
         this.recomputeUnread()
+        if (!anyOk && failed.length) {
+          this.error = 'Couldn’t load notifications from any account'
+        }
       } catch (e: any) {
         this.error = e.message || 'Failed to fetch notifications'
         console.error('Notifications fetch error:', e)
@@ -330,14 +352,11 @@ export const useNotificationsStore = defineStore('notifications', {
         const batches = await Promise.all(
           withCursor.map(async (inst) => {
             try {
-              const client = createRestAPIClient({
-                url: inst.url,
-                accessToken: inst.accessToken!,
-              })
+              const client = clientFor(inst.id)
               const items = await client.v1.notifications.list({
                 limit: 30,
-                max_id: this.cursors[inst.id],
-              } as any)
+                maxId: this.cursors[inst.id],
+              })
               return { instanceId: inst.id, instanceUrl: inst.url, items }
             } catch (e) {
               logWarn(`Load more notifications failed for ${inst.url}:`, e)

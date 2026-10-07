@@ -16,6 +16,7 @@ const loadTrigger = ref<HTMLElement | null>(null)
 const sortMenuOpen = ref(false)
 const actionsMenuOpen = ref(false)
 let observer: IntersectionObserver | null = null
+const overlayStore = useOverlayStore()
 
 const canView = computed(() =>
   instancesStore.hasAuthenticatedInstance
@@ -67,6 +68,14 @@ const selectFilter = (key: NotificationFilterType) => {
   router.replace({ query })
 }
 
+const filterTabs = computed(() =>
+  filters.map((f) => ({ id: f.key, label: f.label })),
+)
+const filterTabId = computed({
+  get: () => notificationsStore.filter,
+  set: (key: string) => selectFilter(key as NotificationFilterType),
+})
+
 const selectSort = (key: SortOrder) => {
   notificationsStore.setSortOrder(key)
   sortMenuOpen.value = false
@@ -77,7 +86,13 @@ const handleRefresh = () => {
 }
 
 const handleClearAll = async () => {
-  if (!confirm('Clear all notifications? This cannot be undone.')) return
+  const ok = await overlayStore.openConfirm({
+    title: 'Clear all notifications?',
+    body: 'This cannot be undone.',
+    confirmLabel: 'Clear all',
+    danger: true,
+  })
+  if (!ok) return
   await notificationsStore.clearAll()
   actionsMenuOpen.value = false
 }
@@ -102,20 +117,7 @@ const hostLabel = (url?: string) => {
   }
 }
 
-const formatTime = (dateString: string) => {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  if (hours < 24) return `${hours}h ago`
-  if (days < 7) return `${days}d ago`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
+const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
 
 const ensureNotifAccount = (notif: ExtendedNotification) => {
   if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
@@ -166,10 +168,19 @@ const previewText = (status?: mastodon.v1.Status | null) => {
   return text.length > 160 ? `${text.slice(0, 160)}…` : text
 }
 
-const closeDropdowns = (e: MouseEvent) => {
-  const t = e.target as HTMLElement
-  if (!t.closest('.sort-menu')) sortMenuOpen.value = false
-  if (!t.closest('.actions-menu')) actionsMenuOpen.value = false
+const bindLoadObserver = (el: Element | null) => {
+  observer?.disconnect()
+  observer = null
+  if (!el) return
+  observer = new IntersectionObserver(
+    ([entry]) => {
+      if (entry.isIntersecting && !notificationsStore.isLoadingMore) {
+        notificationsStore.loadMore()
+      }
+    },
+    { threshold: 0.1 },
+  )
+  observer.observe(el)
 }
 
 onMounted(async () => {
@@ -177,22 +188,12 @@ onMounted(async () => {
   await instancesStore.initialize()
   if (canView.value) {
     await notificationsStore.fetchNotifications(true)
-    await notificationsStore.markAllRead()
   }
+  bindLoadObserver(loadTrigger.value)
+})
 
-  if (loadTrigger.value) {
-    observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !notificationsStore.isLoadingMore) {
-          notificationsStore.loadMore()
-        }
-      },
-      { threshold: 0.1 }
-    )
-    observer.observe(loadTrigger.value)
-  }
-
-  document.addEventListener('click', closeDropdowns)
+watch(loadTrigger, (el) => {
+  bindLoadObserver(el)
 })
 
 watch(
@@ -205,12 +206,19 @@ watch(
 watch(canView, async (ok) => {
   if (!ok || notificationsStore.notifications.length) return
   await notificationsStore.fetchNotifications(true)
-  await notificationsStore.markAllRead()
 })
 
 onBeforeUnmount(() => {
   observer?.disconnect()
-  document.removeEventListener('click', closeDropdowns)
+  if (canView.value) {
+    void notificationsStore.markAllRead()
+  }
+})
+
+onDeactivated(() => {
+  if (canView.value) {
+    void notificationsStore.markAllRead()
+  }
 })
 </script>
 
@@ -246,74 +254,61 @@ onBeforeUnmount(() => {
               </svg>
             </button>
 
-            <!-- Sort -->
-            <div class="sort-menu">
-              <button
-                type="button"
-                class="notif-icon-btn"
-                title="Sort"
-                aria-label="Sort notifications"
-                :aria-expanded="sortMenuOpen"
-                @click.stop="sortMenuOpen = !sortMenuOpen"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="16" y2="12" /><line x1="4" y1="18" x2="12" y2="18" />
-                </svg>
-              </button>
-              <Transition name="dropdown">
-                <div v-if="sortMenuOpen" class="sort-menu__dropdown">
-                  <button
-                    v-for="opt in sortOptions"
-                    :key="opt.key"
-                    class="sort-menu__item"
-                    :class="{ active: notificationsStore.sortOrder === opt.key }"
-                    @click="selectSort(opt.key)"
-                  >{{ opt.label }}</button>
-                </div>
-              </Transition>
-            </div>
+            <NeoMenu
+              v-model:open="sortMenuOpen"
+              class="sort-menu"
+              label="Sort notifications"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="16" y2="12" /><line x1="4" y1="18" x2="12" y2="18" />
+              </svg>
+              <template #items>
+                <button
+                  v-for="opt in sortOptions"
+                  :key="opt.key"
+                  type="button"
+                  role="menuitem"
+                  class="sort-menu__item"
+                  :class="{ active: notificationsStore.sortOrder === opt.key }"
+                  @click="selectSort(opt.key)"
+                >{{ opt.label }}</button>
+              </template>
+            </NeoMenu>
 
-            <!-- More actions -->
-            <div class="actions-menu">
-              <button
-                type="button"
-                class="notif-icon-btn"
-                title="More actions"
-                aria-label="More notification actions"
-                :aria-expanded="actionsMenuOpen"
-                @click.stop="actionsMenuOpen = !actionsMenuOpen"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
-                </svg>
-              </button>
-              <Transition name="dropdown">
-                <div v-if="actionsMenuOpen" class="actions-menu__dropdown">
-                  <button class="actions-menu__item" @click="handleMarkRead">Mark all as read</button>
-                  <button class="actions-menu__item actions-menu__item--danger" @click="handleClearAll">Clear all notifications</button>
-                </div>
-              </Transition>
-            </div>
+            <NeoMenu
+              v-model:open="actionsMenuOpen"
+              class="actions-menu"
+              label="More notification actions"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
+              </svg>
+              <template #items>
+                <button type="button" role="menuitem" class="actions-menu__item" @click="handleMarkRead">Mark all as read</button>
+                <button type="button" role="menuitem" class="actions-menu__item actions-menu__item--danger" @click="handleClearAll">Clear all notifications</button>
+              </template>
+            </NeoMenu>
           </div>
         </div>
 
-        <!-- Filter pills -->
-        <div class="notif-filters" role="toolbar" aria-label="Filter notifications">
-          <button
-            v-for="f in filters"
-            :key="f.key"
-            type="button"
-            class="notif-filter-pill"
-            :class="{ active: notificationsStore.filter === f.key }"
-            :aria-pressed="notificationsStore.filter === f.key"
-            @click="selectFilter(f.key)"
-          >
-            <span class="notif-filter-pill__icon" aria-hidden="true"><NeoIcon :name="f.icon" :size="15" :stroke="2" /></span>
-            <span class="notif-filter-pill__label">{{ f.label }}</span>
-          </button>
-        </div>
+        <NeoTabs
+          v-model="filterTabId"
+          class="notif-filters"
+          :tabs="filterTabs"
+          :panels="false"
+          controls-id="notif-list"
+        />
       </header>
 
+      <div id="notif-list" class="notif-panel">
+      <div
+        v-if="notificationsStore.failedHosts.length"
+        class="notif-partial"
+        role="status"
+      >
+        Couldn’t load from {{ notificationsStore.failedHosts.join(', ') }}.
+        <button type="button" class="notif-partial__retry" @click="handleRefresh">Retry</button>
+      </div>
       <!-- Loading skeleton -->
       <div v-if="notificationsStore.isLoading && notificationsStore.isEmpty" class="notif-skeleton">
         <div v-for="i in 8" :key="i" class="notif-skeleton__item">
@@ -357,7 +352,10 @@ onBeforeUnmount(() => {
               v-for="notif in grouped[group]"
               :key="notif._key"
               class="notif-item"
-              :class="'notif-item--' + notif.type"
+              :class="[
+                'notif-item--' + notif.type,
+                { 'notif-item--unread': notificationsStore.isUnread(notif) },
+              ]"
             >
               <!-- Type icon badge -->
               <div class="notif-item__type-badge" aria-hidden="true">
@@ -403,8 +401,12 @@ onBeforeUnmount(() => {
                       >· {{ hostLabel(notif._instanceUrl) }}</span>
                     </button>
                   </p>
-                  <time class="notif-item__time" :datetime="notif.createdAt">
-                    {{ formatTime(notif.createdAt) }}
+                  <time
+                    class="notif-item__time"
+                    :datetime="notif.createdAt"
+                    :title="formatAbsoluteTime(notif.createdAt)"
+                  >
+                    {{ formatRelativeTime(notif.createdAt) }}
                   </time>
                 </div>
 
@@ -465,6 +467,7 @@ onBeforeUnmount(() => {
             That's everything
           </span>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -576,25 +579,34 @@ onBeforeUnmount(() => {
   to { transform: rotate(360deg); }
 }
 
-// ====== Sort & Actions dropdowns ======
+// ====== Sort & Actions menus ======
 
 .sort-menu,
 .actions-menu {
-  position: relative;
-}
+  :deep(.neo-menu__trigger) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--neo-radius-sm, 4px);
+    color: var(--neo-text-secondary);
 
-.sort-menu__dropdown,
-.actions-menu__dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  background: var(--neo-bg-secondary);
-  border: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
-  border-radius: var(--neo-radius-sm, 4px);
-  padding: 0.25rem;
-  min-width: 180px;
-  box-shadow: var(--neo-shadow-md);
-  z-index: 30;
+    &:hover {
+      background: var(--neo-bg-hover);
+      color: var(--neo-text-primary);
+    }
+  }
+
+  :deep(.neo-menu__panel) {
+    min-width: 180px;
+    background: var(--neo-bg-secondary);
+    border: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
+    border-radius: var(--neo-radius-sm, 4px);
+    padding: 0.25rem;
+    box-shadow: var(--neo-shadow-md);
+    z-index: 30;
+  }
 }
 
 .sort-menu__item,
@@ -629,68 +641,60 @@ onBeforeUnmount(() => {
   }
 }
 
-// ====== Filter pills ======
+// ====== Filter tabs ======
 
 .notif-filters {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.5rem;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  padding: 0 0 0.875rem;
   margin: 0 -0.75rem;
-  padding-left: 0.75rem;
-  padding-right: 0.75rem;
-  border-bottom: 1px solid var(--neo-border-color);
-  scrollbar-width: none;
+  padding: 0 0.75rem 0.5rem;
+  border-bottom: none;
 
-  &::-webkit-scrollbar {
-    display: none;
+  :deep(.neo-tabs__list) {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    padding: 0 0 0.875rem;
+    border-bottom: 1px solid var(--neo-border-color);
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    @media (min-width: 720px) {
+      flex-wrap: wrap;
+      overflow-x: visible;
+    }
   }
 
-  @media (min-width: 720px) {
-    flex-wrap: wrap;
-    overflow-x: visible;
-    margin: 0;
-    padding-left: 0;
-    padding-right: 0;
-  }
-}
+  :deep(.neo-tabs__tab) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0.375rem 0.75rem;
+    border-radius: var(--neo-radius-sm, 4px);
+    border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-secondary);
+    font-size: 0.8125rem;
+    color: var(--neo-text-primary);
+    white-space: nowrap;
+    flex: 0 0 auto;
+    box-shadow: none;
 
-.notif-filter-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  min-height: 34px;
-  padding: 0.375rem 0.75rem;
-  border-radius: var(--neo-radius-sm, 4px);
-  border: 1px solid var(--neo-border-color);
-  background: var(--neo-bg-secondary);
-  font-size: 0.8125rem;
-  color: var(--neo-text-primary);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
-  flex: 0 0 auto;
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+      background: var(--neo-bg-secondary);
+      color: var(--neo-text-primary);
+    }
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
-  }
-
-  &.active {
-    background: var(--neo-accent);
-    border-color: var(--neo-accent);
-    color: var(--neo-text-on-accent);
-  }
-
-  &__icon {
-    font-size: 0.875rem;
-    line-height: 1;
-  }
-
-  &__label {
-    font-weight: 500;
+    &[aria-selected='true'] {
+      background: var(--neo-accent);
+      border-color: var(--neo-accent);
+      color: var(--neo-text-on-accent);
+      box-shadow: none;
+    }
   }
 }
 
@@ -742,6 +746,32 @@ onBeforeUnmount(() => {
   }
   50% {
     opacity: 0.4;
+  }
+}
+
+.notif-partial {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--neo-radius-sm, 6px);
+  border: 1px solid color-mix(in srgb, var(--neo-warning, #b8860b) 40%, var(--neo-border-color));
+  background: color-mix(in srgb, var(--neo-warning, #b8860b) 10%, var(--neo-bg-secondary));
+  color: var(--neo-text-primary);
+  font-size: 0.8125rem;
+
+  &__retry {
+    margin-left: auto;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-primary);
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
   }
 }
 
@@ -864,16 +894,17 @@ onBeforeUnmount(() => {
   transition: background-color 0.15s;
   position: relative;
 
+  &--unread {
+    border-left-color: var(--neo-accent);
+    background: color-mix(in srgb, var(--neo-accent) 6%, transparent);
+  }
+
   &:hover {
     background: var(--neo-bg-hover);
 
     .notif-item__dismiss {
       opacity: 1;
     }
-  }
-
-  &:focus-within {
-    background: var(--neo-bg-hover);
   }
 
   &__type-badge {
@@ -1076,37 +1107,44 @@ onBeforeUnmount(() => {
     cursor: pointer;
     transition: opacity 0.15s, background-color 0.15s, color 0.15s, border-color 0.15s;
 
-    &:hover {
+    &:hover,
+    &:focus-visible {
+      opacity: 1;
       background: var(--neo-danger-soft);
       border-color: var(--neo-danger);
       color: var(--neo-danger);
+      outline: none;
     }
 
     @media (hover: none) {
       opacity: 0.7;
     }
   }
+
+  &:hover &__dismiss {
+    opacity: 1;
+  }
 }
 
 // Type-specific accent strips
 .notif-item--favourite {
-  border-left-color: #e0245e;
+  border-left-color: var(--neo-danger);
 }
 .notif-item--reblog {
-  border-left-color: #00ba7c;
+  border-left-color: var(--neo-success);
 }
 .notif-item--mention {
   border-left-color: var(--neo-accent);
 }
 .notif-item--follow,
 .notif-item--follow_request {
-  border-left-color: #7c3aed;
+  border-left-color: var(--neo-info);
 }
 .notif-item--poll {
-  border-left-color: #f59e0b;
+  border-left-color: var(--neo-warning);
 }
 .notif-item--update {
-  border-left-color: #06b6d4;
+  border-left-color: var(--neo-info);
 }
 
 // ====== Load more ======

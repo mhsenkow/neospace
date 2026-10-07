@@ -111,7 +111,7 @@ const showServersResults = computed(
 )
 
 const fediverseSearchEmpty = computed(() => {
-  if (!hasQuery.value || searchBusy.value) return false
+  if (!hasQuery.value || searchBusy.value || searchError.value) return false
   if (tab.value === 'servers') return false
   if (tab.value === 'people') return !accounts.value.length
   if (tab.value === 'posts') return !statuses.value.length
@@ -382,28 +382,21 @@ onUnmounted(() => {
           </button>
         </label>
 
-        <div class="explore-modes" role="tablist" aria-label="Search type">
-          <button
-            v-for="t in TABS"
-            :key="t.id"
-            type="button"
-            role="tab"
-            class="explore-mode"
-            :class="{ 'explore-mode--on': tab === t.id }"
-            :aria-selected="tab === t.id"
-            :title="t.tip"
-            :aria-label="`${t.label}: ${t.tip}`"
-            @click="setTab(t.id)"
-          >
-            {{ t.label }}
-          </button>
-        </div>
+        <NeoTabs
+          :model-value="tab"
+          class="explore-modes"
+          :tabs="TABS.map((t) => ({ id: t.id, label: t.label }))"
+          :panels="false"
+          controls-id="explore-results"
+          @update:model-value="setTab($event as ExploreTab)"
+        />
       </div>
 
       <p v-if="customError" class="explore-error" role="alert">{{ customError }}</p>
       <p v-else-if="searchError" class="explore-error" role="alert">{{ searchError }}</p>
     </div>
 
+    <div id="explore-results">
     <div v-if="!isSignedIn" class="explore-cta-row">
       <a
         href="https://joinmastodon.org/servers"
@@ -689,6 +682,7 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+    </div>
 
     <InstancePreview @watched="onWatched" />
 
@@ -735,38 +729,43 @@ onUnmounted(() => {
 }
 
 .explore-modes {
-  display: flex;
   flex-shrink: 0;
-  flex-wrap: nowrap;
-  gap: 0.15rem;
-  padding: 0.2rem;
-  border-radius: 10px;
-  background: var(--neo-bg-secondary, var(--neo-bg-tertiary));
-  border: 1px solid var(--neo-border-color);
   max-width: 100%;
-}
 
-.explore-mode {
-  min-height: 2.35rem;
-  padding: 0.3rem 0.65rem;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--neo-text-secondary);
-  font-family: var(--neo-font-family-ui);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--neo-text-primary);
+  :deep(.neo-tabs__list) {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.15rem;
+    padding: 0.2rem;
+    border-radius: 10px;
+    background: var(--neo-bg-secondary, var(--neo-bg-tertiary));
+    border: 1px solid var(--neo-border-color);
+    border-bottom: 1px solid var(--neo-border-color);
   }
 
-  &--on {
-    background: var(--neo-bg-card, var(--neo-bg-primary));
-    color: var(--neo-text-primary);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
+  :deep(.neo-tabs__tab) {
+    min-height: 2.35rem;
+    padding: 0.3rem 0.65rem;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--neo-text-secondary);
+    font-family: var(--neo-font-family-ui);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: none;
+
+    &:hover {
+      color: var(--neo-text-primary);
+      background: transparent;
+    }
+
+    &[aria-selected='true'] {
+      background: var(--neo-bg-card, var(--neo-bg-primary));
+      color: var(--neo-text-primary);
+      box-shadow: 0 1px 2px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
+    }
   }
 }
 
@@ -820,18 +819,21 @@ onUnmounted(() => {
   .explore-modes {
     flex: 1 1 auto;
     width: 100%;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
 
-    &::-webkit-scrollbar {
-      display: none;
+    :deep(.neo-tabs__list) {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
     }
-  }
 
-  .explore-mode {
-    flex: 1 0 auto;
-    text-align: center;
+    :deep(.neo-tabs__tab) {
+      flex: 1 0 auto;
+      text-align: center;
+    }
   }
 }
 

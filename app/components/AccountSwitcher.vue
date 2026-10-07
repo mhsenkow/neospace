@@ -43,6 +43,11 @@ const goProfile = () => {
 const cycleAccount = async () => {
   if (!multi.value) return
   instancesStore.cycleActiveAccount()
+  const active = instancesStore.activeAccount
+  const name =
+    active?.user?.displayName || active?.user?.username || active?.name || 'account'
+  const { useToastStore } = await import('~/stores/toast')
+  useToastStore().show({ message: `Posting as ${name}` })
   if (route.path === '/profile' && !route.query.user) {
     const { useProfileStore } = await import('~/stores/profile')
     await useProfileStore().fetchProfile()
@@ -174,6 +179,7 @@ onUnmounted(() => {
         </div>
       </span>
       <span v-if="multi" class="acct-switch__count" aria-hidden="true">{{ accounts.length }}</span>
+      <span v-if="isNav" class="acct-switch__label">You</span>
     </button>
   </div>
 </template>
@@ -208,13 +214,26 @@ onUnmounted(() => {
 }
 
 .acct-switch--nav .acct-switch__trigger {
-  width: 48px;
-  height: 48px;
+  flex-direction: column;
+  gap: 2px;
+  width: 52px;
+  height: auto;
+  min-height: 48px;
+  padding: 4px 0 2px;
   border-radius: 4px;
+  color: var(--neo-text-secondary);
 
   &.active {
     background: var(--neo-accent-soft);
+    color: var(--neo-accent);
   }
+}
+
+.acct-switch__label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
 }
 
 .acct-switch__stack {

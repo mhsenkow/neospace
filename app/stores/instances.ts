@@ -18,9 +18,12 @@ import {
 import { logError, logWarn } from '~/utils/log'
 import {
   DEFAULT_PUBLIC_INSTANCE,
+  hostnameOf,
   isAuthGatedPublicHost,
+  resolvePublicInstanceUrl,
 } from '~/utils/instances'
 import { dedupeStatusesByIdentity } from '~/utils/statusIdentity'
+import { clearClientCache, clientFor, publicClient } from '~/composables/useMasto'
 
 export interface ConnectedInstance {
   id: string
@@ -77,8 +80,23 @@ interface MultiInstanceState {
 
 const STORAGE_KEY = 'neospace_instances'
 const LEGACY_AUTH_KEY = 'neospace_auth'
+const STORAGE_VERSION = 1
 const APP_NAME = 'NeoSpace'
 const SCOPES = 'read write follow push'
+
+/** Accept raw blobs or `{ v: 1, ... }` wrappers */
+function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== 'object') return null
+  const obj = data as Record<string, unknown>
+  if (typeof obj.v === 'number' && obj.v >= 1) {
+    const { v: _v, ...rest } = obj
+    return rest
+  }
+  return obj
+}
+
+let storageListenerBound = false
+let storageReloadTimer: ReturnType<typeof setTimeout> | null = null
 
 const getRedirectUri = () => {
   if (typeof window === 'undefined') return 'http://localhost:3000/auth/callback'
@@ -208,8 +226,9 @@ export const useInstancesStore = defineStore('instances', {
       try {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
-          const data = JSON.parse(saved)
-          const raw = (data.instances || []).map((i: ConnectedInstance) => ({
+          const data = unwrapStoragePayload(JSON.parse(saved))
+          if (!data) return
+          const raw = ((data.instances as ConnectedInstance[]) || []).map((i: ConnectedInstance) => ({
             ...i,
             clientSecret: null,
             isConnecting: false,
@@ -240,10 +259,18 @@ export const useInstancesStore = defineStore('instances', {
             }
           }
           this.instances = kept
-          this.activeInstanceFilter = data.activeInstanceFilter || null
-          this.activeAccountId = data.activeAccountId || null
-          this.primaryAccountId = data.primaryAccountId || null
+          this.activeInstanceFilter = (data.activeInstanceFilter as string | null) || null
+          this.activeAccountId = (data.activeAccountId as string | null) || null
+          this.primaryAccountId = (data.primaryAccountId as string | null) || null
+          // Stale filter id → empty target list → blank Local/Federated with no error
+          if (
+            this.activeInstanceFilter &&
+            !this.instances.some((i) => i.id === this.activeInstanceFilter)
+          ) {
+            this.activeInstanceFilter = null
+          }
           this.ensurePrimaryAccount()
+          clearClientCache()
         }
       } catch (e) {
         logError('Failed to load instances from storage:', e)
@@ -256,6 +283,7 @@ export const useInstancesStore = defineStore('instances', {
       try {
         // Never persist clientSecret — XSS would steal revoke ability + app credentials
         const toSave = {
+          v: STORAGE_VERSION,
           instances: this.instances.map((i) => ({
             ...i,
             clientSecret: null,
@@ -270,6 +298,20 @@ export const useInstancesStore = defineStore('instances', {
       } catch (e) {
         logError('Failed to save instances to storage:', e)
       }
+    },
+
+    /** Other tabs changed accounts — reload after a short debounce */
+    bindStorageListener() {
+      if (typeof window === 'undefined' || storageListenerBound) return
+      storageListenerBound = true
+      window.addEventListener('storage', (e) => {
+        if (e.key !== STORAGE_KEY || e.newValue == null) return
+        if (storageReloadTimer) clearTimeout(storageReloadTimer)
+        storageReloadTimer = setTimeout(() => {
+          storageReloadTimer = null
+          this.loadFromStorage()
+        }, 200)
+      })
     },
 
     /** Keep a stable "main" identity for the NeoSpace session */
@@ -646,6 +688,33 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
+    /** Revoke and clear every signed-in account */
+    async logoutAll() {
+      const ids = this.authenticatedInstances.map((i) => i.id)
+      for (const id of ids) {
+        await this.logoutInstance(id)
+      }
+    },
+
+    /**
+     * Wipe NeoSpace local device data (drafts, settings, columns, etc.).
+     * Does not revoke remote tokens — call logoutAll first if needed.
+     */
+    clearLocalDeviceData() {
+      if (typeof localStorage === 'undefined') return
+      const keys: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (k && (k.startsWith('neospace') || k.startsWith('neo_'))) keys.push(k)
+      }
+      for (const k of keys) localStorage.removeItem(k)
+      try {
+        sessionStorage.clear()
+      } catch {
+        /* ignore */
+      }
+    },
+
     async verifyAllInstances() {
       const promises = this.instances
         .filter((i) => i.accessToken)
@@ -708,6 +777,7 @@ export const useInstancesStore = defineStore('instances', {
 
       const run = (async () => {
         this.loadFromStorage()
+        this.bindStorageListener()
         this.migrateLegacyAuth()
 
         const gatedWatchOnly = this.instances.filter(
@@ -729,6 +799,31 @@ export const useInstancesStore = defineStore('instances', {
         }
 
         await this.verifyAllInstances()
+
+        // Token may have been cleared during verify — drop gated watch-only leftovers
+        const orphanGated = this.instances.filter(
+          (i) => !i.accessToken && isAuthGatedPublicHost(i.url),
+        )
+        if (orphanGated.length) {
+          const drop = new Set(orphanGated.map((i) => i.id))
+          this.instances = this.instances.filter((i) => !drop.has(i.id))
+          if (
+            this.activeInstanceFilter &&
+            drop.has(this.activeInstanceFilter)
+          ) {
+            this.activeInstanceFilter = null
+          }
+          this.saveToStorage()
+        }
+
+        if (this.instances.length === 0) {
+          try {
+            await this.addInstance(DEFAULT_PUBLIC_INSTANCE)
+          } catch {
+            logWarn('Failed to add default instance after verify')
+          }
+        }
+
         this.ensurePrimaryAccount()
         this.isInitialized = true
       })()
@@ -742,25 +837,67 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     getClient(instanceId: string): mastodon.rest.Client {
-      const instance = this.instances.find((i) => i.id === instanceId)
-      if (!instance) throw new Error('Instance not found')
+      return clientFor(instanceId)
+    },
 
-      return createRestAPIClient({
-        url: instance.url,
-        accessToken: instance.accessToken || undefined,
-      })
+    /** Local/Federated follow the active profile’s server (not a merge of every watch). */
+    publicTimelineTargets(): ConnectedInstance[] {
+      if (this.activeInstanceFilter) {
+        const filtered = this.instances.filter((i) => i.id === this.activeInstanceFilter)
+        if (filtered.length) return filtered
+        // Stale id — clear so we don't keep requesting nothing
+        this.activeInstanceFilter = null
+      }
+      const active = this.activeAccount
+      if (active) return [active]
+      return this.instances
+    },
+
+    /** Open-server fallback when the active host blocks unauthenticated public timelines. */
+    async fetchPublicTimelineFallback(
+      type: 'local' | 'federated',
+      limit: number,
+      maxId?: string,
+    ): Promise<ExtendedStatus[]> {
+      try {
+        const url = resolvePublicInstanceUrl(
+          type === 'federated' ? null : this.activeAccount?.url || this.instances[0]?.url,
+        )
+        const client = publicClient(url)
+        const statuses = await client.v1.timelines.public.list({
+          local: type === 'local',
+          limit,
+          ...(maxId ? { maxId } : {}),
+        })
+        return statuses.map((s) => ({
+          ...s,
+          _instanceId: `public:${hostnameOf(url) || 'fallback'}`,
+          _instanceUrl: url,
+        }))
+      } catch (e) {
+        logWarn('Public timeline fallback failed:', e)
+        return []
+      }
     },
 
     async fetchMergedTimeline(
       type: 'local' | 'federated' = 'local',
       limit: number = 20,
+      maxIdOrCursors?: string | Record<string, string>,
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
       const errors: string[] = []
 
-      const targets = this.activeInstanceFilter
-        ? this.instances.filter((i) => i.id === this.activeInstanceFilter)
-        : this.instances
+      const targets = this.publicTimelineTargets()
+      const cursors =
+        maxIdOrCursors && typeof maxIdOrCursors === 'object' ? maxIdOrCursors : null
+      const legacyMaxId = typeof maxIdOrCursors === 'string' ? maxIdOrCursors : undefined
+
+      if (!targets.length) {
+        const fallback = await this.fetchPublicTimelineFallback(type, limit, legacyMaxId)
+        if (fallback.length) return fallback
+        throw new Error('No servers available for this timeline. Add an instance or sign in.')
+      }
 
       const fetchPromises = targets.map(async (instance) => {
         try {
@@ -769,14 +906,13 @@ export const useInstancesStore = defineStore('instances', {
             return []
           }
 
-          const client = createRestAPIClient({
-            url: instance.url,
-            accessToken: instance.accessToken || undefined,
-          })
+          const client = this.getClient(instance.id)
+          const maxId = cursors?.[instance.id] ?? legacyMaxId
 
           const statuses = await client.v1.timelines.public.list({
             local: type === 'local',
             limit,
+            ...(maxId ? { maxId } : {}),
           })
 
           return statuses.map((s) => ({
@@ -795,12 +931,20 @@ export const useInstancesStore = defineStore('instances', {
       const results = await Promise.all(fetchPromises)
       results.forEach((statuses) => allStatuses.push(...statuses))
 
-      if (allStatuses.length === 0 && errors.length > 0 && targets.length > 0) {
-        throw new Error(
-          errors[0]?.includes('requires login') || errors[0]?.includes('authenticated')
-            ? 'This instance requires login to view timelines. Connect an account or add a different instance.'
-            : errors[0] || 'Failed to fetch timeline',
-        )
+      if (allStatuses.length === 0) {
+        // mastodon.social etc. often 422 without a usable token — don't leave Federated blank
+        const fallback = await this.fetchPublicTimelineFallback(type, limit, legacyMaxId)
+        if (fallback.length) return fallback
+
+        if (errors.length > 0) {
+          throw new Error(
+            errors[0]?.includes('requires login') ||
+              errors[0]?.includes('authenticated') ||
+              errors[0]?.includes('authenticated user')
+              ? 'This instance requires login to view timelines. Connect an account or add a different instance.'
+              : errors[0] || 'Failed to fetch timeline',
+          )
+        }
       }
 
       allStatuses.sort(
@@ -815,7 +959,11 @@ export const useInstancesStore = defineStore('instances', {
       cursors?: Record<string, string>,
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
-      const authInstances = this.instances.filter((i) => i.accessToken)
+      // Active profile’s home only — multi-account merge made feeds feel identical.
+      const active = this.activeAccount
+      const authInstances = active?.accessToken
+        ? [active]
+        : this.instances.filter((i) => i.accessToken)
 
       const fetchPromises = authInstances.map(async (instance) => {
         try {

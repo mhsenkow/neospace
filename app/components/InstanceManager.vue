@@ -4,13 +4,18 @@
  */
 
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
+import { useOverlayStore } from '~/stores/overlay'
+import { useToastStore } from '~/stores/toast'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
 
 const instancesStore = useInstancesStore()
+const overlayStore = useOverlayStore()
+const toastStore = useToastStore()
 const { isOpen, close } = useAccountsManager()
 const router = useRouter()
 
+const modalRef = ref<HTMLElement | null>(null)
 const newServerUrl = ref('')
 const isAdding = ref(false)
 const addError = ref<string | null>(null)
@@ -36,6 +41,11 @@ const closeAndReset = () => {
   addSuccess.value = null
 }
 
+useFocusTrap(modalRef, isOpen, {
+  onEscape: () => closeAndReset(),
+  initialFocus: '.accounts-close',
+})
+
 const watchServer = async () => {
   if (!newServerUrl.value.trim()) return
   isAdding.value = true
@@ -58,16 +68,29 @@ const watchServer = async () => {
   }
 }
 
-const stopWatching = (instance: ConnectedInstance) => {
-  if (confirm(`Stop watching ${instance.name}?`)) {
-    instancesStore.removeInstance(instance.id)
-  }
+const stopWatching = async (instance: ConnectedInstance) => {
+  const ok = await overlayStore.openConfirm({
+    title: 'Stop watching?',
+    body: `Stop watching ${instance.name}?`,
+    confirmLabel: 'Stop watching',
+    danger: true,
+  })
+  if (!ok) return
+  instancesStore.removeInstance(instance.id)
+  toastStore.show({ message: `Stopped watching ${instance.name}` })
 }
 
 const removeAccount = async (instance: ConnectedInstance) => {
-  if (confirm(`Remove ${handleOf(instance)} from NeoSpace? You’ll be signed out of this server.`)) {
-    await instancesStore.removeAccount(instance.id)
-  }
+  const handle = handleOf(instance)
+  const ok = await overlayStore.openConfirm({
+    title: 'Remove account?',
+    body: `Remove ${handle} from NeoSpace? You’ll be signed out of this server.`,
+    confirmLabel: 'Remove',
+    danger: true,
+  })
+  if (!ok) return
+  await instancesStore.removeAccount(instance.id)
+  toastStore.show({ message: `Removed ${handle}` })
 }
 
 const signIn = async (instance: ConnectedInstance) => {
@@ -76,13 +99,20 @@ const signIn = async (instance: ConnectedInstance) => {
     window.location.href = authUrl
   } catch (e) {
     console.error('Sign in error:', e)
+    toastStore.show({ message: 'Couldn’t start sign-in. Try again.' })
   }
 }
 
 const signOut = async (instance: ConnectedInstance) => {
-  if (confirm(`Sign out of ${instance.name}? You can keep watching public posts.`)) {
-    await instancesStore.logoutInstance(instance.id)
-  }
+  const ok = await overlayStore.openConfirm({
+    title: 'Sign out?',
+    body: `Sign out of ${instance.name}? You can keep watching public posts.`,
+    confirmLabel: 'Sign out',
+    danger: true,
+  })
+  if (!ok) return
+  await instancesStore.logoutInstance(instance.id)
+  toastStore.show({ message: `Signed out of ${instance.name}` })
 }
 
 const useForPosting = (instance: ConnectedInstance) => {
@@ -102,7 +132,13 @@ const isActive = (instance: ConnectedInstance) =>
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="isOpen" class="accounts-overlay" @click.self="closeAndReset">
-        <div class="accounts-modal" role="dialog" aria-modal="true" aria-labelledby="accounts-title">
+        <div
+          ref="modalRef"
+          class="accounts-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="accounts-title"
+        >
           <header class="accounts-header">
             <div>
               <h2 id="accounts-title">Accounts &amp; Servers</h2>
@@ -193,7 +229,9 @@ const isActive = (instance: ConnectedInstance) =>
               </p>
 
               <div class="watch-add">
+                <label class="sr-only" for="watch-server-input">Server to watch</label>
                 <input
+                  id="watch-server-input"
                   v-model="newServerUrl"
                   type="text"
                   class="neo-input"
@@ -210,8 +248,8 @@ const isActive = (instance: ConnectedInstance) =>
                   {{ isAdding ? 'Adding…' : 'Watch' }}
                 </button>
               </div>
-              <p v-if="addError" class="watch-error">{{ addError }}</p>
-              <p v-if="addSuccess" class="watch-success">{{ addSuccess }}</p>
+              <p v-if="addError" class="watch-error" role="alert">{{ addError }}</p>
+              <p v-if="addSuccess" class="watch-success" role="status">{{ addSuccess }}</p>
 
               <div v-if="watching.length === 0" class="accounts-empty accounts-empty--quiet">
                 Not watching any extra servers.
@@ -531,7 +569,7 @@ const isActive = (instance: ConnectedInstance) =>
   }
 
   &--danger:hover:not(:disabled) {
-    color: white;
+    color: var(--neo-text-on-accent, #fff);
     background: var(--neo-danger);
     border-color: var(--neo-danger);
   }
@@ -592,5 +630,16 @@ const isActive = (instance: ConnectedInstance) =>
   .accounts-modal {
     transform: scale(0.96) translateY(8px);
   }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

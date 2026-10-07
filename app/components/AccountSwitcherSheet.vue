@@ -127,24 +127,23 @@ onUnmounted(() => {
             </p>
           </header>
 
-          <div v-if="accounts.length <= 4" class="acct-sheet__avatars" role="list">
-            <button
-              v-for="account in accounts"
-              :key="account.id"
-              type="button"
-              class="acct-sheet__avatar-btn"
-              :class="{ 'acct-sheet__avatar-btn--active': account.id === instancesStore.activeAccount?.id }"
-              role="listitem"
-              :aria-pressed="account.id === instancesStore.activeAccount?.id"
-              @click="selectAccount(account.id)"
-            >
-              <span class="acct-sheet__avatar-ring">
-                <img
-                  v-if="account.user?.avatar"
-                  :src="account.user.avatar"
-                  alt=""
-                  class="acct-sheet__avatar-img"
-                />
+          <ul v-if="accounts.length <= 4" class="acct-sheet__avatars">
+            <li v-for="account in accounts" :key="account.id">
+              <button
+                type="button"
+                class="acct-sheet__avatar-btn"
+                :class="{ 'acct-sheet__avatar-btn--active': account.id === instancesStore.activeAccount?.id }"
+                :aria-pressed="account.id === instancesStore.activeAccount?.id"
+                :aria-current="account.id === instancesStore.activeAccount?.id ? 'true' : undefined"
+                @click="selectAccount(account.id)"
+              >
+                <span class="acct-sheet__avatar-ring">
+                  <img
+                    v-if="account.user?.avatar"
+                    :src="account.user.avatar"
+                    alt=""
+                    class="acct-sheet__avatar-img"
+                  />
                   <span
                     v-if="account.id === instancesStore.activeAccount?.id"
                     class="acct-sheet__avatar-check"
@@ -152,50 +151,51 @@ onUnmounted(() => {
                   >
                     <NeoIcon name="check" :size="14" :stroke="2.5" />
                   </span>
-              </span>
-              <span class="acct-sheet__avatar-name">
-                {{ account.user?.displayName || account.user?.username }}
-              </span>
-              <span class="acct-sheet__avatar-host">{{ hostOf(account) }}</span>
-            </button>
+                </span>
+                <span class="acct-sheet__avatar-name">
+                  {{ account.user?.displayName || account.user?.username }}
+                </span>
+                <span class="acct-sheet__avatar-host">{{ hostOf(account) }}</span>
+              </button>
+            </li>
 
-            <button
-              type="button"
-              class="acct-sheet__avatar-btn acct-sheet__avatar-btn--add"
-              role="listitem"
-              @click="addAccount"
-            >
+            <li>
+              <button
+                type="button"
+                class="acct-sheet__avatar-btn acct-sheet__avatar-btn--add"
+                @click="addAccount"
+              >
                 <span class="acct-sheet__avatar-ring acct-sheet__avatar-ring--add">
                   <NeoIcon name="plus" :size="22" :stroke="2" />
                 </span>
-              <span class="acct-sheet__avatar-name">Add</span>
-              <span class="acct-sheet__avatar-host">server</span>
-            </button>
-          </div>
+                <span class="acct-sheet__avatar-name">Add</span>
+                <span class="acct-sheet__avatar-host">server</span>
+              </button>
+            </li>
+          </ul>
 
-          <div v-else class="acct-sheet__list" role="list">
-            <button
-              v-for="account in accounts"
-              :key="account.id"
-              type="button"
-              class="acct-sheet__row"
-              :class="{ 'acct-sheet__row--active': account.id === instancesStore.activeAccount?.id }"
-              role="listitem"
-              @click="selectAccount(account.id)"
-            >
-              <img
-                v-if="account.user?.avatar"
-                :src="account.user.avatar"
-                alt=""
-                class="acct-sheet__row-avatar"
-              />
-              <span class="acct-sheet__row-text">
-                <span class="acct-sheet__row-name">
-                  {{ account.user?.displayName || account.user?.username }}
-                  <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
+          <ul v-else class="acct-sheet__list">
+            <li v-for="account in accounts" :key="account.id">
+              <button
+                type="button"
+                class="acct-sheet__row"
+                :class="{ 'acct-sheet__row--active': account.id === instancesStore.activeAccount?.id }"
+                :aria-current="account.id === instancesStore.activeAccount?.id ? 'true' : undefined"
+                @click="selectAccount(account.id)"
+              >
+                <img
+                  v-if="account.user?.avatar"
+                  :src="account.user.avatar"
+                  alt=""
+                  class="acct-sheet__row-avatar"
+                />
+                <span class="acct-sheet__row-text">
+                  <span class="acct-sheet__row-name">
+                    {{ account.user?.displayName || account.user?.username }}
+                    <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
+                  </span>
+                  <span class="acct-sheet__row-handle">{{ handleOf(account) }}</span>
                 </span>
-                <span class="acct-sheet__row-handle">{{ handleOf(account) }}</span>
-              </span>
                 <span
                   v-if="account.id === instancesStore.activeAccount?.id"
                   class="acct-sheet__row-check"
@@ -203,8 +203,9 @@ onUnmounted(() => {
                 >
                   <NeoIcon name="check" :size="18" :stroke="2.5" />
                 </span>
-            </button>
-          </div>
+              </button>
+            </li>
+          </ul>
 
           <div class="acct-sheet__actions">
             <button type="button" class="acct-sheet__action" @click="goProfile">
@@ -339,7 +340,14 @@ onUnmounted(() => {
   flex-wrap: wrap;
   justify-content: center;
   gap: 1rem 1.15rem;
+  margin: 0;
   padding: 0.25rem 0.25rem 1.15rem;
+  list-style: none;
+
+  > li {
+    margin: 0;
+    padding: 0;
+  }
 }
 
 .acct-sheet__avatar-btn {
@@ -433,7 +441,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  margin-bottom: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+
+  > li {
+    margin: 0;
+    padding: 0;
+  }
 }
 
 .acct-sheet__row {

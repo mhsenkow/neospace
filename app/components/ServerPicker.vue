@@ -6,6 +6,7 @@
 
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
+import { createRaceGuard } from '~/composables/useRace'
 import { normalizeServer, friendlyServerError, isAuthGatedPublicHost } from '~/utils/instances'
 
 const props = withDefaults(
@@ -30,7 +31,8 @@ const { featured, search } = useCuratedInstances()
 const instancesStore = useInstancesStore()
 
 const query = ref(props.initialQuery || '')
-const showCustom = ref(!!props.initialQuery)
+/** Custom server field is primary — featured list is secondary. */
+const showCustom = ref(true)
 const inputRef = ref<HTMLInputElement | null>(null)
 const localError = ref<string | null>(null)
 
@@ -41,6 +43,7 @@ const peekUsers = ref<number | null>(null)
 const peekHost = ref<string | null>(null)
 const peekGated = ref(false)
 let peekTimer: ReturnType<typeof setTimeout> | null = null
+const peekRace = createRaceGuard()
 
 const catalogHits = computed(() => {
   const q = query.value.trim()
@@ -78,9 +81,10 @@ const runPeek = async () => {
   peekHost.value = host
   peekGated.value = isAuthGatedPublicHost(host)
   peekLoading.value = true
+  const ticket = peekRace.next()
   try {
     const info = await instancesStore.fetchInstanceInfo(host)
-    if (peekHost.value !== host) return
+    if (!ticket.isCurrent() || peekHost.value !== host) return
     if (info) {
       peekTitle.value = info.title || host
       peekOpen.value = info.registrations ?? null
@@ -92,7 +96,7 @@ const runPeek = async () => {
       peekUsers.value = null
     }
   } finally {
-    peekLoading.value = false
+    if (ticket.isCurrent()) peekLoading.value = false
   }
 }
 
@@ -136,6 +140,11 @@ defineExpose({
   openCustom,
 })
 
+onMounted(() => {
+  nextTick(() => inputRef.value?.focus())
+  if (query.value.trim()) schedulePeek()
+})
+
 onUnmounted(() => {
   if (peekTimer) clearTimeout(peekTimer)
 })
@@ -143,56 +152,30 @@ onUnmounted(() => {
 
 <template>
   <div class="server-picker" :class="{ 'server-picker--disabled': disabled }">
-    <div class="server-picker__list">
-      <button
-        v-for="server in featured"
-        :key="server.domain"
-        type="button"
-        class="server-picker__row"
-        :disabled="disabled"
-        @click="pick(server.domain)"
-      >
-        <span class="server-picker__emoji" aria-hidden="true">{{ server.emoji }}</span>
-        <span class="server-picker__meta">
-          <span class="server-picker__name">{{ server.domain }}</span>
-          <span class="server-picker__blurb">{{ server.blurb }}</span>
-        </span>
-        <span class="server-picker__arrow" aria-hidden="true">→</span>
-      </button>
-    </div>
-
     <div v-if="localError" class="server-picker__error" role="alert">{{ localError }}</div>
 
     <div class="server-picker__custom">
-      <button
-        v-if="!showCustom"
-        type="button"
-        class="server-picker__toggle"
-        :disabled="disabled"
-        @click="openCustom"
-      >
-        My server isn’t listed — type it in
-      </button>
-
-      <form v-else class="server-picker__form" @submit.prevent="submitCustom">
-        <label class="server-picker__label" for="server-picker-input">Your server name</label>
+      <form class="server-picker__form" @submit.prevent="submitCustom">
+        <label class="server-picker__label" for="server-picker-input">Your handle or server</label>
         <input
           id="server-picker-input"
           ref="inputRef"
           v-model="query"
           type="text"
           class="server-picker__input"
-          placeholder="example.social or @you@example.social"
+          placeholder="@you@example.social or example.social"
           inputmode="url"
-          autocomplete="url"
+          autocomplete="username"
           autocapitalize="none"
           autocorrect="off"
           spellcheck="false"
+          autofocus
           :disabled="disabled"
           @input="schedulePeek"
         />
         <p class="server-picker__hint">
-          Just the name — like <strong>mastodon.social</strong>. No https:// needed.
+          Enter <strong>@you@server</strong> or just the server name — like
+          <strong>mastodon.social</strong>.
         </p>
 
         <!-- Live peek -->
@@ -227,6 +210,25 @@ onUnmounted(() => {
       </form>
     </div>
 
+    <p class="server-picker__featured-label">Or pick a featured server</p>
+    <div class="server-picker__list">
+      <button
+        v-for="server in featured"
+        :key="server.domain"
+        type="button"
+        class="server-picker__row"
+        :disabled="disabled"
+        @click="pick(server.domain)"
+      >
+        <span class="server-picker__emoji" aria-hidden="true">{{ server.emoji }}</span>
+        <span class="server-picker__meta">
+          <span class="server-picker__name">{{ server.domain }}</span>
+          <span class="server-picker__blurb">{{ server.blurb }}</span>
+        </span>
+        <span class="server-picker__arrow" aria-hidden="true">→</span>
+      </button>
+    </div>
+
     <p class="server-picker__more">
       Prefer browsing by interest?
       <NuxtLink to="/explore">Explore servers</NuxtLink>
@@ -240,6 +242,14 @@ onUnmounted(() => {
     opacity: 0.72;
     pointer-events: none;
   }
+}
+
+.server-picker__featured-label {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--neo-text-tertiary);
 }
 
 .server-picker__list {

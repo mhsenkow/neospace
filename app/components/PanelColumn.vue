@@ -8,9 +8,11 @@ import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore, type ExtendedNotification } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
 import { useComposeSheetStore } from '~/stores/composeSheet'
+import { useOverlayStore } from '~/stores/overlay'
 import { useColumnsStore, type ColumnConfig } from '~/stores/columns'
 import { useStatusStore } from '~/stores/status'
 import { activeClient, publicClient } from '~/composables/useMasto'
+import { createRaceGuard } from '~/composables/useRace'
 import { useLinkedProfileFeed } from '~/composables/useLinkedProfileFeed'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
@@ -197,6 +199,8 @@ const remoteHandle = computed(() => {
   return acct ? `@${acct.replace(/^@/, '')}` : ''
 })
 
+const profilePeekRace = createRaceGuard()
+
 const loadRemoteProfile = async () => {
   const acct = props.column.profileAcct
   if (!acct || !instancesStore.hasAuthenticatedInstance) {
@@ -205,6 +209,7 @@ const loadRemoteProfile = async () => {
     return
   }
 
+  const ticket = profilePeekRace.next()
   remoteLoading.value = true
   remoteError.value = null
   remoteStatuses.value = []
@@ -220,14 +225,16 @@ const loadRemoteProfile = async () => {
       const id = await statusStore.resolveAccount(acct)
       if (id) account = await client.v1.accounts.$select(id).fetch()
     }
+    if (!ticket.isCurrent()) return
     if (!account) throw new Error('Account not found')
     remoteAccount.value = account
     await loadRemoteStatuses(true)
   } catch (e: any) {
+    if (!ticket.isCurrent()) return
     remoteError.value = e?.message || 'Couldn’t load profile'
     remoteAccount.value = null
   } finally {
-    remoteLoading.value = false
+    if (ticket.isCurrent()) remoteLoading.value = false
   }
 }
 
@@ -246,7 +253,7 @@ const loadRemoteStatuses = async (refresh = false) => {
       limit: 20,
       maxId: remoteMaxId.value || undefined,
       excludeReplies: true,
-    } as any)
+    })
     remoteStatuses.value = refresh ? page : [...remoteStatuses.value, ...page]
     if (page.length > 0) remoteMaxId.value = page[page.length - 1].id
     remoteHasMore.value = page.length === 20
@@ -264,17 +271,24 @@ const searchError = ref<string | null>(null)
 const searchAccounts = ref<mastodon.v1.Account[]>([])
 const searchHashtags = ref<mastodon.v1.Tag[]>([])
 const searchStatuses = ref<mastodon.v1.Status[]>([])
+const searchRace = createRaceGuard()
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+const searchResultCount = computed(
+  () => searchAccounts.value.length + searchHashtags.value.length + searchStatuses.value.length,
+)
 
 const runSearch = async (q: string) => {
   const query = q.trim()
   if (query.length < 2) {
+    searchRace.abort()
     searchAccounts.value = []
     searchHashtags.value = []
     searchStatuses.value = []
     searchError.value = null
     return
   }
+  const ticket = searchRace.next()
   searchBusy.value = true
   searchError.value = null
   try {
@@ -282,15 +296,17 @@ const runSearch = async (q: string) => {
     const res = await client.v2.search.fetch({
       q: query,
       limit: 8,
-      resolve: instancesStore.hasAuthenticatedInstance,
-    } as any)
+      resolve: instancesStore.hasAuthenticatedInstance && /@[\w.-]+@[\w.-]+/.test(query),
+    })
+    if (!ticket.isCurrent()) return
     searchAccounts.value = res.accounts || []
     searchHashtags.value = res.hashtags || []
     searchStatuses.value = res.statuses || []
   } catch (e: any) {
+    if (!ticket.isCurrent()) return
     searchError.value = e?.message || 'Search failed'
   } finally {
-    searchBusy.value = false
+    if (ticket.isCurrent()) searchBusy.value = false
   }
 }
 
@@ -358,8 +374,9 @@ const previewText = (c: mastodon.v1.Conversation) =>
 
 const openConversation = async (c: mastodon.v1.Conversation) => {
   if (!c.lastStatus?.id) return
-  if (c.unread) await conversationsStore.markRead(c.id)
-  await router.push(`/status/${c.lastStatus.id}`)
+  const id = c.lastStatus.id
+  if (c.unread) void conversationsStore.markRead(c.id)
+  await router.push(`/status/${id}`)
 }
 
 const startNewMessage = () => {
@@ -376,7 +393,13 @@ const startNewMessage = () => {
 
 const archiveConversation = async (c: mastodon.v1.Conversation, e: Event) => {
   e.stopPropagation()
-  if (!confirm('Remove this chat from your inbox? Messages stay on the server.')) return
+  const ok = await useOverlayStore().openConfirm({
+    title: 'Remove this chat?',
+    body: 'Messages stay on the server. This only removes it from your inbox.',
+    confirmLabel: 'Remove',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await conversationsStore.remove(c.id)
   } catch {
@@ -419,6 +442,7 @@ watch(
 
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  searchRace.next()
   conversationsStore.stopLiveRefresh()
 })
 </script>
@@ -717,7 +741,7 @@ onUnmounted(() => {
       <!-- Search -->
       <div v-else-if="column.feedType === 'search'" class="panel-body">
         <label class="search-field">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="11" cy="11" r="8" />
             <path d="M21 21l-4.35-4.35" />
           </svg>
@@ -726,9 +750,17 @@ onUnmounted(() => {
             type="search"
             placeholder="People, tags, posts…"
             autocomplete="off"
+            aria-label="Search people, tags, and posts"
+            :aria-busy="searchBusy || undefined"
           />
         </label>
-        <p v-if="searchBusy" class="panel-hint">Searching…</p>
+        <p class="panel-hint sr-only" aria-live="polite">
+          <template v-if="searchBusy">Searching…</template>
+          <template v-else-if="searchQuery.trim().length >= 2 && !searchError">
+            {{ searchResultCount }} result{{ searchResultCount === 1 ? '' : 's' }}
+          </template>
+        </p>
+        <p v-if="searchBusy" class="panel-hint" aria-hidden="true">Searching…</p>
         <p v-else-if="searchError" class="panel-hint panel-hint--err">{{ searchError }}</p>
         <p v-else-if="searchQuery.trim().length < 2" class="panel-hint">Type at least two characters.</p>
 
@@ -805,31 +837,32 @@ onUnmounted(() => {
           </div>
           <p v-if="notificationsStore.isLoading && notificationsStore.isEmpty" class="panel-hint">Loading…</p>
           <p v-else-if="notificationsStore.isEmpty" class="panel-hint">All caught up.</p>
-          <button
+          <div
             v-for="notif in notificationsStore.filteredNotifications.slice(0, 40)"
             :key="notif._key"
-            type="button"
-            class="row-btn"
-            @click="openNotification(notif)"
+            class="row-btn-wrap"
           >
-            <span class="row-btn__badge"><NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" /></span>
-            <span
+            <button
               v-if="notif.account"
+              type="button"
               class="row-btn__avatar"
-              role="link"
-              tabindex="-1"
+              :aria-label="`View profile of ${notif.account.displayName || notif.account.username}`"
               @click="openNotifProfile(notif, $event)"
             >
               <img :src="notif.account.avatar" alt="" loading="lazy" decoding="async" />
-            </span>
-            <span>
-              <strong
-                class="row-btn__name"
-                @click="openNotifProfile(notif, $event)"
-              >{{ notif.account?.displayName || notif.account?.username }}</strong>
-              <em>{{ notifLabel(notif.type) }} · {{ formatTime(notif.createdAt) }}</em>
-            </span>
-          </button>
+            </button>
+            <button
+              type="button"
+              class="row-btn"
+              @click="openNotification(notif)"
+            >
+              <span class="row-btn__badge"><NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" /></span>
+              <span>
+                <strong class="row-btn__name">{{ notif.account?.displayName || notif.account?.username }}</strong>
+                <em>{{ notifLabel(notif.type) }} · {{ formatTime(notif.createdAt) }}</em>
+              </span>
+            </button>
+          </div>
         </template>
       </div>
 
@@ -1079,6 +1112,18 @@ onUnmounted(() => {
   }
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .search-field {
   display: flex;
   align-items: center;
@@ -1099,11 +1144,45 @@ onUnmounted(() => {
   }
 }
 
+.row-btn-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+}
+
+.row-btn-wrap > .row-btn__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  padding: 2px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+
+  img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    pointer-events: none;
+  }
+
+  &:hover {
+    background: var(--neo-bg-hover);
+  }
+}
+
 .row-btn {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   padding: 0.5rem 0.15rem;
   border: none;
@@ -1137,11 +1216,7 @@ onUnmounted(() => {
   }
 
   &__name {
-    cursor: pointer;
-
-    &:hover {
-      text-decoration: underline;
-    }
+    font-weight: 600;
   }
 
   span {

@@ -39,7 +39,7 @@ SPA deep links use `public/_redirects`. Security/cache headers use `public/_head
 
 The floating note button posts to `POST /api/feedback` (Pages Function), which opens an issue on [mhsenkow/neospace](https://github.com/mhsenkow/neospace).
 
-One-time secret (classic PAT with `repo` scope, or fine-grained with Issues write on this repo):
+One-time secret — prefer a **fine-grained PAT** (this repo only, Issues: Read and write). Avoid classic `repo`-scope PATs:
 
 ```bash
 npx wrangler pages secret put GITHUB_TOKEN --project-name neospace

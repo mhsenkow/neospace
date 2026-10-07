@@ -4,6 +4,8 @@ import { useStatusStore } from '~/stores/status'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeSheet'
+import { useToastStore } from '~/stores/toast'
+import { useOverlayStore } from '~/stores/overlay'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { sanitizeDisplayName, sanitizeStatusHtml } from '~/utils/sanitizeHtml'
 
@@ -27,7 +29,10 @@ const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
 const composeSheet = useComposeSheetStore()
+const toastStore = useToastStore()
+const overlayStore = useOverlayStore()
 const router = useRouter()
+const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
 
 /** Profiles always open the full /profile page — not a column peek. */
 const openProfile = (acct: string | undefined | null, e?: Event) => {
@@ -42,6 +47,19 @@ const safeDisplayName = computed(() =>
   sanitizeDisplayName(displayStatus.value.account.displayName || displayStatus.value.account.username),
 )
 const safeContent = computed(() => sanitizeStatusHtml(displayStatus.value.content || ''))
+/** Full @user@host so impersonators can’t hide behind a display name alone */
+const accountHandle = computed(() => {
+  const acct = displayStatus.value.account?.acct || ''
+  if (!acct) return ''
+  if (acct.includes('@')) return `@${acct}`
+  try {
+    const host = new URL(displayStatus.value.account.url).hostname
+    return host ? `@${acct}@${host}` : `@${acct}`
+  } catch {
+    return `@${acct}`
+  }
+})
+const cardLabelId = computed(() => `status-author-${displayStatus.value.id}`)
 const isReblog = computed(() => !!props.status.reblog)
 const reblogger = computed(() => isReblog.value ? props.status.account : null)
 const isFlip = computed(() => props.variant === 'flip')
@@ -58,27 +76,19 @@ const isMenuOpen = ref(false)
 const isBookmarking = ref(false)
 const isMuting = ref(false)
 const isBlocking = ref(false)
-const showCopiedToast = ref(false)
-const showReplyToast = ref(false)
-const showReplyErrorToast = ref(false)
 const isOpeningReply = ref(false)
-const showBoostToast = ref(false)
 const likePop = ref(false)
-const menuRef = ref<HTMLElement | null>(null)
 const shareOpen = ref(false)
 const boostOpen = ref(false)
 
-const lightbox = ref<{ src: string; alt: string } | null>(null)
-const lightboxOpen = computed(() => !!lightbox.value)
-const lightboxRef = ref<HTMLElement | null>(null)
-const prefersReducedMotion = ref(false)
-
-useFocusTrap(lightboxRef, lightboxOpen, {
-  onEscape: () => {
-    lightbox.value = null
-  },
-  initialFocus: '.status-lightbox__close',
-})
+function readReducedMotion() {
+  if (typeof window === 'undefined') return false
+  return (
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+    document.documentElement.classList.contains('reduce-motion')
+  )
+}
+const prefersReducedMotion = ref(readReducedMotion())
 
 onMounted(() => {
   if (typeof window === 'undefined') return
@@ -116,6 +126,18 @@ const revealMedia = () => {
   mediaRevealed.value = true
   cwOpen.value = true
 }
+
+watch(
+  () => props.status.uri || props.status.id,
+  () => {
+    _resolvedIdCache = null
+    _resolvedClientCache = null
+    mediaRevealed.value = false
+    cwOpen.value = false
+    contentExpanded.value = false
+  },
+)
+
 const plainLength = computed(() =>
   (displayStatus.value.content || '').replace(/<[^>]*>/g, '').length,
 )
@@ -136,6 +158,15 @@ const isOwnPost = computed(() => {
 })
 
 const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
+
+const threadTo = computed(() => {
+  const id = displayStatus.value.id
+  if (!id) return null
+  return {
+    path: `/status/${id}`,
+    query: statusUrl.value ? { url: statusUrl.value } : undefined,
+  }
+})
 
 const canInteract = computed(() =>
   instancesStore.hasAuthenticatedInstance
@@ -214,23 +245,6 @@ const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: s
   return { client: primaryClient, id: status.id }
 }
 
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-
-  const minutes = Math.floor(diff / (1000 * 60))
-  const hours = Math.floor(diff / (1000 * 60 * 60))
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m`
-  if (hours < 24) return `${hours}h`
-  if (days < 7) return `${days}d`
-
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
 const formatNumber = (num: number) => {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
@@ -242,7 +256,7 @@ const formatNumber = (num: number) => {
 // ========================================
 
 const handleFavourite = async () => {
-  if (!canInteract.value || isFavouriting.value) return
+  if (!requireAuth() || isFavouriting.value) return
 
   isFavouriting.value = true
   displayStatus.value.favourited = !displayStatus.value.favourited
@@ -268,6 +282,12 @@ const handleFavourite = async () => {
     _resolvedIdCache = null
     displayStatus.value.favourited = !displayStatus.value.favourited
     displayStatus.value.favouritesCount += displayStatus.value.favourited ? 1 : -1
+    toastStore.show({
+      message: 'Couldn’t update like',
+      actionLabel: 'Retry',
+      onAction: () => void handleFavourite(),
+      duration: 5000,
+    })
   } finally {
     isFavouriting.value = false
   }
@@ -300,8 +320,7 @@ const toggleBoost = async (wantBoost: boolean) => {
 
     if (wantBoost) {
       await ctx.client.v1.statuses.$select(ctx.id).reblog()
-      showBoostToast.value = true
-      setTimeout(() => { showBoostToast.value = false }, 2200)
+      toastStore.show({ message: 'Reposted', duration: 2200 })
     } else {
       await ctx.client.v1.statuses.$select(ctx.id).unreblog()
     }
@@ -311,6 +330,12 @@ const toggleBoost = async (wantBoost: boolean) => {
     _resolvedIdCache = null
     displayStatus.value.reblogged = !displayStatus.value.reblogged
     displayStatus.value.reblogsCount += displayStatus.value.reblogged ? 1 : -1
+    toastStore.show({
+      message: 'Couldn’t update repost',
+      actionLabel: 'Retry',
+      onAction: () => void toggleBoost(wantBoost),
+      duration: 5000,
+    })
   } finally {
     isBoosting.value = false
   }
@@ -364,8 +389,10 @@ const openReplyComposer = async () => {
       sourceInstanceUrl: ext._instanceUrl || null,
     })
     if (!replyId) {
-      showReplyErrorToast.value = true
-      setTimeout(() => { showReplyErrorToast.value = false }, 4200)
+      toastStore.show({
+        message: 'Couldn’t find that post on your account’s server.',
+        duration: 4200,
+      })
       return
     }
     const handle = displayStatus.value.account.acct
@@ -389,8 +416,12 @@ const openReplyComposer = async () => {
       onPosted: (created) => {
         displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
         emit('replied', created)
-        showReplyToast.value = true
-        setTimeout(() => { showReplyToast.value = false }, 3500)
+        toastStore.show({
+          message: 'Reply posted',
+          actionLabel: 'View',
+          onAction: () => openThread(),
+          duration: 3500,
+        })
       },
     })
   } finally {
@@ -420,8 +451,7 @@ const copyLink = async () => {
   if (!url) return
   try {
     await navigator.clipboard.writeText(url)
-    showCopiedToast.value = true
-    setTimeout(() => { showCopiedToast.value = false }, 2000)
+    toastStore.show({ message: 'Link copied', duration: 2000 })
   } catch {
     prompt('Copy this link:', url)
   }
@@ -490,20 +520,8 @@ const boostActions = computed(() => [
 // Menu
 // ========================================
 
-const toggleMenu = (e: Event) => {
-  e.stopPropagation()
-  isMenuOpen.value = !isMenuOpen.value
-}
-
-const closeMenu = (event: MouseEvent) => {
-  if (!isMenuOpen.value) return
-  if (menuRef.value && !menuRef.value.contains(event.target as Node)) {
-    isMenuOpen.value = false
-  }
-}
-
 const handleBookmark = async () => {
-  if (!canInteract.value || isBookmarking.value) return
+  if (!requireAuth() || isBookmarking.value) return
 
   isBookmarking.value = true
   displayStatus.value.bookmarked = !displayStatus.value.bookmarked
@@ -520,6 +538,12 @@ const handleBookmark = async () => {
   } catch (e) {
     console.error('Bookmark error:', e)
     displayStatus.value.bookmarked = !displayStatus.value.bookmarked
+    toastStore.show({
+      message: 'Couldn’t update bookmark',
+      actionLabel: 'Retry',
+      onAction: () => void handleBookmark(),
+      duration: 5000,
+    })
   } finally {
     isBookmarking.value = false
     isMenuOpen.value = false
@@ -529,7 +553,12 @@ const handleBookmark = async () => {
 const handleMute = async () => {
   if (!canInteract.value || isMuting.value) return
 
-  const confirmed = confirm(`Mute @${displayStatus.value.account.acct}? You won't see their posts in your timelines.`)
+  const confirmed = await overlayStore.openConfirm({
+    title: `Mute @${displayStatus.value.account.acct}?`,
+    body: "You won't see their posts in your timelines.",
+    confirmLabel: 'Mute',
+    danger: true,
+  })
   if (!confirmed) return
 
   isMuting.value = true
@@ -539,7 +568,7 @@ const handleMute = async () => {
     })
   } catch (e) {
     console.error('Mute error:', e)
-    alert('Couldn’t mute that account. Try again from your home server.')
+    toastStore.show({ message: 'Couldn’t mute that account. Try again from your home server.' })
   } finally {
     isMuting.value = false
     isMenuOpen.value = false
@@ -549,7 +578,12 @@ const handleMute = async () => {
 const handleBlock = async () => {
   if (!canInteract.value || isBlocking.value) return
 
-  const confirmed = confirm(`Block @${displayStatus.value.account.acct}? They won't be able to see your posts or interact with you.`)
+  const confirmed = await overlayStore.openConfirm({
+    title: `Block @${displayStatus.value.account.acct}?`,
+    body: "They won't be able to see your posts or interact with you.",
+    confirmLabel: 'Block',
+    danger: true,
+  })
   if (!confirmed) return
 
   isBlocking.value = true
@@ -559,7 +593,7 @@ const handleBlock = async () => {
     })
   } catch (e) {
     console.error('Block error:', e)
-    alert('Couldn’t block that account. Try again from your home server.')
+    toastStore.show({ message: 'Couldn’t block that account. Try again from your home server.' })
   } finally {
     isBlocking.value = false
     isMenuOpen.value = false
@@ -569,7 +603,15 @@ const handleBlock = async () => {
 const handleReport = async () => {
   if (!canInteract.value) return
 
-  const reason = prompt(`Report this post by @${displayStatus.value.account.acct}?\n\nOptionally, provide a reason:`)
+  const confirmed = await overlayStore.openConfirm({
+    title: `Report @${displayStatus.value.account.acct}?`,
+    body: 'Submit a report for this post to your home server moderators.',
+    confirmLabel: 'Report',
+    danger: true,
+  })
+  if (!confirmed) return
+
+  const reason = prompt('Optionally, provide a reason:')
   if (reason === null) return
 
   try {
@@ -583,10 +625,10 @@ const handleReport = async () => {
         acct: displayStatus.value.account.acct,
       },
     )
-    alert('Report submitted. Thank you for helping keep the community safe.')
+    toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
   } catch (e) {
     console.error('Report error:', e)
-    alert('Failed to submit report. Please try again.')
+    toastStore.show({ message: 'Failed to submit report. Please try again.' })
   } finally {
     isMenuOpen.value = false
   }
@@ -598,8 +640,7 @@ const handleCopyLink = async () => {
 
   try {
     await navigator.clipboard.writeText(url)
-    showCopiedToast.value = true
-    setTimeout(() => { showCopiedToast.value = false }, 2000)
+    toastStore.show({ message: 'Link copied', duration: 2000 })
   } catch {
     prompt('Copy this link:', url)
   } finally {
@@ -609,57 +650,75 @@ const handleCopyLink = async () => {
 
 const handleOpenOriginal = () => {
   if (statusUrl.value) {
-    window.open(statusUrl.value, '_blank')
+    window.open(statusUrl.value, '_blank', 'noopener,noreferrer')
   }
   isMenuOpen.value = false
 }
 
 const openThread = () => {
-  const id = displayStatus.value.id
-  if (!id) return
-  const query = statusUrl.value ? { url: statusUrl.value } : undefined
-  router.push({ path: `/status/${id}`, query })
+  const to = threadTo.value
+  if (!to) return
+  router.push(to)
 }
 
 const viewThread = () => {
   openThread()
 }
 
+const onCardKeydown = (e: KeyboardEvent) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  const t = e.target as HTMLElement
+  if (t.closest('a, button, input, textarea, summary, [role="button"]')) return
+  e.preventDefault()
+  openThread()
+}
+
 const onContentClick = (e: MouseEvent) => {
+  const sel = typeof window !== 'undefined' ? window.getSelection() : null
+  if (sel && !sel.isCollapsed && sel.toString().trim()) return
+
   const target = e.target as HTMLElement
-  // Let real links inside the HTML work normally
-  if (target.closest('a')) return
+  const anchor = target.closest('a') as HTMLAnchorElement | null
+  if (anchor) {
+    const href = anchor.getAttribute('href') || ''
+    const classes = `${anchor.className || ''} ${anchor.closest('.h-card')?.className || ''}`
+    // In-app hashtag
+    if (/\bhashtag\b/i.test(classes) || /\/tags\//i.test(href)) {
+      e.preventDefault()
+      const fromText = (anchor.textContent || '').replace(/^#/, '').trim()
+      const fromHref = href.match(/\/tags\/([^/?#]+)/i)?.[1]
+      const tag = decodeURIComponent(fromHref || fromText)
+      if (tag) router.push(`/groups/${encodeURIComponent(tag)}`)
+      return
+    }
+    // In-app mention
+    if (/\bmention\b/i.test(classes) || /\bu-url\b/i.test(classes) || /\/@[^/]+/.test(href)) {
+      e.preventDefault()
+      let acct = (anchor.textContent || '').replace(/^@/, '').trim()
+      const m = href.match(/\/@([^/?#]+)/)
+      if (m?.[1]) {
+        const user = decodeURIComponent(m[1])
+        try {
+          const host = new URL(href).hostname
+          acct = user.includes('@') ? user : `${user}@${host}`
+        } catch {
+          acct = user
+        }
+      }
+      if (acct) router.push({ path: '/profile', query: { user: acct } })
+      return
+    }
+    return
+  }
   openThread()
 }
 
 const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   const src = media.url || media.previewUrl
   if (!src) return
-  lightbox.value = { src, alt: media.description || 'Image' }
+  overlayStore.openLightbox({ src, alt: media.description || 'Image' })
 }
 
-const closeLightbox = () => {
-  lightbox.value = null
-}
-
-watch(lightbox, (val) => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = val ? 'hidden' : ''
-})
-
-watch(isMenuOpen, async (open) => {
-  if (open) {
-    await nextTick()
-    document.addEventListener('click', closeMenu)
-  } else {
-    document.removeEventListener('click', closeMenu)
-  }
-})
-
-onUnmounted(() => {
-  document.removeEventListener('click', closeMenu)
-  document.body.style.overflow = ''
-})
 </script>
 
 <template>
@@ -672,6 +731,9 @@ onUnmounted(() => {
       [`status-card--flip-align-${flipAlign}`]: isFlip,
       [`status-card--flip-size-${flipSize}`]: isFlip,
     }"
+    :aria-labelledby="cardLabelId"
+    tabindex="0"
+    @keydown="onCardKeydown"
   >
     <!-- Reblog indicator -->
     <div v-if="isReblog && !isFlip" class="status-reblog">
@@ -696,12 +758,12 @@ onUnmounted(() => {
           v-if="accountProfileTo || displayStatus.account?.acct"
           type="button"
           class="status-avatar-link"
-          :aria-label="`Open ${displayStatus.account.displayName || displayStatus.account.username}`"
+          :aria-label="`View profile of ${displayStatus.account.displayName || displayStatus.account.username} (${accountHandle})`"
           @click="openProfile(displayStatus.account.acct, $event)"
         >
           <img
             :src="displayStatus.account.avatar"
-            :alt="displayStatus.account.displayName || displayStatus.account.username"
+            alt=""
             class="status-avatar"
             loading="lazy"
             decoding="async"
@@ -713,10 +775,11 @@ onUnmounted(() => {
           target="_blank"
           rel="noopener noreferrer"
           class="status-avatar-link"
+          :aria-label="`View profile of ${displayStatus.account.displayName || displayStatus.account.username} (${accountHandle})`"
         >
           <img
             :src="displayStatus.account.avatar"
-            :alt="displayStatus.account.displayName || displayStatus.account.username"
+            alt=""
             class="status-avatar"
             loading="lazy"
             decoding="async"
@@ -731,110 +794,126 @@ onUnmounted(() => {
         <header class="status-header">
           <button
             v-if="accountProfileTo || displayStatus.account?.acct"
+            :id="cardLabelId"
             type="button"
             class="status-author"
             @click="openProfile(displayStatus.account.acct, $event)"
           >
             <span class="status-display-name" v-html="safeDisplayName" />
+            <span class="status-handle">{{ accountHandle }}</span>
           </button>
           <a
             v-else
+            :id="cardLabelId"
             :href="displayStatus.account.url"
             target="_blank"
             rel="noopener noreferrer"
             class="status-author"
           >
             <span class="status-display-name" v-html="safeDisplayName" />
+            <span class="status-handle">{{ accountHandle }}</span>
           </a>
-          <a :href="statusUrl || '#'" target="_blank" rel="noopener noreferrer" class="status-time">
-            <time :datetime="displayStatus.createdAt">{{ formatDate(displayStatus.createdAt) }}</time>
-          </a>
-          <div class="status-menu-container" ref="menuRef">
-            <button class="status-more" aria-label="More options" @click="toggleMenu">
+          <NuxtLink
+            v-if="threadTo"
+            :to="threadTo"
+            class="status-time"
+            @click.stop
+          >
+            <time
+              :datetime="displayStatus.createdAt"
+              :title="formatAbsoluteTime(displayStatus.createdAt)"
+            >{{ formatRelativeTime(displayStatus.createdAt) }}</time>
+          </NuxtLink>
+          <time
+            v-else
+            class="status-time"
+            :datetime="displayStatus.createdAt"
+            :title="formatAbsoluteTime(displayStatus.createdAt)"
+          >{{ formatRelativeTime(displayStatus.createdAt) }}</time>
+          <NeoMenu
+            v-model:open="isMenuOpen"
+            class="status-menu-container"
+            label="More options"
+          >
+            <span class="status-more" aria-hidden="true">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
               </svg>
-            </button>
-
-            <!-- Dropdown Menu -->
-            <Transition name="menu-fade">
-              <div v-if="isMenuOpen" class="status-dropdown" @click.stop>
-                <!-- Save/Bookmark -->
+            </span>
+            <template #items>
+              <button
+                v-if="canInteract"
+                type="button"
+                role="menuitem"
+                class="status-dropdown-item"
+                :disabled="isBookmarking"
+                @click="handleBookmark"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
+                </svg>
+                <span>{{ displayStatus.bookmarked ? 'Unsave' : 'Save' }}</span>
+              </button>
+              <button type="button" role="menuitem" class="status-dropdown-item" @click="handleCopyLink">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                </svg>
+                <span>Copy link</span>
+              </button>
+              <button type="button" role="menuitem" class="status-dropdown-item" @click="handleOpenOriginal">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                <span>Open original</span>
+              </button>
+              <template v-if="canInteract && !isOwnPost">
+                <div class="status-dropdown-divider" role="separator" />
                 <button
-                  v-if="canInteract"
+                  type="button"
+                  role="menuitem"
                   class="status-dropdown-item"
-                  :disabled="isBookmarking"
-                  @click="handleBookmark"
+                  :disabled="isMuting"
+                  @click="handleMute"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
-                    <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
-                  </svg>
-                  <span>{{ displayStatus.bookmarked ? 'Unsave' : 'Save' }}</span>
-                </button>
-
-                <!-- Copy Link -->
-                <button class="status-dropdown-item" @click="handleCopyLink">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
+                    <line x1="23" y1="9" x2="17" y2="15" />
+                    <line x1="17" y1="9" x2="23" y2="15" />
                   </svg>
-                  <span>Copy link</span>
+                  <span>Mute @{{ displayStatus.account.username }}</span>
                 </button>
-
-                <!-- Open Original -->
-                <button class="status-dropdown-item" @click="handleOpenOriginal">
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item status-dropdown-item--danger"
+                  :disabled="isBlocking"
+                  @click="handleBlock"
+                >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                    <polyline points="15 3 21 3 21 9" />
-                    <line x1="10" y1="14" x2="21" y2="3" />
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
                   </svg>
-                  <span>Open original</span>
+                  <span>Block @{{ displayStatus.account.username }}</span>
                 </button>
-
-                <!-- Auth-only moderation actions -->
-                <template v-if="canInteract && !isOwnPost">
-                  <div class="status-dropdown-divider" />
-
-                  <button
-                    class="status-dropdown-item"
-                    :disabled="isMuting"
-                    @click="handleMute"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                      <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                      <line x1="23" y1="9" x2="17" y2="15" />
-                      <line x1="17" y1="9" x2="23" y2="15" />
-                    </svg>
-                    <span>Mute @{{ displayStatus.account.username }}</span>
-                  </button>
-
-                  <button
-                    class="status-dropdown-item status-dropdown-item--danger"
-                    :disabled="isBlocking"
-                    @click="handleBlock"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-                    </svg>
-                    <span>Block @{{ displayStatus.account.username }}</span>
-                  </button>
-
-                  <button
-                    class="status-dropdown-item status-dropdown-item--danger"
-                    @click="handleReport"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                      <line x1="12" y1="9" x2="12" y2="13" />
-                      <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                    <span>Report</span>
-                  </button>
-                </template>
-              </div>
-            </Transition>
-          </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item status-dropdown-item--danger"
+                  @click="handleReport"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>Report</span>
+                </button>
+              </template>
+            </template>
+          </NeoMenu>
         </header>
 
         <!-- Content Warning / Spoiler -->
@@ -844,7 +923,12 @@ onUnmounted(() => {
           @toggle="onCwToggle"
         >
           <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
-          <div class="status-content status-content--clickable" v-html="safeContent" @click="onContentClick" />
+          <div
+            class="status-content status-content--clickable"
+            :lang="displayStatus.language || undefined"
+            v-html="safeContent"
+            @click="onContentClick"
+          />
         </details>
 
         <!-- Regular Content -->
@@ -852,6 +936,7 @@ onUnmounted(() => {
           <div
             class="status-content status-content--clickable"
             :class="{ 'status-content--clamped': isLongPost && !contentExpanded }"
+            :lang="displayStatus.language || undefined"
             v-html="safeContent"
             @click="onContentClick"
           />
@@ -897,6 +982,7 @@ onUnmounted(() => {
                 :src="media.url ?? undefined"
                 :poster="media.previewUrl ?? undefined"
                 controls
+                preload="none"
                 :autoplay="media.type === 'gifv' && !prefersReducedMotion"
                 :loop="media.type === 'gifv'"
                 :muted="media.type === 'gifv'"
@@ -939,20 +1025,20 @@ onUnmounted(() => {
             @click.stop="handleReply"
           >
             <NeoIcon name="message" :size="20" :stroke="1.5" />
-            <span v-if="displayStatus.repliesCount" class="status-action__count">{{ formatNumber(displayStatus.repliesCount) }}</span>
+            <span v-if="(displayStatus.repliesCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.repliesCount) }}</span>
           </button>
 
           <button
             class="status-action status-action--boost neo-tip"
             :class="{ 'status-action--boosted': displayStatus.reblogged }"
-            :disabled="isBoosting"
-            :aria-label="displayStatus.reblogged ? 'Undo repost' : 'Repost'"
-            :title="displayStatus.reblogged ? 'Undo repost' : 'Repost'"
+            :aria-disabled="isBoosting || undefined"
+            aria-label="Repost"
+            title="Repost"
             :aria-pressed="!!displayStatus.reblogged"
-            @click.stop="handleBoost"
+            @click.stop="!isBoosting && handleBoost()"
           >
             <NeoIcon name="reblog" :size="20" :stroke="1.5" />
-            <span v-if="displayStatus.reblogsCount" class="status-action__count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
+            <span v-if="(displayStatus.reblogsCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
           </button>
 
           <button
@@ -965,19 +1051,33 @@ onUnmounted(() => {
           </button>
 
           <button
+            class="status-action status-action--bookmark neo-tip"
+            :class="{ 'status-action--bookmarked': displayStatus.bookmarked }"
+            :aria-disabled="isBookmarking || undefined"
+            aria-label="Bookmark"
+            title="Bookmark"
+            :aria-pressed="!!displayStatus.bookmarked"
+            @click.stop="!isBookmarking && handleBookmark()"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
+            </svg>
+          </button>
+
+          <button
             class="status-action status-action--like neo-tip"
             :class="{
               'status-action--liked': displayStatus.favourited,
               'status-action--pop': likePop,
             }"
-            :disabled="isFavouriting"
-            :aria-label="displayStatus.favourited ? 'Unlike' : 'Like'"
-            :title="displayStatus.favourited ? 'Unlike' : 'Like'"
+            :aria-disabled="isFavouriting || undefined"
+            aria-label="Like"
+            title="Like"
             :aria-pressed="!!displayStatus.favourited"
-            @click.stop="handleFavourite"
+            @click.stop="!isFavouriting && handleFavourite()"
           >
             <NeoIcon name="heart" :size="20" :stroke="1.5" :filled="!!displayStatus.favourited" />
-            <span v-if="displayStatus.favouritesCount" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
+            <span v-if="(displayStatus.favouritesCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
           </button>
         </footer>
 
@@ -998,33 +1098,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Copied Toast -->
-    <Teleport to="body">
-      <Transition name="toast-fade">
-        <div v-if="showCopiedToast" class="status-toast" role="status" aria-live="polite">Link copied</div>
-      </Transition>
-      <Transition name="toast-fade">
-        <div v-if="showBoostToast" class="status-toast" role="status" aria-live="polite">Reposted</div>
-      </Transition>
-      <Transition name="toast-fade">
-        <div v-if="showReplyToast" class="status-toast status-toast--action" role="status" aria-live="polite">
-          <span>Reply posted</span>
-          <button type="button" class="status-toast__btn" @click="openThread(); showReplyToast = false">
-            View
-          </button>
-        </div>
-      </Transition>
-      <Transition name="toast-fade">
-        <div
-          v-if="showReplyErrorToast"
-          class="status-toast status-toast--action"
-          role="alert"
-          aria-live="assertive"
-        >
-          <span>Couldn’t find that post on your account’s server.</span>
-        </div>
-      </Transition>
+    <Teleport v-if="shareOpen || boostOpen" to="body">
       <PostActionSheet
+        v-if="shareOpen"
         :open="shareOpen"
         title="Share"
         :actions="shareActions"
@@ -1032,31 +1108,13 @@ onUnmounted(() => {
         @close="shareOpen = false"
       />
       <PostActionSheet
+        v-if="boostOpen"
         :open="boostOpen"
         title="Repost"
         :actions="boostActions"
         @select="onBoostSelect"
         @close="boostOpen = false"
       />
-      <Transition name="toast-fade">
-        <div
-          v-if="lightbox"
-          ref="lightboxRef"
-          class="status-lightbox"
-          role="dialog"
-          aria-modal="true"
-          :aria-label="lightbox.alt && lightbox.alt !== 'Image' ? lightbox.alt : 'Image'"
-          @click.self="closeLightbox"
-        >
-          <button type="button" class="status-lightbox__close" aria-label="Close" @click="closeLightbox">
-            <NeoIcon name="x" :size="18" :stroke="2" />
-          </button>
-          <img :src="lightbox.src" :alt="lightbox.alt" class="status-lightbox__img" />
-          <p v-if="lightbox.alt && lightbox.alt !== 'Image'" class="status-lightbox__caption">
-            {{ lightbox.alt }}
-          </p>
-        </div>
-      </Transition>
     </Teleport>
   </article>
 </template>
@@ -1086,7 +1144,9 @@ onUnmounted(() => {
 
   @media (max-width: 1023px) {
     background: var(--neo-bg-secondary);
-    padding: 0.65rem 0.75rem;
+    border: none;
+    border-radius: 0;
+    padding: 0.65rem 0.35rem;
     // Solid paints only — backdrop-filter on scrolling cards blacks out iOS Safari
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -1533,7 +1593,8 @@ onUnmounted(() => {
 
 .status-author {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 0.35rem;
   text-decoration: none;
   min-width: 0;
   flex: 1;
@@ -1568,6 +1629,18 @@ onUnmounted(() => {
   }
 }
 
+.status-handle {
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--neo-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 10rem;
+}
+
 .status-time {
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
@@ -1587,41 +1660,40 @@ onUnmounted(() => {
   position: relative;
   flex-shrink: 0;
   z-index: 2;
+
+  :deep(.neo-menu__trigger) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: var(--neo-text-muted);
+    margin: -4px -4px -4px 0;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
+    }
+  }
+
+  :deep(.neo-menu__panel) {
+    min-width: 200px;
+    max-width: calc(100vw - 2rem);
+    background: var(--neo-bg-secondary);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+    z-index: 40;
+    overflow: hidden;
+    padding: 0.375rem;
+  }
 }
 
 .status-more {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: transparent;
-  border: none;
-  border-radius: 50%;
-  color: var(--neo-text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  margin: -4px -4px -4px 0;
-
-  &:hover {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
-  }
-}
-
-.status-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 200px;
-  max-width: calc(100vw - 2rem);
-  background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  z-index: 40;
-  overflow: hidden;
-  padding: 0.375rem;
 }
 
 .status-dropdown-item {
@@ -2018,6 +2090,15 @@ onUnmounted(() => {
   }
 
   // Boosted = success green (instrument, not Twitter)
+  &--bookmarked {
+    color: var(--neo-accent);
+
+    svg {
+      stroke: var(--neo-accent);
+      fill: var(--neo-accent);
+    }
+  }
+
   &--boosted {
     color: var(--neo-success);
 
@@ -2219,7 +2300,8 @@ onUnmounted(() => {
   }
 
   .status-action--liked,
-  .status-action--boosted {
+  .status-action--boosted,
+  .status-action--bookmarked {
     text-shadow: 0 0 10px currentColor;
   }
 }
@@ -2257,113 +2339,5 @@ onUnmounted(() => {
   .status-media-image {
     max-height: 400px;
   }
-}
-</style>
-
-<!-- Unscoped styles for teleported toast / lightbox -->
-<style lang="scss">
-.status-toast {
-  position: fixed;
-  bottom: 7.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 1rem;
-  background: var(--neo-bg-secondary);
-  color: var(--neo-text-primary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 2px;
-  font-family: var(--neo-font-family-ui);
-  font-size: 0.875rem;
-  font-weight: 500;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
-  z-index: 9999;
-  max-width: calc(100vw - 1.5rem);
-
-  &--action {
-    padding-right: 0.5rem;
-  }
-
-  &__btn {
-    border: none;
-    background: var(--neo-accent);
-    color: var(--neo-text-inverse);
-    font: inherit;
-    font-weight: 600;
-    font-size: 0.8125rem;
-    padding: 0.35rem 0.65rem;
-    border-radius: 2px;
-    cursor: pointer;
-
-    &:hover {
-      background: var(--neo-accent-hover);
-    }
-  }
-
-  @media (min-width: 1024px) {
-    bottom: 2rem;
-  }
-}
-
-.status-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 1.5rem;
-  background: color-mix(in srgb, #000 78%, transparent);
-  cursor: zoom-out;
-
-  &__close {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    width: 2.5rem;
-    height: 2.5rem;
-    border: 1px solid color-mix(in srgb, #fff 35%, transparent);
-    background: color-mix(in srgb, #000 40%, transparent);
-    color: #fff;
-    font-size: 1.5rem;
-    line-height: 1;
-    border-radius: 2px;
-    cursor: pointer;
-
-    &:hover {
-      background: color-mix(in srgb, #000 60%, transparent);
-    }
-  }
-
-  &__img {
-    max-width: min(96vw, 1200px);
-    max-height: 82vh;
-    object-fit: contain;
-    border-radius: 2px;
-    cursor: default;
-  }
-
-  &__caption {
-    margin: 0;
-    max-width: 40rem;
-    text-align: center;
-    color: color-mix(in srgb, #fff 85%, transparent);
-    font-size: 0.875rem;
-  }
-}
-
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(10px);
 }
 </style>

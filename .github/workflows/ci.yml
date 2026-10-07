@@ -15,7 +15,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: npm run check
       # Full app typecheck still has pre-existing masto typing gaps; keep generate as the main gate
       - run: npm run generate
+      # eslint / a11y plugin / Playwright axe / Lighthouse CI still optional

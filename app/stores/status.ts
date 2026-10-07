@@ -11,6 +11,10 @@ import { useInstancesStore } from './instances'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { hostnameOf } from '~/utils/instances'
 
+/** Per-account LRU for resolve=true status lookups (thread poll / actions). */
+const RESOLVE_CACHE_MAX = 64
+const resolveStatusCache = new Map<string, string | null>()
+
 interface StatusState {
   error: string | null
 }
@@ -141,22 +145,26 @@ export const useStatusStore = defineStore('status', {
     async updateMediaDescription(mediaId: string, description: string): Promise<void> {
       const instances = useInstancesStore()
       if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
-        return
+        throw new Error('Not authenticated')
       }
-      try {
-        const form = new FormData()
-        form.append('description', description)
-        await fetch(`${instances.instanceUrl}/api/v1/media/${encodeURIComponent(mediaId)}`, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${instances.accessToken}` },
-          body: form,
-        })
-      } catch (e) {
-        console.warn('Failed to update media description:', e)
+      const form = new FormData()
+      form.append('description', description)
+      const res = await fetch(`${instances.instanceUrl}/api/v1/media/${encodeURIComponent(mediaId)}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${instances.accessToken}` },
+        body: form,
+      })
+      if (!res.ok) {
+        throw new Error(`Couldn’t save alt text (${res.status})`)
       }
     },
 
     async resolveStatus(statusUrl: string): Promise<string | null> {
+      const instances = useInstancesStore()
+      const cacheKey = `${instances.activeAccountId || 'anon'}|${statusUrl}`
+      const cached = resolveStatusCache.get(cacheKey)
+      if (cached !== undefined) return cached
+
       try {
         const client = this.getReadClient()
         const results = await client.v2.search.fetch({
@@ -165,7 +173,13 @@ export const useStatusStore = defineStore('status', {
           type: 'statuses',
           limit: 1,
         })
-        return results.statuses[0]?.id ?? null
+        const id = results.statuses[0]?.id ?? null
+        resolveStatusCache.set(cacheKey, id)
+        if (resolveStatusCache.size > RESOLVE_CACHE_MAX) {
+          const oldest = resolveStatusCache.keys().next().value
+          if (oldest) resolveStatusCache.delete(oldest)
+        }
+        return id
       } catch (e) {
         console.warn('Failed to resolve status:', e)
         return null
@@ -297,7 +311,12 @@ export const useStatusStore = defineStore('status', {
       statusId: string,
       accountId: string,
       comment?: string,
-      opts?: { statusUrl?: string; acct?: string },
+      opts?: {
+        statusUrl?: string
+        acct?: string
+        category?: 'spam' | 'violation' | 'other'
+        forward?: boolean
+      },
     ) {
       let localStatusId = statusId
       let localAccountId = accountId
@@ -311,13 +330,17 @@ export const useStatusStore = defineStore('status', {
         const resolvedAcct = await this.resolveAccount(opts.acct)
         if (!resolvedAcct) throw new Error('Couldn’t find that account on your server')
         localAccountId = resolvedAcct
+      } else if (!localAccountId) {
+        throw new Error('Couldn’t find that account on your server')
       }
 
       await this.getClient().v1.reports.create({
         accountId: localAccountId,
         statusIds: [localStatusId],
         comment: comment || '',
-      })
+        category: opts?.category || 'other',
+        forward: opts?.forward ?? true,
+      } as never)
     },
   },
 })

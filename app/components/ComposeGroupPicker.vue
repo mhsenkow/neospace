@@ -5,6 +5,7 @@
 
 import { useGroupsStore, type Group } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
+import { createRaceGuard } from '~/composables/useRace'
 
 const props = withDefaults(
   defineProps<{
@@ -28,6 +29,7 @@ const searchResults = ref<Group[]>([])
 const isSearching = ref(false)
 const sheetRef = ref<HTMLElement | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+const searchRace = createRaceGuard()
 
 useFocusTrap(sheetRef, open, {
   onEscape: () => {
@@ -64,6 +66,21 @@ const showSearchHits = computed(
   () => query.value.trim().length >= 2 && searchResults.value.length > 0,
 )
 
+const queryTag = computed(() => {
+  const raw = query.value.trim().replace(/^#/, '').toLowerCase()
+  if (!raw || raw.length < 2) return null
+  if (!/^[a-z0-9_]+$/i.test(raw)) return null
+  return raw
+})
+
+const showUseQuery = computed(() => {
+  if (!queryTag.value) return false
+  const tag = queryTag.value
+  if (searchResults.value.some((g) => g.tag.toLowerCase() === tag)) return false
+  if (filteredJoined.value.some((g) => g.tag.toLowerCase() === tag)) return false
+  return true
+})
+
 watch(open, async (isOpen) => {
   if (isOpen && instancesStore.isAuthenticated) {
     await groupsStore.initializeGroups()
@@ -78,18 +95,23 @@ watch(query, (q) => {
   if (searchTimer) clearTimeout(searchTimer)
   const trimmed = q.trim()
   if (trimmed.length < 2) {
+    searchRace.abort()
     searchResults.value = []
     isSearching.value = false
     return
   }
   isSearching.value = true
   searchTimer = setTimeout(async () => {
+    const ticket = searchRace.next()
     try {
-      searchResults.value = await groupsStore.searchGroups(trimmed)
+      const hits = await groupsStore.searchGroups(trimmed)
+      if (!ticket.isCurrent()) return
+      searchResults.value = hits
     } catch {
+      if (!ticket.isCurrent()) return
       searchResults.value = []
     } finally {
-      isSearching.value = false
+      if (ticket.isCurrent()) isSearching.value = false
     }
   }, 280)
 })
@@ -97,6 +119,12 @@ watch(query, (q) => {
 const pick = (tag: string) => {
   emit('update:modelValue', tag.replace(/^#/, ''))
   open.value = false
+}
+
+const useQueryAsTag = () => {
+  const raw = query.value.trim().replace(/^#/, '')
+  if (!raw) return
+  pick(raw)
 }
 
 const clear = () => {
@@ -109,6 +137,7 @@ const toggle = () => {
 
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  searchRace.abort()
 })
 </script>
 
@@ -220,6 +249,19 @@ onBeforeUnmount(() => {
               <p class="group-pick-sheet__hint">
                 Pick a community — your post lands in that group feed.
               </p>
+
+              <button
+                v-if="showUseQuery"
+                type="button"
+                class="group-pick-sheet__row group-pick-sheet__row--use"
+                @click="useQueryAsTag"
+              >
+                <span class="group-pick-sheet__row-icon">🏷️</span>
+                <span class="group-pick-sheet__row-text">
+                  <strong>Use #{{ queryTag }}</strong>
+                  <em>Post into this hashtag group</em>
+                </span>
+              </button>
 
               <section v-if="showSearchHits" class="group-pick-sheet__section">
                 <h3 class="group-pick-sheet__section-title">Results</h3>

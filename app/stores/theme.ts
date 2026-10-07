@@ -11,35 +11,29 @@
 import { defineStore } from 'pinia'
 import { sanitizeProfileCss } from '~/utils/sanitizeCss'
 
+/** Module-level — keep DOM nodes out of Pinia state */
+let chaosStyleElement: HTMLStyleElement | null = null
+
 interface ThemeState {
   isChaosMode: boolean
   userCustomCSS: string
-  chaosStyleElement: HTMLStyleElement | null
 }
 
 export const useThemeStore = defineStore('theme', {
   state: (): ThemeState => ({
     isChaosMode: false,
     userCustomCSS: '',
-    chaosStyleElement: null,
   }),
 
   getters: {
-    currentModeName: (state): string => {
-      return state.isChaosMode ? 'Custom profile CSS' : 'Default'
-    },
-
-    toggleButtonText: (state): string => {
-      return state.isChaosMode ? 'Turn off profile CSS' : 'Apply profile CSS'
-    },
-
-    /** Sanitized CSS safe to inject into a <style> tag */
-    safeCustomCSS: (state): string => sanitizeProfileCss(state.userCustomCSS),
+    /** Already sanitized in setUserCustomCSS */
+    safeCustomCSS: (state): string => state.userCustomCSS,
   },
 
   actions: {
     setUserCustomCSS(css: string) {
       this.userCustomCSS = sanitizeProfileCss(css)
+      if (this.isChaosMode) this.injectChaos()
     },
 
     toggleMode() {
@@ -62,8 +56,24 @@ export const useThemeStore = defineStore('theme', {
       }
     },
 
+    /** ?safe=1 disables profile CSS (escape hatch if a skin breaks the UI). */
+    isSafeMode(): boolean {
+      if (typeof window === 'undefined') return false
+      try {
+        const q = new URLSearchParams(window.location.search)
+        if (q.get('safe') === '1' || q.get('safe') === 'true') return true
+        return localStorage.getItem('neospace_disable_profile_css') === '1'
+      } catch {
+        return false
+      }
+    },
+
     injectChaos() {
       if (typeof document === 'undefined') return
+      if (this.isSafeMode()) {
+        this.ejectChaos()
+        return
+      }
       document.body.classList.add('chaos-active')
       this.ejectChaosStyle()
 
@@ -73,7 +83,7 @@ export const useThemeStore = defineStore('theme', {
         styleEl.id = 'neospace-chaos-styles'
         styleEl.textContent = safe
         document.head.appendChild(styleEl)
-        this.chaosStyleElement = styleEl
+        chaosStyleElement = styleEl
       }
     },
 
@@ -83,10 +93,19 @@ export const useThemeStore = defineStore('theme', {
       this.ejectChaosStyle()
     },
 
+    /** Persist escape hatch from Settings or ?safe=1 */
+    setProfileCssDisabled(disabled: boolean) {
+      if (typeof localStorage === 'undefined') return
+      if (disabled) localStorage.setItem('neospace_disable_profile_css', '1')
+      else localStorage.removeItem('neospace_disable_profile_css')
+      if (disabled) this.disableChaosMode()
+      else if (this.isChaosMode) this.injectChaos()
+    },
+
     ejectChaosStyle() {
-      if (this.chaosStyleElement) {
-        this.chaosStyleElement.remove()
-        this.chaosStyleElement = null
+      if (chaosStyleElement) {
+        chaosStyleElement.remove()
+        chaosStyleElement = null
       }
       const existingStyle = document.getElementById('neospace-chaos-styles')
       if (existingStyle) existingStyle.remove()

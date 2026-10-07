@@ -51,9 +51,9 @@ $font-size-5xl: 3rem;
 $font-weight-light: 300;
 $font-weight-normal: 400;
 $font-weight-medium: 500;
-$font-weight-semibold: 500;
-$font-weight-bold: 600;
-$font-weight-extrabold: 700;
+$font-weight-semibold: 600;
+$font-weight-bold: 700;
+$font-weight-extrabold: 800;
 
 $line-height-tight: 1.2;
 $line-height-snug: 1.35;
@@ -95,9 +95,9 @@ $spacing-3xl: $spacing-16;
 // Borders — Braun: sharp-ish, hairline
 $border-width-0: 0;
 $border-width-1: 1px;
-$border-width-2: 1px;
-$border-width-3: 2px;
-$border-width-4: 2px;
+$border-width-2: 2px;
+$border-width-3: 3px;
+$border-width-4: 4px;
 
 $radius-none: 0;
 $radius-sm: 2px;
@@ -165,13 +165,33 @@ $content-width-wide: 760px;
 $sidebar-width-sm: 56px;
 $sidebar-width-md: 64px;
 $sidebar-width-lg: 72px;
+// Real shell widths (rail collapsed / expanded) — used by pre-paint + layout
+$sidebar-width-rail: 68px;
+$sidebar-width-expanded: 248px;
+
+// App shell breakpoints (desktop chrome at ≥1024)
+$bp-desk: 1024px;
+$bp-desk-max: 1023px;
+$bp-wide: 1200px;
 
 $breakpoint-xs: 0;
 $breakpoint-sm: 576px;
 $breakpoint-md: 768px;
-$breakpoint-lg: 992px;
-$breakpoint-xl: 1200px;
+$breakpoint-lg: $bp-desk;
+$breakpoint-xl: $bp-wide;
 $breakpoint-2xl: 1400px;
+
+@mixin desk {
+  @media (min-width: $bp-desk) {
+    @content;
+  }
+}
+
+@mixin mobile {
+  @media (max-width: $bp-desk-max) {
+    @content;
+  }
+}
 
 $opacity-0: 0;
 $opacity-5: 0.05;
@@ -189,30 +209,6 @@ $opacity-90: 0.9;
 $opacity-95: 0.95;
 $opacity-100: 1;
 
-// Legacy aliases (Mom Mode → light Braun)
-$gray-50: $bg;
-$gray-100: $face;
-$gray-200: $hair;
-$gray-300: $rule;
-$gray-400: #b0b0ac;
-$gray-500: $mute;
-$gray-600: $mute;
-$gray-700: #4a4a48;
-$gray-800: #2a2a28;
-$gray-900: $ink;
-
-$blue-50: #f4ebe4;
-$blue-100: #ead7c8;
-$blue-500: $accent;
-$blue-600: $accent;
-$blue-700: $accent-hover;
-$blue-900: #7a3514;
-
-$accent-primary: $accent;
-$accent-primary-hover: $accent-hover;
-$accent-primary-light: color.adjust($accent, $lightness: 12%);
-$accent-primary-dark: color.adjust($accent, $lightness: -10%);
-
 $success-light: color.mix($success, #fff, 18%);
 $success-dark: color.adjust($success, $lightness: -12%);
 $warning-light: color.mix($warning, #fff, 18%);
@@ -221,23 +217,3 @@ $danger-light: color.mix($danger, #fff, 18%);
 $danger-dark: color.adjust($danger, $lightness: -8%);
 $info-light: color.mix($info, #fff, 18%);
 $info-dark: color.adjust($info, $lightness: -12%);
-
-$dark-bg-primary: $dark-bg;
-$dark-bg-secondary: $dark-face;
-$dark-bg-tertiary: $dark-hair;
-$dark-bg-card: $dark-face;
-$dark-text-primary: $dark-ink;
-$dark-text-secondary: $dark-mute;
-$dark-text-muted: #6e6e6a;
-$dark-border: $dark-rule;
-
-$mom-bg-primary: $bg;
-$mom-bg-secondary: $face;
-$mom-bg-tertiary: $hair;
-$mom-text-primary: $ink;
-$mom-text-secondary: $mute;
-$mom-text-muted: $mute;
-$mom-accent: $accent;
-$mom-accent-hover: $accent-hover;
-$mom-border: $rule;
-$mom-shadow: $shadow-md;

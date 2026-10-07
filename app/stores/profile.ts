@@ -37,6 +37,8 @@ interface ProfileState {
   }
   // Errors
   error: string | null
+  /** Inline save failures — keep the form mounted */
+  saveError: string | null
   // Pagination
   maxStatusId: string | null
   hasMoreStatuses: boolean
@@ -62,6 +64,7 @@ export const useProfileStore = defineStore('profile', {
       discoverable: true,
     },
     error: null,
+    saveError: null,
     maxStatusId: null,
     hasMoreStatuses: true,
   }),
@@ -283,7 +286,7 @@ export const useProfileStore = defineStore('profile', {
       }
 
       this.isUpdating = true
-      this.error = null
+      this.saveError = null
 
       try {
         const client = this.getClient()
@@ -331,7 +334,7 @@ export const useProfileStore = defineStore('profile', {
         return updated
 
       } catch (e: any) {
-        this.error = e.message || 'Failed to update profile'
+        this.saveError = e.message || 'Failed to update profile'
         console.error('Profile update error:', e)
         throw e
       } finally {
@@ -349,8 +352,8 @@ export const useProfileStore = defineStore('profile', {
         const client = this.getClient()
         const relationship = await client.v1.accounts.$select(this.viewedProfile.id).follow()
         
-        // Update follower count optimistically
-        if (this.viewedProfile) {
+        // Only bump the count when follow succeeded (not a pending request)
+        if (this.viewedProfile && relationship.following) {
           this.viewedProfile = {
             ...this.viewedProfile,
             followersCount: (this.viewedProfile.followersCount || 0) + 1,
@@ -434,6 +437,7 @@ export const useProfileStore = defineStore('profile', {
       this.pinnedStatuses = []
       this.isEditing = false
       this.error = null
+      this.saveError = null
     },
   },
 })

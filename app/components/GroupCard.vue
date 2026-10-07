@@ -86,14 +86,21 @@ const getCategoryColor = (category: string) => {
       'group-card--tile': tile,
       'group-card--member': group.isMember,
     }"
-    @click="handleView"
   >
     <div class="group-card__icon" :style="{ backgroundColor: getCategoryColor(group.category) + '20' }">
       <span class="group-card__emoji">{{ group.icon }}</span>
     </div>
     
     <div class="group-card__content">
-      <h3 class="group-card__name">{{ group.name }}</h3>
+      <h3 class="group-card__name">
+        <NuxtLink
+          :to="`/groups/${group.tag}`"
+          class="group-card__name-link"
+          @click="handleView"
+        >
+          {{ group.name }}
+        </NuxtLink>
+      </h3>
       <p v-if="!compact && !tile && group.description" class="group-card__description">
         {{ group.description }}
       </p>
@@ -151,11 +158,17 @@ const getCategoryColor = (category: string) => {
   background: var(--neo-bg-card);
   border: 1px solid var(--neo-border-color);
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   transition: border-color 0.15s ease, background-color 0.15s ease;
   min-width: 0;
   height: 100%;
   box-sizing: border-box;
+
+  &:has(.group-card__name-link:hover),
+  &:has(.group-card__name-link:focus-visible) {
+    border-color: var(--neo-accent);
+    background: var(--neo-bg-hover);
+  }
 
   @media (min-width: 480px) {
     gap: 0.875rem;
@@ -307,6 +320,24 @@ const getCategoryColor = (category: string) => {
     }
   }
 
+  &__name-link {
+    color: inherit;
+    text-decoration: none;
+
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
+  }
+
   &__description {
     margin: 0 0 0.5rem;
     font-size: 0.8125rem;
@@ -340,6 +371,8 @@ const getCategoryColor = (category: string) => {
 
   &__actions {
     align-self: center;
+    position: relative;
+    z-index: 1;
   }
 
   &__btn {

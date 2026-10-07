@@ -91,6 +91,21 @@ const columnTabLabels = computed(() =>
   }),
 )
 
+const feedTabs = computed(() =>
+  columnsStore.columns.map((column, idx) => ({
+    id: column.id,
+    label: columnTabLabels.value[idx] || column.feedType,
+  })),
+)
+
+const activeFeedTabId = computed({
+  get: () => columnsStore.columns[activeColumnIndex.value]?.id || feedTabs.value[0]?.id || '',
+  set: (id: string) => {
+    const idx = columnsStore.columns.findIndex((c) => c.id === id)
+    if (idx >= 0) scrollToColumn(idx)
+  },
+})
+
 /** Keep the active mobile feed glued to the same column id across reorders */
 const withActivePreserved = (fn: () => void) => {
   const activeId = columnsStore.columns[activeColumnIndex.value]?.id
@@ -826,20 +841,13 @@ useHead({ title: 'Home | NeoSpace' })
     <!-- Mobile: feed strip + thumb-zone prev/next + add -->
     <nav class="mobile-feed-tabs" aria-label="Feeds">
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
-        <button
-          v-for="(label, idx) in columnTabLabels"
-          :key="columnsStore.columns[idx]!.id"
-          type="button"
-          class="mobile-feed-tabs__tab neo-btn neo-btn--tertiary"
-          :class="{
-            'mobile-feed-tabs__tab--active': activeColumnIndex === idx,
-            'mobile-feed-tabs__tab--recessed': activeColumnIndex !== idx,
-          }"
-          :aria-current="activeColumnIndex === idx ? 'true' : undefined"
-          @click="scrollToColumn(idx)"
-        >
-          {{ label }}
-        </button>
+        <NeoTabs
+          class="mobile-feed-tabs__neo"
+          :tabs="feedTabs"
+          :model-value="activeFeedTabId"
+          :panels="false"
+          @update:model-value="(id) => (activeFeedTabId = id)"
+        />
       </div>
 
       <div class="mobile-feed-tabs__thumb">
@@ -1999,6 +2007,44 @@ useHead({ title: 'Home | NeoSpace' })
 
     &::-webkit-scrollbar {
       display: none;
+    }
+  }
+
+  &__neo {
+    flex: 1;
+    min-width: 0;
+
+    :deep(.neo-tabs__list) {
+      display: flex;
+      gap: 0.35rem;
+      border-bottom: none;
+      overflow-x: auto;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+    }
+
+    :deep(.neo-tabs__tab) {
+      flex-shrink: 0;
+      max-width: 11rem;
+      min-height: 44px;
+      padding: 0.5rem 0.9rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-radius: 8px;
+      box-shadow: none;
+      color: var(--neo-text-quaternary);
+
+      &[aria-selected='true'] {
+        color: var(--neo-text-secondary);
+        background: var(--neo-bg-tertiary);
+        box-shadow: none;
+      }
     }
   }
 

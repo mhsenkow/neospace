@@ -13,6 +13,8 @@ import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 import { dedupeStatusesByIdentity, statusIdentity } from '~/utils/statusIdentity'
 import { idLess } from '~/utils/compareId'
+import { mapErrorToMessage } from '~/utils/friendlyError'
+import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
 const withBrowseOrigin = (
@@ -145,11 +147,16 @@ const columnsStore = useColumnsStore()
 const statuses = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isLoading = ref(false)
 const isLoadingMore = ref(false)
+const isPolling = ref(false)
 const error = ref<string | null>(null)
+const loadMoreError = ref<string | null>(null)
+let fetchGen = 0
 const hasMore = ref(true)
 const maxId = ref<string | null>(null)
-/** Per-instance max_id cursors for merged home timeline */
-const homeCursors = ref<Record<string, string>>({})
+/** Per-instance max_id cursors for merged home / local / federated timelines */
+const feedCursors = ref<Record<string, string>>({})
+const newPostsAnnounce = ref('')
+let newPostsAnnounceTimer: ReturnType<typeof setTimeout> | null = null
 
 const feedMenuOpen = ref(false)
 const groupsExpanded = ref(false)
@@ -179,30 +186,50 @@ const pendingLabel = computed(() => {
   return n === 1 ? '1 new post' : `${n} new posts`
 })
 
+watch(pendingLabel, (label) => {
+  if (newPostsAnnounceTimer) clearTimeout(newPostsAnnounceTimer)
+  if (!label) {
+    newPostsAnnounce.value = ''
+    return
+  }
+  // Throttle polite announcements while posts keep arriving
+  newPostsAnnounceTimer = setTimeout(() => {
+    newPostsAnnounce.value = label
+  }, 700)
+})
+
 const feedLabels: Record<string, string> = {
   home: 'For You',
   local: 'Local',
   federated: 'Federated',
 }
 
-const feedLabel = computed(() => {
-  if (props.column.feedType === 'group' && props.column.groupTag) {
-    const group = groupsStore.getGroup(props.column.groupTag)
-    return group ? `${group.icon} ${group.name}` : `#${props.column.groupTag}`
-  }
-  return feedLabels[props.column.feedType] ?? props.column.feedType
-})
-
 const canShowHome = computed(() => instancesStore.hasAuthenticatedInstance)
 
 const joinedGroups = computed(() => groupsStore.joinedGroups)
 
 const browsingHost = computed(() => {
+  const filteredId = instancesStore.activeInstanceFilter
+  const filtered = filteredId
+    ? instancesStore.instances.find((i) => i.id === filteredId)
+    : null
   const preferred =
+    filtered?.url ||
     instancesStore.activeAccount?.url ||
     instancesStore.instances[0]?.url ||
     resolvePublicInstanceUrl()
   return hostnameOf(preferred) || 'this server'
+})
+
+const feedLabel = computed(() => {
+  if (props.column.feedType === 'group' && props.column.groupTag) {
+    const group = groupsStore.getGroup(props.column.groupTag)
+    return group ? `${group.icon} ${group.name}` : `#${props.column.groupTag}`
+  }
+  if (props.column.feedType === 'local') {
+    return `Local (${browsingHost.value})`
+  }
+  return feedLabels[props.column.feedType] ?? props.column.feedType
 })
 
 /** Guest browsing only auth-gated hosts (e.g. mastodon.social) with no token */
@@ -286,14 +313,6 @@ const errorActions = computed((): EmptyAction[] => {
   ]
 })
 
-const closeFeedMenu = (e: MouseEvent) => {
-  const target = e.target as HTMLElement
-  if (!target.closest('.column-feed-select') && !target.closest('.feed-dropdown')) {
-    feedMenuOpen.value = false
-    groupsExpanded.value = false
-  }
-}
-
 const router = useRouter()
 
 const switchFeed = (type: ColumnFeedType, groupTag?: string) => {
@@ -359,7 +378,7 @@ const onPullEnd = async () => {
       maxId.value = fresh.at(-1)?.id ?? null
       pendingNew.value = []
       hasMore.value = true
-      homeCursors.value = {}
+      feedCursors.value = {}
       if (props.column.feedType === 'home') {
         const next: Record<string, string> = {}
         for (const s of fresh) {
@@ -368,7 +387,7 @@ const onPullEnd = async () => {
           const prev = next[ext._instanceId]
           if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
         }
-        homeCursors.value = next
+        feedCursors.value = next
       }
     }
   } catch {
@@ -384,9 +403,20 @@ const pullHint = computed(() => {
   return 'Pull to refresh'
 })
 
-/** Tap feed title: if scrolled, jump to top (and merge new posts); else open menu */
-const onFeedHeaderClick = () => {
+/**
+ * Title sits outside NeoMenu’s root, so outside-click closes on pointerdown
+ * before this click runs. If we toggled here, a close would immediately reopen.
+ */
+const suppressTitleMenuOpen = ref(false)
+
+const onFeedTitlePointerDown = () => {
+  if (feedMenuOpen.value) suppressTitleMenuOpen.value = true
+}
+
+/** Tap feed title: if scrolled, jump to top; else open the feed menu */
+const onFeedTitleClick = () => {
   if (scrollContainer.value && scrollContainer.value.scrollTop > 96) {
+    suppressTitleMenuOpen.value = false
     if (pendingNew.value.length) {
       jumpToNew()
     } else {
@@ -394,7 +424,37 @@ const onFeedHeaderClick = () => {
     }
     return
   }
-  feedMenuOpen.value = !feedMenuOpen.value
+  if (suppressTitleMenuOpen.value) {
+    suppressTitleMenuOpen.value = false
+    return
+  }
+  feedMenuOpen.value = true
+}
+
+watch(feedMenuOpen, (open) => {
+  if (!open) groupsExpanded.value = false
+})
+
+const seedFeedCursors = (result: (mastodon.v1.Status | ExtendedStatus)[]) => {
+  const next: Record<string, string> = {}
+  for (const s of result) {
+    const ext = s as ExtendedStatus
+    if (!ext._instanceId) continue
+    const prev = next[ext._instanceId]
+    if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
+  }
+  feedCursors.value = next
+}
+
+const advanceFeedCursors = (page: (mastodon.v1.Status | ExtendedStatus)[]) => {
+  const next = { ...feedCursors.value }
+  for (const s of page) {
+    const ext = s as ExtendedStatus
+    if (!ext._instanceId) continue
+    const prev = next[ext._instanceId]
+    if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
+  }
+  feedCursors.value = next
 }
 
 const jumpToNew = () => {
@@ -404,7 +464,14 @@ const jumpToNew = () => {
     statuses.value = dedupeStatusesByIdentity([...unique, ...statuses.value])
   }
   pendingNew.value = []
+  newPostsAnnounce.value = ''
   scrollContainer.value?.scrollTo({ top: 0, behavior: 'smooth' })
+  nextTick(() => {
+    const first = scrollContainer.value?.querySelector(
+      'article.status-card, article[tabindex]',
+    ) as HTMLElement | null
+    first?.focus?.()
+  })
 }
 
 const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
@@ -453,12 +520,24 @@ const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]
 const pauseForRecess = () => props.recessed && isMobileViewport()
 
 const pollForNew = async () => {
-  if (pauseForRecess() || isLoading.value || document.hidden || !statuses.value.length) return
+  if (
+    pauseForRecess() ||
+    isLoading.value ||
+    isLoadingMore.value ||
+    isPolling.value ||
+    document.hidden ||
+    !statuses.value.length
+  ) {
+    return
+  }
+  isPolling.value = true
   try {
     const fresh = await fetchFreshPage()
     mergeIncoming(fresh)
   } catch {
     // quiet — polling failures shouldn't interrupt reading
+  } finally {
+    isPolling.value = false
   }
 }
 
@@ -494,15 +573,19 @@ watch(
 )
 
 const fetchTimeline = async (refresh = false) => {
+  const gen = ++fetchGen
   if (refresh) {
-    statuses.value = []
+    // Keep existing posts visible until the new page lands — avoids blank Federated
+    // when a newer fetch aborts an in-flight one (init + account/filter watches).
     maxId.value = null
-    homeCursors.value = {}
+    feedCursors.value = {}
     pendingNew.value = []
     hasMore.value = true
+    loadMoreError.value = null
   }
 
-  isLoading.value = true
+  const showLoader = refresh ? statuses.value.length === 0 : true
+  if (showLoader) isLoading.value = true
   error.value = null
 
   try {
@@ -515,20 +598,13 @@ const fetchTimeline = async (refresh = false) => {
         throw new Error('Log in or add an instance to view your home timeline')
       }
       result = await instancesStore.fetchMergedHomeTimeline(20)
-      // Seed per-instance cursors from the oldest post we got from each instance
-      const next: Record<string, string> = {}
-      for (const s of result) {
-        const ext = s as ExtendedStatus
-        if (!ext._instanceId) continue
-        const prev = next[ext._instanceId]
-        if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
-      }
-      homeCursors.value = next
+      if (gen === fetchGen) seedFeedCursors(result)
     } else if (instancesStore.instances.length > 0) {
       result = await instancesStore.fetchMergedTimeline(
         props.column.feedType as 'local' | 'federated',
         20,
       )
+      if (gen === fetchGen) seedFeedCursors(result)
     } else {
       const client = publicClient()
       result = await client.v1.timelines.public.list({
@@ -537,27 +613,46 @@ const fetchTimeline = async (refresh = false) => {
       })
     }
 
+    if (gen !== fetchGen) return
     statuses.value = dedupeStatusesByIdentity(result)
     if (result.length > 0) {
       maxId.value = statuses.value.at(-1)!.id
     }
     hasMore.value = result.length >= 20
   } catch (e: any) {
-    error.value = e.message || 'Failed to fetch timeline'
+    if (gen !== fetchGen) return
+    // Only surface the error if we have nothing to show
+    if (!statuses.value.length) {
+      const friendly = mapErrorToMessage(e)
+      error.value = friendly.detail || friendly.title || e.message || 'Failed to fetch timeline'
+    }
   } finally {
-    isLoading.value = false
+    if (gen === fetchGen) isLoading.value = false
   }
 }
 
 const loadMore = async () => {
   if (isLoadingMore.value || !hasMore.value) return
-  if (props.column.feedType === 'home') {
-    if (!Object.keys(homeCursors.value).length) return
+  const usesCursors =
+    props.column.feedType === 'home' ||
+    props.column.feedType === 'local' ||
+    props.column.feedType === 'federated'
+  if (usesCursors) {
+    if (!Object.keys(feedCursors.value).length && props.column.feedType === 'home') return
+    if (
+      (props.column.feedType === 'local' || props.column.feedType === 'federated') &&
+      !Object.keys(feedCursors.value).length &&
+      !maxId.value
+    ) {
+      return
+    }
   } else if (!maxId.value) {
     return
   }
 
+  const gen = fetchGen
   isLoadingMore.value = true
+  loadMoreError.value = null
 
   try {
     let newStatuses: (mastodon.v1.Status | ExtendedStatus)[] = []
@@ -565,34 +660,18 @@ const loadMore = async () => {
     switch (props.column.feedType) {
       case 'home': {
         if (!instancesStore.hasAuthenticatedInstance) break
-        newStatuses = await instancesStore.fetchMergedHomeTimeline(20, { ...homeCursors.value })
-        // Advance cursors with oldest id per instance from this page
-        const next = { ...homeCursors.value }
-        for (const s of newStatuses) {
-          const ext = s as ExtendedStatus
-          if (!ext._instanceId) continue
-          const prev = next[ext._instanceId]
-          if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
-        }
-        homeCursors.value = next
+        newStatuses = await instancesStore.fetchMergedHomeTimeline(20, { ...feedCursors.value })
+        if (gen === fetchGen) advanceFeedCursors(newStatuses)
         break
       }
-      case 'local': {
-        const client = publicClient()
-        newStatuses = await client.v1.timelines.public.list({
-          local: true,
-          maxId: maxId.value!,
-          limit: 20,
-        })
-        break
-      }
+      case 'local':
       case 'federated': {
-        const client = publicClient()
-        newStatuses = await client.v1.timelines.public.list({
-          local: false,
-          maxId: maxId.value!,
-          limit: 20,
-        })
+        newStatuses = await instancesStore.fetchMergedTimeline(
+          props.column.feedType,
+          20,
+          Object.keys(feedCursors.value).length ? { ...feedCursors.value } : maxId.value!,
+        )
+        if (gen === fetchGen) advanceFeedCursors(newStatuses)
         break
       }
       case 'group': {
@@ -603,6 +682,7 @@ const loadMore = async () => {
       }
     }
 
+    if (gen !== fetchGen) return
     if (newStatuses.length > 0) {
       const seen = new Set(statuses.value.map((s) => statusIdentity(s)))
       const unique = newStatuses.filter((s) => {
@@ -614,19 +694,25 @@ const loadMore = async () => {
     }
     hasMore.value = newStatuses.length > 0
   } catch (e: any) {
+    if (gen !== fetchGen) return
     console.error('Load more error:', e)
+    const friendly = mapErrorToMessage(e)
+    loadMoreError.value = friendly.detail || friendly.title || 'Couldn’t load more'
   } finally {
-    isLoadingMore.value = false
+    if (gen === fetchGen) isLoadingMore.value = false
   }
 }
 
-const setupInfiniteScroll = () => {
-  if (!loadTrigger.value || !scrollContainer.value) return
-  if (observer) observer.disconnect()
-
+const ensureInfiniteObserver = () => {
+  if (!scrollContainer.value || observer) return
   observer = new IntersectionObserver(
     (entries) => {
-      if (entries[0]?.isIntersecting && !isLoadingMore.value && hasMore.value) {
+      if (
+        entries[0]?.isIntersecting &&
+        !isLoadingMore.value &&
+        hasMore.value &&
+        !loadMoreError.value
+      ) {
         loadMore()
       }
     },
@@ -636,7 +722,12 @@ const setupInfiniteScroll = () => {
       threshold: 0,
     },
   )
-  observer.observe(loadTrigger.value)
+}
+
+const setupInfiniteScroll = () => {
+  if (!loadTrigger.value || !scrollContainer.value) return
+  ensureInfiniteObserver()
+  observer?.observe(loadTrigger.value)
 }
 
 watch(
@@ -654,19 +745,33 @@ watch(
 )
 
 watch(
-  () => statuses.value.length,
-  () => {
-    nextTick(() => setupInfiniteScroll())
+  () =>
+    `${instancesStore.activeAccountId ?? ''}:${instancesStore.activeInstanceFilter ?? ''}`,
+  (id, prev) => {
+    if (id === prev || !instancesStore.isInitialized) return
+    if (
+      props.column.feedType === 'local' ||
+      props.column.feedType === 'federated' ||
+      props.column.feedType === 'home'
+    ) {
+      fetchTimeline(true)
+    }
   },
 )
 
-onMounted(async () => {
-  if (instancesStore.isAuthenticated && groupsStore.groups.length === 0) {
-    groupsStore.initializeGroups()
-  }
-  if (instancesStore.isInitialized) {
-    await fetchTimeline()
-  }
+watch(loadTrigger, (el, prev) => {
+  if (prev && observer) observer.unobserve(prev)
+  if (el) nextTick(() => setupInfiniteScroll())
+})
+
+const feedRoot = ref<HTMLElement | null>(null)
+const { onKeydown: onFeedKeydown } = useFeedKeyboard(feedRoot)
+
+onMounted(() => {
+  // Register visibility/polling listeners before any await so unmount mid-fetch can't leak
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  startPolling()
+
   nextTick(() => {
     setupInfiniteScroll()
     const el = scrollContainer.value
@@ -682,14 +787,28 @@ onMounted(async () => {
       flipRo.observe(el)
     }
   })
-  document.addEventListener('click', closeFeedMenu)
-  document.addEventListener('visibilitychange', onVisibilityChange)
+
+  void (async () => {
+    if (instancesStore.isAuthenticated && groupsStore.groups.length === 0) {
+      groupsStore.initializeGroups()
+    }
+    if (instancesStore.isInitialized) {
+      await fetchTimeline()
+    }
+  })()
+})
+
+onActivated(() => {
   startPolling()
 })
 
+onDeactivated(() => {
+  stopPolling()
+})
+
 onUnmounted(() => {
+  if (newPostsAnnounceTimer) clearTimeout(newPostsAnnounceTimer)
   if (observer) observer.disconnect()
-  document.removeEventListener('click', closeFeedMenu)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   const el = scrollContainer.value
   el?.removeEventListener('scroll', onScroll)
@@ -710,10 +829,13 @@ onUnmounted(() => {
       'neo-chrome--recessed': recessed,
       'timeline-column--drop-target': dropTarget,
       'timeline-column--dragging': dragging,
+      'timeline-column--menu-open': feedMenuOpen,
     }"
     @dragover="onColumnDragOver"
     @drop="onColumnDrop"
   >
+    <h2 class="column-title">{{ feedLabel }}</h2>
+
     <!-- Column Header -->
     <div class="column-header">
       <button
@@ -737,11 +859,177 @@ onUnmounted(() => {
         </svg>
       </button>
 
-      <div class="column-feed-select" @click.stop="onFeedHeaderClick">
-        <span class="column-feed-label">{{ feedLabel }}</span>
-        <svg class="column-feed-chevron" :class="{ 'column-feed-chevron--open': feedMenuOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
+      <div class="column-feed-select">
+        <button
+          type="button"
+          class="column-feed-title"
+          :aria-label="`${feedLabel}. Scroll to top`"
+          @pointerdown="onFeedTitlePointerDown"
+          @click.stop="onFeedTitleClick"
+        >
+          <span class="column-feed-label">{{ feedLabel }}</span>
+        </button>
+        <NeoMenu
+          v-model:open="feedMenuOpen"
+          class="column-feed-menu"
+          align="start"
+          :label="`Switch feed (${feedLabel})`"
+        >
+          <svg
+            class="column-feed-chevron"
+            :class="{ 'column-feed-chevron--open': feedMenuOpen }"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            aria-hidden="true"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+          <template #items>
+            <button
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'home' }"
+              :disabled="!canShowHome"
+              @click="switchFeed('home')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              </svg>
+              For You
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'local' }"
+              @click="switchFeed('local')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+              </svg>
+              Local
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'federated' }"
+              @click="switchFeed('federated')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20" />
+                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+              </svg>
+              Federated
+            </button>
+
+            <template v-if="joinedGroups.length > 0">
+              <div class="feed-dropdown__divider" role="separator" />
+              <button
+                type="button"
+                class="feed-dropdown__section-toggle"
+                @click.stop="groupsExpanded = !groupsExpanded"
+              >
+                <span>Groups</span>
+                <svg :class="{ rotated: groupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="groupsExpanded">
+                <button
+                  v-for="group in joinedGroups"
+                  :key="group.tag"
+                  type="button"
+                  role="menuitem"
+                  class="feed-dropdown__item feed-dropdown__item--group"
+                  :class="{ 'feed-dropdown__item--active': column.feedType === 'group' && column.groupTag === group.tag }"
+                  @click="switchFeed('group', group.tag)"
+                >
+                  <span class="feed-dropdown__group-icon">{{ group.icon }}</span>
+                  {{ group.name }}
+                </button>
+              </template>
+            </template>
+
+            <div class="feed-dropdown__divider" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'search' }"
+              @click="switchFeed('search')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+              Search
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'profile' }"
+              @click="switchFeed('profile')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              Profile
+            </button>
+            <button
+              v-if="canShowHome"
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'notifications' }"
+              @click="switchFeed('notifications')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 01-3.46 0" />
+              </svg>
+              Notifications
+            </button>
+            <button
+              v-if="canShowHome"
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--active': column.feedType === 'messages' }"
+              @click="switchFeed('messages')"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+              </svg>
+              Messages
+            </button>
+            <div class="feed-dropdown__divider" role="separator" />
+            <NuxtLink
+              to="/groups"
+              role="menuitem"
+              class="feed-dropdown__item feed-dropdown__item--link"
+              @click="feedMenuOpen = false"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 00-3-3.87" />
+                <path d="M16 3.13a4 4 0 010 7.75" />
+              </svg>
+              Browse Groups
+            </NuxtLink>
+          </template>
+        </NeoMenu>
       </div>
 
       <div v-if="canReorder" class="column-reorder">
@@ -806,130 +1094,6 @@ onUnmounted(() => {
         </svg>
       </button>
 
-      <!-- Feed Type Dropdown -->
-      <Transition name="dropdown">
-        <div v-if="feedMenuOpen" class="feed-dropdown" @click.stop>
-          <!-- Standard feeds -->
-          <button
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'home' }"
-            :disabled="!canShowHome"
-            @click="switchFeed('home')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-            </svg>
-            For You
-          </button>
-          <button
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'local' }"
-            @click="switchFeed('local')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-            </svg>
-            Local
-          </button>
-          <button
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'federated' }"
-            @click="switchFeed('federated')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M2 12h20" />
-              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-            </svg>
-            Federated
-          </button>
-
-          <!-- Groups Section -->
-          <template v-if="joinedGroups.length > 0">
-            <div class="feed-dropdown__divider"></div>
-            <button class="feed-dropdown__section-toggle" @click.stop="groupsExpanded = !groupsExpanded">
-              <span>Groups</span>
-              <svg :class="{ 'rotated': groupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            <Transition name="groups-expand">
-              <div v-if="groupsExpanded" class="feed-dropdown__groups">
-                <button
-                  v-for="group in joinedGroups"
-                  :key="group.tag"
-                  class="feed-dropdown__item feed-dropdown__item--group"
-                  :class="{ 'feed-dropdown__item--active': column.feedType === 'group' && column.groupTag === group.tag }"
-                  @click="switchFeed('group', group.tag)"
-                >
-                  <span class="feed-dropdown__group-icon">{{ group.icon }}</span>
-                  {{ group.name }}
-                </button>
-              </div>
-            </Transition>
-          </template>
-
-          <!-- Browse groups link -->
-          <div class="feed-dropdown__divider"></div>
-          <button
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'search' }"
-            @click="switchFeed('search')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-            Search
-          </button>
-          <button
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'profile' }"
-            @click="switchFeed('profile')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-            Profile
-          </button>
-          <button
-            v-if="canShowHome"
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'notifications' }"
-            @click="switchFeed('notifications')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 01-3.46 0" />
-            </svg>
-            Notifications
-          </button>
-          <button
-            v-if="canShowHome"
-            class="feed-dropdown__item"
-            :class="{ 'feed-dropdown__item--active': column.feedType === 'messages' }"
-            @click="switchFeed('messages')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-            </svg>
-            Messages
-          </button>
-          <div class="feed-dropdown__divider"></div>
-          <NuxtLink to="/groups" class="feed-dropdown__item feed-dropdown__item--link" @click="feedMenuOpen = false">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 00-3-3.87" />
-              <path d="M16 3.13a4 4 0 010 7.75" />
-            </svg>
-            Browse Groups
-          </NuxtLink>
-        </div>
-      </Transition>
     </div>
 
     <!-- Scrollable Content -->
@@ -965,6 +1129,7 @@ onUnmounted(() => {
       </div>
 
       <!-- New posts pill — never auto-jumps the feed -->
+      <span class="sr-only" aria-live="polite" aria-atomic="true">{{ newPostsAnnounce }}</span>
       <Transition name="pill-slide">
         <button
           v-if="pendingNew.length"
@@ -982,7 +1147,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Error -->
-      <div v-else-if="error" class="column-state column-state--error">
+      <div v-else-if="error" class="column-state column-state--error" role="alert">
         <span class="column-error__icon">
           <NeoIcon :name="isLoginRequiredError ? 'lock' : 'alert'" :size="22" :stroke="1.75" />
         </span>
@@ -1037,7 +1202,17 @@ onUnmounted(() => {
       </div>
 
       <!-- Posts -->
-      <div v-else class="column-posts" :class="{ 'column-posts--flip': isFlip }">
+      <div
+        v-else
+        ref="feedRoot"
+        class="column-posts"
+        :class="{ 'column-posts--flip': isFlip }"
+        role="feed"
+        tabindex="0"
+        :aria-busy="isLoadingMore || isLoading"
+        :aria-label="`${feedLabel} posts`"
+        @keydown="onFeedKeydown"
+      >
         <template v-if="isFlip">
           <RealPostCard
             v-for="status in statuses"
@@ -1058,13 +1233,19 @@ onUnmounted(() => {
         <!-- Infinite scroll trigger -->
         <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
           <Transition name="fade">
-            <div v-if="isLoadingMore" class="column-loading-more" aria-busy="true">
+            <div v-if="isLoadingMore" class="column-loading-more" role="status" aria-busy="true">
               <FunLoader :size="120" label="Loading more" />
             </div>
           </Transition>
+          <div v-if="loadMoreError" class="column-load-more-error" role="alert">
+            <p>{{ loadMoreError }}</p>
+            <button type="button" class="column-retry" @click="loadMoreError = null; loadMore()">
+              Retry
+            </button>
+          </div>
         </div>
 
-        <div v-if="!hasMore && statuses.length > 0 && !isFlip" class="column-end">
+        <div v-if="!hasMore && statuses.length > 0 && !isFlip" class="column-end" role="status">
           <span>&#x2728;</span> All caught up
         </div>
       </div>
@@ -1098,6 +1279,27 @@ onUnmounted(() => {
       box-shadow: inset 3px 0 0 var(--neo-accent);
     }
   }
+
+  /* Keep feed menu above neighboring columns so items stay clickable */
+  &--menu-open {
+    z-index: 40;
+
+    .column-header {
+      z-index: 40;
+    }
+  }
+}
+
+.column-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .column-header {
@@ -1185,16 +1387,53 @@ onUnmounted(() => {
 .column-feed-select {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.125rem;
   min-width: 0;
-  padding: 0.375rem 0.5rem;
   border-radius: 4px;
+  user-select: none;
+}
+
+.column-feed-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0.375rem 0.35rem 0.375rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
   transition: background-color var(--neo-transition-fast);
-  user-select: none;
 
   &:hover {
     background: var(--neo-bg-tertiary);
+  }
+}
+
+.column-feed-menu {
+  flex-shrink: 0;
+
+  :deep(.neo-menu__trigger) {
+    padding: 0.375rem 0.5rem 0.375rem 0.25rem;
+    border-radius: 4px;
+    color: var(--neo-chrome-fg);
+
+    &:hover {
+      background: var(--neo-bg-tertiary);
+    }
+  }
+
+  :deep(.neo-menu__panel) {
+    left: 0;
+    right: auto;
+    width: 220px;
+    max-height: min(70vh, 28rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--neo-bg-secondary);
+    border-radius: 4px;
+    box-shadow: var(--neo-shadow-md);
+    padding: 0.375rem;
+    z-index: var(--neo-z-dropdown, 1000);
   }
 }
 
@@ -1205,7 +1444,7 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 180px;
+  max-width: min(280px, 46vw);
   transition: color var(--neo-transition-fast);
 }
 
@@ -1220,22 +1459,9 @@ onUnmounted(() => {
 }
 
 // ========================================
-// Feed Dropdown
+// Feed Dropdown items (inside NeoMenu panel)
 // ========================================
 .feed-dropdown {
-  position: absolute;
-  top: 44px;
-  left: 0.5rem;
-  width: 200px;
-  max-height: 400px;
-  overflow-y: auto;
-  background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 4px;
-  box-shadow: var(--neo-shadow-md);
-  padding: 0.375rem;
-  z-index: 20;
-
   &__item {
     display: flex;
     align-items: center;
@@ -1479,6 +1705,17 @@ onUnmounted(() => {
   }
 }
 
+.column-load-more-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  text-align: center;
+  color: var(--neo-text-muted);
+  font-size: 0.875rem;
+}
+
 .column-posts {
   display: flex;
   flex-direction: column;
@@ -1487,6 +1724,8 @@ onUnmounted(() => {
 
   // Subtle card edges within columns
   :deep(.status-card) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
     border: 1px solid var(--neo-border-color);
     border-radius: 4px;
     transition: border-color var(--neo-transition-fast);

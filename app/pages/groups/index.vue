@@ -27,6 +27,19 @@ const trendingGroups = computed(() =>
   groupsStore.trendingGroups.filter((g) => !g.isMember).slice(0, 10),
 )
 
+const trendingServerLabel = computed(() => {
+  const url =
+    instancesStore.activeAccount?.url ||
+    instancesStore.instances[0]?.url ||
+    ''
+  if (!url) return 'your server'
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url.replace(/^https?:\/\//, '').replace(/\/+$/, '') || 'your server'
+  }
+})
+
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) {
     searchResults.value = []
@@ -173,7 +186,7 @@ useHead({
           class="groups-rail-section"
         >
           <div class="section-heading">
-            <h2 class="section-title">Trending</h2>
+            <h2 class="section-title">Trending on {{ trendingServerLabel }}</h2>
           </div>
           <div class="groups-rail" role="list">
             <GroupCard

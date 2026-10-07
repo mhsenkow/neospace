@@ -8,6 +8,7 @@
  */
 
 import { defineStore } from 'pinia'
+import { markRaw } from 'vue'
 import {
   LOOM_ORIGINS,
   STORY_PUBLIC_NOTICE,
@@ -209,7 +210,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         this.lastIngestKey = key
         this.pending = {
           text,
-          files,
+          files: files.map((f) => markRaw(f)),
           descriptions,
           notice: handoffNotice(files.length > 0),
         }
@@ -272,7 +273,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         this.loading = true
         this.error = null
         try {
-          const file = new File([data.image.buffer], imageName, { type: imageType })
+          const file = markRaw(new File([data.image.buffer], imageName, { type: imageType }))
           const text = (share.text || '').trim()
           this.lastIngestKey = key
           this.pending = {

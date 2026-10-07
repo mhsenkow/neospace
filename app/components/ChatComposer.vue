@@ -7,7 +7,8 @@
 import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
-import { useComposeMedia } from '~/composables/useComposeMedia'
+import { COMPOSE_MEDIA_ACCEPT, useComposeMedia } from '~/composables/useComposeMedia'
+import { isImeEvent } from '~/composables/useComposerCore'
 
 const props = defineProps<{
   /** Latest status in the thread to reply to */
@@ -42,6 +43,9 @@ const {
   addFiles,
   removeAttachment,
   clearAttachments,
+  retryUpload,
+  setDescription,
+  altMax,
   onPaste,
 } = useComposeMedia()
 
@@ -154,7 +158,7 @@ const send = async () => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeEvent(e)) return
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     void send()
@@ -188,7 +192,10 @@ onMounted(() => {
   window.visualViewport?.addEventListener('resize', syncKeyboardOffset)
   window.visualViewport?.addEventListener('scroll', syncKeyboardOffset)
   window.addEventListener('resize', syncKeyboardOffset)
-  nextTick(() => textareaRef.value?.focus())
+  // Autofocus only with a fine pointer — avoid popping the mobile keyboard
+  if (typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches) {
+    nextTick(() => textareaRef.value?.focus())
+  }
 })
 
 onUnmounted(() => {
@@ -203,19 +210,62 @@ onUnmounted(() => {
     <div class="chat-composer__inner">
       <div v-if="attachments.length" class="chat-composer__media">
         <div
-          v-for="item in attachments"
+          v-for="(item, idx) in attachments"
           :key="item.localId"
-          class="chat-composer__thumb"
+          class="chat-composer__attach-wrap"
         >
-          <img v-if="item.previewUrl" :src="item.previewUrl" alt="" />
-          <button
-            type="button"
-            class="chat-composer__thumb-x"
-            aria-label="Remove"
-            @click="removeAttachment(item.localId)"
+          <div
+            class="chat-composer__thumb"
+            :class="{
+              'chat-composer__thumb--busy': item.uploading,
+              'chat-composer__thumb--error': !!item.error,
+            }"
           >
-            <NeoIcon name="x" :size="12" :stroke="2.5" />
-          </button>
+            <video
+              v-if="item.file.type.startsWith('video/') && item.previewUrl"
+              :src="item.previewUrl"
+              preload="metadata"
+              muted
+              playsinline
+            />
+            <img
+              v-else-if="item.previewUrl"
+              :src="item.previewUrl"
+              :alt="item.description || ''"
+            />
+            <div v-if="item.uploading" class="chat-composer__thumb-overlay">
+              Uploading…
+            </div>
+            <button
+              v-else-if="item.error"
+              type="button"
+              class="chat-composer__thumb-overlay chat-composer__thumb-overlay--error"
+              :aria-label="`Retry upload: ${item.error}`"
+              @click="retryUpload(item.localId)"
+            >
+              {{ item.error }} · retry
+            </button>
+            <button
+              type="button"
+              class="chat-composer__thumb-x"
+              :aria-label="`Remove attachment ${idx + 1}`"
+              @click="removeAttachment(item.localId)"
+            >
+              <NeoIcon name="x" :size="12" :stroke="2.5" />
+            </button>
+          </div>
+          <label class="chat-composer__alt">
+            <span class="sr-only">Alt text for attachment {{ idx + 1 }}</span>
+            <input
+              type="text"
+              class="chat-composer__alt-input"
+              :maxlength="altMax"
+              :disabled="item.uploading"
+              :value="item.description"
+              placeholder="Alt text"
+              @input="setDescription(item.localId, ($event.target as HTMLInputElement).value)"
+            />
+          </label>
         </div>
       </div>
 
@@ -234,7 +284,7 @@ onUnmounted(() => {
         <input
           ref="fileInputRef"
           type="file"
-          accept="image/*,video/*,audio/*"
+          :accept="COMPOSE_MEDIA_ACCEPT"
           multiple
           class="chat-composer__file"
           @change="onFileChange"
@@ -247,9 +297,10 @@ onUnmounted(() => {
             class="chat-composer__input"
             rows="1"
             :placeholder="placeholder || 'Message…'"
-            :disabled="isSending"
+            :readonly="isSending"
             enterkeyhint="send"
             aria-label="Message"
+            :aria-busy="isSending || undefined"
             @keydown="onKeydown"
             @paste="onPaste"
             @input="autosize"
@@ -272,7 +323,7 @@ onUnmounted(() => {
           class="chat-composer__send"
           :class="{ 'chat-composer__send--ready': canSend }"
           :disabled="!canSend"
-          :aria-label="isSending ? 'Sending' : 'Send'"
+          :aria-label="isUploading ? 'Uploading' : isSending ? 'Sending' : 'Send'"
           @click="send"
         >
           <FunLoader
@@ -319,25 +370,56 @@ onUnmounted(() => {
 
 .chat-composer__media {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.65rem;
   overflow-x: auto;
   padding: 0 0.15rem 0.65rem;
   scrollbar-width: none;
 }
 
+.chat-composer__attach-wrap {
+  flex: 0 0 auto;
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
 .chat-composer__thumb {
   position: relative;
-  width: 64px;
+  width: 88px;
   height: 64px;
-  flex: 0 0 auto;
   border-radius: 12px;
   overflow: hidden;
   background: var(--neo-bg-tertiary);
 
-  img {
+  img,
+  video {
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+}
+
+.chat-composer__thumb-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border: none;
+  background: color-mix(in srgb, var(--neo-bg-primary) 72%, transparent);
+  color: var(--neo-text-primary);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.2;
+  cursor: default;
+
+  &--error {
+    background: color-mix(in srgb, var(--neo-danger, #c44) 78%, transparent);
+    color: #fff;
+    cursor: pointer;
   }
 }
 
@@ -345,8 +427,8 @@ onUnmounted(() => {
   position: absolute;
   top: 4px;
   right: 4px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -355,6 +437,25 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--neo-text-primary) 72%, transparent);
   color: var(--neo-bg-primary);
   cursor: pointer;
+  z-index: 1;
+}
+
+.chat-composer__alt-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 6px;
+  background: var(--neo-bg-secondary);
+  color: var(--neo-text-primary);
+  font: inherit;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+
+  &::placeholder {
+    color: var(--neo-text-muted);
+  }
 }
 
 .chat-composer__error {

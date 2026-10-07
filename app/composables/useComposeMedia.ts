@@ -3,6 +3,7 @@
  */
 
 import type { mastodon } from 'masto'
+import { markRaw } from 'vue'
 import { useStatusStore } from '~/stores/status'
 import { CHART_ALT_MAX } from '~/utils/loomHandoff'
 
@@ -19,7 +20,9 @@ export interface ComposeAttachment {
 
 const MAX_ATTACHMENTS = 4
 const MAX_FILE_BYTES = 40 * 1024 * 1024 // Mastodon default often 40MB images
-const ACCEPT = /^image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime)$/i
+const ACCEPT = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/i
+export const COMPOSE_MEDIA_ACCEPT =
+  'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime'
 
 function uid() {
   return `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -103,39 +106,75 @@ export function useComposeMedia() {
     }
   }
 
+  type RejectedFile = { name: string; reason: string }
+
   /**
    * @param descriptions Optional parallel alt-text hints (e.g. Loom chart title).
+   * @returns Accepted count and rejected files with reasons (for toasts).
    */
   const addFiles = async (
     files: FileList | File[] | null | undefined,
     descriptions?: (string | null | undefined)[],
-  ) => {
-    if (!files || files.length === 0) return
+  ): Promise<{ accepted: number; rejected: RejectedFile[] }> => {
+    const rejected: RejectedFile[] = []
+    if (!files || files.length === 0) return { accepted: 0, rejected }
+
     const list = Array.from(files)
     const room = MAX_ATTACHMENTS - attachments.value.length
-    if (room <= 0) return
-
-    const accepted: ComposeAttachment[] = []
-    let descIdx = 0
-    for (const file of list.slice(0, room)) {
-      if (!ACCEPT.test(file.type)) continue
-      if (file.size > MAX_FILE_BYTES) continue
-      const hint = descriptions?.[descIdx]
-      descIdx += 1
-      accepted.push({
-        localId: uid(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        remoteId: null,
-        uploading: true,
-        error: null,
-        description: (hint || '').trim().slice(0, CHART_ALT_MAX),
-      })
+    if (room <= 0) {
+      for (const file of list) {
+        rejected.push({ name: file.name, reason: 'Attachment limit reached (4)' })
+      }
+      return { accepted: 0, rejected }
     }
 
-    if (accepted.length === 0) return
+    // Filter first so oversize/wrong-type don't consume slots
+    const candidates: { file: File; hint?: string | null }[] = []
+    list.forEach((file, i) => {
+      if (!ACCEPT.test(file.type)) {
+        rejected.push({ name: file.name, reason: 'Unsupported file type' })
+        return
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        rejected.push({ name: file.name, reason: 'File too large (max 40MB)' })
+        return
+      }
+      candidates.push({ file, hint: descriptions?.[i] })
+    })
+
+    const take = candidates.slice(0, room)
+    for (const extra of candidates.slice(room)) {
+      rejected.push({ name: extra.file.name, reason: 'Attachment limit reached (4)' })
+    }
+
+    const accepted: ComposeAttachment[] = take.map(({ file, hint }) => ({
+      localId: uid(),
+      file: markRaw(file),
+      previewUrl: URL.createObjectURL(file),
+      remoteId: null,
+      uploading: true,
+      error: null,
+      description: (hint || '').trim().slice(0, CHART_ALT_MAX),
+    }))
+
+    if (accepted.length === 0) return { accepted: 0, rejected }
     attachments.value.push(...accepted)
     await Promise.all(accepted.map((a) => uploadOne(a.localId)))
+
+    if (rejected.length && typeof window !== 'undefined') {
+      try {
+        const { useToastStore } = await import('~/stores/toast')
+        const first = rejected[0]!
+        const more = rejected.length > 1 ? ` (+${rejected.length - 1} more)` : ''
+        useToastStore().show({
+          message: `${first.name}: ${first.reason}${more}`,
+        })
+      } catch {
+        /* toast optional */
+      }
+    }
+
+    return { accepted: accepted.length, rejected }
   }
 
   const retryUpload = async (localId: string) => {

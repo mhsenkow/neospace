@@ -104,6 +104,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.inReplyToId = null
       this.quoteUrl = null
       this.contextPost = null
+      this.groupTag = null
       // keep onPosted (e.g. navigate into the new conversation)
       this.instanceKey += 1
     },

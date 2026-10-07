@@ -86,13 +86,13 @@ export function downloadInsightsCsv(report: InsightsReport) {
 
 function loomOriginForOpen(): string {
   if (typeof window === 'undefined') return LOOM_HOME
-  // Prefer production Loom; workers origin is accepted as postMessage target too.
   return LOOM_HOME
 }
 
 /**
  * Open Loom and hand off insight CSVs + preferred chart.
- * Falls back to downloading CSVs if the popup is blocked.
+ * Only reports 'posted' after Loom acks ready (or echoes an ack).
+ * Falls back to downloading CSVs if the popup is blocked or no ack arrives.
  */
 export async function exportInsightsToLoom(report: InsightsReport): Promise<'posted' | 'downloaded'> {
   const { files, preferred } = buildInsightsExport(report)
@@ -118,11 +118,11 @@ export async function exportInsightsToLoom(report: InsightsReport): Promise<'pos
   }
 
   const targetOrigin = dest.origin
-  let posted = false
+  let sent = false
 
   const send = () => {
-    if (posted) return
-    posted = true
+    if (sent) return
+    sent = true
     try {
       child.postMessage(payload, targetOrigin)
     } catch {
@@ -130,20 +130,36 @@ export async function exportInsightsToLoom(report: InsightsReport): Promise<'pos
     }
   }
 
-  const onMessage = (event: MessageEvent) => {
-    if (!LOOM_ORIGINS.has(event.origin)) return
-    const data = event.data
-    if (!data || typeof data !== 'object') return
-    if ((data as { type?: string }).type === 'loom-neospace-ready') {
-      send()
+  return await new Promise<'posted' | 'downloaded'>((resolve) => {
+    let settled = false
+    const finish = (result: 'posted' | 'downloaded') => {
+      if (settled) return
+      settled = true
       window.removeEventListener('message', onMessage)
+      window.clearTimeout(deadlineTimer)
+      resolve(result)
     }
-  }
 
-  window.addEventListener('message', onMessage)
-  // Also try after a short delay in case ready fired before listener attached
-  window.setTimeout(send, 900)
-  window.setTimeout(() => window.removeEventListener('message', onMessage), 12_000)
+    const onMessage = (event: MessageEvent) => {
+      if (!LOOM_ORIGINS.has(event.origin)) return
+      const data = event.data
+      if (!data || typeof data !== 'object') return
+      const type = (data as { type?: string }).type
+      if (type === 'loom-neospace-ready') {
+        send()
+        finish('posted')
+        return
+      }
+      if (type === 'neospace-loom-ack') {
+        send()
+        finish('posted')
+      }
+    }
 
-  return 'posted'
+    window.addEventListener('message', onMessage)
+    const deadlineTimer = window.setTimeout(() => {
+      downloadInsightsCsv(report)
+      finish('downloaded')
+    }, 8_000)
+  })
 }

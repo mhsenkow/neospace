@@ -26,6 +26,8 @@ const body = ref('')
 const shot = ref<string | null>(null)
 const busy = ref(false)
 const toast = ref<string | null>(null)
+const fallbackUrl = ref<string | null>(null)
+const bodyRef = ref<HTMLTextAreaElement | null>(null)
 const fileRef = ref<HTMLInputElement | null>(null)
 const titleRef = ref<HTMLInputElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
@@ -105,7 +107,22 @@ const onFocusField = (e: FocusEvent) => {
 }
 
 const close = () => {
+  if (busy.value) return
   open.value = false
+}
+
+const onTitleEnter = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
+  e.preventDefault()
+  bodyRef.value?.focus()
+}
+
+const onFormKeydown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault()
+    void submit()
+  }
 }
 
 const onUpload = async (file: File | undefined) => {
@@ -120,6 +137,7 @@ const onUpload = async (file: File | undefined) => {
 const submit = async () => {
   if (!title.value.trim() || busy.value) return
   busy.value = true
+  fallbackUrl.value = null
 
   const fullTitle = `[${kind.value}] ${title.value.trim()}`
   const fullBody = body.value.trim() || '(no description)'
@@ -130,18 +148,24 @@ const submit = async () => {
       imageBase64: shot.value,
     })
     showToast('Note filed as a GitHub issue')
-    window.open(url, '_blank', 'noopener,noreferrer')
+    fallbackUrl.value = url
     reset()
-    close()
+    // Keep the panel open so the issue link is available (window.open is popup-blocked after await)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
+    const status = (e as { status?: number })?.status
     const fallback = getGitHubNewIssueUrl(fullTitle, fullBody)
-    window.open(fallback, '_blank', 'noopener,noreferrer')
-    showToast(
-      msg.includes('GITHUB_TOKEN') || msg.includes('not configured')
-        ? 'Opened GitHub — paste your note there (API token not set yet).'
-        : `Opened GitHub form (${msg.slice(0, 80)})`,
-    )
+    if (status === 429) {
+      showToast('Too many notes — wait a bit and try again.')
+    } else if (status === 503 || msg.includes('GITHUB_TOKEN') || msg.includes('not configured')) {
+      fallbackUrl.value = fallback
+      showToast('API unavailable — use the GitHub link below.')
+    } else if (/network|fetch|offline|failed to fetch/i.test(msg)) {
+      showToast('Couldn’t reach GitHub — check your connection and retry.')
+    } else {
+      fallbackUrl.value = fallback
+      showToast(msg.slice(0, 120) || 'Couldn’t file the note.')
+    }
   } finally {
     busy.value = false
   }
@@ -181,7 +205,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <button
-      v-if="!open"
+      v-show="!open"
       type="button"
       class="notes-fab"
       aria-label="Leave a note"
@@ -203,17 +227,25 @@ onUnmounted(() => {
         aria-modal="true"
         aria-labelledby="neospace-notes-title"
         @click.self="close"
+        @keydown="onFormKeydown"
       >
         <div ref="panelRef" class="notes-panel">
           <header class="notes-panel__header">
             <h2 id="neospace-notes-title">Leave a note</h2>
-            <button type="button" class="notes-panel__close" aria-label="Close" @click="close">
+            <button
+              type="button"
+              class="notes-panel__close"
+              aria-label="Close"
+              :disabled="busy"
+              @click="close"
+            >
               <NeoIcon name="x" :size="16" :stroke="2" />
             </button>
           </header>
 
           <p class="notes-panel__lede">
-            Files as a GitHub issue on NeoSpace — bugs, UX, ideas.
+            Files as a <strong>public</strong> GitHub issue on NeoSpace — bugs, UX, ideas.
+            The current page URL and any screenshot are included.
           </p>
 
           <div class="notes-kinds" role="radiogroup" aria-label="Note type">
@@ -231,7 +263,7 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <label class="sr-only" for="neospace-note-title">Title</label>
+          <label class="notes-label" for="neospace-note-title">Title</label>
           <input
             id="neospace-note-title"
             ref="titleRef"
@@ -245,12 +277,13 @@ onUnmounted(() => {
             required
             aria-required="true"
             @focus="onFocusField"
-            @keydown.enter.prevent="submit"
+            @keydown.enter="onTitleEnter"
           />
 
-          <label class="sr-only" for="neospace-note-body">Details</label>
+          <label class="notes-label" for="neospace-note-body">Details</label>
           <textarea
             id="neospace-note-body"
+            ref="bodyRef"
             v-model="body"
             class="notes-textarea"
             placeholder="What happened / what would help…"
@@ -271,19 +304,30 @@ onUnmounted(() => {
             <label for="neospace-note-shot" class="notes-shot-btn">
               {{ shot ? 'Replace screenshot' : 'Attach screenshot' }}
             </label>
-            <button v-if="shot" type="button" class="notes-shot-clear" @click="shot = null">
+            <button
+              v-if="shot"
+              type="button"
+              class="notes-shot-clear"
+              aria-label="Remove screenshot"
+              @click="shot = null"
+            >
               Remove
             </button>
           </div>
 
           <img v-if="shot" :src="shot" alt="Screenshot preview" class="notes-preview" />
 
+          <p v-if="fallbackUrl" class="notes-fallback" role="status">
+            <a :href="fallbackUrl" target="_blank" rel="noopener noreferrer">Open on GitHub</a>
+          </p>
+
           <div class="notes-actions">
-            <button type="button" class="notes-cancel" @click="close">Cancel</button>
+            <button type="button" class="notes-cancel" :disabled="busy" @click="close">Cancel</button>
             <button
               type="button"
               class="notes-submit"
               :disabled="!title.trim() || busy"
+              :title="!title.trim() ? 'Add a title first' : undefined"
               @click="submit"
             >
               {{ busy ? 'Filing…' : 'File note' }}
@@ -293,9 +337,11 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <Transition name="toast">
-      <div v-if="toast" class="notes-toast" role="status">{{ toast }}</div>
-    </Transition>
+    <div class="notes-toast" role="status" aria-live="polite">
+      <Transition name="toast">
+        <span v-if="toast">{{ toast }}</span>
+      </Transition>
+    </div>
   </Teleport>
 </template>
 
@@ -303,7 +349,7 @@ onUnmounted(() => {
 .notes-fab {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
-  bottom: max(4.5rem, calc(env(safe-area-inset-bottom) + 3.75rem));
+  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
   z-index: 90;
   display: grid;
   place-items: center;
@@ -403,6 +449,23 @@ onUnmounted(() => {
   font-size: 0.75rem;
   line-height: 1.45;
   color: var(--neo-text-muted);
+}
+
+.notes-label {
+  display: block;
+  margin: 0 0 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+}
+
+.notes-fallback {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+
+  a {
+    color: var(--neo-accent);
+  }
 }
 
 .notes-kinds {
@@ -569,14 +632,24 @@ onUnmounted(() => {
   z-index: 1200;
   transform: translateX(-50%);
   max-width: min(90vw, 22rem);
-  padding: 0.65rem 0.9rem;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  color: var(--neo-text-primary);
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
+  pointer-events: none;
+
+  &:empty,
+  &:not(:has(span)) {
+    display: none;
+  }
+
+  span {
+    display: block;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--neo-text-primary);
+    background: var(--neo-bg-card);
+    border: 1px solid var(--neo-border-color);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
+  }
 
   @media (min-width: 1024px) {
     bottom: max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem));

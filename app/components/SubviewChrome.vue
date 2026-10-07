@@ -22,7 +22,9 @@ const goBack = () => {
     props.backAction()
     return
   }
-  if (typeof window !== 'undefined' && window.history.length > 1) {
+  // Prefer in-app history; history.length includes the entry that opened the tab
+  const state = router.options.history.state as { back?: unknown } | null
+  if (state?.back != null) {
     router.back()
     return
   }
@@ -44,7 +46,7 @@ const goBack = () => {
 
     <div class="subview-chrome__title">
       <slot name="title">
-        <span v-if="title" class="subview-chrome__name">{{ title }}</span>
+        <h1 v-if="title" class="subview-chrome__name">{{ title }}</h1>
       </slot>
     </div>
 
@@ -58,7 +60,7 @@ const goBack = () => {
 .subview-chrome {
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: var(--neo-z-shell-header, 40);
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -114,6 +116,7 @@ const goBack = () => {
 
 .subview-chrome__name {
   display: block;
+  margin: 0;
   font-size: 1rem;
   font-weight: 650;
   letter-spacing: -0.02em;

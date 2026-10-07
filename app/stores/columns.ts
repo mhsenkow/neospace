@@ -67,6 +67,7 @@ interface ColumnsState {
 const STORAGE_KEY = 'neospace_columns_v2'
 const LEGACY_STORAGE_KEY = 'neospace_columns'
 const DESK_LAYOUT_KEY = 'neospace_desk_layout'
+const STORAGE_VERSION = 1
 /** Profile metadata field name (visible on profile; compact value) */
 export const COLUMNS_PROFILE_FIELD = 'neospace_columns'
 /** Max independent timeline columns (desktop strip + mobile swipe) */
@@ -218,7 +219,14 @@ export const useColumnsStore = defineStore('columns', {
       try {
         const raw = localStorage.getItem(STORAGE_KEY)
         if (raw) {
-          const data = JSON.parse(raw) as { byAccount?: Record<string, ColumnConfig[]> }
+          const parsed = JSON.parse(raw) as {
+            v?: number
+            byAccount?: Record<string, ColumnConfig[]>
+          }
+          const data =
+            typeof parsed?.v === 'number'
+              ? parsed
+              : (parsed as { byAccount?: Record<string, ColumnConfig[]> })
           const cols = data.byAccount?.[this.storageBucketKey(accountKey)]
           if (Array.isArray(cols) && cols.length > 0 && cols.length <= MAX_COLUMNS) {
             return normalizeColumns(cols)
@@ -256,7 +264,7 @@ export const useColumnsStore = defineStore('columns', {
           /* replace corrupt blob */
         }
         byAccount[key] = this.columns
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ byAccount }))
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: STORAGE_VERSION, byAccount }))
         // Clear legacy so we don't keep resurrecting old single-device layout
         localStorage.removeItem(LEGACY_STORAGE_KEY)
       } catch (e) {

@@ -8,7 +8,9 @@ import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
+import { isImeEvent, mastodonLength, useDraft } from '~/composables/useComposerCore'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
+import { useOverlayStore } from '~/stores/overlay'
 import type { mastodon } from 'masto'
 
 const props = withDefaults(
@@ -27,6 +29,8 @@ const props = withDefaults(
     initialVisibility?: 'public' | 'unlisted' | 'private' | 'direct'
     /** Threads-style group/hashtag to tag on post */
     initialGroupTag?: string | null
+    /** Keep the group tag locked (no picker) — group page compose */
+    lockGroup?: boolean
     /**
      * Absorb Loom / cross-app handoff drafts.
      * Only one visible composer should accept — mobile sheet vs desktop column.
@@ -37,6 +41,7 @@ const props = withDefaults(
     placeholder: "What's new?",
     title: "What's new?",
     compact: false,
+    lockGroup: false,
     acceptHandoff: true,
   },
 )
@@ -49,6 +54,7 @@ const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
 const handoffStore = useComposeHandoffStore()
+const overlayStore = useOverlayStore()
 
 const content = ref(props.initialText || '')
 const spoilerText = ref('')
@@ -65,13 +71,58 @@ const composeFocused = ref(false)
 const selectedGroupTag = ref<string | null>(
   props.initialGroupTag ? props.initialGroupTag.replace(/^#/, '') : null,
 )
+const mentionListId = 'compose-mention-list'
+const counterAnnounce = ref('')
 
-/** Locked private message compose — don't let people accidentally go public */
+/** Only lock the visibility control when compose started as a DM */
+const isLockedDirect = computed(() => props.initialVisibility === 'direct')
+
+/** Current post is a private mention/DM (locked or user-chosen) */
 const isDirectCompose = computed(
-  () => props.initialVisibility === 'direct' || visibility.value === 'direct',
+  () => isLockedDirect.value || visibility.value === 'direct',
 )
 
-const showGroupPicker = computed(() => !isDirectCompose.value && !props.compact)
+const showGroupPicker = computed(
+  () => !isDirectCompose.value && !props.compact && !props.lockGroup,
+)
+
+const draftKey = computed(() => {
+  if (props.initialVisibility === 'direct') return 'dm'
+  if (props.inReplyToId) return `reply:${props.inReplyToId}`
+  if (props.quoteUrl) return 'quote'
+  const tag = props.initialGroupTag?.replace(/^#/, '').trim()
+  if (tag) return `group:${tag}`
+  return 'new'
+})
+
+const {
+  text: draftText,
+  spoiler: draftSpoiler,
+  visibility: draftVisibility,
+  restore: restoreDraft,
+  clear: clearDraft,
+  scheduleSave: scheduleDraftSave,
+} = useDraft(draftKey)
+
+const applyDraft = () => {
+  if (draftText.value) {
+    content.value = draftText.value
+  }
+  if (draftSpoiler.value) {
+    spoilerText.value = draftSpoiler.value
+    showCW.value = true
+  }
+  if (draftVisibility.value && !isLockedDirect.value) {
+    visibility.value = draftVisibility.value
+  }
+}
+
+const persistDraft = () => {
+  draftText.value = content.value
+  draftSpoiler.value = showCW.value ? spoilerText.value : ''
+  draftVisibility.value = visibility.value
+  scheduleDraftSave()
+}
 
 const {
   attachments,
@@ -112,14 +163,32 @@ const maxLength = computed(() => instancesStore.statusMaxCharacters)
 
 const groupTagSuffix = computed(() => {
   const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
-  if (!tag) return ''
+  if (!tag || isDirectCompose.value) return ''
   const already = new RegExp(`(?:^|\\s)#${tag}\\b`, 'i').test(content.value)
   return already ? '' : ` #${tag}`
 })
 
 const effectiveMaxLength = computed(() => maxLength.value - groupTagSuffix.value.length)
-const characterCount = computed(() => content.value.length)
+/** Count status body + quote URL + CW the way Mastodon weighs characters */
+const characterCount = computed(() => {
+  let body = content.value
+  const quote = props.quoteUrl?.trim()
+  if (quote && !body.includes(quote)) {
+    body = `${body.trim()}${body.trim() ? '\n\n' : ''}${quote}`
+  }
+  const cw = showCW.value ? spoilerText.value : ''
+  return mastodonLength(body) + (cw ? mastodonLength(cw) : 0)
+})
 const isOverLimit = computed(() => characterCount.value > effectiveMaxLength.value)
+const isNearLimit = computed(
+  () => characterCount.value > effectiveMaxLength.value * 0.9 && !isOverLimit.value,
+)
+const missingAltCount = computed(
+  () =>
+    attachments.value.filter(
+      (a) => !a.uploading && !a.error && a.remoteId && !a.description?.trim(),
+    ).length,
+)
 const canPost = computed(() => {
   const hasText = content.value.trim().length > 0
   const hasQuote = !!props.quoteUrl
@@ -141,14 +210,29 @@ const postingAs = computed(() => {
   return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
 })
 
+/** Media / reply IDs belong to the active server — switching mid-compose breaks the post */
 const canSwitchPostingAccount = computed(
-  () => instancesStore.authenticatedInstances.length > 1,
+  () =>
+    instancesStore.authenticatedInstances.length > 1 &&
+    !hasMedia.value &&
+    !isUploading.value &&
+    !props.inReplyToId,
 )
 
 const cyclePostingAccount = () => {
   if (!canSwitchPostingAccount.value) return
   instancesStore.cycleActiveAccount()
 }
+
+watch([characterCount, isOverLimit, isNearLimit], () => {
+  if (isOverLimit.value) {
+    counterAnnounce.value = `Over character limit by ${characterCount.value - effectiveMaxLength.value}`
+  } else if (isNearLimit.value) {
+    counterAnnounce.value = `${effectiveMaxLength.value - characterCount.value} characters left`
+  } else {
+    counterAnnounce.value = ''
+  }
+})
 
 const visibilityOptions = [
   { value: 'public', label: 'Public' },
@@ -180,6 +264,10 @@ const {
 const mentionOpen = ref(false)
 const mentionIndex = ref(0)
 const mentionAt = ref(-1)
+const activeMentionId = computed(() => {
+  const pick = mentionResults.value[mentionIndex.value]
+  return pick ? `compose-mention-${pick.id}` : undefined
+})
 
 const closeMentions = () => {
   mentionOpen.value = false
@@ -248,6 +336,18 @@ watch(
 const handlePost = async () => {
   if (!canPost.value) return
 
+  if (missingAltCount.value > 0) {
+    const ok = await overlayStore.openConfirm({
+      title: 'Add image descriptions?',
+      body:
+        missingAltCount.value === 1
+          ? 'One image has no alt text. Post anyway?'
+          : `${missingAltCount.value} images have no alt text. Post anyway?`,
+      confirmLabel: 'Post without alt',
+    })
+    if (!ok) return
+  }
+
   isPosting.value = true
   error.value = null
 
@@ -277,6 +377,7 @@ const handlePost = async () => {
       sensitive: showCW.value || undefined,
       inReplyToId: props.inReplyToId,
     })
+    clearDraft()
     resetForm()
     emit('posted', status)
     nextTick(() => {
@@ -316,7 +417,7 @@ const onFilePicked = async (e: Event) => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeEvent(e)) return
   if (mentionOpen.value && mentionResults.value.length) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -358,7 +459,7 @@ const onComposeInput = () => {
 const onMentionKeyup = (e: KeyboardEvent) => {
   // Don't reset arrow selection when navigating the popup
   if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) return
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeEvent(e)) return
   syncMentions({ resetIndex: true })
 }
 
@@ -416,7 +517,13 @@ watch(
   },
 )
 
+watch([content, spoilerText, visibility, showCW], () => {
+  persistDraft()
+})
+
 onMounted(() => {
+  restoreDraft()
+  applyDraft()
   if (props.inReplyToId && props.initialText) {
     nextTick(() => {
       textareaRef.value?.focus()
@@ -467,6 +574,12 @@ onMounted(() => {
           :placeholder="placeholder"
           rows="1"
           :disabled="isPosting"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-expanded="mentionOpen"
+          :aria-controls="mentionListId"
+          :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
+          :aria-invalid="isOverLimit"
           :aria-label="title || placeholder || 'Write a post'"
           @focus="composeFocused = true"
           @blur="composeFocused = false"
@@ -478,6 +591,7 @@ onMounted(() => {
         />
         <div
           v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+          :id="mentionListId"
           class="compose-mentions"
           role="listbox"
           aria-label="Mention suggestions"
@@ -487,6 +601,7 @@ onMounted(() => {
           </p>
           <button
             v-for="(account, idx) in mentionResults"
+            :id="`compose-mention-${account.id}`"
             :key="account.id"
             type="button"
             class="compose-mentions__item"
@@ -527,11 +642,12 @@ onMounted(() => {
         <div class="compose-heading">
           <div class="compose-title-row">
             <button
-              v-if="canSwitchPostingAccount"
+              v-if="instancesStore.authenticatedInstances.length > 1"
               type="button"
               class="compose-title compose-title--btn"
               title="Switch account"
               aria-label="Switch posting account"
+              :disabled="!canSwitchPostingAccount"
               @click="cyclePostingAccount"
             >
               {{ instancesStore.userDisplayName || postingAs || 'You' }}
@@ -556,6 +672,12 @@ onMounted(() => {
           :placeholder="placeholder"
           :rows="3"
           :disabled="isPosting"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-expanded="mentionOpen"
+          :aria-controls="mentionListId"
+          :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
+          :aria-invalid="isOverLimit"
           :aria-label="title || placeholder || 'Write a post'"
           @paste="onPaste"
           @keydown="onKeydown"
@@ -566,6 +688,7 @@ onMounted(() => {
 
         <div
           v-if="mentionOpen && (mentionResults.length || mentionSearching)"
+          :id="mentionListId"
           class="compose-mentions"
           role="listbox"
           aria-label="Mention suggestions"
@@ -575,6 +698,7 @@ onMounted(() => {
           </p>
           <button
             v-for="(account, idx) in mentionResults"
+            :id="`compose-mention-${account.id}`"
             :key="account.id"
             type="button"
             class="compose-mentions__item"
@@ -646,6 +770,13 @@ onMounted(() => {
         >
           <NeoIcon name="x" :size="12" :stroke="2.5" />
         </button>
+        <span
+          v-if="!item.uploading && !item.error && item.remoteId && !item.description?.trim()"
+          class="compose-media__alt-badge"
+          title="Missing alt text"
+        >
+          ALT
+        </span>
         <label class="compose-media__alt">
           <span class="compose-media__alt-label">Alt text</span>
           <textarea
@@ -704,7 +835,7 @@ onMounted(() => {
           CW
         </button>
 
-        <div v-if="!isDirectCompose" class="compose-visibility">
+        <div v-if="!isLockedDirect" class="compose-visibility">
           <select
             v-model="visibility"
             class="compose-visibility-select"
@@ -723,19 +854,26 @@ onMounted(() => {
 
         <span v-if="hasMedia" class="compose-media-count">
           {{ attachments.length }}/{{ maxAttachments }}
+          <span v-if="missingAltCount" class="compose-media-count__alt" title="Images need descriptions">
+            · {{ missingAltCount }} missing ALT
+          </span>
         </span>
       </div>
 
       <div v-if="!compact" class="compose-actions">
+        <span
+          class="sr-only"
+          aria-live="polite"
+          aria-atomic="true"
+        >{{ counterAnnounce }}</span>
         <span
           class="compose-counter"
           :class="{
             'compose-counter--warning': characterCount > effectiveMaxLength * 0.9,
             'compose-counter--error': isOverLimit,
           }"
-          :aria-live="isOverLimit ? 'assertive' : 'off'"
+          aria-hidden="true"
         >
-          <span class="sr-only" v-if="isOverLimit">Character limit exceeded. </span>
           {{ characterCount }}/{{ effectiveMaxLength }}
         </span>
 
@@ -777,6 +915,10 @@ onMounted(() => {
   overflow: visible;
   box-sizing: border-box;
   cursor: text;
+
+  &:focus-within {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 55%, transparent);
+  }
 
   &--dragging {
     overflow: hidden;
@@ -993,44 +1135,6 @@ onMounted(() => {
   }
 }
 
-.compose-as {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font-size: 0.75rem;
-  color: var(--neo-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-
-  &--switch {
-    cursor: pointer;
-    color: var(--neo-text-secondary);
-
-    &:hover {
-      color: var(--neo-accent);
-    }
-  }
-
-  &__hint {
-    flex-shrink: 0;
-    padding: 0.05rem 0.35rem;
-    border-radius: 999px;
-    background: var(--neo-bg-tertiary);
-    font-size: 0.625rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    color: var(--neo-text-muted);
-  }
-}
-
 .compose-cw-input {
   background-color: var(--neo-bg-tertiary);
   border-color: var(--neo-warning);
@@ -1232,8 +1336,8 @@ onMounted(() => {
   place-items: center;
   font-size: 1rem;
   line-height: 1;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.65);
+  color: var(--neo-text-on-accent, #fff);
+  background: color-mix(in srgb, var(--neo-text-primary) 65%, transparent);
   border: none;
   border-radius: 50%;
   cursor: pointer;
@@ -1249,11 +1353,31 @@ onMounted(() => {
   }
 }
 
+.compose-media__alt-badge {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.65rem;
+  z-index: 1;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--neo-text-on-accent, #fff);
+  background: var(--neo-danger, #c62828);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
 .compose-media__alt {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   min-width: 0;
+}
+
+.compose-media-count__alt {
+  color: var(--neo-danger);
+  font-weight: 600;
 }
 
 .compose-media__alt-label {

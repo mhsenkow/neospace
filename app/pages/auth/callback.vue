@@ -135,7 +135,7 @@ definePageMeta({
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.1em;
-  color: #fafaf8;
+  color: var(--neo-text-on-accent);
   background: var(--neo-accent);
   border-radius: 2px;
 }
@@ -179,7 +179,7 @@ p {
   padding: 0.75rem 1.5rem;
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #fafaf8;
+  color: var(--neo-text-on-accent);
   background: var(--neo-accent);
   border: none;
   border-radius: 4px;

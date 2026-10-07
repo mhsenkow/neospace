@@ -24,6 +24,7 @@ interface ConversationsState {
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let focusHandler: (() => void) | null = null
 let pollConsumers = 0
+let fetchSeq = 0
 
 const stripHtml = (html: string) =>
   html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -61,14 +62,19 @@ export const useConversationsStore = defineStore('conversations', {
       }
       if ((this.isLoading || this.isRefreshing) && !force) return
 
-      if (quiet || this.conversations.length) this.isRefreshing = true
-      else this.isLoading = true
+      const seq = ++fetchSeq
+      // Quiet/background polls must not flip isRefreshing (pull indicator).
+      if (!quiet) {
+        if (this.conversations.length) this.isRefreshing = true
+        else this.isLoading = true
+      }
       this.error = null
       try {
         const client = activeClient()
         const items = (await client.v1.conversations.list({
           limit: PAGE_LIMIT,
         } as any)) as mastodon.v1.Conversation[]
+        if (seq !== fetchSeq) return
         const page = Array.isArray(items) ? items : []
         // Merge page 1 so quiet polls don't drop conversations loaded via loadMore
         const pageIds = new Set(page.map((c) => c.id))
@@ -79,11 +85,14 @@ export const useConversationsStore = defineStore('conversations', {
           this.hasMore = page.length >= PAGE_LIMIT
         }
       } catch (e: any) {
+        if (seq !== fetchSeq) return
         if (!quiet) this.error = e?.message || 'Could not load messages'
         logWarn('conversations fetch failed:', e)
       } finally {
-        this.isLoading = false
-        this.isRefreshing = false
+        if (seq === fetchSeq) {
+          this.isLoading = false
+          this.isRefreshing = false
+        }
       }
     },
 
@@ -146,18 +155,14 @@ export const useConversationsStore = defineStore('conversations', {
         null
 
       if (!match && acctSet.size) {
+        // Exact participant set only — never mark a group DM via a subset match
         match =
           this.conversations.find((c) => {
             const ids = (c.accounts || []).map((a) => a.id)
-            if (!ids.length) return false
-            // Prefer exact participant set
-            if (ids.length === acctSet.size && ids.every((id) => acctSet.has(id))) return true
-            return false
-          }) ||
-          this.conversations.find((c) =>
-            (c.accounts || []).some((a) => acctSet.has(a.id)),
-          ) ||
-          null
+            return (
+              ids.length === acctSet.size && ids.length > 0 && ids.every((id) => acctSet.has(id))
+            )
+          }) || null
       }
 
       if (match?.unread) await this.markRead(match.id)

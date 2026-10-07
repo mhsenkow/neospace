@@ -37,6 +37,10 @@ onMounted(async () => {
   await Promise.all([load(), insights.fetchAnnualReports()])
 })
 
+onBeforeUnmount(() => {
+  insights.abortInFlight()
+})
+
 watch(
   () => props.account.id,
   async (id, prev) => {
@@ -206,15 +210,41 @@ const kpi = computed(() => {
       <div v-if="report.byDay.some((d) => d.engagement || d.posts)" class="insights__card">
         <h3 class="insights__card-title">Engagement over time</h3>
         <p class="insights__card-sub">Daily favourites + boosts + replies + quotes</p>
+        <p class="insights__card-summary">
+          Peak {{ formatCompact(areaPath.max) }} engagement
+          · {{ report.byDay.filter((d) => d.engagement || d.posts).length }} active days
+          · total {{ formatCompact(report.totals.engagement) }}
+        </p>
         <svg
           class="insights__area"
           :viewBox="`0 0 ${areaPath.w || 320} ${areaPath.h || 96}`"
           role="img"
           :aria-label="`Engagement chart, peak ${formatCompact(areaPath.max)}`"
+          aria-describedby="insights-area-data"
         >
           <path :d="areaPath.area" class="insights__area-fill" />
           <path :d="areaPath.line" class="insights__area-line" fill="none" />
         </svg>
+        <details class="insights__data-table">
+          <summary>View data</summary>
+          <table id="insights-area-data">
+            <caption class="sr-only">Daily engagement values</caption>
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Posts</th>
+                <th scope="col">Engagement</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in report.byDay" :key="d.date">
+                <td>{{ d.date }}</td>
+                <td>{{ d.posts }}</td>
+                <td>{{ d.engagement }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
       </div>
 
       <div v-if="report.posts.length" class="insights__card">
@@ -369,7 +399,7 @@ const kpi = computed(() => {
   min-height: 2.25rem;
   padding: 0.35rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid var(--neo-border);
+  border: 1px solid var(--neo-border-color);
   background: transparent;
   color: var(--neo-text-secondary);
   font-size: 0.8125rem;
@@ -379,7 +409,7 @@ const kpi = computed(() => {
   &--on {
     background: var(--neo-text-primary);
     border-color: var(--neo-text-primary);
-    color: var(--neo-bg);
+    color: var(--neo-bg-primary);
   }
 }
 
@@ -454,7 +484,7 @@ const kpi = computed(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.85rem 0 0.25rem;
-  border-top: 1px solid var(--neo-border);
+  border-top: 1px solid var(--neo-border-color);
 }
 
 .insights__card-title {
@@ -462,6 +492,37 @@ const kpi = computed(() => {
   font-size: 0.9375rem;
   font-weight: 650;
   color: var(--neo-text-primary);
+}
+
+.insights__card-summary {
+  margin: 0 0 0.65rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+}
+
+.insights__data-table {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-secondary);
+
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+
+  table {
+    width: 100%;
+    margin-top: 0.5rem;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: 0.25rem 0.4rem;
+    border-bottom: 1px solid var(--neo-border-color);
+    text-align: left;
+  }
 }
 
 .insights__card-sub {

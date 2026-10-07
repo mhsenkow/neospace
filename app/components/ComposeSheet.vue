@@ -4,10 +4,12 @@
  */
 
 import { useComposeSheetStore } from '~/stores/composeSheet'
+import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
 import type { mastodon } from 'masto'
 
 const sheet = useComposeSheetStore()
+const overlayStore = useOverlayStore()
 const panelRef = ref<HTMLElement | null>(null)
 const sheetOpen = computed(() => sheet.open)
 
@@ -15,17 +17,25 @@ const { viewportStyle, onFocusField } = useKeyboardViewport(sheetOpen, {
   lockScroll: true,
 })
 
-const requestClose = () => {
+const requestClose = async () => {
   const draft = panelRef.value?.querySelector<HTMLTextAreaElement>('textarea.compose-input, .compose-input')
   const dirty = !!(draft?.value?.trim())
-  if (dirty && !window.confirm('Discard this draft?')) return
+  if (dirty) {
+    const ok = await overlayStore.openConfirm({
+      title: 'Discard this draft?',
+      body: 'Your post will be lost.',
+      confirmLabel: 'Discard',
+      danger: true,
+    })
+    if (!ok) return
+  }
   sheet.hide()
 }
 
 useFocusTrap(panelRef, sheetOpen, {
   onEscape: requestClose,
   // Prefer the composer — Cancel is first in the DOM and stole focus on mobile
-  initialFocus: 'textarea, .compose-input, .group-pick-sheet__input, .compose-sheet__close',
+  initialFocus: 'textarea, .compose-input, #recipient-search-input, .group-pick-sheet__input, .compose-sheet__close',
 })
 
 const onPosted = (status: mastodon.v1.Status) => {
@@ -69,7 +79,13 @@ const onPick = async (account: mastodon.v1.Account) => {
         aria-modal="true"
         :aria-label="ariaLabel"
       >
-        <button type="button" class="compose-sheet__backdrop" aria-label="Close" @click="requestClose" />
+        <button
+          type="button"
+          class="compose-sheet__backdrop"
+          tabindex="-1"
+          aria-hidden="true"
+          @click="requestClose"
+        />
         <div class="compose-sheet__panel">
           <RecipientPicker
             v-if="sheet.pickRecipient"

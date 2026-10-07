@@ -37,9 +37,14 @@ const dismiss = () => {
 
 <template>
   <Transition name="install-banner">
-    <aside v-if="show" class="install-banner" role="dialog" aria-label="Install NeoSpace">
+    <aside
+      v-if="show"
+      class="install-banner"
+      role="region"
+      aria-labelledby="install-banner-title"
+    >
       <div class="install-banner__copy">
-        <strong>Install NeoSpace</strong>
+        <strong id="install-banner-title">Install NeoSpace</strong>
         <span>Add to your home screen for a full-screen app.</span>
       </div>
       <div class="install-banner__actions">
@@ -59,7 +64,7 @@ const dismiss = () => {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
   right: max(0.75rem, env(safe-area-inset-right));
-  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
+  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
   z-index: 120;
   display: flex;
   flex-wrap: wrap;

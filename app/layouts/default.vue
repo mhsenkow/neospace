@@ -54,9 +54,6 @@ const sidebarRail = ref(false)
 const groupsShowAll = ref(false)
 const lookOpen = ref(false)
 const inboxMenuOpen = ref(false)
-const inboxMenuRef = ref<HTMLElement | null>(null)
-const inboxPopoverRef = ref<HTMLElement | null>(null)
-const inboxMenuStyle = ref<Record<string, string>>({})
 
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
 // Curated picks only — raw server trends live on /groups (Trending tab), not the home rail
@@ -109,38 +106,6 @@ const toggleSidebarRail = () => {
   }
 }
 
-const updateInboxMenuPos = () => {
-  const root = inboxMenuRef.value
-  if (!root) return
-  const btn = root.querySelector('button')
-  const rect = (btn || root).getBoundingClientRect()
-  if (sidebarRail.value) {
-    inboxMenuStyle.value = {
-      position: 'fixed',
-      left: `${Math.round(rect.right + 6)}px`,
-      top: `${Math.round(rect.top)}px`,
-      width: '12.5rem',
-      zIndex: '200',
-    }
-  } else {
-    inboxMenuStyle.value = {
-      position: 'fixed',
-      left: `${Math.round(rect.left)}px`,
-      top: `${Math.round(rect.bottom + 4)}px`,
-      minWidth: `${Math.max(Math.round(rect.width), 180)}px`,
-      zIndex: '200',
-    }
-  }
-}
-
-const toggleInboxMenu = async () => {
-  inboxMenuOpen.value = !inboxMenuOpen.value
-  if (inboxMenuOpen.value) {
-    await nextTick()
-    updateInboxMenuPos()
-  }
-}
-
 const closeInboxMenu = () => {
   inboxMenuOpen.value = false
 }
@@ -160,29 +125,15 @@ const openDesktopGroup = (tag: string) => {
   router.push(`/groups/${tag}`)
 }
 
-const onDocPointerDown = (e: PointerEvent) => {
-  if (!inboxMenuOpen.value) return
-  const t = e.target
-  if (!(t instanceof Node)) return
-  const root = inboxMenuRef.value
-  const pop = inboxPopoverRef.value
-  if ((root && root.contains(t)) || (pop && pop.contains(t))) return
-  closeInboxMenu()
+const categoryColor = (category: string) => {
+  const key = ['tech', 'creative', 'gaming', 'social', 'news', 'trending', 'local', 'other'].includes(category)
+    ? category
+    : 'other'
+  return `var(--neo-cat-${key})`
 }
 
-const categoryColor = (category: string) => {
-  const colors: Record<string, string> = {
-    tech: '#c45c26',
-    creative: '#b8860b',
-    gaming: '#2f7d4a',
-    social: '#a84c1e',
-    news: '#3a6ea5',
-    trending: '#c45c26',
-    local: '#757575',
-    other: '#757575',
-  }
-  return colors[category] || colors.other
-}
+const categoryTint = (category: string) =>
+  `color-mix(in srgb, ${categoryColor(category)} 13%, transparent)`
 
 const openGroupFromMenu = (tag: string) => {
   closeMobileMenu()
@@ -248,29 +199,40 @@ const applyTheme = () => {
 
 const cycleTheme = () => {
   settingsStore.cycleTheme()
+  nextTick(() => announceLook('Theme', currentThemeLabel.value))
 }
 
 const cycleUi = () => {
   settingsStore.cycleUi()
+  nextTick(() => announceLook('Chrome', currentUiLabel.value))
 }
 
 const cycleRadius = () => {
   settingsStore.cycleRadius()
+  nextTick(() => announceLook('Corners', currentRadiusLabel.value))
 }
 
 const cycleDensity = () => {
   settingsStore.cycleDensity()
+  nextTick(() => announceLook('Density', currentDensityLabel.value))
 }
 
 const cycleLine = () => {
   settingsStore.cycleLine()
+  nextTick(() => announceLook('Lines', currentLineLabel.value))
 }
 
 const densityTitle = computed(() =>
   columnsStore.deskDensity === 'packed'
-    ? 'Packed — up to six across (four on smaller desks), then scroll. Click for roomy.'
-    : 'Roomy — about three to four views, scroll for the rest. Click to pack.',
+    ? 'Packed — up to six across (four on smaller desks), then scroll.'
+    : 'Roomy — about three to four views, scroll for the rest.',
 )
+
+/** Polite live region for Look cycle buttons */
+const lookAnnounce = ref('')
+const announceLook = (kind: string, label: string) => {
+  lookAnnounce.value = `${kind}: ${label}`
+}
 
 const onHomeClick = () => {
   columnsStore.clearColumnFocus()
@@ -399,9 +361,6 @@ onMounted(async () => {
   }
   deskMq.addEventListener?.('change', onDeskBreakpoint)
   cleanups.push(() => deskMq.removeEventListener?.('change', onDeskBreakpoint))
-
-  document.addEventListener('pointerdown', onDocPointerDown)
-  cleanups.push(() => document.removeEventListener('pointerdown', onDocPointerDown))
 
   onUnmounted(() => {
     for (const fn of cleanups) fn()
@@ -558,7 +517,6 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
           :class="{ 'sidebar__logo--on': route.path === '/' && !columnsStore.focusedColumnId }"
           title="Home"
           aria-label="neospace home"
-          :aria-current="route.path === '/' && !columnsStore.focusedColumnId ? 'page' : undefined"
           @click="onHomeClick"
         >
           <span class="sidebar__mark">ns</span>
@@ -638,20 +596,20 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             <span class="sidebar__label">Search</span>
           </NuxtLink>
 
-          <div
+          <NeoMenu
             v-if="instancesStore.hasAuthenticatedInstance"
-            ref="inboxMenuRef"
+            v-model:open="inboxMenuOpen"
             class="sidebar__inbox"
+            :class="{ 'sidebar__inbox--active': inboxActive }"
+            :label="inboxBadge ? `Inbox, ${inboxBadge} unread` : 'Inbox — messages and mentions'"
+            teleport
+            :placement="sidebarRail ? 'end' : 'bottom'"
+            align="start"
           >
-            <button
-              type="button"
+            <span
               class="sidebar__link sidebar__link--badge"
               :class="{ active: inboxActive }"
               :title="inboxBadge ? `Inbox (${inboxBadge} unread)` : 'Inbox'"
-              :aria-label="inboxBadge ? `Inbox, ${inboxBadge} unread` : 'Inbox — messages and mentions'"
-              :aria-expanded="inboxMenuOpen"
-              aria-haspopup="menu"
-              @click="toggleInboxMenu"
             >
               <NeoIcon
                 name="send"
@@ -661,39 +619,28 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               />
               <span class="sidebar__label">Inbox</span>
               <span v-if="inboxBadge" class="nav-badge" aria-hidden="true">{{ inboxBadge }}</span>
-            </button>
-            <Teleport to="body">
-              <div
-                v-if="inboxMenuOpen"
-                ref="inboxPopoverRef"
-                class="sidebar__micro sidebar__micro--portal"
-                role="menu"
-                aria-label="Inbox"
-                :style="inboxMenuStyle"
+            </span>
+            <template #items>
+              <button
+                type="button"
+                role="menuitem"
+                :aria-current="route.path === '/messages' ? 'page' : undefined"
+                @click="openDirectMessages"
               >
-                <button
-                  type="button"
-                  class="sidebar__micro-item"
-                  role="menuitem"
-                  :class="{ 'sidebar__micro-item--on': route.path === '/messages' }"
-                  @click="openDirectMessages"
-                >
-                  <NeoIcon name="message" :size="16" :stroke="1.75" />
-                  <span>Direct messages</span>
-                </button>
-                <button
-                  type="button"
-                  class="sidebar__micro-item"
-                  role="menuitem"
-                  :class="{ 'sidebar__micro-item--on': route.path === '/notifications' && route.query.filter === 'mention' }"
-                  @click="openMentions"
-                >
-                  <NeoIcon name="mention" :size="16" :stroke="1.75" />
-                  <span>Mentions</span>
-                </button>
-              </div>
-            </Teleport>
-          </div>
+                <NeoIcon name="message" :size="16" :stroke="1.75" />
+                <span>Direct messages</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                :aria-current="route.path === '/notifications' && route.query.filter === 'mention' ? 'page' : undefined"
+                @click="openMentions"
+              >
+                <NeoIcon name="mention" :size="16" :stroke="1.75" />
+                <span>Mentions</span>
+              </button>
+            </template>
+          </NeoMenu>
 
           <NuxtLink
             to="/profile"
@@ -727,7 +674,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               >
                 <span
                   class="sidebar__row-icon"
-                  :style="{ background: categoryColor(group.category) + '22' }"
+                  :style="{ background: categoryTint(group.category) }"
                   aria-hidden="true"
                 >{{ group.icon }}</span>
                 <span class="sidebar__label">{{ group.name }}</span>
@@ -748,7 +695,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               >
                 <span
                   class="sidebar__row-icon"
-                  :style="{ background: categoryColor(group.category) + '22' }"
+                  :style="{ background: categoryTint(group.category) }"
                   aria-hidden="true"
                 >{{ group.icon }}</span>
                 <span class="sidebar__label">{{ group.name }}</span>
@@ -760,6 +707,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             v-if="groupsCanToggle"
             type="button"
             class="sidebar__more"
+            :aria-expanded="groupsShowAll"
             @click="groupsShowAll = !groupsShowAll"
           >
             {{ groupsShowAll ? 'Show less' : 'Show more' }}
@@ -778,7 +726,8 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               'sidebar__density--roomy': columnsStore.deskDensity === 'roomy',
             }"
             :title="densityTitle"
-            :aria-label="densityTitle"
+            aria-label="Board density"
+            :aria-describedby="'sidebar-density-desc'"
             :aria-pressed="columnsStore.deskDensity === 'roomy'"
             @click="columnsStore.toggleDeskDensity()"
           >
@@ -788,6 +737,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             </span>
             <span class="sidebar__label">{{ columnsStore.deskDensity === 'roomy' ? 'Roomy' : 'Packed' }}</span>
           </button>
+          <p id="sidebar-density-desc" class="sr-only">{{ densityTitle }}</p>
         </section>
 
         <section class="sidebar__section sidebar__section--look" aria-label="Look">
@@ -798,6 +748,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               class="sidebar__section-action"
               :aria-expanded="lookOpen"
               aria-controls="sidebar-look-controls"
+              :aria-label="lookOpen ? 'Hide look controls' : 'Show look controls'"
               @click="lookOpen = !lookOpen"
             >
               {{ lookOpen ? 'Hide' : 'Try' }}
@@ -806,13 +757,14 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
           <p v-if="!lookOpen" class="sidebar__look-desc">
             Theme, chrome, corners, density, lines.
           </p>
+          <p class="sr-only" aria-live="polite">{{ lookAnnounce }}</p>
 
           <div v-show="lookOpen" id="sidebar-look-controls" class="sidebar__section-list">
             <button
               type="button"
               class="sidebar__row"
               :title="`Theme: ${currentThemeLabel}`"
-              :aria-label="`Theme ${currentThemeLabel}. Click to cycle.`"
+              aria-label="Theme"
               @click="cycleTheme"
             >
               <span class="sidebar__theme-swatch" aria-hidden="true" />
@@ -822,7 +774,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               type="button"
               class="sidebar__row"
               :title="`Chrome: ${currentUiLabel}`"
-              :aria-label="`Chrome ${currentUiLabel}. Click to cycle.`"
+              aria-label="Chrome"
               @click="cycleUi"
             >
               <span class="sidebar__chrome-mark" aria-hidden="true">Aa</span>
@@ -832,7 +784,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               type="button"
               class="sidebar__row"
               :title="`Corners: ${currentRadiusLabel}`"
-              :aria-label="`Corners ${currentRadiusLabel}. Click to cycle.`"
+              aria-label="Corners"
               @click="cycleRadius"
             >
               <span class="sidebar__radius-mark" aria-hidden="true" />
@@ -842,7 +794,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               type="button"
               class="sidebar__row"
               :title="`Density: ${currentDensityLabel}`"
-              :aria-label="`Density ${currentDensityLabel}. Click to cycle.`"
+              aria-label="Density"
               @click="cycleDensity"
             >
               <span class="sidebar__spacing-mark" aria-hidden="true"><i /><i /><i /></span>
@@ -852,7 +804,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               type="button"
               class="sidebar__row"
               :title="`Lines: ${currentLineLabel}`"
-              :aria-label="`Lines ${currentLineLabel}. Click to cycle.`"
+              aria-label="Lines"
               @click="cycleLine"
             >
               <span class="sidebar__line-mark" aria-hidden="true" />
@@ -1005,7 +957,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             :class="{ 'chrome-hint': boardPortal === 'activity' }"
             @click="closeMobileMenu"
           >
-            Notifications
+            Activity
             <span v-if="notifBadge" class="nav-badge nav-badge--inline">{{ notifBadge }}</span>
           </NuxtLink>
         </nav>
@@ -1048,7 +1000,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
                 >
                   <span
                     class="mobile-sidebar__group-icon"
-                    :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+                    :style="{ backgroundColor: categoryTint(group.category) }"
                   >
                     {{ group.icon }}
                   </span>
@@ -1071,7 +1023,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
                 >
                   <span
                     class="mobile-sidebar__suggest-icon"
-                    :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+                    :style="{ backgroundColor: categoryTint(group.category) }"
                   >
                     {{ group.icon }}
                   </span>
@@ -1290,7 +1242,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   padding: 0.85rem 0.65rem 0.85rem;
   background: var(--neo-bg-secondary);
   border-right: 1px solid var(--neo-border-color);
-  z-index: 100;
+  z-index: var(--neo-z-shell-nav, 100);
   transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 
   @media (min-width: 1024px) {
@@ -1309,7 +1261,15 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     .sidebar__section-hint,
     .sidebar__look-desc,
     .sidebar__more {
-      display: none;
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
     }
 
     .sidebar__top {
@@ -1442,7 +1402,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     height: 34px;
     flex-shrink: 0;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--neo-radius-full, 999px);
     background: transparent;
     color: var(--neo-text-muted);
     cursor: pointer;
@@ -1463,7 +1423,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     position: absolute;
     top: 0;
     right: 0;
-    transform: translate(20%, -15%) scale(0.85);
+    transform: translate(20%, -15%);
   }
 
   &__scroll {
@@ -1476,12 +1436,31 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     overflow-y: auto;
     scrollbar-width: thin;
     padding-bottom: 0.5rem;
+
+    :focus-visible {
+      outline-offset: -2px;
+    }
   }
 
   &__nav {
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
+  }
+
+  &__inbox {
+    display: block;
+    width: 100%;
+
+    :deep(.neo-menu__trigger) {
+      display: flex;
+      width: 100%;
+      border-radius: var(--neo-radius-full, 999px);
+    }
+
+    .sidebar__link {
+      pointer-events: none;
+    }
   }
 
   &__home {
@@ -1507,7 +1486,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     width: 28px;
     height: 28px;
     border: 1px solid var(--neo-border-color);
-    border-radius: 999px;
+    border-radius: var(--neo-radius-full, 999px);
     background: var(--neo-bg-primary);
     color: var(--neo-text-primary);
     cursor: pointer;
@@ -1526,7 +1505,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     width: 44px;
     height: 44px;
     margin: 0;
-    border-radius: 999px;
+    border-radius: var(--neo-radius-full, 999px);
     border-color: transparent;
     background: transparent;
     color: var(--neo-text-secondary);
@@ -1558,14 +1537,14 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     flex-direction: column;
     gap: 0.1rem;
     padding: 0.35rem;
-    border-radius: 14px;
+    border-radius: var(--neo-radius-2xl, 14px);
     background: var(--neo-bg-card, var(--neo-bg-secondary));
     border: 1px solid var(--neo-border-color);
     box-shadow: 0 10px 28px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
 
     &--portal {
       position: fixed;
-      z-index: 200;
+      z-index: var(--neo-z-shell-popover, 200);
     }
   }
 
@@ -1576,7 +1555,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     width: 100%;
     padding: 0.55rem 0.65rem;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--neo-radius-xl, 10px);
     background: transparent;
     color: var(--neo-text-secondary);
     font: inherit;
@@ -1606,7 +1585,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     padding: 0.45rem 0.7rem;
     color: var(--neo-text-secondary);
     text-decoration: none;
-    border-radius: 999px;
+    border-radius: var(--neo-radius-full, 999px);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -1665,23 +1644,25 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
 
   &__section-title {
     margin: 0;
-    font-size: 0.6875rem;
+    font-size: max(0.6875rem, 11px);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: none;
-    color: var(--neo-text-muted);
+    color: var(--neo-text-secondary);
   }
 
   &__section-action {
     border: none;
     background: transparent;
-    color: var(--neo-text-muted);
+    color: var(--neo-text-secondary);
     font: inherit;
-    font-size: 0.6875rem;
+    font-size: max(0.6875rem, 11px);
     font-weight: 500;
     cursor: pointer;
-    padding: 0;
+    padding: 0.2rem 0.35rem;
+    min-height: 24px;
     text-decoration: none;
+    border-radius: var(--neo-radius-sm, 4px);
 
     &:hover {
       color: var(--neo-text-primary);
@@ -1716,7 +1697,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     flex-shrink: 0;
     width: 28px;
     height: 28px;
-    border-radius: 8px;
+    border-radius: var(--neo-radius-xl, 8px);
     font-size: 0.95rem;
     line-height: 1;
   }
@@ -1728,10 +1709,12 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   &__more {
     align-self: flex-start;
     margin: 0.15rem 0.75rem 0;
-    padding: 0;
+    padding: 0.2rem 0.35rem;
+    min-height: 24px;
     border: none;
+    border-radius: var(--neo-radius-sm, 4px);
     background: transparent;
-    color: var(--neo-text-muted);
+    color: var(--neo-text-secondary);
     font: inherit;
     font-size: 0.8125rem;
     cursor: pointer;
@@ -1811,7 +1794,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     flex: 1 1 0;
     max-width: 48px;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--neo-radius-xl, 10px);
     background: transparent;
     color: var(--neo-text-secondary);
     cursor: pointer;
@@ -1970,7 +1953,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
-  z-index: 90;
+  z-index: var(--neo-z-shell-header, 90);
   @media (min-width: 1024px) {
     display: none;
   }
@@ -1999,7 +1982,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     border: none;
     color: var(--neo-text-primary);
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--neo-radius-sm, 4px);
     text-decoration: none;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
@@ -2047,7 +2030,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   background: var(--neo-accent-soft);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
   animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-  border-radius: 4px;
+  border-radius: var(--neo-radius-sm, 4px);
 }
 
 @keyframes chrome-hint-pulse {
@@ -2085,7 +2068,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   padding-bottom: env(safe-area-inset-bottom, 0);
   background: var(--neo-bg-primary);
   border-top: 1px solid var(--neo-border-color);
-  z-index: 90;
+  z-index: var(--neo-z-shell-header, 90);
   box-sizing: border-box;
 
   @media (min-width: 1024px) {
@@ -2105,7 +2088,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     text-decoration: none;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--neo-radius-sm, 4px);
     transition: color var(--neo-transition-fast), background-color var(--neo-transition-fast);
     position: relative;
     cursor: pointer;
@@ -2126,7 +2109,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   }
 
   &__label {
-    font-size: 10px;
+    font-size: max(0.6875rem, 11px);
     font-weight: 600;
     line-height: 1.1;
     letter-spacing: 0.01em;
@@ -2152,7 +2135,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     justify-content: center;
     width: 44px;
     height: 28px;
-    border-radius: 10px;
+    border-radius: var(--neo-radius-xl, 10px);
     background: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));
     transition: transform 0.12s ease, background 0.12s ease;
@@ -2183,19 +2166,19 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   position: absolute;
   top: 4px;
   right: 2px;
-  min-width: 1.05rem;
-  height: 1.05rem;
-  padding: 0 0.22rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-family: var(--neo-font-family-ui);
-  font-size: 0.625rem;
+  font-size: max(0.6875rem, 11px);
   font-weight: 700;
   line-height: 1;
-  color: var(--neo-text-inverse);
+  color: var(--neo-text-on-accent, var(--neo-text-inverse));
   background: var(--neo-accent);
-  border-radius: 2px;
+  border-radius: var(--neo-radius-sm, 2px);
   pointer-events: none;
 
   &--inline {
@@ -2203,7 +2186,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     margin-left: 0.4rem;
     min-width: 1.15rem;
     height: 1.15rem;
-    font-size: 0.6875rem;
+    font-size: max(0.6875rem, 11px);
   }
 }
 
@@ -2211,7 +2194,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   position: fixed;
   inset: 0;
   background: var(--neo-bg-overlay);
-  z-index: 95;
+  z-index: var(--neo-z-shell-overlay, 95);
 
   @media (min-width: 1024px) {
     display: none;
@@ -2229,8 +2212,12 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   flex-direction: column;
   background: var(--neo-bg-secondary);
   border-right: 1px solid var(--neo-border-color);
-  z-index: 100;
+  z-index: var(--neo-z-shell-nav, 100);
   overflow-y: auto;
+
+  :focus-visible {
+    outline-offset: -2px;
+  }
 
   @media (min-width: 1024px) {
     display: none;
@@ -2266,7 +2253,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     letter-spacing: 0.06em;
     color: var(--neo-text-inverse);
     background: var(--neo-accent);
-    border-radius: 2px;
+    border-radius: var(--neo-radius-sm, 2px);
   }
 
   &__close {
@@ -2279,7 +2266,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     border: none;
     color: var(--neo-text-muted);
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--neo-radius-sm, 4px);
 
     &:hover {
       background: var(--neo-bg-hover);
@@ -2299,7 +2286,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     padding: 0.75rem 1rem;
     color: var(--neo-text-secondary);
     text-decoration: none;
-    border-radius: 4px;
+    border-radius: var(--neo-radius-sm, 4px);
     font-size: 0.9375rem;
     font-weight: 500;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
@@ -2318,7 +2305,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   &__guest {
     margin: 0.35rem 0.75rem 0.75rem;
     padding: 0.85rem 0.9rem;
-    border-radius: 10px;
+    border-radius: var(--neo-radius-xl, 10px);
     background: var(--neo-accent-soft);
     border: 1px solid color-mix(in srgb, var(--neo-accent) 28%, transparent);
   }
@@ -2343,7 +2330,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     justify-content: center;
     min-height: 36px;
     padding: 0.4rem 0.9rem;
-    border-radius: 999px;
+    border-radius: var(--neo-radius-full, 999px);
     background: var(--neo-accent);
     color: var(--neo-text-inverse);
     font-size: 0.8125rem;
@@ -2468,7 +2455,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     width: 100%;
     padding: 0.45rem 0.35rem;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--neo-radius-xl, 8px);
     background: transparent;
     text-align: left;
     cursor: pointer;
@@ -2483,7 +2470,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   &__suggest-icon {
     width: 36px;
     height: 36px;
-    border-radius: 10px;
+    border-radius: var(--neo-radius-xl, 10px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2531,7 +2518,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     color: var(--neo-text-secondary);
     font-size: 0.875rem;
     font-weight: 500;
-    border-radius: 4px;
+    border-radius: var(--neo-radius-sm, 4px);
     cursor: pointer;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
@@ -2588,7 +2575,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     background: var(--neo-accent);
     color: var(--neo-text-inverse);
     text-decoration: none;
-    border-radius: 2px;
+    border-radius: var(--neo-radius-sm, 2px);
     font-size: 0.875rem;
     font-weight: 600;
     letter-spacing: 0.01em;

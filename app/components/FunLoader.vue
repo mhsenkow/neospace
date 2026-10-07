@@ -223,6 +223,18 @@ const strokeSeg = (
   ctx.restore()
 }
 
+const inkColor = () => {
+  const el = rootRef.value
+  if (!el || typeof getComputedStyle === 'undefined') return 'currentColor'
+  return getComputedStyle(el).color || 'currentColor'
+}
+
+const prefersReducedMotion = () => {
+  if (typeof window === 'undefined') return false
+  if (document.documentElement.classList.contains('reduce-motion')) return true
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
 const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
   const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
   const px = Math.round(size * dpr)
@@ -237,6 +249,7 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
   const total = segments.length
   if (!total) return
 
+  const ink = inkColor()
   // Keep stroke weight proportional so large region fills don't look spindly
   const strokeScale = Math.max(0.85, Math.min(2.4, size / 160))
 
@@ -245,10 +258,12 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
     ctx.moveTo(s.x1 * scale + ox, s.y1 * scale + oy)
     ctx.lineTo(s.x2 * scale + ox, s.y2 * scale + oy)
   }
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)'
+  ctx.strokeStyle = ink
+  ctx.globalAlpha = 0.12
   ctx.lineWidth = 1.15 * strokeScale
   ctx.lineCap = 'square'
   ctx.stroke()
+  ctx.globalAlpha = 1
 
   let progress = (loopT(t, run.cycleMs) + run.phase) % 1
   if (run.reverse) progress = 1 - progress
@@ -270,9 +285,9 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
       s.y1 * scale + oy,
       s.x2 * scale + ox,
       s.y2 * scale + oy,
-      lit ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.1)',
+      ink,
       Math.max(0.7, 1.7 - s.depth * 0.22 + combined * 1.35) * strokeScale,
-      lit ? 0.22 + combined * 0.72 : 0.07,
+      lit ? 0.55 + combined * 0.4 : 0.18,
     )
   }
 
@@ -283,8 +298,10 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
     const hx = (head.x1 + (head.x2 - head.x1) * frac) * scale + ox
     const hy = (head.y1 + (head.y2 - head.y1) * frac) * scale + oy
     const r = run.headSize * strokeScale
-    ctx.fillStyle = 'rgba(255,255,255,0.95)'
+    ctx.fillStyle = ink
+    ctx.globalAlpha = 0.95
     ctx.fillRect(hx - r, hy - r, r * 2, r * 2)
+    ctx.globalAlpha = 1
   }
 }
 
@@ -293,7 +310,7 @@ const tick = (now: number) => {
   if (!start) start = now
   if (typeof document !== 'undefined') {
     if (document.hidden) return
-    if (document.documentElement.classList.contains('reduce-motion')) {
+    if (prefersReducedMotion()) {
       const canvas = canvasRef.value
       const ctx = canvas?.getContext('2d')
       if (ctx) drawFrame(ctx, renderSize.value, 0)
@@ -312,7 +329,12 @@ const onVis = () => {
     raf = 0
     return
   }
-  if (document.documentElement.classList.contains('reduce-motion')) return
+  if (prefersReducedMotion()) {
+    const canvas = canvasRef.value
+    const ctx = canvas?.getContext('2d')
+    if (ctx) drawFrame(ctx, renderSize.value, 0)
+    return
+  }
   if (!raf) {
     start = performance.now()
     raf = requestAnimationFrame(tick)
@@ -368,7 +390,13 @@ onMounted(() => {
   }
 
   start = 0
-  raf = requestAnimationFrame(tick)
+  if (prefersReducedMotion()) {
+    const canvas = canvasRef.value
+    const ctx = canvas?.getContext('2d')
+    if (ctx) drawFrame(ctx, renderSize.value, 0)
+  } else {
+    raf = requestAnimationFrame(tick)
+  }
   document.addEventListener('visibilitychange', onVis)
 })
 
@@ -408,17 +436,20 @@ const markBoxStyle = computed(() => {
       'fun-loader--seed': mode === 'seed',
     }"
     role="status"
-    :aria-label="label || 'Loading'"
     :style="markBoxStyle"
   >
     <canvas
       ref="canvasRef"
       class="fun-loader__canvas"
-      :width="renderSize"
-      :height="renderSize"
+      aria-hidden="true"
       :style="{ width: `${renderSize}px`, height: `${renderSize}px` }"
     />
-    <span v-if="label && mode !== 'seed' && mode !== 'pull'" class="fun-loader__label">{{ label }}</span>
+    <span
+      class="fun-loader__label"
+      :class="{ 'fun-loader__label--sr': !label || mode === 'seed' || mode === 'pull' }"
+    >
+      {{ label || 'Loading' }}
+    </span>
   </div>
 </template>
 
@@ -432,6 +463,7 @@ const markBoxStyle = computed(() => {
   gap: 0.55rem;
   flex-shrink: 0;
   box-sizing: border-box;
+  color: var(--neo-text-primary);
 }
 
 .fun-loader--region {
@@ -475,5 +507,17 @@ const markBoxStyle = computed(() => {
   line-height: 1.3;
   color: var(--neo-text-muted);
   text-align: center;
+
+  &--sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 }
 </style>

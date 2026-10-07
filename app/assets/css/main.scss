@@ -447,18 +447,18 @@ ul, ol {
 }
 
 // iOS/iPadOS zooms focused inputs under 16px — keep touch keyboards stable
-// (include iPad desktop-width layout: coarse pointer, not only max-width 1023)
 @media (max-width: 1023px), (hover: none), (pointer: coarse) {
+  input,
+  textarea,
+  select,
   .neo-input,
   .compose-input,
   .chat-composer__input,
   .recipient-picker input,
   .group-pick-sheet__input,
   .notes-input,
-  .notes-textarea,
-  textarea.neo-input,
-  input.neo-input {
-    font-size: 16px !important;
+  .notes-textarea {
+    font-size: max(16px, 1rem) !important;
   }
 }
 
@@ -496,7 +496,7 @@ ul, ol {
   &--accent { color: var(--neo-accent); }
   &--sm { font-size: var(--neo-font-size-sm); }
   &--lg { font-size: var(--neo-font-size-lg); }
-  &--mono { font-family: var(--neo-font-mono); }
+  &--mono { font-family: var(--neo-font-family-mono); }
   &--bold { font-weight: var(--neo-font-weight-bold); }
   &--semibold { font-weight: var(--neo-font-weight-semibold); }
 }
@@ -586,10 +586,19 @@ body {
   overscroll-behavior-x: none;
 }
 
-// Better tap targets on phones + iPad (coarse) — chrome controls, not every inline link
+// Opt-in 44px hit targets — prefer .neo-hit-44 over blanket button sizing
+.neo-hit-44 {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.neo-hit-min {
+  min-height: 24px;
+  min-width: 24px;
+}
+
 @media (max-width: 1023px), (hover: none), (pointer: coarse) {
-  button,
-  [role="button"],
+  .neo-hit-44,
   .neo-btn,
   .neo-chrome-btn,
   .mobile-nav__item,
@@ -665,7 +674,7 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 10000;
+  z-index: var(--neo-z-skip, 10000);
   padding: 0.65rem 1rem;
   background: var(--neo-accent);
   color: var(--neo-text-on-accent, var(--neo-text-inverse, #fff));
@@ -684,36 +693,88 @@ body {
   }
 }
 
-// Keyboard focus — never rely on mouse-only hover cues
+// Keyboard focus — single two-tone ring (accent outline + bg shadow)
 :focus {
   outline: none;
 }
 
 :focus-visible {
-  outline: 2px solid var(--neo-accent);
+  outline: 2px solid var(--neo-focus, var(--neo-accent));
   outline-offset: 2px;
-}
-
-button:focus-visible,
-a:focus-visible,
-[role="button"]:focus-visible,
-summary:focus-visible {
-  outline: 2px solid var(--neo-accent);
-  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--neo-bg-primary);
 }
 
 .neo-input:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--neo-accent);
+  outline: 2px solid var(--neo-focus, var(--neo-accent));
   outline-offset: 1px;
-  border-color: var(--neo-accent);
+  border-color: var(--neo-focus, var(--neo-accent));
+  box-shadow: 0 0 0 3px var(--neo-bg-primary);
+}
+
+[tabindex="-1"]:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+// Inside overflow scrollers, keep rings visible
+.neo-scroll :focus-visible,
+[data-neo-scroll] :focus-visible {
+  outline-offset: -2px;
+}
+
+// Windows High Contrast / forced-colors
+@media (forced-colors: active) {
+  :focus-visible,
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  summary:focus-visible,
+  .neo-input:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  button,
+  .neo-btn,
+  .neo-chrome-btn,
+  .sidebar__link,
+  .sidebar__row,
+  .mobile-nav__item,
+  .status-action {
+    border: 1px solid ButtonText;
+  }
+
+  .neo-btn--primary,
+  .mobile-nav__compose-mark,
+  .nav-badge {
+    forced-color-adjust: none;
+    border: 1px solid ButtonText;
+  }
+
+  .status-card,
+  .sidebar,
+  .mobile-nav,
+  .mobile-header {
+    border-color: CanvasText;
+  }
 }
 
 // Dialog open: stop background scroll (complement to per-sheet overflow locks)
 html.neo-dialog-open,
 html.neo-dialog-open body {
+  overflow: hidden;
+}
+
+// Ref-counted scroll lock (useScrollLock) — safe with nested overlays
+html.neo-scroll-lock,
+html.neo-scroll-lock body {
   overflow: hidden;
 }
 

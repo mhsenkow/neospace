@@ -28,17 +28,31 @@ const SAFE_EMOJI_CLASSES = new Set([
   'spoiler-text',
 ])
 
+let linkHookInstalled = false
+
+function ensureLinkHook() {
+  if (linkHookInstalled || typeof window === 'undefined') return
+  linkHookInstalled = true
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (!(node instanceof HTMLAnchorElement) && node.nodeName !== 'A') return
+    const el = node as HTMLAnchorElement
+    el.setAttribute('target', '_blank')
+    el.setAttribute('rel', 'noopener noreferrer nofollow')
+  })
+}
+
 function purify(dirty: string, tags: string[], attr: string[]): string {
   if (!dirty || typeof dirty !== 'string') return ''
   if (typeof window === 'undefined') {
     // SPA prerender / SSR stub — strip tags coarsely
     return dirty.replace(/<[^>]*>/g, '')
   }
+  ensureLinkHook()
   return DOMPurify.sanitize(dirty, {
     ALLOWED_TAGS: tags,
     ALLOWED_ATTR: attr,
     ALLOW_DATA_ATTR: false,
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'rel'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   })
 }
@@ -48,11 +62,12 @@ function purifyWithSafeClasses(dirty: string, tags: string[], attr: string[]): s
   if (typeof window === 'undefined') {
     return dirty.replace(/<[^>]*>/g, '')
   }
+  ensureLinkHook()
   return DOMPurify.sanitize(dirty, {
     ALLOWED_TAGS: tags,
     ALLOWED_ATTR: [...attr, 'class'],
     ALLOW_DATA_ATTR: false,
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'rel'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   }).replace(/\sclass="([^"]*)"/gi, (_m, classes: string) => {
     const kept = classes

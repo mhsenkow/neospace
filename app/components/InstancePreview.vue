@@ -10,6 +10,7 @@ const emit = defineEmits<{
 const instancesStore = useInstancesStore()
 const { getByDomain } = useCuratedInstances()
 
+const modalRef = ref<HTMLElement | null>(null)
 const isOpen = computed(() => !!instancesStore.previewingInstance)
 const domain = computed(() => instancesStore.previewingInstance)
 const instanceInfo = computed(() => (domain.value ? instancesStore.getInstance(domain.value) : null))
@@ -38,6 +39,11 @@ const addError = ref<string | null>(null)
 const close = () => {
   instancesStore.closePreview()
 }
+
+useFocusTrap(modalRef, isOpen, {
+  onEscape: () => close(),
+  initialFocus: '.close-btn',
+})
 
 const handleWatch = async () => {
   if (!domain.value || isWatching.value) return
@@ -71,14 +77,6 @@ const createAccountUrl = computed(() =>
   domain.value ? `https://${domain.value}/auth/sign_up` : '#',
 )
 
-onMounted(() => {
-  const handleEscape = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') close()
-  }
-  window.addEventListener('keydown', handleEscape)
-  onUnmounted(() => window.removeEventListener('keydown', handleEscape))
-})
-
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('en-US', {
@@ -99,14 +97,26 @@ const stripHtml = (html: string) => {
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="isOpen" class="preview-overlay" @click.self="close">
-        <div class="preview-modal" :style="{ '--accent': curatedInfo?.color || 'var(--neo-accent)' }">
+        <div
+          ref="modalRef"
+          class="preview-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="instance-preview-title"
+          :style="{ '--neo-preview-accent': curatedInfo?.color || 'var(--neo-accent)' }"
+        >
           <!-- Header -->
           <header class="preview-header">
             <div class="header-content">
               <span class="emoji">{{ curatedInfo?.emoji || '🌐' }}</span>
               <div>
-                <h2>{{ instanceInfo?.title || domain }}</h2>
-                <a :href="`https://${domain}`" target="_blank" class="domain-link">
+                <h2 id="instance-preview-title">{{ instanceInfo?.title || domain }}</h2>
+                <a
+                  :href="`https://${domain}`"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="domain-link"
+                >
                   {{ domain }}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
@@ -248,7 +258,7 @@ const stripHtml = (html: string) => {
               v-if="instanceInfo?.registrations !== false"
               :href="createAccountUrl"
               target="_blank"
-              rel="noopener"
+              rel="noopener noreferrer"
               class="action-btn action-btn--join"
             >
               Create account →
@@ -269,14 +279,14 @@ const stripHtml = (html: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--neo-z-modal, 1000);
   padding: 2rem;
 }
 
 .preview-modal {
-  --accent: #6364ff;
-  
-  background: #ffffff;
+  --neo-preview-accent: var(--neo-accent);
+
+  background: var(--neo-bg-card);
   border-radius: 24px;
   width: 100%;
   max-width: 640px;
@@ -284,8 +294,8 @@ const stripHtml = (html: string) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 25px 80px color-mix(in srgb, var(--neo-text-primary) 35%, transparent);
+  border: 1px solid var(--neo-border-color);
 }
 
 .preview-header {
@@ -293,8 +303,8 @@ const stripHtml = (html: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 1.5rem 2rem;
-  background: var(--accent);
-  color: white;
+  background: var(--neo-preview-accent);
+  color: var(--neo-text-on-accent);
 }
 
 .header-content {
@@ -316,18 +326,18 @@ const stripHtml = (html: string) => {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: color-mix(in srgb, var(--neo-text-on-accent) 80%, transparent);
     font-size: 0.9rem;
     text-decoration: none;
 
     &:hover {
-      color: white;
+      color: var(--neo-text-on-accent);
     }
   }
 }
 
 .close-btn {
-  background: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--neo-text-on-accent) 20%, transparent);
   border: none;
   border-radius: 50%;
   width: 40px;
@@ -336,21 +346,21 @@ const stripHtml = (html: string) => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: white;
+  color: var(--neo-text-on-accent);
   transition: background 0.15s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: color-mix(in srgb, var(--neo-text-on-accent) 30%, transparent);
   }
 }
 
 .instance-info {
   padding: 1.5rem 2rem;
-  border-bottom: 1px solid #e5e7eb;
-  background: #ffffff;
+  border-bottom: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-card);
 
   .description {
-    color: #4b5563;
+    color: var(--neo-text-secondary);
     line-height: 1.6;
     margin-bottom: 1.25rem;
   }
@@ -381,17 +391,17 @@ const stripHtml = (html: string) => {
 }
 
 .rules {
-  background: #f3f4f6;
+  background: var(--neo-bg-secondary, var(--neo-bg-tertiary));
   border-radius: 12px;
   padding: 1rem 1.25rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--neo-border-color);
 
   h4 {
     margin: 0 0 0.75rem;
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #6b7280;
+    color: var(--neo-text-muted);
   }
 
   ol {
@@ -400,7 +410,7 @@ const stripHtml = (html: string) => {
     
     li {
       font-size: 0.9rem;
-      color: #374151;
+      color: var(--neo-text-secondary);
       margin-bottom: 0.5rem;
       line-height: 1.4;
 
@@ -415,7 +425,7 @@ const stripHtml = (html: string) => {
   flex: 1;
   overflow-y: auto;
   padding: 1.5rem 2rem;
-  background: #fafafa;
+  background: var(--neo-bg-primary);
 
   h3 {
     display: flex;
@@ -423,7 +433,7 @@ const stripHtml = (html: string) => {
     gap: 0.5rem;
     margin: 0 0 1rem;
     font-size: 1rem;
-    color: #111827;
+    color: var(--neo-text-primary);
     font-weight: 600;
   }
 }
@@ -434,14 +444,14 @@ const stripHtml = (html: string) => {
   align-items: center;
   justify-content: center;
   padding: 3rem;
-  color: #6b7280;
+  color: var(--neo-text-muted);
 }
 
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e5e7eb;
-  border-top-color: var(--accent);
+  border: 3px solid var(--neo-border-color);
+  border-top-color: var(--neo-preview-accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-bottom: 0.75rem;
@@ -461,10 +471,10 @@ const stripHtml = (html: string) => {
   display: flex;
   gap: 0.75rem;
   padding: 1rem;
-  background: #ffffff;
+  background: var(--neo-bg-card);
   border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--neo-border-color);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--neo-text-primary) 6%, transparent);
 }
 
 .avatar {
@@ -537,15 +547,15 @@ const stripHtml = (html: string) => {
 .preview-error {
   padding: 0.75rem 2rem;
   background: #fef2f2;
-  color: #dc2626;
+  color: var(--neo-danger);
   text-align: center;
   font-size: 0.875rem;
 }
 
 .preview-footer {
   padding: 1.25rem 2rem;
-  border-top: 1px solid #e5e7eb;
-  background: #ffffff;
+  border-top: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-card);
   display: flex;
   justify-content: center;
   gap: 0.75rem;
@@ -577,8 +587,8 @@ const stripHtml = (html: string) => {
 }
 
 .action-btn--watch {
-  background: var(--accent);
-  color: white;
+  background: var(--neo-preview-accent);
+  color: var(--neo-text-on-accent);
 
   &:hover:not(:disabled) {
     opacity: 0.9;
@@ -586,18 +596,18 @@ const stripHtml = (html: string) => {
 }
 
 .action-btn--login {
-  background: #10b981;
-  color: white;
+  background: var(--neo-success);
+  color: var(--neo-text-on-accent, #fff);
 
   &:hover {
-    background: #059669;
+    background: var(--neo-success-dark, var(--neo-success));
   }
 }
 
 .action-btn--join {
   background: transparent;
-  border: 2px solid var(--accent);
-  color: var(--accent);
+  border: 2px solid var(--neo-preview-accent);
+  color: var(--neo-preview-accent);
 
   &:hover {
     background: rgba(99, 100, 255, 0.1);

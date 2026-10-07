@@ -5,10 +5,13 @@
 
 import { ref, computed, watch } from 'vue'
 import { useInstancesStore } from '~/stores/instances'
+import { useOverlayStore } from '~/stores/overlay'
 import type { mastodon } from 'masto'
 import { activeClient } from '~/composables/useMasto'
+import { usePager } from '~/composables/usePager'
 
 const instancesStore = useInstancesStore()
+const overlayStore = useOverlayStore()
 
 const props = defineProps<{
   accountId?: string
@@ -17,12 +20,14 @@ const props = defineProps<{
 
 const isOpen = ref(false)
 const activeTab = ref<'followers' | 'following'>('following')
-const isLoading = ref(false)
-const accounts = ref<mastodon.v1.Account[]>([])
-const recentPosts = ref<Record<string, mastodon.v1.Status | null>>({})
 const relationships = ref<Record<string, mastodon.v1.Relationship>>({})
 const loadingActions = ref<Record<string, boolean>>({})
 const modalRef = ref<HTMLElement | null>(null)
+
+const tabDefs = [
+  { id: 'followers', label: 'Followers' },
+  { id: 'following', label: 'Following' },
+]
 
 const isOwnFollowersList = computed(() => {
   const viewing = props.accountId || instancesStore.currentUser?.id
@@ -36,146 +41,90 @@ useFocusTrap(modalRef, isOpen, {
   initialFocus: '.close-btn',
 })
 
-// Pagination
-const nextPageUrl = ref<string | null>(null)
-const hasMore = ref(true)
+const getClient = () => activeClient()
+
+const enrichPage = async (fetchedAccounts: mastodon.v1.Account[]) => {
+  if (!fetchedAccounts.length) return
+  const client = getClient()
+  try {
+    const accountIds = fetchedAccounts.map((a) => a.id)
+    const rels = await client.v1.accounts.relationships.fetch({ id: accountIds })
+    rels.forEach((rel) => {
+      relationships.value[rel.id] = rel
+    })
+  } catch {
+    /* relationships are optional */
+  }
+  // Skip N+1 lastStatus fetches — use account.lastStatusAt in the row UI
+}
+
+const pager = usePager<mastodon.v1.Account>(async ({ maxId, signal }) => {
+  void signal
+  const client = getClient()
+  const accountId = props.accountId || instancesStore.currentUser?.id
+  if (!accountId) return []
+
+  const opts = { limit: 20, maxId }
+  const fetched =
+    activeTab.value === 'followers'
+      ? await client.v1.accounts.$select(accountId).followers.list(opts)
+      : await client.v1.accounts.$select(accountId).following.list(opts)
+
+  void enrichPage(fetched)
+  return fetched
+})
+
+const accounts = pager.items
+const isLoading = pager.isLoading
+const isLoadingMore = pager.isLoadingMore
+const hasMore = pager.hasMore
 
 const open = (tab?: 'followers' | 'following') => {
   if (tab) activeTab.value = tab
   isOpen.value = true
-  loadAccounts()
+  void loadAccounts()
 }
 
 const close = () => {
   isOpen.value = false
-  accounts.value = []
-  recentPosts.value = {}
+  pager.reset()
   relationships.value = {}
 }
 
-const getClient = () => activeClient()
-
 const loadAccounts = async () => {
   if (!instancesStore.isAuthenticated) return
-  
-  isLoading.value = true
-  accounts.value = []
-  recentPosts.value = {}
-  
-  try {
-    const client = getClient()
-    const accountId = props.accountId || instancesStore.currentUser?.id
-    
-    if (!accountId) return
-    
-    // Fetch followers or following
-    let fetchedAccounts: mastodon.v1.Account[]
-    if (activeTab.value === 'followers') {
-      fetchedAccounts = await client.v1.accounts.$select(accountId).followers.list({ limit: 20 })
-    } else {
-      fetchedAccounts = await client.v1.accounts.$select(accountId).following.list({ limit: 20 })
-    }
-    
-    accounts.value = fetchedAccounts
-    hasMore.value = fetchedAccounts.length === 20
-    
-    // Fetch relationships for all accounts
-    if (fetchedAccounts.length > 0) {
-      const accountIds = fetchedAccounts.map(a => a.id)
-      const rels = await client.v1.accounts.relationships.fetch({ id: accountIds })
-      rels.forEach(rel => {
-        relationships.value[rel.id] = rel
-      })
-    }
-    
-    // Fetch recent post for each account (in parallel, limited)
-    await loadRecentPosts(fetchedAccounts.slice(0, 10))
-    
-  } catch (e) {
-    console.error('Failed to load accounts:', e)
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const loadRecentPosts = async (accountsList: mastodon.v1.Account[]) => {
-  const client = getClient()
-  
-  const promises = accountsList.map(async (account) => {
-    try {
-      const statuses = await client.v1.accounts.$select(account.id).statuses.list({
-        limit: 1,
-        excludeReplies: true,
-        excludeReblogs: true,
-      })
-      recentPosts.value[account.id] = statuses[0] || null
-    } catch (e) {
-      recentPosts.value[account.id] = null
-    }
-  })
-  
-  await Promise.all(promises)
+  relationships.value = {}
+  pager.reset()
+  await pager.loadInitial()
 }
 
 const loadMore = async () => {
-  if (!hasMore.value || isLoading.value) return
-  
-  isLoading.value = true
+  await pager.loadMore()
+}
+
+const formatLastActive = (iso?: string | null) => {
+  if (!iso) return null
   try {
-    const client = getClient()
-    const accountId = props.accountId || instancesStore.currentUser?.id
-    if (!accountId) return
-    
-    const lastAccount = accounts.value[accounts.value.length - 1]
-    
-    let fetchedAccounts: mastodon.v1.Account[]
-    if (activeTab.value === 'followers') {
-      fetchedAccounts = await client.v1.accounts.$select(accountId).followers.list({ 
-        limit: 20,
-        maxId: lastAccount?.id 
-      })
-    } else {
-      fetchedAccounts = await client.v1.accounts.$select(accountId).following.list({ 
-        limit: 20,
-        maxId: lastAccount?.id 
-      })
-    }
-    
-    accounts.value.push(...fetchedAccounts)
-    hasMore.value = fetchedAccounts.length === 20
-    
-    // Fetch relationships
-    if (fetchedAccounts.length > 0) {
-      const accountIds = fetchedAccounts.map(a => a.id)
-      const rels = await client.v1.accounts.relationships.fetch({ id: accountIds })
-      rels.forEach(rel => {
-        relationships.value[rel.id] = rel
-      })
-    }
-    
-    // Load recent posts for new accounts
-    await loadRecentPosts(fetchedAccounts.slice(0, 10))
-    
-  } catch (e) {
-    console.error('Failed to load more:', e)
-  } finally {
-    isLoading.value = false
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch {
+    return null
   }
 }
 
-// Actions
 const handleFollow = async (accountId: string) => {
   loadingActions.value[accountId] = true
   try {
     const client = getClient()
     const rel = relationships.value[accountId]
-    
+
     if (rel?.following) {
       await client.v1.accounts.$select(accountId).unfollow()
-      relationships.value[accountId] = { ...rel, following: false }
+      relationships.value[accountId] = { ...rel, following: false } as mastodon.v1.Relationship
     } else {
       await client.v1.accounts.$select(accountId).follow()
-      relationships.value[accountId] = { ...rel, following: true }
+      relationships.value[accountId] = { ...rel, following: true } as mastodon.v1.Relationship
     }
   } catch (e) {
     console.error('Follow action failed:', e)
@@ -189,13 +138,13 @@ const handleMute = async (accountId: string) => {
   try {
     const client = getClient()
     const rel = relationships.value[accountId]
-    
+
     if (rel?.muting) {
       await client.v1.accounts.$select(accountId).unmute()
-      relationships.value[accountId] = { ...rel, muting: false }
+      relationships.value[accountId] = { ...rel, muting: false } as mastodon.v1.Relationship
     } else {
       await client.v1.accounts.$select(accountId).mute()
-      relationships.value[accountId] = { ...rel, muting: true }
+      relationships.value[accountId] = { ...rel, muting: true } as mastodon.v1.Relationship
     }
   } catch (e) {
     console.error('Mute action failed:', e)
@@ -205,15 +154,19 @@ const handleMute = async (accountId: string) => {
 }
 
 const handleBlock = async (accountId: string) => {
-  if (!confirm('Are you sure you want to block this account?')) return
-  
+  const ok = await overlayStore.openConfirm({
+    title: 'Block this account?',
+    body: 'They will not be able to see your posts or interact with you.',
+    confirmLabel: 'Block',
+    danger: true,
+  })
+  if (!ok) return
+
   loadingActions.value[accountId] = true
   try {
     const client = getClient()
     await client.v1.accounts.$select(accountId).block()
-    
-    // Remove from list
-    accounts.value = accounts.value.filter(a => a.id !== accountId)
+    accounts.value = accounts.value.filter((a) => a.id !== accountId)
   } catch (e) {
     console.error('Block action failed:', e)
   } finally {
@@ -222,15 +175,19 @@ const handleBlock = async (accountId: string) => {
 }
 
 const handleRemoveFollower = async (accountId: string) => {
-  if (!confirm('Remove this follower? They can still follow you again.')) return
-  
+  const ok = await overlayStore.openConfirm({
+    title: 'Remove this follower?',
+    body: 'They can still follow you again.',
+    confirmLabel: 'Remove',
+    danger: true,
+  })
+  if (!ok) return
+
   loadingActions.value[accountId] = true
   try {
     const client = getClient()
     await client.v1.accounts.$select(accountId).removeFromFollowers()
-    
-    // Remove from list
-    accounts.value = accounts.value.filter(a => a.id !== accountId)
+    accounts.value = accounts.value.filter((a) => a.id !== accountId)
   } catch (e) {
     console.error('Remove follower failed:', e)
   } finally {
@@ -238,35 +195,12 @@ const handleRemoveFollower = async (accountId: string) => {
   }
 }
 
-// Helper to strip HTML
-const stripHtml = (html: string) => {
-  if (!html) return ''
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return doc.body.textContent || ''
-}
-
-// Format date
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-  
-  if (diffDays === 0) return 'Today'
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return `${diffDays}d ago`
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-// Watch for tab changes
 watch(activeTab, () => {
   if (isOpen.value) {
-    loadAccounts()
+    void loadAccounts()
   }
 })
 
-// Expose methods
 defineExpose({ open, close })
 </script>
 
@@ -283,33 +217,17 @@ defineExpose({ open, close })
         @click.self="close"
       >
         <div class="followers-modal">
-          <!-- Header with tabs -->
           <header class="modal-header">
             <h2 id="followers-modal-title" class="sr-only">
               {{ activeTab === 'followers' ? 'Followers' : 'Following' }}
             </h2>
-            <div class="modal-tabs" role="tablist" aria-label="Followers or following">
-              <button 
-                class="modal-tab"
-                role="tab"
-                type="button"
-                :aria-selected="activeTab === 'followers'"
-                :class="{ 'modal-tab--active': activeTab === 'followers' }"
-                @click="activeTab = 'followers'"
-              >
-                Followers
-              </button>
-              <button 
-                class="modal-tab"
-                role="tab"
-                type="button"
-                :aria-selected="activeTab === 'following'"
-                :class="{ 'modal-tab--active': activeTab === 'following' }"
-                @click="activeTab = 'following'"
-              >
-                Following
-              </button>
-            </div>
+            <NeoTabs
+              v-model="activeTab"
+              class="modal-tabs"
+              :tabs="tabDefs"
+              :panels="false"
+              controls-id="followers-modal-list"
+            />
             <button class="close-btn" @click="close" aria-label="Close">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -318,108 +236,113 @@ defineExpose({ open, close })
             </button>
           </header>
 
-          <!-- Content -->
-          <div class="modal-content">
-            <!-- Loading state -->
+          <div id="followers-modal-list" class="modal-content">
             <div v-if="isLoading && accounts.length === 0" class="loading-state" aria-busy="true">
               <FunLoader fill label="Loading" />
             </div>
 
-            <!-- Empty state -->
             <div v-else-if="accounts.length === 0" class="empty-state">
               <NeoIcon name="user" :size="32" :stroke="1.5" />
               <p>{{ activeTab === 'followers' ? 'No followers yet' : 'Not following anyone yet' }}</p>
             </div>
 
-            <!-- Account list -->
             <div v-else class="account-list">
-              <div 
-                v-for="account in accounts" 
+              <div
+                v-for="account in accounts"
                 :key="account.id"
                 class="account-card"
               >
-                <!-- Account Info Row -->
                 <div class="account-row">
-                  <a :href="account.url" target="_blank" rel="noopener noreferrer" class="account-avatar">
-                    <img :src="account.avatar" :alt="account.displayName || account.username" />
-                  </a>
-                  
+                  <NuxtLink
+                    :to="{ path: '/profile', query: { user: account.acct } }"
+                    class="account-avatar"
+                    :aria-label="`View profile of ${account.displayName || account.username}`"
+                    @click="close()"
+                  >
+                    <img :src="account.avatar" alt="" />
+                  </NuxtLink>
+
                   <div class="account-info">
-                    <a :href="account.url" target="_blank" rel="noopener noreferrer" class="account-name">
+                    <NuxtLink
+                      :to="{ path: '/profile', query: { user: account.acct } }"
+                      class="account-name"
+                      @click="close()"
+                    >
                       {{ account.displayName || account.username }}
                       <span v-if="account.bot" class="bot-badge">🤖</span>
-                    </a>
+                    </NuxtLink>
                     <span class="account-handle">@{{ account.acct }}</span>
+                    <span
+                      v-if="relationships[account.id]?.followedBy"
+                      class="account-badge"
+                    >Follows you</span>
                   </div>
-                  
-                  <!-- Quick Actions -->
+
                   <div class="account-actions">
-                    <button 
-                      v-if="activeTab === 'following'"
+                    <button
                       class="action-btn"
-                      :class="{ 
+                      :class="{
                         'action-btn--following': relationships[account.id]?.following,
+                        'action-btn--requested': relationships[account.id]?.requested,
                         'action-btn--loading': loadingActions[account.id]
                       }"
                       :disabled="loadingActions[account.id]"
                       @click="handleFollow(account.id)"
                     >
-                      {{ relationships[account.id]?.following ? 'Following' : 'Follow' }}
+                      {{
+                        relationships[account.id]?.following
+                          ? 'Following'
+                          : relationships[account.id]?.requested
+                            ? 'Requested'
+                            : activeTab === 'followers'
+                              ? 'Follow back'
+                              : 'Follow'
+                      }}
                     </button>
-                    
-                    <div class="action-menu">
-                      <button class="action-menu-trigger" aria-label="More actions">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                          <circle cx="12" cy="5" r="2"/>
-                          <circle cx="12" cy="12" r="2"/>
-                          <circle cx="12" cy="19" r="2"/>
-                        </svg>
-                      </button>
-                      <div class="action-menu-dropdown">
-                        <button @click="handleMute(account.id)">
-                          {{ relationships[account.id]?.muting ? '🔊 Unmute' : '🔇 Mute' }}
+
+                    <NeoMenu
+                      class="action-menu"
+                      :label="`More actions for @${account.acct}`"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <circle cx="12" cy="5" r="2"/>
+                        <circle cx="12" cy="12" r="2"/>
+                        <circle cx="12" cy="19" r="2"/>
+                      </svg>
+                      <template #items>
+                        <button type="button" role="menuitem" @click="handleMute(account.id)">
+                          {{ relationships[account.id]?.muting ? 'Unmute' : 'Mute' }}
                         </button>
-                        <button @click="handleBlock(account.id)" class="danger">
-                          🚫 Block
+                        <button type="button" role="menuitem" class="danger" @click="handleBlock(account.id)">
+                          Block
                         </button>
-                        <button 
+                        <button
                           v-if="activeTab === 'followers' && isOwnFollowersList"
-                          @click="handleRemoveFollower(account.id)"
+                          type="button"
+                          role="menuitem"
                           class="danger"
+                          @click="handleRemoveFollower(account.id)"
                         >
-                          ✖️ Remove follower
+                          Remove follower
                         </button>
-                      </div>
-                    </div>
+                      </template>
+                    </NeoMenu>
                   </div>
                 </div>
 
-                <!-- Recent Post Preview -->
-                <div v-if="recentPosts[account.id]" class="recent-post">
-                  <div class="recent-post-header">
-                    <span class="recent-post-label">Latest post</span>
-                    <span class="recent-post-date">{{ formatDate(recentPosts[account.id]!.createdAt) }}</span>
-                  </div>
-                  <p class="recent-post-content">
-                    {{ stripHtml(recentPosts[account.id]!.content).slice(0, 120) }}{{ stripHtml(recentPosts[account.id]!.content).length > 120 ? '...' : '' }}
-                  </p>
-                  <div v-if="recentPosts[account.id]!.mediaAttachments?.length" class="recent-post-media">
-                    <span>📷 {{ recentPosts[account.id]!.mediaAttachments.length }} media</span>
-                  </div>
-                </div>
-                <div v-else-if="recentPosts[account.id] === null" class="no-recent-post">
-                  <span>No recent posts</span>
-                </div>
+                <p v-if="formatLastActive(account.lastStatusAt)" class="recent-post-meta">
+                  Last post {{ formatLastActive(account.lastStatusAt) }}
+                </p>
+                <p v-else class="no-recent-post">No recent posts</p>
               </div>
 
-              <!-- Load More -->
-              <button 
-                v-if="hasMore" 
+              <button
+                v-if="hasMore"
                 class="load-more-btn"
-                :disabled="isLoading"
+                :disabled="isLoading || isLoadingMore"
                 @click="loadMore"
               >
-                {{ isLoading ? 'Loading...' : 'Load more' }}
+                {{ isLoading || isLoadingMore ? 'Loading...' : 'Load more' }}
               </button>
             </div>
           </div>
@@ -438,66 +361,60 @@ defineExpose({ open, close })
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--neo-z-modal, 200);
   padding: 1rem;
 }
 
 .followers-modal {
-  background: var(--neo-bg-primary);
-  border-radius: 16px;
-  width: 100%;
-  max-width: 480px;
-  max-height: 85vh;
+  width: min(520px, 100%);
+  max-height: min(85vh, 720px);
   display: flex;
   flex-direction: column;
+  background: var(--neo-bg-primary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-lg, 12px);
   overflow: hidden;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--neo-shadow-xl);
 }
 
 .modal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 1rem;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem 0;
   border-bottom: 1px solid var(--neo-border-color);
 }
 
 .modal-tabs {
-  display: flex;
-}
+  flex: 1;
+  min-width: 0;
 
-.modal-tab {
-  padding: 1rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--neo-text-muted);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover {
-    color: var(--neo-text-secondary);
+  :deep(.neo-tabs__list) {
+    border-bottom: none;
+    gap: 0.25rem;
   }
 
-  &--active {
-    color: var(--neo-text-primary);
-    border-bottom-color: var(--neo-accent);
+  :deep(.neo-tabs__tab) {
+    flex: 1;
+    justify-content: center;
+    font-weight: 600;
   }
 }
 
 .close-btn {
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   border: none;
-  color: var(--neo-text-muted);
+  border-radius: var(--neo-radius-sm, 4px);
+  background: transparent;
+  color: var(--neo-text-secondary);
   cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 8px;
-  transition: all 0.15s ease;
 
   &:hover {
-    background: var(--neo-bg-secondary);
+    background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
   }
 }
@@ -505,38 +422,19 @@ defineExpose({ open, close })
 .modal-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .loading-state,
 .empty-state {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  min-height: min(50dvh, 22rem);
-  padding: 1.25rem;
+  min-height: 12rem;
+  color: var(--neo-text-secondary);
   text-align: center;
-  color: var(--neo-text-muted);
-  box-sizing: border-box;
-
-  p {
-    margin: 0;
-    font-size: 0.9375rem;
-  }
-}
-
-.empty-state {
-  align-items: center;
-}
-
-.spinner {
-  animation: spin 2s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .account-list {
@@ -546,15 +444,10 @@ defineExpose({ open, close })
 }
 
 .account-card {
-  background: var(--neo-bg-secondary);
+  padding: 0.75rem;
   border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-  padding: 1rem;
-  transition: all 0.15s ease;
-
-  &:hover {
-    border-color: var(--neo-border-hover, var(--neo-border-color));
-  }
+  border-radius: var(--neo-radius-md, 8px);
+  background: var(--neo-bg-secondary);
 }
 
 .account-row {
@@ -565,11 +458,14 @@ defineExpose({ open, close })
 
 .account-avatar {
   flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  overflow: hidden;
 
   img {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
   }
 }
@@ -577,240 +473,177 @@ defineExpose({ open, close })
 .account-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
 }
 
 .account-name {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
   font-weight: 600;
   color: var(--neo-text-primary);
   text-decoration: none;
-  font-size: 0.9375rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
   &:hover {
     text-decoration: underline;
   }
+}
 
-  .bot-badge {
-    font-size: 0.75rem;
-  }
+.account-badge {
+  display: inline-block;
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+  background: color-mix(in srgb, var(--neo-accent) 14%, transparent);
 }
 
 .account-handle {
-  display: block;
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.bot-badge {
+  margin-left: 0.25rem;
 }
 
 .account-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
   flex-shrink: 0;
 }
 
 .action-btn {
-  padding: 0.5rem 1rem;
+  min-height: 32px;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  background: var(--neo-accent);
+  color: var(--neo-text-on-accent, #fff);
   font-size: 0.8125rem;
   font-weight: 600;
-  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
-  border: 1px solid var(--neo-accent);
-  background: var(--neo-accent);
-  color: white;
-
-  &:hover:not(:disabled) {
-    opacity: 0.9;
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
 
   &--following {
     background: transparent;
     color: var(--neo-text-primary);
-    border-color: var(--neo-border-color);
-
-    &:hover:not(:disabled) {
-      border-color: var(--neo-danger);
-      color: var(--neo-danger);
-    }
   }
 
-  &--loading {
-    opacity: 0.7;
+  &--loading,
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 }
 
 .action-menu {
-  position: relative;
-
-  &:hover .action-menu-dropdown,
-  &:focus-within .action-menu-dropdown {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-  }
-}
-
-.action-menu-trigger {
-  background: none;
-  border: none;
-  color: var(--neo-text-muted);
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 8px;
-  transition: all 0.15s ease;
-
-  &:hover {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
-  }
-}
-
-.action-menu-dropdown {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  background: var(--neo-bg-primary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-  padding: 0.5rem;
-  min-width: 160px;
-  box-shadow: var(--neo-shadow-lg);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-8px);
-  transition: all 0.15s ease;
-  z-index: 10;
-
-  button {
-    display: block;
-    width: 100%;
-    padding: 0.625rem 0.875rem;
-    font-size: 0.875rem;
-    text-align: left;
-    background: none;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    color: var(--neo-text-primary);
-    transition: background 0.15s ease;
+  :deep(.neo-menu__trigger) {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--neo-radius-sm, 4px);
+    color: var(--neo-text-secondary);
 
     &:hover {
-      background: var(--neo-bg-secondary);
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
     }
+  }
 
-    &.danger {
-      color: var(--neo-danger);
+  :deep(.neo-menu__panel) {
+    min-width: 10rem;
+  }
 
-      &:hover {
-        background: rgba(239, 68, 68, 0.1);
-      }
-    }
+  :deep(.danger) {
+    color: var(--neo-danger);
   }
 }
 
 .recent-post {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
   border-top: 1px solid var(--neo-border-color);
 }
 
 .recent-post-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.375rem;
-}
-
-.recent-post-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--neo-text-muted);
-}
-
-.recent-post-date {
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
   font-size: 0.75rem;
   color: var(--neo-text-muted);
 }
 
 .recent-post-content {
-  font-size: 0.8125rem;
-  color: var(--neo-text-secondary);
-  line-height: 1.5;
   margin: 0;
+  font-size: 0.875rem;
+  color: var(--neo-text-secondary);
+  line-height: 1.4;
 }
 
-.recent-post-media {
-  margin-top: 0.375rem;
-  font-size: 0.75rem;
-  color: var(--neo-accent);
-}
-
+.recent-post-meta,
 .no-recent-post {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--neo-border-color);
-  
-  span {
-    font-size: 0.75rem;
-    color: var(--neo-text-muted);
-    font-style: italic;
-  }
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
 }
 
 .load-more-btn {
-  display: block;
   width: 100%;
-  padding: 1rem;
-  margin-top: 0.5rem;
-  font-size: 0.875rem;
+  min-height: 40px;
+  margin-top: 0.25rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-primary);
   font-weight: 600;
-  color: var(--neo-accent);
-  background: transparent;
-  border: 1px dashed var(--neo-border-color);
-  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover:not(:disabled) {
-    background: var(--neo-bg-secondary);
-    border-style: solid;
-  }
 
   &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    opacity: 0.6;
+    cursor: default;
   }
 }
 
-// Transitions
 .modal-fade-enter-active,
 .modal-fade-leave-active {
-  transition: opacity 0.2s ease;
-  
-  .followers-modal {
-    transition: transform 0.2s ease;
-  }
+  transition: opacity 0.15s ease;
 }
 
 .modal-fade-enter-from,
 .modal-fade-leave-to {
   opacity: 0;
-  
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 600px) {
+  .followers-modal-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
   .followers-modal {
-    transform: scale(0.95) translateY(20px);
+    width: 100%;
+    max-height: 100%;
+    border-radius: 0;
   }
 }
 </style>
-

@@ -91,9 +91,19 @@ export function normalizePresenceInput(
   }
 
   if (kind === 'seenu') {
+    if (/^https?:\/\//i.test(value)) {
+      try {
+        const u = new URL(value)
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return ''
+        const host = u.hostname.replace(/^www\./, '').toLowerCase()
+        if (host !== 'seenu.io' && !host.endsWith('.seenu.io')) return ''
+        return value.replace(/\/+$/, '')
+      } catch {
+        return ''
+      }
+    }
     const handle = value.replace(/^@/, '').replace(/^seenu\.io\//i, '')
-    if (!handle) return ''
-    if (handle.includes('.')) return `https://${handle.replace(/^https?:\/\//i, '')}`
+    if (!handle || handle.includes('.') || handle.includes('/')) return ''
     return `https://seenu.io/${handle}`
   }
 
@@ -109,6 +119,7 @@ export function normalizePresenceInput(
       return ''
     }
   }
+  // Never return a raw non-URL string (could be javascript: after decode tricks)
   return ''
 }
 
@@ -165,17 +176,38 @@ export function mergePresenceIntoFields(
   fields: { name: string; value: string }[],
   draft: { bluesky: string; seenu: string; website: string },
 ): { name: string; value: string }[] {
-  // Keep non-presence custom fields; never silently drop them for a 4th presence link
-  const custom = fields.filter((f) => !isPresenceField(f))
   const presence: { name: string; value: string }[] = []
+  const claimedHrefs = new Set<string>()
   const order: Exclude<PresenceKind, 'mastodon'>[] = ['bluesky', 'seenu', 'website']
   for (const kind of order) {
     const href = normalizePresenceInput(kind, draft[kind])
     if (!href) continue
     presence.push({ name: SOURCE_LABELS[kind], value: href })
+    claimedHrefs.add(href)
   }
-  const room = Math.max(0, 4 - custom.length)
-  return [...custom.slice(0, 4), ...presence.slice(0, room)].slice(0, 4)
+
+  // Keep non-presence fields + unmatched presence (e.g. a second website) as Other
+  const other: { name: string; value: string }[] = []
+  for (const f of fields) {
+    if (!isPresenceField(f)) {
+      other.push(f)
+      continue
+    }
+    const raw = extractHttpUrl(f.value || '') || stripHtml(f.value || '').trim()
+    if (!raw) continue
+    const byName = kindFromFieldName(f.name || '')
+    const kind = byName || kindFromUrl(raw)
+    if (!kind || kind === 'mastodon') {
+      other.push({ name: f.name || 'Other', value: raw })
+      continue
+    }
+    const href = normalizePresenceInput(kind, raw)
+    if (!href || claimedHrefs.has(href)) continue
+    other.push({ name: f.name?.trim() || 'Other', value: href })
+  }
+
+  const room = Math.max(0, 4 - other.length)
+  return [...other.slice(0, 4), ...presence.slice(0, room)].slice(0, 4)
 }
 
 export function buildPresenceLinks(opts: {

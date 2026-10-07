@@ -8,11 +8,13 @@
 
 import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
+import { useColumnsStore } from '~/stores/columns'
 
 const route = useRoute()
 const router = useRouter()
 const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
+const columnsStore = useColumnsStore()
 
 // Get the tag from route
 const tag = computed(() => route.params.tag as string)
@@ -39,6 +41,10 @@ const displayGroup = computed(() => {
 
 const isJoining = ref(false)
 const isLeaving = ref(false)
+
+const onGroupPosted = (status: import('masto').mastodon.v1.Status) => {
+  groupsStore.prependToTimeline(tag.value, status)
+}
 
 // Initialize on mount
 onMounted(async () => {
@@ -80,11 +86,22 @@ const handleJoin = async () => {
   }
 }
 
-// Handle leave
+// Leave immediately, offer Undo to rejoin
 const handleLeave = async () => {
+  if (isLeaving.value) return
+  const leftTag = tag.value
   isLeaving.value = true
   try {
-    await groupsStore.leaveGroup(tag.value)
+    await groupsStore.leaveGroup(leftTag)
+    const { useToastStore } = await import('~/stores/toast')
+    useToastStore().show({
+      message: `Left #${leftTag}`,
+      actionLabel: 'Undo',
+      duration: 5000,
+      onAction: () => {
+        void groupsStore.joinGroup(leftTag)
+      },
+    })
   } catch (e) {
     console.error('Failed to leave:', e)
   } finally {
@@ -100,6 +117,18 @@ const handleLoadMore = () => {
 // Go back
 const goBack = () => {
   router.push('/groups')
+}
+
+const isOnBoard = computed(() =>
+  columnsStore.columns.some(
+    (c) => c.feedType === 'group' && c.groupTag?.toLowerCase() === tag.value.toLowerCase(),
+  ),
+)
+
+/** Pin this hashtag feed as a board column and jump home */
+const addToBoard = () => {
+  const id = columnsStore.ensureFocusedView('group', tag.value.toLowerCase())
+  if (id) router.push('/')
 }
 
 // Get category color
@@ -152,15 +181,26 @@ useHead({
 
         <div class="group-actions">
           <button
+            class="action-btn action-btn--board"
+            :class="{ 'action-btn--board-on': isOnBoard }"
+            :title="isOnBoard ? 'Open on your board' : 'Add as a column on Home'"
+            @click="addToBoard"
+          >
+            <NeoIcon :name="isOnBoard ? 'check' : 'plus'" :size="14" :stroke="2.5" />
+            <span>{{ isOnBoard ? 'On board' : 'Add column' }}</span>
+          </button>
+          <button
             v-if="displayGroup.isMember"
             class="action-btn action-btn--leave"
             :disabled="isLeaving"
+            aria-label="Leave group"
             @click="handleLeave"
           >
-            <span v-if="isLeaving">Leaving...</span>
+            <span v-if="isLeaving">Leaving…</span>
             <span v-else class="action-btn__joined">
               <NeoIcon name="check" :size="14" :stroke="2.5" />
-              Joined
+              <span class="action-btn__joined-label">Joined</span>
+              <span class="action-btn__leave-label">Leave</span>
             </span>
           </button>
           <button
@@ -189,11 +229,14 @@ useHead({
     </div>
 
     <!-- Compose Box (for authenticated users) -->
-    <GroupComposeBox
+    <RealComposeBox
       v-if="instancesStore.isAuthenticated"
-      :tag="tag"
-      :group-name="displayGroup.name"
-      :group-icon="displayGroup.icon"
+      :initial-group-tag="tag"
+      lock-group
+      :title="`Post to ${displayGroup.name}`"
+      :placeholder="`Share with #${tag}…`"
+      :accept-handoff="false"
+      @posted="onGroupPosted"
     />
 
     <!-- Timeline -->
@@ -272,7 +315,12 @@ useHead({
 .group-header {
   position: relative;
   padding: 1rem;
-  background: linear-gradient(135deg, var(--category-color), color-mix(in srgb, var(--category-color) 70%, white));
+  // Mix toward black so white chrome stays ≥4.5:1 on light category hues
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--category-color) 78%, #0a0a0a),
+    color-mix(in srgb, var(--category-color) 55%, #121212)
+  );
   border-radius: 14px;
   margin-bottom: 1rem;
   overflow: hidden;
@@ -428,9 +476,14 @@ useHead({
 }
 
 .group-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
   flex-shrink: 0;
   align-self: flex-start;
   width: 100%;
+  position: relative;
+  z-index: 2;
 
   @media (min-width: 600px) {
     align-self: center;
@@ -439,6 +492,10 @@ useHead({
 }
 
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   padding: 0.625rem 1.25rem;
   font-size: 0.875rem;
   font-weight: 700;
@@ -447,6 +504,7 @@ useHead({
   cursor: pointer;
   transition: all 0.15s ease;
   width: 100%;
+  pointer-events: auto;
 
   @media (min-width: 480px) {
     padding: 0.75rem 1.5rem;
@@ -455,6 +513,23 @@ useHead({
 
   @media (min-width: 600px) {
     width: auto;
+    min-width: 9.5rem;
+  }
+
+  &--board {
+    background: rgba(255, 255, 255, 0.18);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.65);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.28);
+    }
+  }
+
+  &--board-on {
+    background: white;
+    color: var(--category-color);
+    border-color: white;
   }
 
   &--join {
@@ -478,8 +553,21 @@ useHead({
     color: white;
     border: 2px solid rgba(255, 255, 255, 0.5);
 
-    &:hover:not(:disabled) {
+    .action-btn__leave-label {
+      display: none;
+    }
+
+    &:hover:not(:disabled),
+    &:focus-visible:not(:disabled) {
       background: rgba(255, 255, 255, 0.35);
+
+      .action-btn__joined-label {
+        display: none;
+      }
+
+      .action-btn__leave-label {
+        display: inline;
+      }
     }
 
     &:disabled {

@@ -61,8 +61,13 @@ const groups: SuiteGroup[] = [
   },
 ]
 
-const close = () => {
+const triggerEl = ref<HTMLButtonElement | null>(null)
+
+const close = (opts?: { restoreFocus?: boolean }) => {
   open.value = false
+  if (opts?.restoreFocus !== false) {
+    nextTick(() => triggerEl.value?.focus())
+  }
 }
 
 const toggle = () => {
@@ -72,16 +77,26 @@ const toggle = () => {
 const onDocPointer = (e: PointerEvent) => {
   if (!open.value || !rootEl.value) return
   if (e.target instanceof Node && rootEl.value.contains(e.target)) return
-  close()
+  close({ restoreFocus: false })
 }
 
 const onKey = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') close()
+  if (e.defaultPrevented) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    close()
+  }
 }
 
-onMounted(() => {
-  document.addEventListener('pointerdown', onDocPointer)
-  document.addEventListener('keydown', onKey)
+watch(open, (isOpen) => {
+  if (typeof document === 'undefined') return
+  if (isOpen) {
+    document.addEventListener('pointerdown', onDocPointer)
+    document.addEventListener('keydown', onKey)
+  } else {
+    document.removeEventListener('pointerdown', onDocPointer)
+    document.removeEventListener('keydown', onKey)
+  }
 })
 
 onUnmounted(() => {
@@ -98,10 +113,11 @@ onUnmounted(() => {
     aria-label="ibm.io tools"
   >
     <button
+      ref="triggerEl"
       type="button"
       class="suite-menu__btn"
       :aria-expanded="open"
-      aria-haspopup="true"
+      aria-haspopup="dialog"
       aria-controls="neoSuitePanel"
       aria-label="Tools"
       title="Tools"
@@ -140,7 +156,8 @@ onUnmounted(() => {
               :aria-current="tool.current ? 'page' : undefined"
               :target="tool.current ? undefined : '_blank'"
               :rel="tool.current ? undefined : 'noopener noreferrer'"
-              @click="close"
+              :aria-label="tool.current ? tool.label : `${tool.label} (opens in new tab)`"
+              @click="close({ restoreFocus: false })"
             >
               <span class="suite-menu__tile-label">{{ tool.label }}</span>
               <span class="suite-menu__tile-blurb">{{ tool.blurb }}</span>
@@ -154,7 +171,8 @@ onUnmounted(() => {
         href="https://ibm.io/tools/"
         target="_blank"
         rel="noopener noreferrer"
-        @click="close"
+        aria-label="All tools (opens in new tab)"
+        @click="close({ restoreFocus: false })"
       >
         all tools
       </a>
@@ -167,7 +185,7 @@ onUnmounted(() => {
   position: fixed;
   right: max(10px, env(safe-area-inset-right));
   // Above mobile bottom nav (+ leave-a-note sits on the left)
-  bottom: max(4.5rem, calc(env(safe-area-inset-bottom) + 3.75rem));
+  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
   z-index: 90;
   display: flex;
   flex-direction: column-reverse;
@@ -200,7 +218,7 @@ onUnmounted(() => {
   background: transparent;
   color: inherit;
   cursor: pointer;
-  opacity: 0.42;
+  opacity: 0.72;
   transition: opacity 0.2s ease, color 0.2s ease, background 0.2s ease;
   touch-action: manipulation;
 
@@ -260,11 +278,10 @@ onUnmounted(() => {
 
 .suite-menu__group-label {
   display: block;
-  font-size: 0.5625rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--neo-text-muted);
-  opacity: 0.75;
   padding: 2px 4px 6px;
 }
 
@@ -290,12 +307,18 @@ onUnmounted(() => {
   border-radius: 2px;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 
-  &:hover,
+  &:hover {
+    color: var(--neo-text-primary);
+    background: var(--neo-bg-hover);
+    border-color: color-mix(in srgb, var(--neo-accent) 45%, transparent);
+  }
+
   &:focus-visible {
     color: var(--neo-text-primary);
     background: var(--neo-bg-hover);
     border-color: color-mix(in srgb, var(--neo-accent) 45%, transparent);
-    outline: none;
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
   }
 
   &.is-current {
@@ -328,10 +351,14 @@ onUnmounted(() => {
   color: var(--neo-text-muted);
   border-top: 1px solid var(--neo-border-color);
 
-  &:hover,
+  &:hover {
+    color: var(--neo-accent);
+  }
+
   &:focus-visible {
     color: var(--neo-accent);
-    outline: none;
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
   }
 }
 </style>

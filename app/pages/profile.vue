@@ -25,6 +25,9 @@ import {
   normalizeFieldKey,
   readPresenceDraft,
 } from '~/utils/profileSources'
+import { createRaceGuard } from '~/composables/useRace'
+import { mapErrorToMessage } from '~/utils/friendlyError'
+import { useToastStore } from '~/stores/toast'
 
 const INTERNAL_FIELD_NAMES = new Set([
   'neospace_columns',
@@ -39,9 +42,12 @@ const profileStore = useProfileStore()
 const instancesStore = useInstancesStore()
 const themeStore = useThemeStore()
 const composeSheet = useComposeSheetStore()
+const toastStore = useToastStore()
 const { open: openAccountSwitcher } = useAccountSwitcher()
 const route = useRoute()
 const router = useRouter()
+const profileRace = createRaceGuard()
+const statusesRace = createRaceGuard()
 
 const canSwitchAccounts = computed(
   () =>
@@ -140,6 +146,12 @@ const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void 
 const relationship = ref<mastodon.v1.Relationship | null>(null)
 const isFollowLoading = ref(false)
 const profileTab = ref<'posts' | 'replies' | 'media' | 'reposts' | 'insights'>('posts')
+const profileTabDefs = [
+  { id: 'posts', label: 'Posts' },
+  { id: 'replies', label: 'Replies' },
+  { id: 'media', label: 'Media' },
+  { id: 'reposts', label: 'Reposts' },
+]
 
 // File input refs
 const avatarInput = ref<HTMLInputElement | null>(null)
@@ -183,8 +195,7 @@ const tabFetchOpts = computed(() => {
 const visibleStatuses = computed(() => {
   const list = profileStore.statuses
   if (profileTab.value === 'replies') {
-    const replies = list.filter((s) => !!s.inReplyToId)
-    return replies.length ? replies : list
+    return list.filter((s) => !!s.inReplyToId)
   }
   if (profileTab.value === 'reposts') {
     return list.filter((s) => !!s.reblog)
@@ -195,19 +206,25 @@ const visibleStatuses = computed(() => {
   return list.filter((s) => !s.reblog)
 })
 
+const optsForTab = (tab: typeof profileTab.value) => {
+  if (tab === 'media') return { onlyMedia: true, excludeReplies: true }
+  if (tab === 'replies') return { excludeReplies: false, onlyMedia: false }
+  return { excludeReplies: true, onlyMedia: false }
+}
+
+const fetchStatusesGuarded = async (refresh: boolean, opts: { excludeReplies?: boolean; onlyMedia?: boolean }) => {
+  const ticket = statusesRace.next()
+  await profileStore.fetchStatuses(refresh, opts)
+  return ticket.isCurrent()
+}
+
 const setProfileTab = async (
   tab: 'posts' | 'replies' | 'media' | 'reposts' | 'insights',
 ) => {
   if (profileTab.value === tab) return
   profileTab.value = tab
   if (tab === 'insights') return
-  const opts =
-    tab === 'media'
-      ? { onlyMedia: true, excludeReplies: true }
-      : tab === 'replies'
-        ? { excludeReplies: false, onlyMedia: false }
-        : { excludeReplies: true, onlyMedia: false }
-  await profileStore.fetchStatuses(true, opts)
+  await fetchStatusesGuarded(true, optsForTab(tab))
 }
 
 const shareProfile = async () => {
@@ -248,6 +265,8 @@ const messageUser = async () => {
 }
 
 async function loadProfileFromRoute() {
+  const ticket = profileRace.next()
+  relationship.value = null
   const userParam = route.query.user
   const username = typeof userParam === 'string' ? userParam : undefined
 
@@ -256,17 +275,23 @@ async function loadProfileFromRoute() {
   } else {
     await profileStore.fetchProfile()
   }
+  if (!ticket.isCurrent()) return
 
   profileTab.value = 'posts'
 
   if (!profileStore.isOwnProfile) {
-    relationship.value = await profileStore.getRelationship()
+    const rel = await profileStore.getRelationship()
+    if (!ticket.isCurrent()) return
+    relationship.value = rel
   } else {
     relationship.value = null
   }
 
-  if (profileStore.profileCustomCSS && themeStore.isChaosMode) {
+  if (profileStore.profileCustomCSS && themeStore.isChaosMode && !themeStore.isSafeMode()) {
     themeStore.setUserCustomCSS(profileStore.profileCustomCSS)
+  } else if (profileStore.isOwnProfile && themeStore.isChaosMode) {
+    // Restore viewer CSS when leaving someone else's profile
+    themeStore.setUserCustomCSS(profileStore.profileCustomCSS || themeStore.userCustomCSS)
   }
 }
 
@@ -288,7 +313,7 @@ onMounted(async () => {
 })
 
 watch(
-  () => route.fullPath,
+  () => route.query.user,
   async () => {
     if (!profileRouteReady.value || route.path !== '/profile') return
 
@@ -301,17 +326,36 @@ watch(
 
 // Cleanup
 onUnmounted(() => {
+  profileRace.abort()
+  statusesRace.abort()
   profileStore.clear()
+})
+
+const followLabel = computed(() => {
+  if (relationship.value?.following) return 'Following'
+  if (relationship.value?.requested) return 'Requested'
+  return 'Follow'
 })
 
 const handleFollow = async () => {
   isFollowLoading.value = true
+  const prev = relationship.value
   try {
-    if (relationship.value?.following) {
+    if (relationship.value?.following || relationship.value?.requested) {
       relationship.value = await profileStore.unfollowUser() || null
     } else {
+      // Optimistic “Following” / “Requested” until the server answers
+      relationship.value = {
+        ...(relationship.value || ({} as mastodon.v1.Relationship)),
+        following: true,
+        requested: false,
+      } as mastodon.v1.Relationship
       relationship.value = await profileStore.followUser() || null
     }
+  } catch (e) {
+    relationship.value = prev
+    const friendly = mapErrorToMessage(e)
+    toastStore.show({ message: friendly.detail || friendly.title, duration: 4200 })
   } finally {
     isFollowLoading.value = false
   }
@@ -332,16 +376,23 @@ const handleHeaderChange = (event: Event) => {
 }
 
 const handleSaveProfile = async () => {
+  const prevFields = profileStore.editForm.fields.map((f) => ({ ...f }))
   try {
     profileStore.editForm.fields = mergePresenceIntoFields(
-      profileStore.editForm.fields,
+      prevFields,
       presenceDraft.value,
     )
     await profileStore.updateProfile()
   } catch {
-    // Error is handled in store
+    profileStore.editForm.fields = prevFields
+    // saveError is set in the store — keep the form open
   }
 }
+
+const profileErrorFriendly = computed(() => {
+  if (!profileStore.error) return null
+  return mapErrorToMessage(new Error(profileStore.error))
+})
 
 const triggerAvatarUpload = () => {
   avatarInput.value?.click()
@@ -421,10 +472,20 @@ useHead({
     </div>
 
     <!-- Error State -->
-    <div v-else-if="profileStore.error" class="profile-error neo-card">
-      <span>⚠️</span>
-      <p>{{ profileStore.error }}</p>
-      <NuxtLink to="/" class="neo-btn neo-btn--primary">Go Home</NuxtLink>
+    <div v-else-if="profileStore.error" class="profile-error neo-card" role="alert">
+      <p class="profile-error__title">{{ profileErrorFriendly?.title || 'Couldn’t load profile' }}</p>
+      <p>{{ profileErrorFriendly?.detail || profileStore.error }}</p>
+      <div class="profile-error__actions">
+        <button
+          v-if="profileErrorFriendly?.retryable !== false"
+          type="button"
+          class="neo-btn neo-btn--primary"
+          @click="loadProfileFromRoute"
+        >
+          Retry
+        </button>
+        <NuxtLink to="/" class="neo-btn neo-btn--secondary">Go Home</NuxtLink>
+      </div>
     </div>
 
     <!-- Profile Content -->
@@ -594,6 +655,9 @@ useHead({
         <div class="profile-cta">
           <template v-if="profileStore.isOwnProfile">
             <template v-if="profileStore.isEditing">
+              <p v-if="profileStore.saveError" class="profile-save-error" role="alert">
+                {{ profileStore.saveError }}
+              </p>
               <button
                 type="button"
                 class="neo-btn neo-btn--primary profile-cta__btn"
@@ -631,11 +695,12 @@ useHead({
             <button
               type="button"
               class="neo-btn profile-cta__btn"
-              :class="relationship?.following ? 'neo-btn--secondary' : 'neo-btn--primary'"
+              :class="relationship?.following || relationship?.requested ? 'neo-btn--secondary' : 'neo-btn--primary'"
               :disabled="isFollowLoading"
+              :aria-pressed="!!(relationship?.following || relationship?.requested)"
               @click="handleFollow"
             >
-              {{ relationship?.following ? 'Following' : 'Follow' }}
+              {{ followLabel }}
             </button>
             <button
               type="button"
@@ -734,118 +799,92 @@ useHead({
         </div>
       </section>
 
-      <nav class="profile-tabs" aria-label="Profile sections" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          class="profile-tabs__tab"
-          :class="{ 'profile-tabs__tab--active': profileTab === 'posts' }"
-          :aria-selected="profileTab === 'posts'"
-          @click="setProfileTab('posts')"
-        >
-          Posts
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="profile-tabs__tab"
-          :class="{ 'profile-tabs__tab--active': profileTab === 'replies' }"
-          :aria-selected="profileTab === 'replies'"
-          @click="setProfileTab('replies')"
-        >
-          Replies
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="profile-tabs__tab"
-          :class="{ 'profile-tabs__tab--active': profileTab === 'media' }"
-          :aria-selected="profileTab === 'media'"
-          @click="setProfileTab('media')"
-        >
-          Media
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="profile-tabs__tab"
-          :class="{ 'profile-tabs__tab--active': profileTab === 'reposts' }"
-          :aria-selected="profileTab === 'reposts'"
-          @click="setProfileTab('reposts')"
-        >
-          Reposts
-        </button>
-      </nav>
-
-      <ProfileInsights
-        v-if="profileTab === 'insights' && profileStore.isOwnProfile && profileStore.viewedProfile"
-        :account="profileStore.viewedProfile"
+      <NeoTabs
+        class="profile-tabs"
+        :tabs="profileTabDefs"
+        :model-value="profileTab === 'insights' ? 'posts' : profileTab"
+        :panels="false"
+        controls-id="profile-tab-panel"
+        @update:model-value="setProfileTab($event as 'posts' | 'replies' | 'media' | 'reposts')"
       />
 
-      <template v-else>
-        <button
-          v-if="profileStore.isOwnProfile && profileTab === 'posts'"
-          type="button"
-          class="profile-compose"
-          @click="openCompose"
-        >
-          <img
-            :src="profileStore.viewedProfile.avatar"
-            alt=""
-            class="profile-compose__avatar"
-            width="36"
-            height="36"
-          />
-          <span class="profile-compose__placeholder">What's new?</span>
-          <span class="profile-compose__post">Post</span>
-        </button>
+      <div id="profile-tab-panel">
+        <ProfileInsights
+          v-if="profileTab === 'insights' && profileStore.isOwnProfile && profileStore.viewedProfile"
+          :account="profileStore.viewedProfile"
+        />
 
-        <section v-if="profileStore.pinnedStatuses.length && profileTab === 'posts'" class="profile-pinned">
-          <RealPostCard
-            v-for="status in profileStore.pinnedStatuses"
-            :key="'pin-' + status.id"
-            :status="status"
-          />
-        </section>
+        <template v-else>
+          <button
+            v-if="profileStore.isOwnProfile && profileTab === 'posts'"
+            type="button"
+            class="profile-compose"
+            @click="openCompose"
+          >
+            <img
+              :src="profileStore.viewedProfile.avatar"
+              alt=""
+              class="profile-compose__avatar"
+              width="36"
+              height="36"
+            />
+            <span class="profile-compose__placeholder">What's new?</span>
+            <span class="profile-compose__post">Post</span>
+          </button>
 
-        <section class="profile-posts-section">
-          <div v-if="profileStore.isLoadingStatuses && !visibleStatuses.length" class="profile-posts-loading" aria-busy="true">
-            <FunLoader fill label="Loading posts" />
-          </div>
-
-          <div v-else-if="visibleStatuses.length" class="profile-posts">
+          <section v-if="profileStore.pinnedStatuses.length && profileTab === 'posts'" class="profile-pinned">
             <RealPostCard
-              v-for="status in visibleStatuses"
-              :key="status.id"
+              v-for="status in profileStore.pinnedStatuses"
+              :key="'pin-' + status.id"
               :status="status"
             />
+          </section>
+
+          <section class="profile-posts-section">
+            <div v-if="profileStore.isLoadingStatuses && !visibleStatuses.length" class="profile-posts-loading" aria-busy="true">
+              <FunLoader fill label="Loading posts" />
+            </div>
+
+            <div v-else-if="visibleStatuses.length" class="profile-posts">
+              <RealPostCard
+                v-for="status in visibleStatuses"
+                :key="status.id"
+                :status="status"
+              />
+            </div>
+
+            <div v-else class="profile-posts-empty">
+              <p>
+                {{
+                  profileTab === 'media'
+                    ? 'No media yet.'
+                    : profileTab === 'replies'
+                      ? 'No replies yet.'
+                      : profileTab === 'reposts'
+                        ? 'No reposts yet.'
+                        : 'No posts yet.'
+                }}
+              </p>
+            </div>
 
             <button
-              v-if="profileStore.hasMoreStatuses"
+              v-if="profileStore.hasMoreStatuses && !profileStore.isLoadingStatuses"
               type="button"
               class="neo-btn neo-btn--secondary profile-load-more"
-              :disabled="profileStore.isLoadingStatuses"
               @click="profileStore.fetchStatuses(false, tabFetchOpts)"
             >
-              {{ profileStore.isLoadingStatuses ? 'Loading…' : 'Load more' }}
+              Load more
             </button>
-          </div>
-
-          <div v-else class="profile-posts-empty">
-            <p>
-              {{
-                profileTab === 'media'
-                  ? 'No media yet.'
-                  : profileTab === 'replies'
-                    ? 'No replies yet.'
-                    : profileTab === 'reposts'
-                      ? 'No reposts yet.'
-                      : 'No posts yet.'
-              }}
+            <p
+              v-else-if="profileStore.hasMoreStatuses && profileStore.isLoadingStatuses"
+              class="profile-load-more profile-load-more--busy"
+              aria-live="polite"
+            >
+              Loading…
             </p>
-          </div>
-        </section>
-      </template>
+          </section>
+        </template>
+      </div>
     </template>
   </div>
 </template>
@@ -906,6 +945,29 @@ useHead({
     color: var(--neo-text-muted);
     font-size: 1rem;
   }
+}
+
+.profile-error__title {
+  font-weight: 600;
+  color: var(--neo-text-primary);
+  margin: 0;
+}
+
+.profile-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.profile-save-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--neo-danger) 12%, transparent);
+  color: var(--neo-danger);
+  font-size: 0.875rem;
 }
 
 .profile-loading__spinner {
@@ -1330,8 +1392,6 @@ useHead({
 }
 
 .profile-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--neo-border-color);
   margin: 0.75rem 0 0;
   position: sticky;
   top: 0;
@@ -1341,37 +1401,46 @@ useHead({
   @media (max-width: 1023px) {
     top: 52px;
   }
-}
 
-.profile-tabs__tab {
-  flex: 1;
-  height: 48px;
-  border: none;
-  background: transparent;
-  color: var(--neo-text-muted);
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  cursor: pointer;
-  position: relative;
-
-  &--active {
-    color: var(--neo-text-primary);
-
-    &::after {
-      content: '';
-      position: absolute;
-      left: 20%;
-      right: 20%;
-      bottom: 0;
-      height: 2px;
-      border-radius: 2px 2px 0 0;
-      background: var(--neo-text-primary);
-    }
+  :deep(.neo-tabs__list) {
+    display: flex;
+    border-bottom: 1px solid var(--neo-border-color);
+    gap: 0;
   }
 
-  &:hover:not(.profile-tabs__tab--active) {
-    color: var(--neo-text-secondary);
+  :deep(.neo-tabs__tab) {
+    flex: 1;
+    height: 48px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--neo-text-muted);
+    font: inherit;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    box-shadow: none;
+    position: relative;
+
+    &[aria-selected='true'] {
+      color: var(--neo-text-primary);
+      box-shadow: none;
+
+      &::after {
+        content: '';
+        position: absolute;
+        left: 20%;
+        right: 20%;
+        bottom: 0;
+        height: 2px;
+        border-radius: 2px 2px 0 0;
+        background: var(--neo-text-primary);
+      }
+    }
+
+    &:hover:not([aria-selected='true']) {
+      color: var(--neo-text-secondary);
+      background: transparent;
+    }
   }
 }
 

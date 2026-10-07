@@ -292,8 +292,9 @@ export function nextLine(current: NeoLineId): NeoLineId {
 
 export function resolveTheme(theme: NeoThemeId): Exclude<NeoThemeId, 'auto'> {
   if (theme !== 'auto') return theme
-  if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark'
+  if (typeof window !== 'undefined') {
+    if (window.matchMedia('(prefers-contrast: more)').matches) return 'contrast'
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
   }
   return 'light'
 }

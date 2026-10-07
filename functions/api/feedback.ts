@@ -17,7 +17,11 @@ interface PagesContext {
 const GITHUB_REPO = 'mhsenkow/neospace'
 const UA = 'NeoSpace-Feedback/1.0'
 
-/** Feedback submissions per IP per hour */
+/**
+ * Feedback submissions per IP per hour (in-isolate only).
+ * Deploy a Cloudflare WAF custom rate-limit rule (or KV/DO counter) for
+ * global enforcement — this Map is per-colo/isolate and is a soft dampener.
+ */
 const RATE_LIMIT = 5
 const RATE_WINDOW_MS = 60 * 60 * 1000
 
@@ -87,9 +91,14 @@ export const onRequestPost = async (context: PagesContext) => {
   }
 
   const title = (payload.title || 'NeoSpace feedback').trim().slice(0, 200)
-  // Escape @mentions so public issues don't spam random accounts
-  const escapeMd = (s: string) => s.replace(/(^|[^a-zA-Z0-9_])@/g, '$1&#64;')
-  let body = escapeMd((payload.body || '(no description)').trim()).slice(0, 8_000)
+  // Neutralize @mentions / issue refs so public issues don't spam or close tickets
+  const escapeMd = (s: string) =>
+    s
+      .replace(/(^|[^a-zA-Z0-9_])@/g, '$1&#64;')
+      .replace(/(^|[^a-zA-Z0-9_])#(\d+)/g, '$1&#35;$2')
+  const rawBody = escapeMd((payload.body || '(no description)').trim()).slice(0, 8_000)
+  // Fence user text so Markdown can't inject headings / HTML / trackers
+  const fencedBody = ['```text', rawBody.replace(/```/g, "'''"), '```'].join('\n')
   const kind = (payload.kind || 'feedback').trim().slice(0, 40)
 
   // Strip path/query that may include DM / status ids from public issues
@@ -105,14 +114,16 @@ export const onRequestPost = async (context: PagesContext) => {
   }
 
   const meta = [
-    `**Kind:** ${kind}`,
-    pageLabel ? `**Area:** \`${pageLabel}\`` : null,
-    `**Source:** neospace.ibm.io leave-a-note`,
+    '```meta',
+    `kind: ${kind}`,
+    pageLabel ? `area: ${pageLabel}` : null,
+    'source: neospace.ibm.io leave-a-note',
+    '```',
   ]
     .filter(Boolean)
     .join('\n')
 
-  body = `${body}\n\n---\n${meta}`
+  let body = `${fencedBody}\n\n${meta}`
 
   // GitHub issue body soft limit ~65k; keep screenshots small or omit
   const GITHUB_BODY_BUDGET = 60_000

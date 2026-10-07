@@ -4,6 +4,7 @@
  */
 
 import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { useScrollLock } from '~/composables/useScrollLock'
 
 export function useKeyboardViewport(
   active: Ref<boolean> | { value: boolean },
@@ -13,7 +14,8 @@ export function useKeyboardViewport(
   },
 ) {
   const viewportStyle = ref<Record<string, string>>({})
-  let scrollLockY = 0
+  const scrollLock = useScrollLock()
+  let scrollHeld = false
 
   const syncViewport = () => {
     if (typeof window === 'undefined') return
@@ -35,30 +37,13 @@ export function useKeyboardViewport(
     }
   }
 
-  const lockScroll = () => {
-    if (typeof document === 'undefined') return
-    scrollLockY = window.scrollY || 0
-    document.documentElement.style.overflow = 'hidden'
-    document.body.style.overflow = 'hidden'
-    document.body.style.position = 'fixed'
-    document.body.style.inset = '0'
-    document.body.style.width = '100%'
-  }
-
-  const unlockScroll = () => {
-    if (typeof document === 'undefined') return
-    document.documentElement.style.overflow = ''
-    document.body.style.overflow = ''
-    document.body.style.position = ''
-    document.body.style.inset = ''
-    document.body.style.width = ''
-    window.scrollTo(0, scrollLockY)
-  }
-
   const attach = () => {
     if (typeof window === 'undefined') return
     syncViewport()
-    if (opts?.lockScroll) lockScroll()
+    if (opts?.lockScroll && !scrollHeld) {
+      scrollLock.lock()
+      scrollHeld = true
+    }
     window.visualViewport?.addEventListener('resize', syncViewport)
     window.visualViewport?.addEventListener('scroll', syncViewport)
     window.addEventListener('resize', syncViewport)
@@ -66,7 +51,10 @@ export function useKeyboardViewport(
 
   const detach = () => {
     if (typeof window === 'undefined') return
-    if (opts?.lockScroll) unlockScroll()
+    if (scrollHeld) {
+      scrollLock.unlock()
+      scrollHeld = false
+    }
     window.visualViewport?.removeEventListener('resize', syncViewport)
     window.visualViewport?.removeEventListener('scroll', syncViewport)
     window.removeEventListener('resize', syncViewport)
