@@ -1166,15 +1166,16 @@ onUnmounted(() => {
 }
 
 .panel-body--profile {
-  padding-top: 0.65rem;
+  // Flush to the column chrome — match timeline posts, no inset “card shelf”
+  padding: 0;
 }
 
 .profile-peek-strip {
   display: flex;
   gap: 0.4rem;
   overflow-x: auto;
-  padding: 0 0 0.75rem;
-  margin-bottom: 0.15rem;
+  padding: 0.65rem 0.5rem 0.75rem;
+  margin-bottom: 0;
   scrollbar-width: none;
 
   &::-webkit-scrollbar {
@@ -1236,8 +1237,10 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.75rem;
-  padding-bottom: 0.85rem;
-  margin-bottom: 0.35rem;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.75rem 0.5rem 0.85rem;
+  margin: 0;
   border-bottom: 1px solid var(--neo-border-color);
 
   &__avatar {
@@ -1246,6 +1249,7 @@ onUnmounted(() => {
     border-radius: 50%;
     object-fit: cover;
     border: 1px solid var(--neo-border-color);
+    flex-shrink: 0;
   }
 
   &__meta {
@@ -1254,6 +1258,7 @@ onUnmounted(() => {
     align-items: flex-start;
     gap: 0.25rem;
     width: 100%;
+    min-width: 0;
   }
 
   &__name {
@@ -1301,7 +1306,15 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  margin: 0 -0.85rem;
-  padding: 0 0.5rem 0.5rem;
+  margin: 0;
+  padding: 0.5rem;
+  box-sizing: border-box;
+  width: 100%;
+
+  // Same card edges as TimelineColumn posts
+  :deep(.status-card) {
+    border: 1px solid var(--neo-border-color);
+    border-radius: 4px;
+  }
 }
 </style>
