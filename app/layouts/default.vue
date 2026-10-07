@@ -40,6 +40,8 @@ const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
 const router = useRouter()
 const route = useRoute()
+/** Pages may redirect `/messages` → `/messages/`; normalize before route checks. */
+const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 
 const mobileMenuOpen = ref(false)
 
@@ -50,17 +52,6 @@ const SIDEBAR_RAIL_KEY = 'neospace_sidebar_rail'
 const sidebarRail = ref(false)
 const groupsShowAll = ref(false)
 const lookOpen = ref(false)
-
-// Sync rail before first paint of this layout (pre-paint script also sets data-rail)
-if (import.meta.client) {
-  try {
-    const railOn = localStorage.getItem(SIDEBAR_RAIL_KEY) === '1'
-    sidebarRail.value = railOn
-    if (railOn) lookOpen.value = true
-  } catch {
-    /* ignore */
-  }
-}
 const inboxMenuOpen = ref(false)
 const inboxMenuRef = ref<HTMLElement | null>(null)
 const inboxPopoverRef = ref<HTMLElement | null>(null)
@@ -84,7 +75,7 @@ const groupsCanToggle = computed(
     (showSidebarSuggested.value && sidebarSuggestedGroups.value.length > 4),
 )
 const inboxActive = computed(
-  () => route.path === '/messages' || route.path === '/notifications',
+  () => path.value === '/messages' || path.value === '/notifications',
 )
 const inboxBadge = computed(() => messagesBadge.value || notifBadge.value || '')
 
@@ -238,9 +229,11 @@ const openLoomCompose = async () => {
 }
 
 /** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
-const isThreadRoute = computed(() => route.path.startsWith('/status/'))
-const isProfileRoute = computed(() => route.path === '/profile' || route.path.startsWith('/profile/'))
-const isMessagesRoute = computed(() => route.path === '/messages')
+const isThreadRoute = computed(() => path.value.startsWith('/status/'))
+const isProfileRoute = computed(
+  () => path.value === '/profile' || path.value.startsWith('/profile/'),
+)
+const isMessagesRoute = computed(() => path.value === '/messages')
 /** Nested mobile screens — own chrome, no global header/tabs */
 const isMobileSubview = computed(
   () => isThreadRoute.value || isProfileRoute.value || isMessagesRoute.value,
@@ -1269,6 +1262,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     .sidebar__section-title,
     .sidebar__section-action,
     .sidebar__section-hint,
+    .sidebar__look-desc,
     .sidebar__more {
       display: none;
     }
@@ -1514,18 +1508,6 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     color: var(--neo-text-secondary);
   }
 
-  &__section-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-
-    > li {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
-  }
-
   &__micro {
     display: flex;
     flex-direction: column;
@@ -1671,6 +1653,15 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     display: flex;
     flex-direction: column;
     gap: 0.05rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+
+    > li {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
   }
 
   &__row-icon {
@@ -2318,6 +2309,15 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     padding: 0.1rem 0.15rem 0.35rem;
+    list-style: none;
+    margin: 0;
+
+    > li {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      flex: 0 0 auto;
+    }
 
     &::-webkit-scrollbar {
       display: none;
@@ -2367,6 +2367,15 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+
+    > li {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
   }
 
   &__suggest {
@@ -2520,7 +2529,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   min-width: 0;
   width: 100%;
   padding: var(--neo-mobile-chrome-top, 52px) 0.5rem
-    calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px));
+    calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
