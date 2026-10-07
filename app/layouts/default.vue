@@ -50,8 +50,21 @@ const SIDEBAR_RAIL_KEY = 'neospace_sidebar_rail'
 const sidebarRail = ref(false)
 const groupsShowAll = ref(false)
 const lookOpen = ref(false)
+
+// Sync rail before first paint of this layout (pre-paint script also sets data-rail)
+if (import.meta.client) {
+  try {
+    const railOn = localStorage.getItem(SIDEBAR_RAIL_KEY) === '1'
+    sidebarRail.value = railOn
+    if (railOn) lookOpen.value = true
+  } catch {
+    /* ignore */
+  }
+}
 const inboxMenuOpen = ref(false)
 const inboxMenuRef = ref<HTMLElement | null>(null)
+const inboxPopoverRef = ref<HTMLElement | null>(null)
+const inboxMenuStyle = ref<Record<string, string>>({})
 
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
 // Curated picks only — raw server trends live on /groups (Trending tab), not the home rail
@@ -75,6 +88,11 @@ const inboxActive = computed(
 )
 const inboxBadge = computed(() => messagesBadge.value || notifBadge.value || '')
 
+const syncRailAttr = (on: boolean) => {
+  if (typeof document === 'undefined') return
+  document.documentElement.toggleAttribute('data-rail', on)
+}
+
 const loadSidebarRail = () => {
   if (typeof window === 'undefined') return
   try {
@@ -83,6 +101,7 @@ const loadSidebarRail = () => {
   } catch {
     sidebarRail.value = false
   }
+  syncRailAttr(sidebarRail.value)
 }
 
 const toggleSidebarRail = () => {
@@ -90,6 +109,7 @@ const toggleSidebarRail = () => {
   inboxMenuOpen.value = false
   // Rail hides text labels — keep Look cycles reachable as icon buttons
   if (sidebarRail.value) lookOpen.value = true
+  syncRailAttr(sidebarRail.value)
   try {
     localStorage.setItem(SIDEBAR_RAIL_KEY, sidebarRail.value ? '1' : '0')
   } catch {
@@ -97,8 +117,36 @@ const toggleSidebarRail = () => {
   }
 }
 
-const toggleInboxMenu = () => {
+const updateInboxMenuPos = () => {
+  const root = inboxMenuRef.value
+  if (!root) return
+  const btn = root.querySelector('button')
+  const rect = (btn || root).getBoundingClientRect()
+  if (sidebarRail.value) {
+    inboxMenuStyle.value = {
+      position: 'fixed',
+      left: `${Math.round(rect.right + 6)}px`,
+      top: `${Math.round(rect.top)}px`,
+      width: '12.5rem',
+      zIndex: '200',
+    }
+  } else {
+    inboxMenuStyle.value = {
+      position: 'fixed',
+      left: `${Math.round(rect.left)}px`,
+      top: `${Math.round(rect.bottom + 4)}px`,
+      minWidth: `${Math.max(Math.round(rect.width), 180)}px`,
+      zIndex: '200',
+    }
+  }
+}
+
+const toggleInboxMenu = async () => {
   inboxMenuOpen.value = !inboxMenuOpen.value
+  if (inboxMenuOpen.value) {
+    await nextTick()
+    updateInboxMenuPos()
+  }
 }
 
 const closeInboxMenu = () => {
@@ -121,11 +169,13 @@ const openDesktopGroup = (tag: string) => {
 }
 
 const onDocPointerDown = (e: PointerEvent) => {
-  const el = inboxMenuRef.value
-  if (!inboxMenuOpen.value || !el) return
-  if (e.target instanceof Node && !el.contains(e.target)) {
-    closeInboxMenu()
-  }
+  if (!inboxMenuOpen.value) return
+  const t = e.target
+  if (!(t instanceof Node)) return
+  const root = inboxMenuRef.value
+  const pop = inboxPopoverRef.value
+  if ((root && root.contains(t)) || (pop && pop.contains(t))) return
+  closeInboxMenu()
 }
 
 const categoryColor = (category: string) => {
@@ -190,8 +240,11 @@ const openLoomCompose = async () => {
 /** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
 const isThreadRoute = computed(() => route.path.startsWith('/status/'))
 const isProfileRoute = computed(() => route.path === '/profile' || route.path.startsWith('/profile/'))
+const isMessagesRoute = computed(() => route.path === '/messages')
 /** Nested mobile screens — own chrome, no global header/tabs */
-const isMobileSubview = computed(() => isThreadRoute.value || isProfileRoute.value)
+const isMobileSubview = computed(
+  () => isThreadRoute.value || isProfileRoute.value || isMessagesRoute.value,
+)
 const showMobileNav = computed(() => !isMobileSubview.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
 
@@ -261,12 +314,13 @@ onMounted(async () => {
     '--neo-mobile-chrome-top',
     'calc(52px + env(safe-area-inset-top, 0px))',
   )
-  document.documentElement.style.setProperty('--neo-mobile-nav-h', '56px')
+  document.documentElement.style.setProperty('--neo-mobile-nav-h', '64px')
 
   // Loom handoff listener MUST register before initialize() — Loom may postMessage
   // while auth/storage is still loading, and those messages are otherwise lost.
   let loomShareAccepted = false
   const LOOM_READY_ORIGINS = [...LOOM_ORIGINS]
+  const cleanups: Array<() => void> = []
 
   const bufferFromMessage = (raw: unknown): ArrayBuffer | null => {
     if (!raw) return null
@@ -332,17 +386,40 @@ onMounted(async () => {
   pingLoomReady()
   const readyInterval = window.setInterval(pingLoomReady, 400)
   window.setTimeout(() => window.clearInterval(readyInterval), 10000)
-  onUnmounted(() => {
+  cleanups.push(() => {
     window.removeEventListener('message', onLoomMessage)
     window.clearInterval(readyInterval)
   })
 
+  // Register listeners + cleanups synchronously BEFORE any await
+  const mq = window.matchMedia('(prefers-color-scheme: dark)')
+  const onScheme = () => {
+    if (settingsStore.localPreferences.theme === 'auto') applyTheme()
+  }
+  mq.addEventListener?.('change', onScheme)
+  cleanups.push(() => mq.removeEventListener?.('change', onScheme))
+
+  const deskMq = window.matchMedia('(min-width: 1024px)')
+  const onDeskBreakpoint = () => {
+    if (deskMq.matches) closeMobileMenu()
+  }
+  deskMq.addEventListener?.('change', onDeskBreakpoint)
+  cleanups.push(() => deskMq.removeEventListener?.('change', onDeskBreakpoint))
+
+  document.addEventListener('pointerdown', onDocPointerDown)
+  cleanups.push(() => document.removeEventListener('pointerdown', onDocPointerDown))
+
+  onUnmounted(() => {
+    for (const fn of cleanups) fn()
+    conversationsStore.stopLiveRefresh()
+  })
+
+  loadSidebarRail()
+
   await instancesStore.initialize()
   settingsStore.loadLocalPreferences()
   applyTheme()
-  loadSidebarRail()
   void groupsStore.initializeGroups()
-  document.addEventListener('pointerdown', onDocPointerDown)
 
   if (instancesStore.userCustomCSS) {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
@@ -392,18 +469,6 @@ onMounted(async () => {
       }
     }
   }
-
-  const mq = window.matchMedia('(prefers-color-scheme: dark)')
-  const onScheme = () => {
-    if (settingsStore.localPreferences.theme === 'auto') applyTheme()
-  }
-  mq.addEventListener?.('change', onScheme)
-  onUnmounted(() => mq.removeEventListener?.('change', onScheme))
-})
-
-onUnmounted(() => {
-  conversationsStore.stopLiveRefresh()
-  document.removeEventListener('pointerdown', onDocPointerDown)
 })
 
 watch(
@@ -431,25 +496,24 @@ watch(
   },
 )
 
+const closeMobileMenu = () => {
+  mobileMenuOpen.value = false
+}
+
 watch(
-  () => [
-    settingsStore.localPreferences.theme,
-    settingsStore.localPreferences.ui,
-    settingsStore.localPreferences.font,
-    settingsStore.localPreferences.fontSize,
-  ],
-  () => applyTheme(),
+  () => route.fullPath,
+  () => {
+    closeMobileMenu()
+    closeInboxMenu()
+  },
 )
 
 const handleLogout = async () => {
+  closeMobileMenu()
   await instancesStore.logout()
   themeStore.setUserCustomCSS('')
   themeStore.disableChaosMode()
   router.push('/login')
-}
-
-const closeMobileMenu = () => {
-  mobileMenuOpen.value = false
 }
 
 watch(mobileMenuOpen, async (open) => {
@@ -481,12 +545,6 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     }"
   >
     <a href="#main-content" class="skip-link">Skip to content</a>
-
-    <Teleport to="head" v-if="themeStore.isChaosMode && themeStore.safeCustomCSS">
-      <component :is="'style'" id="neospace-chaos-dynamic">
-        {{ themeStore.safeCustomCSS }}
-      </component>
-    </Teleport>
 
     <aside
       class="sidebar"
@@ -604,33 +662,37 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               <span class="sidebar__label">Inbox</span>
               <span v-if="inboxBadge" class="nav-badge" aria-hidden="true">{{ inboxBadge }}</span>
             </button>
-            <div
-              v-if="inboxMenuOpen"
-              class="sidebar__micro"
-              role="menu"
-              aria-label="Inbox"
-            >
-              <button
-                type="button"
-                class="sidebar__micro-item"
-                role="menuitem"
-                :class="{ 'sidebar__micro-item--on': route.path === '/messages' }"
-                @click="openDirectMessages"
+            <Teleport to="body">
+              <div
+                v-if="inboxMenuOpen"
+                ref="inboxPopoverRef"
+                class="sidebar__micro sidebar__micro--portal"
+                role="menu"
+                aria-label="Inbox"
+                :style="inboxMenuStyle"
               >
-                <NeoIcon name="message" :size="16" :stroke="1.75" />
-                <span>Direct messages</span>
-              </button>
-              <button
-                type="button"
-                class="sidebar__micro-item"
-                role="menuitem"
-                :class="{ 'sidebar__micro-item--on': route.path === '/notifications' && route.query.filter === 'mention' }"
-                @click="openMentions"
-              >
-                <NeoIcon name="mention" :size="16" :stroke="1.75" />
-                <span>Mentions</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  class="sidebar__micro-item"
+                  role="menuitem"
+                  :class="{ 'sidebar__micro-item--on': route.path === '/messages' }"
+                  @click="openDirectMessages"
+                >
+                  <NeoIcon name="message" :size="16" :stroke="1.75" />
+                  <span>Direct messages</span>
+                </button>
+                <button
+                  type="button"
+                  class="sidebar__micro-item"
+                  role="menuitem"
+                  :class="{ 'sidebar__micro-item--on': route.path === '/notifications' && route.query.filter === 'mention' }"
+                  @click="openMentions"
+                >
+                  <NeoIcon name="mention" :size="16" :stroke="1.75" />
+                  <span>Mentions</span>
+                </button>
+              </div>
+            </Teleport>
           </div>
 
           <NuxtLink
@@ -655,44 +717,44 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             <NuxtLink to="/groups" class="sidebar__section-action" title="All groups">All</NuxtLink>
           </div>
 
-          <div v-if="visibleJoinedGroups.length" class="sidebar__section-list" role="list">
-            <button
-              v-for="group in visibleJoinedGroups"
-              :key="`joined-${group.tag}`"
-              type="button"
-              class="sidebar__row"
-              role="listitem"
-              :title="group.name"
-              @click="openDesktopGroup(group.tag)"
-            >
-              <span
-                class="sidebar__row-icon"
-                :style="{ background: categoryColor(group.category) + '22' }"
-                aria-hidden="true"
-              >{{ group.icon }}</span>
-              <span class="sidebar__label">{{ group.name }}</span>
-            </button>
-          </div>
+          <ul v-if="visibleJoinedGroups.length" class="sidebar__section-list">
+            <li v-for="group in visibleJoinedGroups" :key="`joined-${group.tag}`">
+              <button
+                type="button"
+                class="sidebar__row"
+                :title="group.name"
+                @click="openDesktopGroup(group.tag)"
+              >
+                <span
+                  class="sidebar__row-icon"
+                  :style="{ background: categoryColor(group.category) + '22' }"
+                  aria-hidden="true"
+                >{{ group.icon }}</span>
+                <span class="sidebar__label">{{ group.name }}</span>
+              </button>
+            </li>
+          </ul>
 
-          <div v-if="showSidebarSuggested" class="sidebar__section-list" role="list">
-            <p v-if="!visibleJoinedGroups.length" class="sidebar__section-hint">Suggested</p>
-            <button
-              v-for="group in visibleSuggestedGroups"
-              :key="`suggest-${group.tag}`"
-              type="button"
-              class="sidebar__row"
-              role="listitem"
-              :title="group.name"
-              @click="openDesktopGroup(group.tag)"
-            >
-              <span
-                class="sidebar__row-icon"
-                :style="{ background: categoryColor(group.category) + '22' }"
-                aria-hidden="true"
-              >{{ group.icon }}</span>
-              <span class="sidebar__label">{{ group.name }}</span>
-            </button>
-          </div>
+          <ul v-if="showSidebarSuggested" class="sidebar__section-list">
+            <li v-if="!visibleJoinedGroups.length" class="sidebar__section-hint-li">
+              <p class="sidebar__section-hint">Suggested</p>
+            </li>
+            <li v-for="group in visibleSuggestedGroups" :key="`suggest-${group.tag}`">
+              <button
+                type="button"
+                class="sidebar__row"
+                :title="group.name"
+                @click="openDesktopGroup(group.tag)"
+              >
+                <span
+                  class="sidebar__row-icon"
+                  :style="{ background: categoryColor(group.category) + '22' }"
+                  aria-hidden="true"
+                >{{ group.icon }}</span>
+                <span class="sidebar__label">{{ group.name }}</span>
+              </button>
+            </li>
+          </ul>
 
           <button
             v-if="groupsCanToggle"
@@ -735,13 +797,17 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
               type="button"
               class="sidebar__section-action"
               :aria-expanded="lookOpen"
+              aria-controls="sidebar-look-controls"
               @click="lookOpen = !lookOpen"
             >
               {{ lookOpen ? 'Hide' : 'Try' }}
             </button>
           </div>
+          <p v-if="!lookOpen" class="sidebar__look-desc">
+            Theme, chrome, corners, density, lines.
+          </p>
 
-          <div v-show="lookOpen" class="sidebar__section-list">
+          <div v-show="lookOpen" id="sidebar-look-controls" class="sidebar__section-list">
             <button
               type="button"
               class="sidebar__row"
@@ -868,7 +934,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         <button
           class="mobile-header__btn"
           @click="cycleTheme"
-          :aria-label="`Theme ${currentThemeLabel}`"
+          aria-label="Theme"
           type="button"
           :title="`Theme: ${currentThemeLabel}`"
         >
@@ -956,51 +1022,49 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
                 See all
               </NuxtLink>
             </div>
-            <div class="mobile-sidebar__group-chips" role="list">
-              <button
-                v-for="group in sidebarJoinedGroups"
-                :key="group.tag"
-                type="button"
-                class="mobile-sidebar__group-chip"
-                role="listitem"
-                @click="openGroupFromMenu(group.tag)"
-              >
-                <span
-                  class="mobile-sidebar__group-icon"
-                  :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+            <ul class="mobile-sidebar__group-chips">
+              <li v-for="group in sidebarJoinedGroups" :key="group.tag">
+                <button
+                  type="button"
+                  class="mobile-sidebar__group-chip"
+                  @click="openGroupFromMenu(group.tag)"
                 >
-                  {{ group.icon }}
-                </span>
-                <span class="mobile-sidebar__group-name">{{ group.name }}</span>
-              </button>
-            </div>
+                  <span
+                    class="mobile-sidebar__group-icon"
+                    :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+                  >
+                    {{ group.icon }}
+                  </span>
+                  <span class="mobile-sidebar__group-name">{{ group.name }}</span>
+                </button>
+              </li>
+            </ul>
           </div>
 
           <div v-if="sidebarSuggestedGroups.length" class="mobile-sidebar__groups-block">
             <div class="mobile-sidebar__groups-head">
               <h2 class="mobile-sidebar__groups-title">Suggested</h2>
             </div>
-            <div class="mobile-sidebar__suggest-list" role="list">
-              <button
-                v-for="group in sidebarSuggestedGroups"
-                :key="`s-${group.tag}`"
-                type="button"
-                class="mobile-sidebar__suggest"
-                role="listitem"
-                @click="openGroupFromMenu(group.tag)"
-              >
-                <span
-                  class="mobile-sidebar__suggest-icon"
-                  :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+            <ul class="mobile-sidebar__suggest-list">
+              <li v-for="group in sidebarSuggestedGroups" :key="`s-${group.tag}`">
+                <button
+                  type="button"
+                  class="mobile-sidebar__suggest"
+                  @click="openGroupFromMenu(group.tag)"
                 >
-                  {{ group.icon }}
-                </span>
-                <span class="mobile-sidebar__suggest-text">
-                  <span class="mobile-sidebar__suggest-name">{{ group.name }}</span>
-                  <span class="mobile-sidebar__suggest-tag">#{{ group.tag }}</span>
-                </span>
-              </button>
-            </div>
+                  <span
+                    class="mobile-sidebar__suggest-icon"
+                    :style="{ backgroundColor: categoryColor(group.category) + '28' }"
+                  >
+                    {{ group.icon }}
+                  </span>
+                  <span class="mobile-sidebar__suggest-text">
+                    <span class="mobile-sidebar__suggest-name">{{ group.name }}</span>
+                    <span class="mobile-sidebar__suggest-tag">#{{ group.tag }}</span>
+                  </span>
+                </button>
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -1048,7 +1112,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     </main>
 
     <!-- Threads-style: Home · Messages · + · Activity · Profile -->
-    <nav v-if="showMobileNav" class="mobile-nav" aria-label="Mobile">
+    <nav v-if="showMobileNav" class="mobile-nav" aria-label="Tabs">
       <NuxtLink
         to="/"
         class="mobile-nav__item"
@@ -1057,6 +1121,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         :aria-current="route.path === '/' ? 'page' : undefined"
       >
         <NeoIcon name="home" :size="22" :stroke="route.path === '/' ? 2 : 1.5" :filled="route.path === '/'" />
+        <span class="mobile-nav__label">Home</span>
       </NuxtLink>
 
       <NuxtLink
@@ -1073,6 +1138,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
           :stroke="route.path === '/messages' ? 2 : 1.5"
           :filled="route.path === '/messages'"
         />
+        <span class="mobile-nav__label">Inbox</span>
         <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
       </NuxtLink>
       <NuxtLink
@@ -1083,6 +1149,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         aria-label="Messages — sign in"
       >
         <NeoIcon name="message" :size="22" :stroke="1.5" />
+        <span class="mobile-nav__label">Inbox</span>
       </NuxtLink>
 
       <button
@@ -1094,6 +1161,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         <span class="mobile-nav__compose-mark">
           <NeoIcon name="plus" :size="22" :stroke="2" />
         </span>
+        <span class="mobile-nav__label">Post</span>
       </button>
 
       <NuxtLink
@@ -1101,10 +1169,16 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         to="/notifications"
         class="mobile-nav__item mobile-nav__item--badge"
         :class="{ active: route.path === '/notifications' }"
-        :aria-label="notifBadge ? `Notifications, ${notifBadge} unread` : 'Notifications'"
+        :aria-label="notifBadge ? `Activity, ${notifBadge} unread` : 'Activity'"
         :aria-current="route.path === '/notifications' ? 'page' : undefined"
       >
-        <NeoIcon name="bell" :size="22" :stroke="route.path === '/notifications' ? 2 : 1.5" />
+        <NeoIcon
+          name="heart"
+          :size="22"
+          :stroke="route.path === '/notifications' ? 2 : 1.5"
+          :filled="route.path === '/notifications' && route.query.filter !== 'mention'"
+        />
+        <span class="mobile-nav__label">Activity</span>
         <span v-if="notifBadge" class="nav-badge" aria-hidden="true">{{ notifBadge }}</span>
       </NuxtLink>
       <NuxtLink
@@ -1116,6 +1190,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         :aria-current="route.path.startsWith('/groups') ? 'page' : undefined"
       >
         <NeoIcon name="users" :size="22" :stroke="route.path.startsWith('/groups') ? 2 : 1.5" />
+        <span class="mobile-nav__label">Groups</span>
       </NuxtLink>
 
       <AccountSwitcher
@@ -1131,6 +1206,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         aria-label="Sign in"
       >
         <NeoIcon name="user" :size="22" :stroke="1.5" />
+        <span class="mobile-nav__label">You</span>
       </NuxtLink>
     </nav>
 
@@ -1140,6 +1216,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     <FeedbackNotes v-if="!isMobileSubview" />
     <LazySettingsModal />
     <InstallAppBanner />
+    <NeoOverlayHost />
   </div>
 </template>
 
@@ -1157,7 +1234,8 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     --neo-sidebar-w: 200px;
   }
 
-  &--rail {
+  &--rail,
+  :global(html[data-rail]) & {
     --neo-sidebar-w: 68px;
   }
 }
@@ -1429,12 +1507,26 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     position: relative;
   }
 
+  &__look-desc {
+    margin: 0 0.7rem 0.35rem;
+    font-size: 0.6875rem;
+    line-height: 1.35;
+    color: var(--neo-text-secondary);
+  }
+
+  &__section-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+
+    > li {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+  }
+
   &__micro {
-    position: absolute;
-    left: 0.5rem;
-    right: 0.5rem;
-    top: calc(100% + 0.2rem);
-    z-index: 20;
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
@@ -1443,6 +1535,11 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     background: var(--neo-bg-card, var(--neo-bg-secondary));
     border: 1px solid var(--neo-border-color);
     box-shadow: 0 10px 28px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
+
+    &--portal {
+      position: fixed;
+      z-index: 200;
+    }
   }
 
   &__micro-item {
@@ -1470,13 +1567,6 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
       background: color-mix(in srgb, var(--neo-bg-hover) 80%, var(--neo-accent) 20%);
       font-weight: 600;
     }
-  }
-
-  .sidebar--rail &__micro {
-    left: calc(100% + 0.4rem);
-    right: auto;
-    top: 0;
-    width: 12.5rem;
   }
 
   &__link,
@@ -1913,11 +2003,11 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   bottom: 0;
   left: 0;
   right: 0;
-  height: calc(56px + env(safe-area-inset-bottom, 0px));
+  height: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px));
   display: flex;
   align-items: flex-start;
   justify-content: space-around;
-  padding: 4px 0.5rem 0;
+  padding: 4px 0.35rem 0;
   padding-bottom: env(safe-area-inset-bottom, 0);
   background: var(--neo-bg-primary);
   border-top: 1px solid var(--neo-border-color);
@@ -1930,11 +2020,14 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
 
   &__item {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    width: 48px;
-    height: 48px;
-    color: var(--neo-text-tertiary);
+    justify-content: flex-start;
+    gap: 2px;
+    width: 52px;
+    min-height: 52px;
+    padding-top: 4px;
+    color: var(--neo-text-secondary);
     text-decoration: none;
     background: transparent;
     border: none;
@@ -1958,8 +2051,21 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     }
   }
 
+  &__label {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
   &__compose {
-    color: var(--neo-text-inverse);
+    color: var(--neo-text-secondary);
+
+    &.active,
+    &:focus-visible {
+      color: var(--neo-accent);
+    }
 
     &:active .mobile-nav__compose-mark {
       transform: scale(0.94);
@@ -1970,8 +2076,8 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 48px;
-    height: 36px;
+    width: 44px;
+    height: 28px;
     border-radius: 10px;
     background: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));

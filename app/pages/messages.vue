@@ -164,48 +164,52 @@ watch(canView, (ok) => {
   }
 })
 
+const goHome = () => {
+  void router.push('/')
+}
+
 useHead({ title: 'Messages | NeoSpace' })
 </script>
 
 <template>
   <div class="messages-page">
-    <header class="messages-header">
-      <div class="messages-header__row">
-        <h1 class="messages-header__title">Messages</h1>
-        <div class="messages-header__tools">
-          <button
-            v-if="canView"
-            type="button"
-            class="neo-btn neo-btn--tertiary neo-btn--icon"
-            title="Refresh"
-            aria-label="Refresh messages"
-            :disabled="conversationsStore.isRefreshing || conversationsStore.isLoading"
-            @click="refreshInbox"
-          >
-            <FunLoader
-              v-if="conversationsStore.isRefreshing"
-              variant="seed"
-              :size="22"
-              label="Refreshing"
-            />
-            <NeoIcon v-else name="refresh" :size="18" :stroke="2" />
-          </button>
-          <button
-            v-if="canView"
-            type="button"
-            class="neo-btn neo-btn--tertiary neo-btn--icon messages-header__new"
-            title="New message"
-            aria-label="New message"
-            @click="startNewMessage"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-        </div>
-      </div>
-      <label v-if="canView && conversationsStore.conversations.length" class="messages-search">
+    <SubviewChrome title="Messages" :back-action="goHome">
+      <template #actions>
+        <button
+          v-if="canView"
+          type="button"
+          class="subview-chrome__btn neo-tip"
+          title="Refresh"
+          aria-label="Refresh messages"
+          :disabled="conversationsStore.isRefreshing || conversationsStore.isLoading"
+          @click="refreshInbox"
+        >
+          <FunLoader
+            v-if="conversationsStore.isRefreshing"
+            variant="seed"
+            :size="22"
+            label="Refreshing"
+          />
+          <NeoIcon v-else name="refresh" :size="18" :stroke="1.75" />
+        </button>
+        <button
+          v-if="canView"
+          type="button"
+          class="subview-chrome__btn neo-tip"
+          title="New message"
+          aria-label="New message"
+          @click="startNewMessage"
+        >
+          <NeoIcon name="plus" :size="18" :stroke="1.75" />
+        </button>
+      </template>
+    </SubviewChrome>
+
+    <div
+      v-if="canView && conversationsStore.conversations.length"
+      class="messages-toolbar"
+    >
+      <label class="messages-search">
         <span class="sr-only">Search messages</span>
         <input
           v-model="searchQuery"
@@ -215,7 +219,7 @@ useHead({ title: 'Messages | NeoSpace' })
           autocomplete="off"
         />
       </label>
-    </header>
+    </div>
 
     <div v-if="!canView" class="messages-state">
       <span class="messages-state__icon"><NeoIcon name="lock" :size="32" :stroke="1.5" /></span>
@@ -405,46 +409,13 @@ useHead({ title: 'Messages | NeoSpace' })
   padding-bottom: 2rem;
 }
 
-.messages-header {
-  padding: 1rem 1rem 0.5rem;
-  border-bottom: 1px solid var(--neo-border-color);
-
-  &__row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-
-  &__tools {
-    display: flex;
-    align-items: center;
-    gap: 0.15rem;
-  }
-
-  &__title {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 650;
-    letter-spacing: -0.03em;
-    color: var(--neo-text-primary);
-  }
-
-  &__new {
-    width: 40px;
-    height: 40px;
-  }
-
-  &__hint {
-    margin: 0.35rem 0 0.75rem;
-    font-size: 0.8125rem;
-    color: var(--neo-text-tertiary);
-  }
+.messages-toolbar {
+  padding: 0.65rem 1rem 0.35rem;
 }
 
 .messages-search {
   display: block;
-  margin: 0 0 0.65rem;
+  margin: 0;
 
   &__input {
     width: 100%;

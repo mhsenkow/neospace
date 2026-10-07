@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Sticky back chrome for focused linear views (profile, thread).
+ * Sticky back chrome for focused linear views (profile, thread, messages).
  * Visible on all breakpoints — Threads-style escape hatch to the prior view.
  */
 
