@@ -141,10 +141,6 @@ const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
 const columnsStore = useColumnsStore()
 
-const openProfileInColumn = (acct: string) => {
-  columnsStore.peekProfileInColumn(props.column.id, acct)
-}
-
 const statuses = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isLoading = ref(false)
 const isLoadingMore = ref(false)
@@ -297,10 +293,17 @@ const closeFeedMenu = (e: MouseEvent) => {
   }
 }
 
+const router = useRouter()
+
 const switchFeed = (type: ColumnFeedType, groupTag?: string) => {
   feedMenuOpen.value = false
   groupsExpanded.value = false
   pendingNew.value = []
+  // Profiles are a full page — don't shrink them into a board column
+  if (type === 'profile') {
+    router.push(instancesStore.isAuthenticated ? '/profile' : '/login')
+    return
+  }
   if (type === props.column.feedType && groupTag === props.column.groupTag) return
   emit('update-feed-type', type, groupTag)
 }
@@ -1034,8 +1037,6 @@ onUnmounted(() => {
             :status="status"
             variant="flip"
             hide-inline-reply
-            column-profile
-            @open-profile="openProfileInColumn"
           />
         </template>
         <TransitionGroup v-else name="post-list">
@@ -1043,8 +1044,6 @@ onUnmounted(() => {
             v-for="status in statuses"
             :key="statusIdentity(status)"
             :status="status"
-            column-profile
-            @open-profile="openProfileInColumn"
           />
         </TransitionGroup>
 

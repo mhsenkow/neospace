@@ -13,21 +13,14 @@ interface Props {
   hideInlineReply?: boolean
   /** flow = list card, flip = full-bleed snap slide */
   variant?: 'flow' | 'flip'
-  /**
-   * Progressive disclosure: open profile in the parent column first
-   * instead of jumping to the full /profile route.
-   */
-  columnProfile?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   hideInlineReply: false,
   variant: 'flow',
-  columnProfile: false,
 })
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
-  'open-profile': [acct: string]
 }>()
 
 const statusStore = useStatusStore()
@@ -36,17 +29,12 @@ const settingsStore = useSettingsStore()
 const composeSheet = useComposeSheetStore()
 const router = useRouter()
 
-/** Column peels first; only leave the board when columnProfile is off. */
-const openProfileInColumn = (acct: string | undefined | null, e?: Event) => {
+/** Profiles always open the full /profile page — not a column peek. */
+const openProfile = (acct: string | undefined | null, e?: Event) => {
   if (!acct) return
   e?.preventDefault()
   e?.stopPropagation()
-  const handle = acct.replace(/^@/, '')
-  if (props.columnProfile) {
-    emit('open-profile', handle)
-    return
-  }
-  router.push({ path: '/profile', query: { user: handle } })
+  router.push({ path: '/profile', query: { user: acct.replace(/^@/, '') } })
 }
 
 const displayStatus = computed(() => props.status.reblog || props.status)
@@ -637,10 +625,10 @@ onUnmounted(() => {
     <div v-if="isReblog && !isFlip" class="status-reblog">
       <NeoIcon name="reblog" :size="14" :stroke="2" />
       <button
-        v-if="rebloggerProfileTo || (columnProfile && reblogger?.acct)"
+        v-if="rebloggerProfileTo || reblogger?.acct"
         type="button"
         class="status-reblog-text status-reblog-text--link"
-        @click="openProfileInColumn(reblogger?.acct, $event)"
+        @click="openProfile(reblogger?.acct, $event)"
       >
         {{ reblogger!.displayName || reblogger!.username }} reposted
       </button>
@@ -653,11 +641,11 @@ onUnmounted(() => {
       <!-- Avatar Column -->
       <div class="status-avatar-col">
         <button
-          v-if="columnProfile || accountProfileTo"
+          v-if="accountProfileTo || displayStatus.account?.acct"
           type="button"
           class="status-avatar-link"
           :aria-label="`Open ${displayStatus.account.displayName || displayStatus.account.username}`"
-          @click="openProfileInColumn(displayStatus.account.acct, $event)"
+          @click="openProfile(displayStatus.account.acct, $event)"
         >
           <img
             :src="displayStatus.account.avatar"
@@ -690,10 +678,10 @@ onUnmounted(() => {
         <!-- Header: username + time + menu -->
         <header class="status-header">
           <button
-            v-if="columnProfile || accountProfileTo"
+            v-if="accountProfileTo || displayStatus.account?.acct"
             type="button"
             class="status-author"
-            @click="openProfileInColumn(displayStatus.account.acct, $event)"
+            @click="openProfile(displayStatus.account.acct, $event)"
           >
             <span class="status-display-name" v-html="safeDisplayName" />
           </button>

@@ -171,12 +171,8 @@ const openFullProfile = () => {
 }
 
 const onFocusClick = () => {
-  // Peek → board focus first; only leave for /profile once already focused
-  if (props.column.profileAcct) {
-    if (!props.focused) {
-      emit('focus')
-      return
-    }
+  // Profile columns jump to the full /profile page — no board "focus" shelf
+  if (props.column.feedType === 'profile') {
     openFullProfile()
     return
   }
@@ -491,10 +487,10 @@ onUnmounted(() => {
       <button
         type="button"
         class="neo-chrome-btn"
-        :class="{ 'neo-chrome-btn--on': focused && !isProfilePeek }"
-        :title="isProfilePeek ? (focused ? 'Open full profile' : 'Focus this view') : focused ? 'Show all views' : 'Focus this view'"
-        :aria-label="isProfilePeek ? (focused ? 'Open full profile' : 'Focus this view') : focused ? 'Show all views' : 'Focus this view'"
-        :aria-pressed="focused"
+        :class="{ 'neo-chrome-btn--on': focused && column.feedType !== 'profile' }"
+        :title="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
+        :aria-label="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
+        :aria-pressed="column.feedType === 'profile' ? undefined : focused"
         @click="onFocusClick"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -578,8 +574,6 @@ onUnmounted(() => {
                 v-for="status in remoteStatuses"
                 :key="status.id"
                 :status="status"
-                column-profile
-                @open-profile="(acct) => columnsStore.peekProfileInColumn(column.id, acct)"
               />
               <button
                 v-if="remoteHasMore"
@@ -681,8 +675,6 @@ onUnmounted(() => {
                 v-for="status in profileStatuses"
                 :key="status.id"
                 :status="status"
-                column-profile
-                @open-profile="(acct) => columnsStore.peekProfileInColumn(column.id, acct)"
               />
               <button
                 v-if="profileHasMore"

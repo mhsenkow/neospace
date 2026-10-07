@@ -306,7 +306,6 @@ useHead({
           :href="websiteFieldUrl"
           target="_blank"
           rel="noopener noreferrer"
-          title="Website"
           aria-label="Website"
         >
           <NeoIcon name="globe" :size="18" :stroke="1.75" />
@@ -317,7 +316,6 @@ useHead({
           :href="instanceProfileUrl"
           target="_blank"
           rel="noopener noreferrer"
-          title="Open on instance"
           aria-label="Open on instance"
         >
           <NeoIcon name="servers" :size="18" :stroke="1.75" />
@@ -326,7 +324,6 @@ useHead({
           v-if="profileStore.viewedProfile"
           type="button"
           class="subview-chrome__btn neo-tip"
-          title="Share profile"
           aria-label="Share profile"
           @click="shareProfile"
         >
@@ -336,7 +333,6 @@ useHead({
           v-if="!profileStore.isOwnProfile && profileStore.viewedProfile && instancesStore.hasAuthenticatedInstance"
           type="button"
           class="subview-chrome__btn neo-tip"
-          title="Message"
           aria-label="Message"
           @click="messageUser"
         >
