@@ -495,7 +495,24 @@ ul, ol {
   color: var(--neo-chrome-fg);
   transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
-  &:hover:not(:disabled) {
+  @media (hover: none), (pointer: coarse) {
+    width: 44px;
+    height: 44px;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    &:hover:not(:disabled) {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-chrome-fg-strong);
+    }
+
+    &--danger:hover:not(:disabled) {
+      background: var(--neo-danger-soft);
+      color: var(--neo-danger);
+    }
+  }
+
+  &:active:not(:disabled) {
     background: var(--neo-bg-tertiary);
     color: var(--neo-chrome-fg-strong);
   }
@@ -503,11 +520,6 @@ ul, ol {
   &:disabled {
     opacity: 0.45;
     cursor: not-allowed;
-  }
-
-  &--danger:hover:not(:disabled) {
-    background: var(--neo-danger-soft);
-    color: var(--neo-danger);
   }
 }
 
@@ -739,12 +751,17 @@ body.chaos-active::after {
   }
 }
 
-// Disable pull-to-refresh and overscroll effects
+// Disable pull-to-refresh, overscroll, and Safari history edge-swipe chaining
 html {
   overscroll-behavior: none;
+  overscroll-behavior-x: none;
   // Avoid iOS text-size inflation in standalone / landscape
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+body {
+  overscroll-behavior-x: none;
 }
 
 // Better tap targets on mobile — chrome controls, not every inline link

@@ -333,7 +333,7 @@ const onFilePicked = async (e: Event) => {
   border: none;
   background: transparent;
   color: var(--neo-text-primary);
-  font-size: 0.9375rem;
+  font-size: max(16px, 1rem);
   line-height: 1.45;
 
   &:focus {

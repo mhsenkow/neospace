@@ -304,10 +304,14 @@ const columnsCanScrollX = () => {
   return el.scrollWidth > el.clientWidth + 2
 }
 
-/** iPad Magic Keyboard / trackpad: map horizontal wheel onto the board scroller */
+/**
+ * iPad Magic Keyboard / trackpad: map horizontal wheel onto the board scroller.
+ * Always claim dominant-horizontal gestures over the board — even at the edges —
+ * so Safari's history back/forward swipe doesn't steal them.
+ */
 const onColumnsWheel = (e: WheelEvent) => {
   const el = columnsContainer.value
-  if (!el || !columnsCanScrollX()) return
+  if (!el) return
 
   let dx = e.deltaX
   let dy = e.deltaY
@@ -327,18 +331,18 @@ const onColumnsWheel = (e: WheelEvent) => {
   // Dominant-horizontal trackpad swipe (iPadOS often sends deltaX here)
   if (Math.abs(dx) < 0.5 || Math.abs(dx) <= Math.abs(dy) * 1.05) return
 
-  const max = el.scrollWidth - el.clientWidth
+  const max = Math.max(0, el.scrollWidth - el.clientWidth)
   const next = Math.max(0, Math.min(max, el.scrollLeft + dx))
-  if (next === el.scrollLeft) return
-
+  // preventDefault even when clamped — blocks Safari history navigation
   e.preventDefault()
-  el.scrollLeft = next
+  if (next !== el.scrollLeft) el.scrollLeft = next
 }
 
 const onCarouselTouchStart = (e: TouchEvent) => {
   if (e.touches.length !== 1) return
   const el = columnsContainer.value
-  if (!el || !columnsCanScrollX()) return
+  // Track even when fully scrolled — horizontal lock still blocks history swipe
+  if (!el) return
   const t = e.touches[0]!
   const target = e.target as HTMLElement | null
   if (target?.closest('input, textarea, select, [contenteditable="true"], .mobile-feed-tabs')) {
@@ -874,8 +878,10 @@ useHead({ title: 'Home | NeoSpace' })
   // Desktop: extend into main-content padding to fill the full viewport
   @media (min-width: 1024px) {
     height: 100vh;
+    height: 100dvh;
     margin: -1.25rem;
     width: calc(100% + 2.5rem);
+    overscroll-behavior-x: none;
   }
 
   @media (min-width: 1200px) {
@@ -928,7 +934,9 @@ useHead({ title: 'Home | NeoSpace' })
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  overscroll-behavior-x: contain;
+  // none (not contain) — stop Safari history swipe at the board edges
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: none;
   -webkit-overflow-scrolling: touch;
   // Let iPad finger + trackpad claim horizontal; nested feeds keep pan-y for vertical
   touch-action: pan-x pan-y;
@@ -1320,6 +1328,11 @@ useHead({ title: 'Home | NeoSpace' })
   width: 36px;
   height: 36px;
   border-radius: 8px;
+
+  @media (hover: none), (pointer: coarse) {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .add-column-menu {

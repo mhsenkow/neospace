@@ -1146,7 +1146,9 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   --neo-sidebar-w: 248px;
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--neo-bg-primary);
+  overscroll-behavior-x: none;
 
   // iPad / small laptop: give the board more horizontal room
   @media (min-width: 1024px) and (max-width: 1199px) {
@@ -2406,12 +2408,14 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
 .main-content {
   flex: 1;
   min-height: 100vh;
+  min-height: 100dvh;
   min-width: 0;
   width: 100%;
   padding: var(--neo-mobile-chrome-top, 52px) 0.5rem
     calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
   background: var(--neo-bg-primary);
+  overscroll-behavior-x: none;
 
   @media (min-width: 600px) {
     padding-left: 1rem;

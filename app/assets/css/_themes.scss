@@ -190,6 +190,11 @@
       background-attachment: scroll;
       background-image: none;
     }
+
+    // iPad landscape is ≥1024 but still paints black mid-scroll with fixed bg
+    @supports (-webkit-touch-callout: none) {
+      background-attachment: scroll;
+    }
   }
 
   .neo-card,
@@ -233,6 +238,10 @@
     @media (max-width: 1023px) {
       background-attachment: scroll;
       background-image: none;
+    }
+
+    @supports (-webkit-touch-callout: none) {
+      background-attachment: scroll;
     }
   }
 

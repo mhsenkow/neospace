@@ -803,7 +803,8 @@ onMounted(() => {
       border: none;
       background: transparent;
       box-shadow: none;
-      font-size: 0.9375rem;
+      // ≥16px absolute — stops iOS/iPad focus zoom (root rem is 15px)
+      font-size: max(16px, 1rem);
       line-height: 1.35;
       resize: none;
       field-sizing: content;
