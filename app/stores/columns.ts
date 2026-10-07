@@ -38,6 +38,26 @@ export type ColumnViewMode = 'flow' | 'flip'
 export const TIMELINE_FEED_TYPES: ColumnFeedType[] = ['home', 'local', 'federated', 'group']
 export const PANEL_FEED_TYPES: ColumnFeedType[] = ['profile', 'search', 'notifications', 'messages']
 
+/** Single source for feed labels (board menus, tabs, TimelineColumn). */
+export const FEED_CATALOG: { type: ColumnFeedType; label: string }[] = [
+  { type: 'home', label: 'For You' },
+  { type: 'local', label: 'Local' },
+  { type: 'federated', label: 'Federated' },
+  { type: 'group', label: 'Group' },
+  { type: 'profile', label: 'Profile' },
+  { type: 'search', label: 'Search' },
+  { type: 'notifications', label: 'Notifications' },
+  { type: 'messages', label: 'Messages' },
+]
+
+export const FEED_LABELS: Record<ColumnFeedType, string> = FEED_CATALOG.reduce(
+  (acc, item) => {
+    acc[item.type] = item.label
+    return acc
+  },
+  {} as Record<ColumnFeedType, string>,
+)
+
 export function isTimelineFeed(type: ColumnFeedType): boolean {
   return type === 'home' || type === 'local' || type === 'federated' || type === 'group'
 }
@@ -144,13 +164,14 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
   const plain = stripHtml(raw)
   if (!plain) return null
   const parts = plain.split('|').map((p) => p.trim()).filter(Boolean)
-  if (!parts.length || parts.length > MAX_COLUMNS) return null
+  if (!parts.length) return null
 
   const columns: ColumnConfig[] = []
   for (const part of parts) {
+    if (columns.length >= MAX_COLUMNS) break
     if (part.startsWith('group:')) {
       const tag = part.slice(6).trim()
-      if (!tag) return null
+      if (!tag) continue
       columns.push({ id: generateId(), feedType: 'group', groupTag: tag })
       continue
     }
@@ -158,7 +179,7 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       columns.push({ id: generateId(), feedType: part as ColumnFeedType })
       continue
     }
-    return null
+    // Skip unknown parts so one bad token doesn't reject the whole layout
   }
   return columns.length ? columns : null
 }
@@ -445,14 +466,39 @@ export const useColumnsStore = defineStore('columns', {
     removeColumn(columnId: string) {
       if (this.columns.length <= 1) return
       const index = this.columns.findIndex((c) => c.id === columnId)
-      if (index !== -1) {
-        this.columns.splice(index, 1)
-        if (this.focusedColumnId === columnId) {
-          this.focusedColumnId = null
-          this.saveDeskLayout()
-        }
-        this.persist()
+      if (index === -1) return
+
+      const removed = { ...this.columns[index]! }
+      const restoredFocus = this.focusedColumnId === columnId
+      this.columns.splice(index, 1)
+      if (restoredFocus) {
+        this.focusedColumnId = null
+        this.saveDeskLayout()
       }
+      this.persist()
+
+      if (typeof window === 'undefined') return
+      void import('./toast').then(({ useToastStore }) => {
+        const label =
+          removed.feedType === 'group' && removed.groupTag
+            ? `#${removed.groupTag}`
+            : FEED_LABELS[removed.feedType] || 'Column'
+        useToastStore().show({
+          message: `${label} removed`,
+          actionLabel: 'Undo',
+          duration: 5000,
+          onAction: () => {
+            if (this.columns.some((c) => c.id === removed.id)) return
+            if (this.columns.length >= MAX_COLUMNS) return
+            this.columns.splice(Math.min(index, this.columns.length), 0, removed)
+            if (restoredFocus) {
+              this.focusedColumnId = removed.id
+              this.saveDeskLayout()
+            }
+            this.persist()
+          },
+        })
+      })
     },
 
     updateColumnFeedType(columnId: string, feedType: ColumnFeedType, groupTag?: string) {

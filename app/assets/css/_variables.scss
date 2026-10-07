@@ -127,6 +127,12 @@ $shadow-dark-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
 $shadow-dark-xl: 0 24px 48px rgba(0, 0, 0, 0.45);
 $shadow-dark-2xl: 0 32px 64px rgba(0, 0, 0, 0.5);
 
+// Chaos gradient button
+$chaos-stop-1: $accent;
+$chaos-stop-2: #8338ec;
+$chaos-stop-3: #3a86ff;
+$chaos-fg: #ffffff;
+
 // Rams motion — decelerate, short, no bounce
 $ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 $ease-in: cubic-bezier(0.4, 0, 1, 1);

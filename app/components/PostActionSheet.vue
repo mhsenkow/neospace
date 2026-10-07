@@ -140,7 +140,7 @@ useFocusTrap(sheetRef, isOpen, {
 }
 
 .action-sheet__item--danger {
-  color: var(--neo-danger, #c44);
+  color: var(--neo-danger);
 }
 
 .action-sheet__label {

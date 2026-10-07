@@ -8,7 +8,7 @@
 import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
-import { useColumnsStore, type ColumnConfig, type ColumnFeedType } from '~/stores/columns'
+import { useColumnsStore, FEED_LABELS, type ColumnConfig, type ColumnFeedType } from '~/stores/columns'
 import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 import { dedupeStatusesByIdentity, statusIdentity, statusListKey } from '~/utils/statusIdentity'
@@ -16,6 +16,7 @@ import { idLess } from '~/utils/compareId'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
 import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
+import { emitComposedStatus, onComposedStatus } from '~/composables/useComposedStatus'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
 const withBrowseOrigin = (
@@ -200,12 +201,6 @@ watch(pendingLabel, (label) => {
   }, 700)
 })
 
-const feedLabels: Record<string, string> = {
-  home: 'For You',
-  local: 'Local',
-  federated: 'Federated',
-}
-
 const canShowHome = computed(() => instancesStore.hasAuthenticatedInstance)
 
 const joinedGroups = computed(() => groupsStore.joinedGroups)
@@ -231,7 +226,7 @@ const feedLabel = computed(() => {
   if (props.column.feedType === 'local') {
     return `Local (${browsingHost.value})`
   }
-  return feedLabels[props.column.feedType] ?? props.column.feedType
+  return FEED_LABELS[props.column.feedType] ?? props.column.feedType
 })
 
 /** Guest browsing only auth-gated hosts (e.g. mastodon.social) with no token */
@@ -330,10 +325,58 @@ const switchFeed = (type: ColumnFeedType, groupTag?: string) => {
   emit('update-feed-type', type, groupTag)
 }
 
+/** Animate TransitionGroup only for short prepend windows (not full refresh). */
+const listMotionActive = ref(false)
+let listMotionTimer: ReturnType<typeof setTimeout> | null = null
+
+const preferReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+const withPrependMotion = (fn: () => void) => {
+  if (preferReducedMotion()) {
+    fn()
+    return
+  }
+  listMotionActive.value = true
+  if (listMotionTimer) clearTimeout(listMotionTimer)
+  fn()
+  listMotionTimer = setTimeout(() => {
+    listMotionActive.value = false
+    listMotionTimer = null
+  }, 280)
+}
+
+const statusHasTag = (status: mastodon.v1.Status, tag: string) => {
+  const needle = tag.toLowerCase()
+  if ((status.tags || []).some((t) => t.name.toLowerCase() === needle)) return true
+  // Fallback when tags aren't populated yet on the create response
+  return new RegExp(`(?:^|\\s)#${needle}\\b`, 'i').test(
+    (status.content || '').replace(/<[^>]*>/g, ' '),
+  )
+}
+
+const acceptsComposedStatus = (status: mastodon.v1.Status) => {
+  if (props.column.feedType === 'home') return true
+  if (props.column.feedType === 'group' && props.column.groupTag) {
+    return statusHasTag(status, props.column.groupTag)
+  }
+  return false
+}
+
+const insertComposedStatus = (status: mastodon.v1.Status) => {
+  if (!acceptsComposedStatus(status)) return
+  const key = statusIdentity(status)
+  if (!key) return
+  if (statuses.value.some((s) => statusIdentity(s) === key)) return
+  withPrependMotion(() => {
+    statuses.value = dedupeStatusesByIdentity([status, ...statuses.value])
+  })
+  pendingNew.value = pendingNew.value.filter((s) => statusIdentity(s) !== key)
+}
+
 const onComposePosted = (status: mastodon.v1.Status) => {
-  if (statuses.value.some((s) => s.id === status.id)) return
-  statuses.value = [status, ...statuses.value]
-  pendingNew.value = pendingNew.value.filter((s) => s.id !== status.id)
+  emitComposedStatus(status)
 }
 
 const onScroll = () => {
@@ -445,7 +488,9 @@ const jumpToNew = () => {
   const seen = new Set(statuses.value.map((s) => statusIdentity(s)))
   const unique = pendingNew.value.filter((s) => !seen.has(statusIdentity(s)))
   if (unique.length) {
-    statuses.value = dedupeStatusesByIdentity([...unique, ...statuses.value])
+    withPrependMotion(() => {
+      statuses.value = dedupeStatusesByIdentity([...unique, ...statuses.value])
+    })
   }
   pendingNew.value = []
   newPostsAnnounce.value = ''
@@ -471,7 +516,9 @@ const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
   if (!newer.length) return
 
   if (isNearTop.value) {
-    statuses.value = dedupeStatusesByIdentity([...newer, ...statuses.value])
+    withPrependMotion(() => {
+      statuses.value = dedupeStatusesByIdentity([...newer, ...statuses.value])
+    })
   } else {
     pendingNew.value = dedupeStatusesByIdentity([...newer, ...pendingNew.value]).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -751,9 +798,12 @@ watch(loadTrigger, (el, prev) => {
 const feedRoot = ref<HTMLElement | null>(null)
 const { onKeydown: onFeedKeydown } = useFeedKeyboard(feedRoot)
 
+let stopComposedListen: (() => void) | null = null
+
 onMounted(() => {
   // Register visibility/polling listeners before any await so unmount mid-fetch can't leak
   document.addEventListener('visibilitychange', onVisibilityChange)
+  stopComposedListen = onComposedStatus(insertComposedStatus)
   startPolling()
 
   nextTick(() => {
@@ -791,6 +841,9 @@ onDeactivated(() => {
 })
 
 onUnmounted(() => {
+  stopComposedListen?.()
+  stopComposedListen = null
+  if (listMotionTimer) clearTimeout(listMotionTimer)
   if (newPostsAnnounceTimer) clearTimeout(newPostsAnnounceTimer)
   if (observer) observer.disconnect()
   document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -1205,7 +1258,7 @@ onUnmounted(() => {
             hide-inline-reply
           />
         </template>
-        <TransitionGroup v-else name="post-list">
+        <TransitionGroup v-else name="post-list" :css="listMotionActive">
           <RealPostCard
             v-for="status in statuses"
             :key="statusListKey(status)"
@@ -1342,7 +1395,7 @@ onUnmounted(() => {
   color: var(--neo-text-inverse);
   background: var(--neo-accent);
   border: 1px solid var(--neo-accent-dark, var(--neo-accent));
-  border-radius: 2px;
+  border-radius: var(--neo-radius-sm);
   cursor: pointer;
   box-shadow: 0 2px 8px color-mix(in srgb, var(--neo-accent) 28%, transparent);
   transition: transform 0.12s ease, background 0.12s ease;
@@ -1372,7 +1425,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.125rem;
   min-width: 0;
-  border-radius: 4px;
+  border-radius: var(--neo-radius-md);
   user-select: none;
 }
 
@@ -1382,7 +1435,7 @@ onUnmounted(() => {
   min-width: 0;
   padding: 0.375rem 0.35rem 0.375rem 0.5rem;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--neo-radius-md);
   background: transparent;
   cursor: pointer;
   transition: background-color var(--neo-transition-fast);
@@ -1397,7 +1450,7 @@ onUnmounted(() => {
 
   :deep(.neo-menu__trigger) {
     padding: 0.375rem 0.5rem 0.375rem 0.25rem;
-    border-radius: 4px;
+    border-radius: var(--neo-radius-md);
     color: var(--neo-chrome-fg);
 
     &:hover {
@@ -1413,7 +1466,7 @@ onUnmounted(() => {
     overflow-y: auto;
     overscroll-behavior: contain;
     background: var(--neo-bg-secondary);
-    border-radius: 4px;
+    border-radius: var(--neo-radius-md);
     box-shadow: var(--neo-shadow-md);
     padding: 0.375rem;
     z-index: var(--neo-z-dropdown, 1000);
@@ -1454,8 +1507,8 @@ onUnmounted(() => {
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--neo-text-secondary);
-    border-radius: 7px;
-    transition: all 0.12s ease;
+    border-radius: var(--neo-radius-lg);
+    transition: background-color 0.12s ease, color 0.12s ease;
     text-decoration: none;
 
     &:hover:not(:disabled) {
@@ -1513,8 +1566,8 @@ onUnmounted(() => {
     color: var(--neo-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    border-radius: 6px;
-    transition: all 0.12s ease;
+    border-radius: var(--neo-radius-lg);
+    transition: background-color 0.12s ease, color 0.12s ease;
 
     &:hover {
       background: var(--neo-bg-tertiary);
@@ -1667,10 +1720,6 @@ onUnmounted(() => {
     gap: 0.5rem;
     margin-top: 0.35rem;
   }
-
-  &__spinner {
-    animation: spin 2s linear infinite;
-  }
 }
 
 .column-retry {
@@ -1679,8 +1728,8 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--neo-text-secondary);
   background: var(--neo-bg-tertiary);
-  border-radius: 8px;
-  transition: all 0.15s ease;
+  border-radius: var(--neo-radius-lg);
+  transition: background-color 0.15s ease, color 0.15s ease;
 
   &:hover {
     background: var(--neo-bg-hover);
@@ -1700,6 +1749,7 @@ onUnmounted(() => {
 }
 
 .column-posts {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
@@ -1710,7 +1760,7 @@ onUnmounted(() => {
     content-visibility: auto;
     contain-intrinsic-size: auto 220px;
     border: 1px solid var(--neo-border-color);
-    border-radius: 4px;
+    border-radius: var(--neo-radius-md);
     transition: border-color var(--neo-transition-fast);
 
     &:hover {
@@ -1773,19 +1823,9 @@ onUnmounted(() => {
 // ========================================
 // Animations
 // ========================================
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
-}
-
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all 0.15s ease;
+  transition: opacity 0.15s ease, transform 0.15s ease;
   transform-origin: top left;
 }
 .dropdown-enter-from,
@@ -1796,7 +1836,7 @@ onUnmounted(() => {
 
 .groups-expand-enter-active,
 .groups-expand-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease, max-height 0.2s ease;
   overflow: hidden;
 }
 .groups-expand-enter-from,
@@ -1809,9 +1849,15 @@ onUnmounted(() => {
   max-height: 300px;
 }
 
-.post-list-enter-active,
+.post-list-enter-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
 .post-list-leave-active {
-  transition: all 0.25s ease;
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
 }
 .post-list-enter-from {
   opacity: 0;
@@ -1819,6 +1865,21 @@ onUnmounted(() => {
 }
 .post-list-leave-to {
   opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-list-enter-active,
+  .post-list-leave-active,
+  .dropdown-enter-active,
+  .dropdown-leave-active,
+  .groups-expand-enter-active,
+  .groups-expand-leave-active,
+  .pill-slide-enter-active,
+  .pill-slide-leave-active,
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none !important;
+  }
 }
 
 .fade-enter-active,

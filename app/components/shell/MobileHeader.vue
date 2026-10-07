@@ -26,7 +26,7 @@ const toggleMenu = () => {
     >
       <NeoIcon name="menu" :size="22" :stroke="1.75" />
     </button>
-    <div class="mobile-header__logo">neospace</div>
+    <NuxtLink to="/" class="mobile-header__logo">neospace</NuxtLink>
   </div>
   <div class="mobile-header__actions">
     <NuxtLink
@@ -119,6 +119,7 @@ const toggleMenu = () => {
     text-transform: lowercase;
     line-height: 1;
     padding-bottom: 1px;
+    text-decoration: none;
   }
 
   &__theme-swatch {

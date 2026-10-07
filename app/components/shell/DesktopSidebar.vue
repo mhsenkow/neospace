@@ -132,10 +132,9 @@ watch(
 </script>
 
 <template>
-<aside
+<div
   class="sidebar"
   :class="{ 'sidebar--rail': sidebarRail }"
-  aria-label="Desktop navigation"
 >
   <div class="sidebar__top">
     <NuxtLink
@@ -178,7 +177,7 @@ watch(
   </div>
 
   <div class="sidebar__scroll">
-    <nav class="sidebar__nav" aria-label="Primary">
+    <nav class="sidebar__nav" aria-label="Main menu">
       <div class="sidebar__home">
         <NuxtLink
           v-if="!sidebarRail"
@@ -480,7 +479,7 @@ watch(
       <NeoIcon name="log-in" :size="20" :stroke="1.5" />
     </NuxtLink>
   </div>
-</aside>
+</div>
 </template>
 
 <style lang="scss" scoped>

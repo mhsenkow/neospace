@@ -12,6 +12,7 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
 import { useShellAppearance } from '~/composables/useShellAppearance'
 import { useLoomHandoff } from '~/composables/useLoomHandoff'
+import { useDeskViewport } from '~/composables/useBreakpoint'
 import DesktopSidebar from '~/components/shell/DesktopSidebar.vue'
 import MobileHeader from '~/components/shell/MobileHeader.vue'
 import MobileDrawer from '~/components/shell/MobileDrawer.vue'
@@ -32,6 +33,7 @@ const mobileMenuOpen = ref(false)
 
 const { sidebarRail, loadSidebarRail, applyTheme } = useShellAppearance()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
+const isDesk = useDeskViewport()
 
 /** Conversation focus — hide bottom tabs / FAB that fight sticky reply */
 const isThreadRoute = computed(() => path.value.startsWith('/status/'))
@@ -49,6 +51,23 @@ const showMobileHeader = computed(() => !isMobileSubview.value)
 const closeMobileMenu = () => {
   mobileMenuOpen.value = false
 }
+
+/** Shell owns one live-refresh consumer — don't start twice from mount + auth watch. */
+let shellLiveRefresh = false
+const startShellLiveRefresh = () => {
+  if (shellLiveRefresh) return
+  conversationsStore.startLiveRefresh()
+  shellLiveRefresh = true
+}
+const stopShellLiveRefresh = () => {
+  if (!shellLiveRefresh) return
+  conversationsStore.stopLiveRefresh()
+  shellLiveRefresh = false
+}
+
+watch(isDesk, (desk) => {
+  if (desk) closeMobileMenu()
+})
 
 onMounted(async () => {
   // Mobile chrome is in-flow (flex), so main no longer reserves fixed offsets.
@@ -69,16 +88,9 @@ onMounted(async () => {
   mq.addEventListener?.('change', onScheme)
   cleanups.push(() => mq.removeEventListener?.('change', onScheme))
 
-  const deskMq = window.matchMedia('(min-width: 1024px)')
-  const onDeskBreakpoint = () => {
-    if (deskMq.matches) closeMobileMenu()
-  }
-  deskMq.addEventListener?.('change', onDeskBreakpoint)
-  cleanups.push(() => deskMq.removeEventListener?.('change', onDeskBreakpoint))
-
   onUnmounted(() => {
     for (const fn of cleanups) fn()
-    conversationsStore.stopLiveRefresh()
+    stopShellLiveRefresh()
   })
 
   loadSidebarRail()
@@ -96,7 +108,7 @@ onMounted(async () => {
   if (instancesStore.hasAuthenticatedInstance) {
     notificationsStore.refreshUnreadBadge()
     conversationsStore.refreshUnreadBadge()
-    conversationsStore.startLiveRefresh()
+    startShellLiveRefresh()
   }
 
   await bootLoomHandoff()
@@ -114,10 +126,10 @@ watch(
   () => instancesStore.isAuthenticated,
   (ok) => {
     if (ok) {
-      conversationsStore.startLiveRefresh()
+      startShellLiveRefresh()
       void conversationsStore.refreshUnreadBadge()
     } else {
-      conversationsStore.stopLiveRefresh()
+      stopShellLiveRefresh()
     }
   },
 )
@@ -153,8 +165,6 @@ watch(
 
     <MobileHeader v-if="showMobileHeader" v-model:open="mobileMenuOpen" />
 
-    <SuiteMenu />
-
     <MobileDrawer v-model:open="mobileMenuOpen" />
 
     <main id="main-content" class="main-content" tabindex="-1">
@@ -168,7 +178,14 @@ watch(
     <AccountSwitcherSheet v-if="instancesStore.hasAuthenticatedInstance" />
     <FeedbackNotes v-if="!isMobileSubview" />
     <LazySettingsModal />
-    <InstallAppBanner />
+    <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
+    <div
+      class="neo-bottom-dock"
+      :class="{ 'neo-bottom-dock--subview': isMobileSubview }"
+    >
+      <InstallAppBanner />
+      <SuiteMenu />
+    </div>
     <NeoOverlayHost />
   </div>
 </template>
@@ -208,6 +225,36 @@ watch(
   &--rail,
   :global(html[data-rail]) & {
     --neo-sidebar-w: 68px;
+  }
+}
+
+/* Bottom-right dock for install banner + suite waffle — below modal/drawer */
+.neo-bottom-dock {
+  position: fixed;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
+  z-index: var(--neo-z-shell-header, 90);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 0.5rem;
+  pointer-events: none;
+  max-width: min(22rem, calc(100vw - 20px));
+
+  &--subview {
+    /* Tab bar hidden on focused mobile screens */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 0.65rem);
+  }
+
+  @media (max-width: 1023px) {
+    left: max(0.75rem, env(safe-area-inset-left));
+    right: max(0.75rem, env(safe-area-inset-right));
+    max-width: none;
+  }
+
+  @media (min-width: 1024px) {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
   }
 }
 

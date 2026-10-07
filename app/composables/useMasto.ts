@@ -58,8 +58,25 @@ export function clientFor(instanceId: string): mastodon.rest.Client {
   return cachedClient(instance.url, instance.accessToken)
 }
 
+/**
+ * Transient read client for a route opened from another account's notification
+ * without switching the global active account (and re-initing every column).
+ */
+let readAccountOverrideId: string | null = null
+
+export function setReadAccountOverride(instanceId: string | null) {
+  readAccountOverrideId = instanceId
+}
+
 /** Authenticated client for the active account */
 export function activeClient(): mastodon.rest.Client {
+  if (readAccountOverrideId) {
+    try {
+      return clientFor(readAccountOverrideId)
+    } catch {
+      /* fall through to active */
+    }
+  }
   const store = useInstancesStore()
   const account = store.activeAccount
   if (!account?.url || !account.accessToken) {

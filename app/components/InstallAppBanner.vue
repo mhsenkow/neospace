@@ -4,6 +4,8 @@
  * Uses @vite-pwa/nuxt $pwa when beforeinstallprompt is available.
  */
 
+import { useMediaQuery } from '~/composables/useBreakpoint'
+
 const { $pwa } = useNuxtApp()
 
 const pwa = computed(() => $pwa as {
@@ -13,12 +15,12 @@ const pwa = computed(() => $pwa as {
   cancelInstall?: () => void
 } | undefined)
 
+const isStandalone = useMediaQuery('(display-mode: standalone)')
+
 const show = computed(() => {
   if (!pwa.value) return false
   if (pwa.value.isPWAInstalled) return false
-  if (typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches) {
-    return false
-  }
+  if (isStandalone.value) return false
   return !!pwa.value.showInstallPrompt
 })
 
@@ -60,28 +62,24 @@ const dismiss = () => {
 </template>
 
 <style lang="scss" scoped>
+/* Positioning comes from .neo-bottom-dock in the layout */
 .install-banner {
-  position: fixed;
-  left: max(0.75rem, env(safe-area-inset-left));
-  right: max(0.75rem, env(safe-area-inset-right));
-  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
-  z-index: 120;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  width: 100%;
+  max-width: 22rem;
   padding: 0.85rem 1rem;
-  border-radius: 12px;
+  border-radius: var(--neo-radius-md, 12px);
   background: var(--neo-bg-card);
   border: 1px solid var(--neo-border-color);
   box-shadow: 0 12px 32px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
+  pointer-events: auto;
 
-  @media (min-width: 1024px) {
-    left: auto;
-    right: 1.25rem;
-    bottom: 1.25rem;
-    max-width: 22rem;
+  @media (max-width: 1023px) {
+    max-width: none;
   }
 
   &__copy {

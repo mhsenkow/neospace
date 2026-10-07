@@ -8,6 +8,7 @@ import { useToastStore } from '~/stores/toast'
 import { useOverlayStore } from '~/stores/overlay'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { sanitizeDisplayName, sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
+import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 
 interface Props {
@@ -44,10 +45,25 @@ const openProfile = (acct: string | undefined | null, e?: Event) => {
 }
 
 const displayStatus = computed(() => props.status.reblog || props.status)
-const safeDisplayName = computed(() =>
-  sanitizeDisplayName(displayStatus.value.account.displayName || displayStatus.value.account.username),
+const accountEmojis = computed(() => displayStatus.value.account?.emojis || [])
+const statusEmojis = computed(() => displayStatus.value.emojis || [])
+const nameEmojiUrls = computed(() => emojiUrlSet(accountEmojis.value))
+const safeDisplayName = computed(() => {
+  const raw = displayStatus.value.account.displayName || displayStatus.value.account.username || ''
+  return sanitizeDisplayName(emojify(raw, accountEmojis.value), nameEmojiUrls.value)
+})
+const safeContent = computed(() =>
+  emojify(sanitizeStatusHtml(displayStatus.value.content || ''), statusEmojis.value, {
+    escape: false,
+  }),
 )
-const safeContent = computed(() => sanitizeStatusHtml(displayStatus.value.content || ''))
+const linkCard = computed(() => {
+  const card = displayStatus.value.card
+  if (!card?.url) return null
+  // Skip link cards when the post already has media (Mastodon often duplicates)
+  if (displayStatus.value.mediaAttachments?.length) return null
+  return card
+})
 /** Full @user@host so impersonators can’t hide behind a display name alone */
 const accountHandle = computed(() => {
   const acct = displayStatus.value.account?.acct || ''
@@ -104,8 +120,10 @@ onMounted(() => {
   onUnmounted(() => mq.removeEventListener?.('change', sync))
 })
 
-/** Long-post collapse (Threads-style see more, without engagement bait) */
+/** Long-post collapse — overflow-based toggle (not char-count only) */
 const contentExpanded = ref(false)
+const contentEl = ref<HTMLElement | null>(null)
+const contentOverflows = ref(false)
 /** CW / sensitive media revealed by the reader */
 const mediaRevealed = ref(false)
 const cwOpen = ref(false)
@@ -137,16 +155,53 @@ watch(
     mediaRevealed.value = false
     cwOpen.value = false
     contentExpanded.value = false
+    contentOverflows.value = false
   },
 )
 
-const plainLength = computed(() =>
-  (displayStatus.value.content || '').replace(/<[^>]*>/g, '').length,
+const measureContentOverflow = () => {
+  const el = contentEl.value
+  if (!el) {
+    contentOverflows.value = false
+    return
+  }
+  const wasClamped = el.classList.contains('status-content--clamped')
+  if (contentExpanded.value && !wasClamped) {
+    el.classList.add('status-content--clamped')
+    contentOverflows.value = el.scrollHeight > el.clientHeight + 2
+    el.classList.remove('status-content--clamped')
+  } else {
+    contentOverflows.value = el.scrollHeight > el.clientHeight + 2
+  }
+}
+
+const showSeeMore = computed(() => contentOverflows.value || contentExpanded.value)
+
+let contentResizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined') {
+    contentResizeObserver = new ResizeObserver(() => measureContentOverflow())
+    if (contentEl.value) contentResizeObserver.observe(contentEl.value)
+  }
+  nextTick(measureContentOverflow)
+})
+
+watch(contentEl, (el, prev) => {
+  if (prev) contentResizeObserver?.unobserve(prev)
+  if (el) contentResizeObserver?.observe(el)
+  nextTick(measureContentOverflow)
+})
+
+watch(
+  [safeContent, () => isMobileViewport.value, contentExpanded],
+  () => nextTick(measureContentOverflow),
 )
-/** Tighter clamp on mobile so media starts higher in the viewport */
-const isLongPost = computed(() =>
-  plainLength.value > (isMobileViewport.value ? 220 : 320),
-)
+
+onUnmounted(() => {
+  contentResizeObserver?.disconnect()
+  contentResizeObserver = null
+})
 
 const pollDenominator = computed(() => {
   const poll = displayStatus.value.poll
@@ -957,21 +1012,26 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         <!-- Regular Content -->
         <div v-else class="status-content-wrap">
           <div
+            ref="contentEl"
             class="status-content status-content--clickable"
-            :class="{ 'status-content--clamped': isLongPost && !contentExpanded }"
+            :class="{ 'status-content--clamped': !contentExpanded }"
             :lang="displayStatus.language || undefined"
             v-html="safeContent"
             @click="onContentClick"
           />
           <button
-            v-if="isLongPost && !contentExpanded"
+            v-if="showSeeMore"
             type="button"
             class="status-see-more"
-            @click.stop="contentExpanded = true"
+            :aria-expanded="contentExpanded"
+            @click.stop="contentExpanded = !contentExpanded"
           >
-            See more
+            {{ contentExpanded ? 'See less' : 'See more' }}
           </button>
         </div>
+
+        <!-- Link preview -->
+        <PreviewCard v-if="linkCard && !isFlip" :card="linkCard" />
 
         <!-- Media: gated behind CW / sensitive -->
         <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
@@ -1493,8 +1553,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       }
     }
 
-    .status-footer-row,
-    .reply-composer {
+    .status-footer-row {
       display: none;
     }
 
@@ -1513,12 +1572,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
   color: var(--neo-text-muted);
   margin-bottom: 0.5rem;
   padding-left: 52px;
-
-  &-icon {
-    width: 14px;
-    height: 14px;
-    opacity: 0.7;
-  }
 
   &-text {
     font-weight: 500;
@@ -1827,9 +1880,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
   font-size: 0.9375rem;
   line-height: 1.5;
   color: var(--neo-text-primary);
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
   max-width: 100%;
 
   &--clickable {
@@ -1854,8 +1906,23 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
 
   :deep(a) {
     color: var(--neo-accent);
-    word-break: break-all;
+    overflow-wrap: anywhere;
+    word-break: normal;
     &:hover { text-decoration: underline; }
+  }
+
+  // Mastodon link microformats — hide scheme/host noise, keep readable ellipsis
+  :deep(.invisible) {
+    font-size: 0;
+    line-height: 0;
+    display: inline-block;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+  }
+
+  :deep(.ellipsis)::after {
+    content: '…';
   }
 
   :deep(.mention) { color: var(--neo-accent); }
@@ -2166,10 +2233,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       font-size: 0.6875rem;
       opacity: 0.75;
     }
-
-    &--external {
-      display: none;
-    }
   }
 
   // Boosted = success green (instrument, not Twitter)
@@ -2215,123 +2278,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
     font-variant-numeric: tabular-nums;
     color: inherit;
   }
-
-  &--external {
-    text-decoration: none;
-    opacity: 0.65;
-
-    &:hover {
-      opacity: 1;
-    }
-  }
-}
-
-// ========================================
-// Inline Reply Composer
-// ========================================
-.reply-composer {
-  margin-top: 0.5rem;
-  padding: 0.625rem;
-  background: var(--neo-bg-tertiary);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-
-  &__input-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-start;
-  }
-
-  &__avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-    margin-top: 0.25rem;
-  }
-
-  &__textarea {
-    flex: 1;
-    resize: none;
-    border: none;
-    background: transparent;
-    font-family: inherit;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    color: var(--neo-text-primary);
-    outline: none;
-    min-height: 1.5em;
-    max-height: 200px;
-
-    &::placeholder {
-      color: var(--neo-text-muted);
-    }
-  }
-
-  &__error {
-    font-size: 0.75rem;
-    color: var(--neo-danger);
-    padding-left: 2rem;
-  }
-
-  &__actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-  }
-
-  &__cancel {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--neo-text-muted);
-    border-radius: 999px;
-    transition: all 0.12s ease;
-
-    &:hover {
-      background: var(--neo-bg-secondary);
-      color: var(--neo-text-primary);
-    }
-  }
-
-  &__submit {
-    padding: 0.375rem 0.875rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--neo-text-inverse);
-    background: var(--neo-text-primary);
-    border-radius: 999px;
-    transition: all 0.12s ease;
-
-    &:hover:not(:disabled) {
-      opacity: 0.9;
-    }
-
-    &:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-  }
-}
-
-.reply-expand-enter-active,
-.reply-expand-leave-active {
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-.reply-expand-enter-from,
-.reply-expand-leave-to {
-  opacity: 0;
-  max-height: 0;
-  margin-top: 0;
-  padding: 0 0.625rem;
-}
-.reply-expand-enter-to,
-.reply-expand-leave-from {
-  max-height: 300px;
 }
 
 // ========================================

@@ -3,6 +3,8 @@
 // Maps Braun tokens onto the --neo-* runtime system
 // ============================================
 
+@use 'variables' as vars;
+
 @font-face {
   font-family: 'OpenDyslexic';
   font-style: normal;
@@ -75,6 +77,15 @@
   --neo-border-color: #{$hair};
   --neo-border-color-light: #{$hair};
   --neo-border-color-dark: #{$rule};
+
+  // Per-scheme shadows — light defaults live in :root; dark themes need deeper lifts
+  @if $scheme == dark {
+    --neo-shadow-sm: #{vars.$shadow-dark-sm};
+    --neo-shadow-md: #{vars.$shadow-dark-md};
+    --neo-shadow-lg: #{vars.$shadow-dark-lg};
+    --neo-shadow-xl: #{vars.$shadow-dark-xl};
+    --neo-shadow-2xl: #{vars.$shadow-dark-2xl};
+  }
 
   color-scheme: #{$scheme};
 }

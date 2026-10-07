@@ -201,6 +201,7 @@ export const useConversationsStore = defineStore('conversations', {
       return mine ? `You: ${clipped}` : clipped
     },
 
+    /** Start conversation polling. Idempotent for the timer; refcounts consumers. */
     startLiveRefresh() {
       pollConsumers += 1
       if (pollTimer) return

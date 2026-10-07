@@ -17,6 +17,7 @@ import {
   sanitizeFieldHtml,
   sanitizeStatusHtml,
 } from '~/utils/sanitizeHtml'
+import { emojiUrlSet, emojify } from '~/utils/emojify'
 import {
   buildPresenceLinks,
   extractHttpUrl,
@@ -56,12 +57,17 @@ const canSwitchAccounts = computed(
     instancesStore.hasAuthenticatedInstance,
 )
 
-const safeProfileName = computed(() =>
-  sanitizeDisplayName(
-    profileStore.viewedProfile?.displayName || profileStore.viewedProfile?.username || '',
-  ),
-)
-const safeProfileNote = computed(() => sanitizeStatusHtml(profileStore.viewedProfile?.note || ''))
+const safeProfileName = computed(() => {
+  const profile = profileStore.viewedProfile
+  const raw = profile?.displayName || profile?.username || ''
+  const emojis = profile?.emojis || []
+  return sanitizeDisplayName(emojify(raw, emojis), emojiUrlSet(emojis))
+})
+const safeProfileNote = computed(() => {
+  const profile = profileStore.viewedProfile
+  const emojis = profile?.emojis || []
+  return emojify(sanitizeStatusHtml(profile?.note || ''), emojis, { escape: false })
+})
 
 type ProfileFieldToken = {
   name: string

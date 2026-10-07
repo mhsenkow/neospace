@@ -181,27 +181,16 @@ onUnmounted(() => {
 </template>
 
 <style lang="scss" scoped>
+/* Positioning comes from .neo-bottom-dock in the layout */
 .suite-menu {
-  position: fixed;
-  right: max(10px, env(safe-area-inset-right));
-  // Above mobile bottom nav (+ leave-a-note sits on the left)
-  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
-  z-index: 90;
+  position: relative;
+  align-self: flex-end;
   display: flex;
   flex-direction: column-reverse;
   align-items: flex-end;
   font-family: var(--neo-font-family-ui, var(--neo-font-family));
   color: var(--neo-text-muted);
   pointer-events: none;
-
-  &.is-open {
-    z-index: 120;
-  }
-
-  @media (min-width: 1024px) {
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
-  }
 }
 
 .suite-menu__btn {

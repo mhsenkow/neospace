@@ -166,7 +166,8 @@ export function useFocusTrap(
       if (isActive) void activate()
       else deactivate()
     },
-    { flush: 'post' },
+    // immediate: sheets often mount with open=true via v-if
+    { flush: 'post', immediate: true },
   )
 
   onUnmounted(() => {

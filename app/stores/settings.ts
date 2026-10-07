@@ -23,6 +23,7 @@ import {
   applyAppearance,
   normalizeDensity,
   normalizeFont,
+  normalizeFontSize,
   normalizeLine,
   normalizeRadius,
   normalizeTheme,
@@ -306,9 +307,7 @@ export const useSettingsStore = defineStore('settings', {
             theme: normalizeTheme(parsed.theme),
             ui: normalizeUi(parsed.ui),
             font: normalizeFont(parsed.font),
-            fontSize: (['small', 'medium', 'large'].includes(parsed.fontSize)
-              ? parsed.fontSize
-              : this.localPreferences.fontSize) as NeoFontSizeId,
+            fontSize: normalizeFontSize(parsed.fontSize),
             radius: normalizeRadius(parsed.radius),
             density: normalizeDensity(parsed.density, !!parsed.compactMode),
             line: normalizeLine(parsed.line),

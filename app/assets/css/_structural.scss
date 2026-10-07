@@ -189,8 +189,14 @@
   --neo-opacity-95: #{vars.$opacity-95};
   --neo-opacity-100: #{vars.$opacity-100};
   
-  // === Decorative (Mom Mode = clean, no decorations) ===
+  // === Decorative (defaults: clean surface, no ornaments) ===
   --neo-bg-image: none;
   --neo-cursor: default;
   --neo-glow: none;
+
+  // Chaos gradient button stops
+  --neo-chaos-stop-1: #{vars.$chaos-stop-1};
+  --neo-chaos-stop-2: #{vars.$chaos-stop-2};
+  --neo-chaos-stop-3: #{vars.$chaos-stop-3};
+  --neo-chaos-fg: #{vars.$chaos-fg};
 }

@@ -6,6 +6,7 @@
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
+import { emitComposedStatus } from '~/composables/useComposedStatus'
 import type { mastodon } from 'masto'
 
 const sheet = useComposeSheetStore()
@@ -39,6 +40,7 @@ useFocusTrap(panelRef, sheetOpen, {
 })
 
 const onPosted = (status: mastodon.v1.Status) => {
+  emitComposedStatus(status)
   sheet.posted(status)
 }
 

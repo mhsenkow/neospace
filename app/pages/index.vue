@@ -261,18 +261,30 @@ const nearestSlideIndex = (scrollLeft?: number) => {
 let settleTimer = 0
 let settleGen = 0
 let carouselSettling = false
+/** Ignore scrollend parks right after we snap — prevents bounce loops */
+let parkCooldownUntil = 0
+let nativeParkTimer = 0
+/** Finger lost cancelable touchmove — native scrolling; park when it ends */
+let nativeTookOver = false
+
+const armParkCooldown = (ms = 320) => {
+  parkCooldownUntil = performance.now() + ms
+}
+
+const parkSlideNow = (el: HTMLElement, slideIndex: number) => {
+  const slides = getSlideEls()
+  const child = slides[clamp(slideIndex, 0, Math.max(0, slides.length - 1))]
+  if (!child) return
+  el.scrollLeft = child.offsetLeft
+  el.style.scrollSnapType = 'none'
+  el.classList.remove('columns-container--settling', 'columns-container--swiping')
+  armParkCooldown()
+}
 
 const finishCarouselSettle = (gen: number, finalIndex: number) => {
   if (gen !== settleGen) return
   const el = columnsContainer.value
-  if (el) {
-    // Land exactly — smooth scroll can stop a few px short with many slides
-    const slides = getSlideEls()
-    const child = slides[clamp(finalIndex, 0, Math.max(0, slides.length - 1))]
-    if (child) el.scrollLeft = child.offsetLeft
-    el.style.scrollSnapType = ''
-    el.classList.remove('columns-container--settling', 'columns-container--swiping')
-  }
+  if (el) parkSlideNow(el, finalIndex)
   carouselSettling = false
   carouselSlideIndex.value = finalIndex
   syncBoardPortalFromSlide(finalIndex)
@@ -288,8 +300,11 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   carouselSlideIndex.value = idx
   syncBoardPortalFromSlide(idx)
 
-  if (behavior === 'auto' || !isMobileUi.value) {
-    el.scrollLeft = child.offsetLeft
+  // Mobile parks instantly — smooth + residual momentum bounced back and forth
+  if (behavior === 'auto' || isMobileUi.value) {
+    window.clearTimeout(settleTimer)
+    carouselSettling = false
+    parkSlideNow(el, idx)
     return
   }
 
@@ -551,6 +566,7 @@ const onColumnsScroll = () => {
 /** Native scroll / momentum ended — park on the nearest full slide */
 const onCarouselScrollEnd = () => {
   if (carouselGesture || portalActionLock || carouselSettling) return
+  if (performance.now() < parkCooldownUntil) return
   if (!isMobileUi.value) {
     syncActiveColumnFromScroll()
     return
@@ -561,9 +577,12 @@ const onCarouselScrollEnd = () => {
   if (!el || !child) return
   carouselSlideIndex.value = idx
   syncBoardPortalFromSlide(idx)
-  // Already parked — don't kick another smooth settle (avoids jitter loops)
-  if (Math.abs(el.scrollLeft - child.offsetLeft) < 3) return
-  settleCarousel(idx, 'smooth')
+  // Already parked — don't kick another settle (avoids bounce loops)
+  if (Math.abs(el.scrollLeft - child.offsetLeft) < 8) {
+    armParkCooldown(200)
+    return
+  }
+  settleCarousel(idx, 'auto')
 }
 
 /**
@@ -683,10 +702,10 @@ const onCarouselTouchMove = (e: TouchEvent) => {
 
   // iOS/Chrome mark touchmove cancelable=false once scrolling has begun.
   // Calling preventDefault then is ignored (Intervention) and fighting
-  // native scrollLeft makes the board vibrate.
+  // native scrollLeft makes the board vibrate / bounce.
   if (!e.cancelable) {
-    el.style.scrollSnapType = ''
     el.classList.remove('columns-container--swiping')
+    nativeTookOver = true
     carouselGesture = null
     return
   }
@@ -700,9 +719,25 @@ const onCarouselTouchMove = (e: TouchEvent) => {
   el.scrollLeft = Math.max(0, Math.min(max, g.startScroll - dx))
 }
 
+const scheduleNativePark = () => {
+  window.clearTimeout(nativeParkTimer)
+  nativeParkTimer = window.setTimeout(() => {
+    if (carouselGesture || carouselSettling || portalActionLock) return
+    if (!isMobileUi.value) return
+    settleCarousel(nearestSlideIndex(), 'auto')
+  }, 100)
+}
+
 const finishCarouselGesture = (e: TouchEvent) => {
   const g = carouselGesture
-  if (!g) return
+  if (!g) {
+    // Native took the gesture — park once momentum quiets
+    if (nativeTookOver) {
+      nativeTookOver = false
+      scheduleNativePark()
+    }
+    return
+  }
   const ended = Array.from(e.changedTouches).some((c) => c.identifier === g.id)
   if (!ended) return
 
@@ -710,22 +745,23 @@ const finishCarouselGesture = (e: TouchEvent) => {
   const wasX = g.locked === 'x'
   const vx = g.vx
   carouselGesture = null
+  nativeTookOver = false
   if (!el || !wasX) return
 
-  el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping')
 
-  // Mobile snap carousel — park on a full-width slide (±1 on a clear flick)
+  // Mobile — instant park on a full-width slide (±1 on a clear flick)
   if (isMobileUi.value) {
     let index = nearestSlideIndex()
     if (vx < -FLICK_VX) index += 1
     else if (vx > FLICK_VX) index -= 1
     index = clamp(index, 0, Math.max(0, slideCount.value - 1))
-    settleCarousel(index)
+    settleCarousel(index, 'auto')
     return
   }
 
   // Desktop / iPad — gentle coast, leave where it lands (no spring-back)
+  el.style.scrollSnapType = ''
   if (Math.abs(vx) > 0.08) {
     const max = Math.max(0, el.scrollWidth - el.clientWidth)
     const coast = Math.max(0, Math.min(max, el.scrollLeft - vx * 180))
@@ -743,6 +779,8 @@ const bindCarouselGestures = () => {
   el.addEventListener('touchcancel', finishCarouselGesture, { passive: true, capture: true })
   el.addEventListener('wheel', onColumnsWheel, { passive: false, capture: true })
   el.addEventListener('scrollend', onCarouselScrollEnd)
+  // Mobile: JS parks — never leave mandatory snap armed (it bounced against settle)
+  if (isMobileUi.value) el.style.scrollSnapType = 'none'
 }
 
 const unbindCarouselGestures = () => {
@@ -756,8 +794,11 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('scrollend', onCarouselScrollEnd)
   window.clearTimeout(wheelIdleTimer)
   window.clearTimeout(settleTimer)
+  window.clearTimeout(nativeParkTimer)
   wheelArmed = false
   carouselSettling = false
+  nativeTookOver = false
+  parkCooldownUntil = 0
   el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping', 'columns-container--settling')
   carouselGesture = null
@@ -767,6 +808,8 @@ const syncMobileUi = () => {
   const next = !!mobileMq?.matches
   if (next === isMobileUi.value) return
   isMobileUi.value = next
+  const el = columnsContainer.value
+  if (el) el.style.scrollSnapType = next ? 'none' : ''
   nextTick(() => scrollToColumn(activeColumnIndex.value, 'auto'))
 }
 
@@ -1652,13 +1695,13 @@ useHead({ title: 'Home | NeoSpace' })
     max-width: none;
   }
 
-  // Mobile: full-width snap carousel — swipe left/right between feeds + edge portals
+  // Mobile: full-width pages — JS parks on release (CSS mandatory snap bounced vs settle)
   @media (max-width: 1023px) {
     width: 100%;
     // No side padding — equal-width pages + scrollLeft math need a clean box
     padding-inline: 0;
     scroll-padding-inline: 0;
-    scroll-snap-type: x mandatory;
+    scroll-snap-type: none;
     scrollbar-width: none;
     // Finger: we axis-lock in JS; keep pan-y for nested feed scroll
     touch-action: pan-y;
@@ -1674,8 +1717,6 @@ useHead({ title: 'Home | NeoSpace' })
       width: 100%;
       min-width: 100%;
       max-width: 100%;
-      scroll-snap-align: start;
-      scroll-snap-stop: always;
       border-right: none;
       box-sizing: border-box;
     }

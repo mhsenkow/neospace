@@ -1,8 +1,8 @@
 // ============================================
 // NEOSPACE - MAIN STYLESHEET
 // ============================================
-// Dual-Mode Theme System: Mom Mode & Chaos Mode
-// Comprehensive variable system with light/dark mode support
+// Theme system: light/dark color schemes + optional chaos-mode overrides
+// Structural tokens load before themes so per-theme overrides win
 
 @use 'sass:color';
 @use 'variables' as vars;
@@ -41,6 +41,14 @@ html {
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  // Disable pull-to-refresh / overscroll and Safari history edge-swipe chaining
+  overscroll-behavior: none;
+  overscroll-behavior-x: none;
+  // Avoid iOS text-size inflation in standalone / landscape
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--neo-text-muted) var(--neo-bg-tertiary);
 }
 
 body {
@@ -55,6 +63,7 @@ body {
   min-height: 100vh;
   transition: background-color var(--neo-transition), color var(--neo-transition);
   overflow-x: hidden; // Prevent horizontal scroll
+  overscroll-behavior-x: none;
   font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
   font-variant-ligatures: common-ligatures contextual;
 
@@ -69,7 +78,7 @@ body {
   }
 }
 
-// Global media overflow protection
+// Global media overflow protection (no display:block — breaks inline custom emoji)
 img, video, audio, iframe, embed, object {
   max-width: 100%;
   height: auto;
@@ -83,12 +92,6 @@ a {
   &:hover {
     color: var(--neo-text-link-hover);
   }
-}
-
-img {
-  max-width: 100%;
-  height: auto;
-  display: block;
 }
 
 button {
@@ -154,15 +157,15 @@ ul, ol {
   max-width: 100%;
   overflow: hidden;
   box-sizing: border-box;
-  
-  &:hover {
+
+  &--interactive:hover {
     border-color: var(--neo-border-color-dark);
   }
 }
 
 // Button Component
-// Emphasis: primary → secondary → tertiary → quaternary (loud → quiet).
-// Chrome/icon controls should default to tertiary; recessed surfaces use quaternary.
+// Emphasis: primary → secondary → tertiary (loud → quiet).
+// Chrome/icon controls should default to tertiary.
 .neo-btn {
   display: inline-flex;
   align-items: center;
@@ -221,23 +224,6 @@ ul, ol {
     }
   }
 
-  // Whisper control — for recessed / non-focused chrome
-  &--quaternary {
-    background-color: transparent;
-    color: var(--neo-text-quaternary);
-    border: 1px solid transparent;
-
-    &:hover:not(:disabled) {
-      background-color: var(--neo-bg-hover);
-      color: var(--neo-text-tertiary);
-    }
-
-    &:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-  }
-  
   &--ghost {
     background-color: transparent;
     color: var(--neo-text-secondary);
@@ -250,7 +236,13 @@ ul, ol {
     }
   }
 
-  // Square icon affordance — compose with --tertiary / --quaternary
+  &--sm {
+    padding: var(--neo-spacing-1) var(--neo-spacing-3);
+    font-size: var(--neo-font-size-xs);
+    gap: var(--neo-spacing-1);
+  }
+
+  // Square icon affordance — compose with --tertiary
   &--icon {
     width: 30px;
     height: 30px;
@@ -269,9 +261,14 @@ ul, ol {
   }
   
   &--chaos {
-    background: linear-gradient(135deg, #c45c26, #8338ec, #3a86ff);
+    background: linear-gradient(
+      135deg,
+      var(--neo-chaos-stop-1),
+      var(--neo-chaos-stop-2),
+      var(--neo-chaos-stop-3)
+    );
     background-size: 200% 200%;
-    color: white;
+    color: var(--neo-chaos-fg);
     animation: gradient-shift 3s ease infinite;
     box-shadow: var(--neo-glow);
     
@@ -502,20 +499,6 @@ ul, ol {
 }
 
 // ============================================
-// SPACING UTILITIES
-// ============================================
-
-@for $i from 1 through 8 {
-  .neo-mt-#{$i} { margin-top: calc(var(--neo-spacing-unit) * #{$i * 0.5}); }
-  .neo-mb-#{$i} { margin-bottom: calc(var(--neo-spacing-unit) * #{$i * 0.5}); }
-  .neo-my-#{$i} { 
-    margin-top: calc(var(--neo-spacing-unit) * #{$i * 0.5}); 
-    margin-bottom: calc(var(--neo-spacing-unit) * #{$i * 0.5}); 
-  }
-  .neo-p-#{$i} { padding: calc(var(--neo-spacing-unit) * #{$i * 0.5}); }
-}
-
-// ============================================
 // CHAOS MODE SPECIAL EFFECTS
 // ============================================
 
@@ -571,19 +554,6 @@ body.chaos-active::after {
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
-}
-
-// Disable pull-to-refresh, overscroll, and Safari history edge-swipe chaining
-html {
-  overscroll-behavior: none;
-  overscroll-behavior-x: none;
-  // Avoid iOS text-size inflation in standalone / landscape
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-}
-
-body {
-  overscroll-behavior-x: none;
 }
 
 // Opt-in 44px hit targets — prefer .neo-hit-44 over blanket button sizing

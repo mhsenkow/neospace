@@ -51,32 +51,6 @@ export interface UiOption {
   sample: string
 }
 
-/** Cycle order matches wordcount theme button */
-export const THEME_CYCLE: Exclude<NeoThemeId, 'auto'>[] = [
-  'light',
-  'dark',
-  'contrast',
-  'paper',
-  'glass',
-  'frost',
-  'brutal',
-  'loom',
-  'tank',
-  'nes',
-]
-
-/** Cycle order matches wordcount chrome radios */
-export const UI_CYCLE: NeoUiId[] = [
-  'braun',
-  'monocle',
-  'bauhaus',
-  'noyes',
-  'ikea',
-  'military',
-  'terminal',
-  'nyt',
-]
-
 export const THEME_OPTIONS: ThemeOption[] = [
   { id: 'light', label: 'Light', desc: 'Warm Braun neutrals', swatch: '#f2f2f0', ink: '#c45c26' },
   { id: 'dark', label: 'Dark', desc: 'Quiet instrument night', swatch: '#161616', ink: '#e07a45' },
@@ -124,15 +98,6 @@ export const RADIUS_OPTIONS: { id: NeoRadiusId; label: string; desc: string }[] 
   { id: 'jagged', label: 'Jagged', desc: 'Irregular · stamp / torn corners' },
 ]
 
-export const RADIUS_CYCLE: NeoRadiusId[] = [
-  'match',
-  'sharp',
-  'business',
-  'soft',
-  'bubble',
-  'jagged',
-]
-
 /** Spacing density — roomy / cozy (default) / dense (ex-compact) */
 export type NeoDensityId = 'roomy' | 'cozy' | 'dense'
 
@@ -141,8 +106,6 @@ export const DENSITY_OPTIONS: { id: NeoDensityId; label: string; desc: string }[
   { id: 'cozy', label: 'Cozy', desc: 'Default spacing' },
   { id: 'dense', label: 'Dense', desc: 'Jam the screen · tighter chrome' },
 ]
-
-export const DENSITY_CYCLE: NeoDensityId[] = ['roomy', 'cozy', 'dense']
 
 /** Outline character for cards / chrome */
 export type NeoLineId = 'clean' | 'ink' | 'crayon' | 'dashed'
@@ -154,7 +117,14 @@ export const LINE_OPTIONS: { id: NeoLineId; label: string; desc: string }[] = [
   { id: 'dashed', label: 'Dashed', desc: 'Sketch / notebook' },
 ]
 
-export const LINE_CYCLE: NeoLineId[] = ['clean', 'ink', 'crayon', 'dashed']
+/** Cycle lists derived from *_OPTIONS so ids stay in sync */
+export const THEME_CYCLE: Exclude<NeoThemeId, 'auto'>[] = THEME_OPTIONS.map((o) => o.id)
+export const UI_CYCLE: NeoUiId[] = UI_OPTIONS.map((o) => o.id)
+export const FONT_CYCLE: NeoFontId[] = FONT_OPTIONS.map((o) => o.id)
+export const FONT_SIZE_CYCLE: NeoFontSizeId[] = FONT_SIZE_OPTIONS.map((o) => o.id)
+export const RADIUS_CYCLE: NeoRadiusId[] = RADIUS_OPTIONS.map((o) => o.id)
+export const DENSITY_CYCLE: NeoDensityId[] = DENSITY_OPTIONS.map((o) => o.id)
+export const LINE_CYCLE: NeoLineId[] = LINE_OPTIONS.map((o) => o.id)
 
 /** Body type stacks — chrome × font (wordcount TYPE_FACES_WEB) */
 export const TYPE_FACES: Record<NeoUiId, Record<NeoFontId, string>> = {
@@ -251,9 +221,13 @@ export function normalizeUi(raw: string | null | undefined): NeoUiId {
 }
 
 export function normalizeFont(raw: string | null | undefined): NeoFontId {
-  const ok: NeoFontId[] = ['sans', 'serif', 'book', 'mono', 'dyslexic']
-  if (raw && ok.includes(raw as NeoFontId)) return raw as NeoFontId
+  if (raw && FONT_CYCLE.includes(raw as NeoFontId)) return raw as NeoFontId
   return 'sans'
+}
+
+export function normalizeFontSize(raw: string | null | undefined): NeoFontSizeId {
+  if (raw && FONT_SIZE_CYCLE.includes(raw as NeoFontSizeId)) return raw as NeoFontSizeId
+  return 'medium'
 }
 
 export function normalizeRadius(raw: string | null | undefined): NeoRadiusId {
@@ -302,12 +276,12 @@ export function resolveTheme(theme: NeoThemeId): Exclude<NeoThemeId, 'auto'> {
 export function nextTheme(current: NeoThemeId): Exclude<NeoThemeId, 'auto'> {
   const resolved = resolveTheme(current)
   const idx = THEME_CYCLE.indexOf(resolved)
-  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]
+  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]!
 }
 
 export function nextUi(current: NeoUiId): NeoUiId {
   const idx = UI_CYCLE.indexOf(normalizeUi(current))
-  return UI_CYCLE[(idx + 1) % UI_CYCLE.length]
+  return UI_CYCLE[(idx + 1) % UI_CYCLE.length]!
 }
 
 export function applyAppearance(opts: {
@@ -326,6 +300,7 @@ export function applyAppearance(opts: {
 
   const ui = normalizeUi(opts.ui)
   const font = normalizeFont(opts.font)
+  const fontSize = normalizeFontSize(opts.fontSize)
   const radius = normalizeRadius(opts.radius)
   const density = normalizeDensity(opts.density)
   const line = normalizeLine(opts.line)
@@ -334,7 +309,7 @@ export function applyAppearance(opts: {
   root.setAttribute('data-radius', radius)
   root.setAttribute('data-density', density)
   root.setAttribute('data-line', line)
-  if (opts.fontSize) root.setAttribute('data-font-size', opts.fontSize)
+  root.setAttribute('data-font-size', fontSize)
   // Legacy class some CSS still keys off
   root.classList.toggle('compact-mode', density === 'dense')
 

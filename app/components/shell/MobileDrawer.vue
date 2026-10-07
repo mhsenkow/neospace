@@ -5,6 +5,7 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
 import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
+import { useOverlayStore } from '~/stores/overlay'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { categoryTint } from '~/composables/useShellAppearance'
 
@@ -16,6 +17,7 @@ const conversationsStore = useConversationsStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
 const themeStore = useThemeStore()
+const overlayStore = useOverlayStore()
 const { open: openAccounts } = useAccountsManager()
 const { boardPortal } = useBoardPortal()
 const router = useRouter()
@@ -26,6 +28,16 @@ const messagesBadge = computed(() => conversationsStore.badgeLabel)
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
 const sidebarSuggestedGroups = computed(() => groupsStore.suggestedFeaturedGroups.slice(0, 6))
 
+const instanceHost = computed(() => {
+  const url = instancesStore.instanceUrl
+  if (!url) return ''
+  try {
+    return new URL(url).host
+  } catch {
+    return url.replace(/^https?:\/\//, '')
+  }
+})
+
 const closeMobileMenu = () => {
   open.value = false
 }
@@ -35,7 +47,20 @@ const openGroupFromMenu = (tag: string) => {
   router.push(`/groups/${tag}`)
 }
 
+const openSettingsFromDrawer = async () => {
+  closeMobileMenu()
+  await nextTick()
+  settingsStore.open()
+}
+
 const handleLogout = async () => {
+  const ok = await overlayStore.openConfirm({
+    title: 'Sign out?',
+    body: 'Sign out of this account? You can keep browsing public posts.',
+    confirmLabel: 'Sign out',
+    danger: true,
+  })
+  if (!ok) return
   closeMobileMenu()
   await instancesStore.logout()
   themeStore.setUserCustomCSS('')
@@ -62,12 +87,12 @@ useFocusTrap(mobileSidebarRef, open, {
 
 <template>
 <Transition name="fade">
-  <div v-if="open" class="mobile-overlay" @click="closeMobileMenu"></div>
+  <div v-show="open" class="mobile-overlay" @click="closeMobileMenu"></div>
 </Transition>
 
 <Transition name="slide">
-  <aside
-    v-if="open"
+  <div
+    v-show="open"
     id="mobile-sidebar"
     ref="mobileSidebarRef"
     class="mobile-sidebar"
@@ -85,7 +110,7 @@ useFocusTrap(mobileSidebarRef, open, {
       </button>
     </div>
 
-    <nav class="mobile-sidebar__nav">
+    <nav class="mobile-sidebar__nav" aria-label="Main menu">
       <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
       <NuxtLink
         to="/explore"
@@ -107,7 +132,9 @@ useFocusTrap(mobileSidebarRef, open, {
         @click="closeMobileMenu"
       >
         Messages
-        <span v-if="messagesBadge" class="nav-badge nav-badge--inline">{{ messagesBadge }}</span>
+        <span v-if="messagesBadge" class="nav-badge nav-badge--inline">
+          {{ messagesBadge }}<span class="sr-only"> unread</span>
+        </span>
       </NuxtLink>
       <NuxtLink
         v-if="instancesStore.hasAuthenticatedInstance"
@@ -117,7 +144,9 @@ useFocusTrap(mobileSidebarRef, open, {
         @click="closeMobileMenu"
       >
         Activity
-        <span v-if="notifBadge" class="nav-badge nav-badge--inline">{{ notifBadge }}</span>
+        <span v-if="notifBadge" class="nav-badge nav-badge--inline">
+          {{ notifBadge }}<span class="sr-only"> unread</span>
+        </span>
       </NuxtLink>
     </nav>
 
@@ -202,7 +231,7 @@ useFocusTrap(mobileSidebarRef, open, {
       <button
         class="mobile-sidebar__action"
         :class="{ 'chrome-hint': boardPortal === 'settings' }"
-        @click="settingsStore.open(); closeMobileMenu()"
+        @click="openSettingsFromDrawer"
         type="button"
       >
         Settings
@@ -222,7 +251,7 @@ useFocusTrap(mobileSidebarRef, open, {
           <div class="mobile-sidebar__user-info">
             <span class="mobile-sidebar__user-name">{{ instancesStore.userDisplayName }}</span>
             <span class="mobile-sidebar__user-instance">
-              Posting as · {{ instancesStore.instanceUrl?.replace('https://', '') }}
+              Posting as · {{ instanceHost }}
             </span>
           </div>
         </div>
@@ -237,7 +266,7 @@ useFocusTrap(mobileSidebarRef, open, {
         </NuxtLink>
       </template>
     </div>
-  </aside>
+  </div>
 </Transition>
 </template>
 

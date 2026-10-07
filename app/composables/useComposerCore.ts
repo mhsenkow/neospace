@@ -1,10 +1,7 @@
 /**
- * Shared composer primitives — length, IME-safe keys, drafts.
- * Media tray / autocomplete / submit live in useComposeMedia + RealComposeBox.
+ * Shared composer primitives — IME-safe keys.
+ * Length/drafts: import from ~/utils/mastodonLength and ~/composables/useDraft.
  */
-
-export { mastodonLength } from '~/utils/mastodonLength'
-export { useDraft, type DraftVisibility } from '~/composables/useDraft'
 
 /** True when the key event is part of an IME composition (do not submit). */
 export function isImeEvent(e: KeyboardEvent): boolean {

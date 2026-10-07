@@ -1,6 +1,8 @@
 /**
  * Load only the Google Fonts needed for the active chrome + type face.
  * Avoids the previous ~15-family megabundle on every page.
+ *
+ * Skipped (too large for this pass): self-host via @nuxt/fonts / fontsource.
  */
 
 import type { NeoFontId, NeoUiId } from './appearance'
@@ -72,18 +74,18 @@ export function ensureFontsLoaded(ui: NeoUiId, font: NeoFontId) {
   if (typeof document === 'undefined') return
 
   const map = UI_FAMILIES[ui] || {}
-  const names = new Set<string>([
-    ...(map.ui || []),
-    ...(map[font] || []),
-    ...(map.mono || []),
-  ])
+  // Mono is only fetched when the active face is mono (lazy), via map[font]
+  const names = new Set<string>([...(map.ui || []), ...(map[font] || [])])
 
   const queries: string[] = []
+  const pending: string[] = []
   for (const name of names) {
     if (loaded.has(name)) continue
     const q = FAMILY_QUERY[name]
     if (!q) continue
+    // Optimistic mark prevents duplicate parallel loads; onerror clears for retry
     loaded.add(name)
+    pending.push(name)
     queries.push(q)
   }
   if (!queries.length) return
@@ -108,5 +110,9 @@ export function ensureFontsLoaded(ui: NeoUiId, font: NeoFontId) {
   link.rel = 'stylesheet'
   link.href = href
   link.dataset.neoFont = queries.join(',')
+  link.onerror = () => {
+    for (const name of pending) loaded.delete(name)
+    link.remove()
+  }
   document.head.appendChild(link)
 }

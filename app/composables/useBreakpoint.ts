@@ -55,4 +55,11 @@ export function useDeskViewport() {
   return deskRef.matches
 }
 
+/** Reactive matchMedia result for an arbitrary media query. */
+export function useMediaQuery(query: string, defaultValue = false) {
+  const media = createMediaRef(query, defaultValue)
+  media.subscribe()
+  return media.matches
+}
+
 export { DESK_MQ, MOBILE_MQ }

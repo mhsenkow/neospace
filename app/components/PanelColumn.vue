@@ -14,9 +14,10 @@ import { useStatusStore } from '~/stores/status'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useLinkedProfileFeed } from '~/composables/useLinkedProfileFeed'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { participantLabel } from '~/utils/dmHelpers'
+import { FEED_LABELS } from '~/stores/columns'
 
 interface Props {
   column: ColumnConfig
@@ -89,13 +90,6 @@ const conversationsStore = useConversationsStore()
 const composeSheet = useComposeSheetStore()
 const router = useRouter()
 
-const labels: Record<string, string> = {
-  profile: 'Profile',
-  search: 'Search',
-  notifications: 'Notifications',
-  messages: 'Messages',
-}
-
 const isProfilePeek = computed(
   () => props.column.feedType === 'profile' && !!props.column.profileAcct,
 )
@@ -108,8 +102,17 @@ const title = computed(() => {
       props.column.profileAcct
     return name || 'Profile'
   }
-  return labels[props.column.feedType] || 'View'
+  return FEED_LABELS[props.column.feedType] || 'View'
 })
+
+const notifPreview = (status?: mastodon.v1.Status | null) => {
+  if (!status?.content) return ''
+  const text = stripHtml(status.content).replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  return text.length > 100 ? `${text.slice(0, 100)}…` : text
+}
+
+const panelNotifications = computed(() => notificationsStore.filteredNotifications)
 
 const formatTime = (dateString?: string | null) => {
   if (!dateString) return ''
@@ -198,6 +201,32 @@ const remoteHandle = computed(() => {
   const acct = remoteAccount.value?.acct || props.column.profileAcct || ''
   return acct ? `@${acct.replace(/^@/, '')}` : ''
 })
+
+const safeRemoteBio = computed(() => sanitizeStatusHtml(remoteAccount.value?.note || ''))
+const safeProfileBio = computed(() => sanitizeStatusHtml(profileAccount.value?.note || ''))
+
+const onProfilePeekKeydown = (e: KeyboardEvent) => {
+  const list = profileLinkedAccounts.value
+  if (list.length < 2) return
+  const idx = list.findIndex((inst) => inst.id === profilePeekId.value)
+  if (idx < 0) return
+  let next = idx
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (idx + 1) % list.length
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (idx - 1 + list.length) % list.length
+  else if (e.key === 'Home') next = 0
+  else if (e.key === 'End') next = list.length - 1
+  else return
+  e.preventDefault()
+  const target = list[next]
+  if (!target) return
+  selectProfileAccount(target.id)
+  nextTick(() => {
+    const el = (e.currentTarget as HTMLElement | null)?.querySelector(
+      `[aria-checked="true"]`,
+    ) as HTMLElement | null
+    el?.focus()
+  })
+}
 
 const profilePeekRace = createRaceGuard()
 
@@ -333,36 +362,44 @@ const openHashtag = (tag: string) => {
 }
 
 // ── Notifications ───────────────────────────────────────
+/** Prefer the notification's account client via ?account= — don't switch global active. */
+const accountQuery = (instanceId?: string) =>
+  instanceId ? { account: instanceId } : {}
+
 const openNotification = (notif: ExtendedNotification) => {
-  if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
-    instancesStore.setActiveAccount(notif._instanceId)
-  }
+  const via = accountQuery(notif._instanceId)
   if (notif.type === 'follow' || notif.type === 'follow_request') {
     const acct = notif.account?.acct
     if (acct) {
-      router.push({ path: '/profile', query: { user: acct } })
+      router.push({ path: '/profile', query: { user: acct, ...via } })
       return
     }
   }
   const status = notif.status
   if (status?.id) {
+    const url = status.url || status.uri
     router.push({
       path: `/status/${status.id}`,
-      query: status.url || status.uri ? { url: status.url || status.uri } : undefined,
+      query: {
+        ...(url ? { url } : {}),
+        ...via,
+      },
     })
     return
   }
   const acct = notif.account?.acct
-  if (acct) router.push({ path: '/profile', query: { user: acct } })
+  if (acct) router.push({ path: '/profile', query: { user: acct, ...via } })
 }
 
 const openNotifProfile = (notif: ExtendedNotification, e?: Event) => {
   e?.stopPropagation()
-  if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
-    instancesStore.setActiveAccount(notif._instanceId)
-  }
   const acct = notif.account?.acct
-  if (acct) router.push({ path: '/profile', query: { user: acct } })
+  if (acct) {
+    router.push({
+      path: '/profile',
+      query: { user: acct, ...accountQuery(notif._instanceId) },
+    })
+  }
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -585,9 +622,11 @@ onUnmounted(() => {
                   {{ remoteAccount.displayName || remoteAccount.username }}
                 </h3>
                 <p class="profile-card__acct">{{ remoteHandle }}</p>
-                <p v-if="remoteAccount.note" class="profile-card__bio">
-                  {{ stripHtml(remoteAccount.note) }}
-                </p>
+                <div
+                  v-if="safeRemoteBio"
+                  class="profile-card__bio"
+                  v-html="safeRemoteBio"
+                />
                 <p class="profile-card__followers">
                   <strong>{{ remoteAccount.followersCount?.toLocaleString() }}</strong> followers
                 </p>
@@ -647,8 +686,9 @@ onUnmounted(() => {
           <div
             v-if="profileLinkedAccounts.length > 1"
             class="profile-peek-strip"
-            role="listbox"
+            role="radiogroup"
             aria-label="Linked accounts"
+            @keydown="onProfilePeekKeydown"
           >
             <button
               v-for="inst in profileLinkedAccounts"
@@ -656,8 +696,9 @@ onUnmounted(() => {
               type="button"
               class="profile-peek-chip"
               :class="{ 'profile-peek-chip--active': inst.id === profilePeekId }"
-              role="option"
-              :aria-selected="inst.id === profilePeekId"
+              role="radio"
+              :aria-checked="inst.id === profilePeekId"
+              :tabindex="inst.id === profilePeekId ? 0 : -1"
               :title="`${inst.user?.displayName || inst.user?.username || inst.name} · ${profileHost(inst.url)}`"
               @click="selectProfileAccount(inst.id)"
             >
@@ -686,9 +727,11 @@ onUnmounted(() => {
                   {{ profileAccount.displayName || profileAccount.username }}
                 </h3>
                 <p class="profile-card__acct">{{ profileHandle }}</p>
-                <p v-if="profileAccount.note" class="profile-card__bio">
-                  {{ stripHtml(profileAccount.note) }}
-                </p>
+                <div
+                  v-if="safeProfileBio"
+                  class="profile-card__bio"
+                  v-html="safeProfileBio"
+                />
                 <p class="profile-card__followers">
                   <strong>{{ profileAccount.followersCount?.toLocaleString() }}</strong> followers
                 </p>
@@ -838,9 +881,10 @@ onUnmounted(() => {
           <p v-if="notificationsStore.isLoading && notificationsStore.isEmpty" class="panel-hint">Loading…</p>
           <p v-else-if="notificationsStore.isEmpty" class="panel-hint">All caught up.</p>
           <div
-            v-for="notif in notificationsStore.filteredNotifications.slice(0, 40)"
+            v-for="notif in panelNotifications"
             :key="notif._key"
             class="row-btn-wrap"
+            :class="{ 'row-btn-wrap--unread': notificationsStore.isUnread(notif) }"
           >
             <button
               v-if="notif.account"
@@ -856,13 +900,28 @@ onUnmounted(() => {
               class="row-btn"
               @click="openNotification(notif)"
             >
+              <span
+                v-if="notificationsStore.isUnread(notif)"
+                class="row-btn__unread"
+                aria-label="Unread"
+              />
               <span class="row-btn__badge"><NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" /></span>
               <span>
                 <strong class="row-btn__name">{{ notif.account?.displayName || notif.account?.username }}</strong>
                 <em>{{ notifLabel(notif.type) }} · {{ formatTime(notif.createdAt) }}</em>
+                <em v-if="notifPreview(notif.status)" class="row-btn__excerpt">{{ notifPreview(notif.status) }}</em>
               </span>
             </button>
           </div>
+          <button
+            v-if="notificationsStore.hasMore && !notificationsStore.isEmpty"
+            type="button"
+            class="neo-btn neo-btn--ghost neo-btn--sm panel-more"
+            :disabled="notificationsStore.isLoadingMore"
+            @click="notificationsStore.loadMore()"
+          >
+            {{ notificationsStore.isLoadingMore ? 'Loading…' : 'Load more' }}
+          </button>
         </template>
       </div>
 
@@ -1149,6 +1208,13 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.25rem;
   width: 100%;
+
+  &--unread {
+    border-left: 2px solid var(--neo-accent);
+    margin-left: -0.35rem;
+    padding-left: 0.35rem;
+    background: color-mix(in srgb, var(--neo-accent) 5%, transparent);
+  }
 }
 
 .row-btn-wrap > .row-btn__avatar {

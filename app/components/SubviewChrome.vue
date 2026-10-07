@@ -69,8 +69,8 @@ const goBack = () => {
   padding-top: max(0.35rem, env(safe-area-inset-top, 0px));
   padding-bottom: 0.35rem;
   overflow: visible;
-  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
-  backdrop-filter: blur(10px);
+  /* Solid fill — backdrop-filter flashes black on iOS Safari */
+  background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
 
   @media (min-width: 1024px) {
