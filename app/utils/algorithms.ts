@@ -268,3 +268,250 @@ export function builtinRecipes(): AlgorithmRecipe[] {
     },
   ]
 }
+
+/** Partial recipe + suggested title from a natural-language sentence. */
+export type ParsedAlgorithmSentence = {
+  name: string
+  description: string
+  source: AlgorithmSource
+  mediaOnly: boolean
+  noReblogs: boolean
+  noReplies: boolean
+  includeTags: string[]
+  excludeTags: string[]
+  includeKeywords: string[]
+  excludeKeywords: string[]
+  /** Human chips for the preview UI */
+  chips: string[]
+}
+
+const STOP = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'with',
+  'without',
+  'from',
+  'on',
+  'in',
+  'of',
+  'to',
+  'for',
+  'my',
+  'me',
+  'i',
+  'show',
+  'see',
+  'want',
+  'just',
+  'only',
+  'please',
+  'posts',
+  'post',
+  'feed',
+  'timeline',
+  'things',
+  'stuff',
+  'about',
+  'that',
+  'this',
+  'those',
+  'these',
+  'any',
+  'all',
+  'some',
+  'except',
+  'excluding',
+  'no',
+  'not',
+  'dont',
+  "don't",
+  'skip',
+  'hide',
+  'minus',
+  'plus',
+  'also',
+  'like',
+  'as',
+  'is',
+  'are',
+  'be',
+  'it',
+  'its',
+  "it's",
+  'get',
+  'give',
+  'using',
+  'use',
+  'via',
+  'into',
+  'over',
+  'under',
+  'more',
+  'less',
+  'than',
+  'then',
+  'when',
+  'where',
+  'who',
+  'what',
+  'how',
+  'why',
+])
+
+/**
+ * Deterministic NL → recipe rules. No network / model — pattern + keyword extract.
+ * Examples:
+ *  - "cat photos on local, no boosts"
+ *  - "tech news but no politics"
+ *  - "federated #foss media only without replies"
+ */
+export function parseAlgorithmSentence(raw: string): ParsedAlgorithmSentence {
+  const text = raw.trim().replace(/\s+/g, ' ')
+  const lower = text.toLowerCase()
+
+  let source: AlgorithmSource = 'home'
+  if (/\b(federated|fediverse|public timeline|firehose)\b/.test(lower)) source = 'federated'
+  else if (/\b(local|this server|my server|instance)\b/.test(lower)) source = 'local'
+  else if (/\b(for you|home|following)\b/.test(lower)) source = 'home'
+
+  const mediaOnly =
+    /\b(media only|photos?|images?|pics?|pictures?|videos?|with media|has media)\b/.test(lower)
+  const noReblogs =
+    /\b(no boosts?|without boosts?|no reblogs?|without reblogs?|originals?|no retweets?)\b/.test(
+      lower,
+    )
+  const noReplies = /\b(no replies?|without replies?|hide replies?|top[- ]level)\b/.test(lower)
+
+  // Explicit hashtags
+  const allTags = [...text.matchAll(/#([a-z0-9_]{2,})/gi)].map((m) => m[1]!.toLowerCase())
+  const includeTags: string[] = []
+  const excludeTags: string[] = []
+
+  // "no #politics" / "without #nsfw" / "except #x"
+  const exclTagRe =
+    /(?:\bno|without|except|excluding|hide|skip|minus)\s+#([a-z0-9_]{2,})/gi
+  for (const m of text.matchAll(exclTagRe)) {
+    excludeTags.push(m[1]!.toLowerCase())
+  }
+  for (const t of allTags) {
+    if (!excludeTags.includes(t) && !includeTags.includes(t)) includeTags.push(t)
+  }
+
+  // Quoted phrases
+  const includeKeywords: string[] = []
+  const excludeKeywords: string[] = []
+  for (const m of text.matchAll(/"([^"]{2,64})"|'([^']{2,64})'/g)) {
+    const phrase = (m[1] || m[2] || '').trim()
+    if (phrase) includeKeywords.push(phrase)
+  }
+
+  // Exclusion phrases: "no politics", "but no spoilers", "without ads"
+  const exclKwRe =
+    /(?:\bno|without|except|excluding|hide|skip|minus|but\s+no)\s+([a-z][a-z0-9][\w\s-]{0,40}?)(?=\s*(?:,|\.|$|but|and|with|from|on|#)|$)/gi
+  for (const m of lower.matchAll(exclKwRe)) {
+    let chunk = (m[1] || '').trim()
+    // Strip trailing filter words that aren't content
+    chunk = chunk
+      .replace(
+        /\b(boosts?|reblogs?|replies?|photos?|images?|pics?|videos?|media|posts?|feed|timeline)\b/g,
+        '',
+      )
+      .replace(/#\w+/g, '')
+      .trim()
+    for (const part of chunk.split(/[,\s]+/).filter(Boolean)) {
+      if (part.length < 2 || STOP.has(part)) continue
+      if (!excludeKeywords.some((k) => k.toLowerCase() === part)) excludeKeywords.push(part)
+    }
+  }
+
+  // Inclusion after "about / with / show me / just"
+  const aboutRe =
+    /(?:about|with|show\s+me|i\s+want|just|only)\s+([a-z0-9][\w\s#,-]{1,48}?)(?=\s*(?:,|\.|$|but|without|except|no\s+|from|on\s+(?:local|home|federated))|$)/gi
+  for (const m of lower.matchAll(aboutRe)) {
+    let chunk = (m[1] || '').trim()
+    chunk = chunk
+      .replace(
+        /\b(photos?|images?|pics?|videos?|media|boosts?|reblogs?|replies?|posts?)\b/g,
+        '',
+      )
+      .replace(/#\w+/g, '')
+      .trim()
+    for (const part of chunk.split(/[,\s]+/).filter(Boolean)) {
+      if (part.length < 2 || STOP.has(part)) continue
+      if (excludeKeywords.some((k) => k.toLowerCase() === part)) continue
+      if (!includeKeywords.some((k) => k.toLowerCase() === part)) includeKeywords.push(part)
+    }
+  }
+
+  // Fallback: leftover content words if we still have nothing to include
+  if (!includeTags.length && !includeKeywords.length) {
+    const stripped = lower
+      .replace(/#[a-z0-9_]+/g, ' ')
+      .replace(/["'][^"']+["']/g, ' ')
+      .replace(
+        /\b(federated|local|home|for you|following|instance|server|media only|photos?|images?|pics?|videos?|no boosts?|without boosts?|no reblogs?|originals?|no replies?|without replies?|show me|i want|timeline|feed|posts?)\b/g,
+        ' ',
+      )
+      .replace(
+        /(?:\bno|without|except|excluding|hide|skip|minus|but\s+no)\s+[a-z][\w\s-]{0,40}/g,
+        ' ',
+      )
+    for (const part of stripped.split(/[^\w]+/).filter(Boolean)) {
+      if (part.length < 3 || STOP.has(part)) continue
+      if (!includeKeywords.some((k) => k.toLowerCase() === part)) includeKeywords.push(part)
+      if (includeKeywords.length >= 6) break
+    }
+  }
+
+  const chips: string[] = []
+  chips.push(source === 'home' ? 'For You' : source === 'local' ? 'Local' : 'Federated')
+  if (mediaOnly) chips.push('Media')
+  if (noReblogs) chips.push('No boosts')
+  if (noReplies) chips.push('No replies')
+  for (const t of includeTags.slice(0, 4)) chips.push(`#${t}`)
+  for (const t of excludeTags.slice(0, 3)) chips.push(`−#${t}`)
+  for (const k of includeKeywords.slice(0, 4)) chips.push(k)
+  for (const k of excludeKeywords.slice(0, 3)) chips.push(`−${k}`)
+
+  // Suggested name
+  let name = ''
+  if (includeTags[0]) name = `#${includeTags[0]}`
+  else if (includeKeywords[0]) {
+    name = includeKeywords[0].replace(/\b\w/g, (c) => c.toUpperCase())
+  } else if (mediaOnly) name = 'Media'
+  else if (noReblogs) name = 'Originals'
+  else name = source === 'local' ? 'Local pick' : source === 'federated' ? 'Federated pick' : 'My feed'
+  if (excludeKeywords[0] || excludeTags[0]) {
+    const ex = excludeTags[0] ? `#${excludeTags[0]}` : excludeKeywords[0]
+    if (name.length < 28) name = `${name}, no ${ex}`
+  }
+  name = name.slice(0, 48)
+
+  const description = text.slice(0, 160)
+
+  return {
+    name,
+    description,
+    source,
+    mediaOnly,
+    noReblogs,
+    noReplies,
+    includeTags: normalizeTagList(includeTags),
+    excludeTags: normalizeTagList(excludeTags),
+    includeKeywords: normalizeKeywordList(includeKeywords),
+    excludeKeywords: normalizeKeywordList(excludeKeywords),
+    chips,
+  }
+}
+
+export const ALGORITHM_SENTENCE_EXAMPLES = [
+  'Cat photos on local, no boosts',
+  'Tech news but no politics',
+  'Federated #foss media only',
+  'Show me climate without replies',
+] as const
+

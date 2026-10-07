@@ -27,9 +27,11 @@ import { collapseDuplicateReblogs, statusIdentity } from '../app/utils/statusIde
 import { formatLogRingForFeedback, logError, logWarn } from '../app/utils/log'
 import { formatCompactRelativeTime } from '../app/utils/relativeTime'
 import { stripParticipantMentions } from '../app/utils/dmMentions'
+import { httpStatusFrom, mapErrorToMessage } from '../app/utils/friendlyError'
 import {
   decodeAlgorithmShare,
   encodeAlgorithmShare,
+  parseAlgorithmSentence,
   sharePayloadToRecipe,
   statusMatchesRecipe,
 } from '../app/utils/algorithms'
@@ -424,6 +426,24 @@ describe('algorithm recipes', () => {
     expect(decodeAlgorithmShare('not-valid!!!')).toBeNull()
     expect(decodeAlgorithmShare('')).toBeNull()
   })
+
+  it('parses a natural-language algorithm sentence into rules', () => {
+    const a = parseAlgorithmSentence('Cat photos on local, no boosts')
+    expect(a.source).toBe('local')
+    expect(a.mediaOnly).toBe(true)
+    expect(a.noReblogs).toBe(true)
+    expect(a.includeKeywords.map((k) => k.toLowerCase())).toContain('cat')
+
+    const b = parseAlgorithmSentence('Tech news but no politics')
+    expect(b.excludeKeywords.map((k) => k.toLowerCase())).toContain('politics')
+    expect(b.includeKeywords.some((k) => /tech|news/i.test(k))).toBe(true)
+
+    const c = parseAlgorithmSentence('Federated #foss media only without replies')
+    expect(c.source).toBe('federated')
+    expect(c.includeTags).toContain('foss')
+    expect(c.mediaOnly).toBe(true)
+    expect(c.noReplies).toBe(true)
+  })
 })
 
 describe('formatCompactRelativeTime', () => {
@@ -471,5 +491,19 @@ describe('stripParticipantMentions', () => {
   it('leaves non-mention text and mid-sentence mentions alone', () => {
     const html = `<p>@home tonight, ${hcard('bob', 'https://x.social/@bob')}?</p>`
     expect(stripParticipantMentions(html, ['bob'])).toBe(html)
+  })
+})
+
+describe('friendlyError rate limits', () => {
+  it('reads 429 from masto errors and from bare stored messages', () => {
+    expect(httpStatusFrom({ statusCode: 429, message: 'Too many requests' })).toBe(429)
+    expect(httpStatusFrom(new Error('Too many requests'))).toBe(429)
+    expect(httpStatusFrom(new Error('Record not found'))).toBeNull()
+  })
+
+  it('gives rate limits their own copy instead of the generic fallback', () => {
+    const msg = mapErrorToMessage(new Error('Too many requests'))
+    expect(msg.title).toBe('Taking a breather')
+    expect(msg.retryable).toBe(true)
   })
 })
