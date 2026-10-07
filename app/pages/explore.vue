@@ -119,6 +119,24 @@ const fediverseSearchEmpty = computed(() => {
   return !accounts.value.length && !statuses.value.length && !hashtags.value.length
 })
 
+const searchStatusText = computed(() => {
+  if (!hasQuery.value) return ''
+  if (searchBusy.value) return 'Searching…'
+  if (searchError.value) return searchError.value
+  if (!isSignedIn.value && tab.value !== 'servers') return ''
+  const q = query.value.trim()
+  const parts: string[] = []
+  if (showPeople.value) parts.push(`${accounts.value.length} ${accounts.value.length === 1 ? 'person' : 'people'}`)
+  if (showTags.value) parts.push(`${hashtags.value.length} ${hashtags.value.length === 1 ? 'tag' : 'tags'}`)
+  if (showPosts.value) parts.push(`${statuses.value.length} ${statuses.value.length === 1 ? 'post' : 'posts'}`)
+  if (showServersResults.value) {
+    parts.push(`${filteredInstances.value.length} ${filteredInstances.value.length === 1 ? 'server' : 'servers'}`)
+  }
+  if (parts.length) return `${parts.join(', ')} for “${q}”`
+  if (fediverseSearchEmpty.value) return `No results for “${q}”`
+  return ''
+})
+
 const syncFromRoute = () => {
   const q = route.query.q
   if (typeof q === 'string') query.value = q
@@ -296,25 +314,23 @@ const goGroups = () => router.push('/groups')
 
 watch(query, (q) => {
   if (searchTimer) clearTimeout(searchTimer)
-  if (tab.value !== 'servers') {
-    searchTimer = setTimeout(() => {
+  searchTimer = setTimeout(() => {
+    if (tab.value !== 'servers') {
       void runFediverseSearch(q)
-    }, 260)
-  } else {
-    clearFediverseResults()
-  }
-  persistRoute()
+    } else {
+      clearFediverseResults()
+    }
+    persistRoute()
+  }, 260)
 })
 
 watch(tab, () => {
+  persistRoute()
   if (hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
 })
 
 watch(isSignedIn, (ok) => {
-  if (!ok && ['people', 'posts', 'tags'].includes(tab.value) && !hasQuery.value) {
-    /* keep tab so they see the sign-in empty state */
-  }
-  if (ok && hasQuery.value) void runFediverseSearch(query.value)
+  if (ok && hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
 })
 
 onMounted(async () => {
@@ -394,9 +410,18 @@ onUnmounted(() => {
 
       <p v-if="customError" class="explore-error" role="alert">{{ customError }}</p>
       <p v-else-if="searchError" class="explore-error" role="alert">{{ searchError }}</p>
+      <p
+        v-if="searchStatusText && !customError && !searchError"
+        class="explore-hint explore-hint--status"
+        role="status"
+        aria-live="polite"
+        :aria-busy="searchBusy"
+      >
+        {{ searchStatusText }}
+      </p>
     </div>
 
-    <div id="explore-results">
+    <div id="explore-results" :aria-busy="searchBusy">
     <div v-if="!isSignedIn" class="explore-cta-row">
       <a
         href="https://joinmastodon.org/servers"
@@ -502,8 +527,6 @@ onUnmounted(() => {
 
     <!-- Active search results -->
     <template v-else>
-      <p v-if="searchBusy" class="explore-hint">Searching…</p>
-
       <div
         v-if="!isSignedIn && tab !== 'servers'"
         class="explore-empty"
@@ -522,12 +545,11 @@ onUnmounted(() => {
       <template v-else>
         <section v-if="showPeople" class="explore-people">
           <h2 class="explore-section-title">People</h2>
-          <button
+          <NuxtLink
             v-for="acct in accounts"
             :key="acct.id"
-            type="button"
+            :to="{ path: '/profile', query: { user: acct.acct } }"
             class="explore-person"
-            @click="openAccount(acct.acct)"
           >
             <img :src="acct.avatar" alt="" class="explore-person__avatar" loading="lazy" />
             <span class="explore-person__meta">
@@ -535,7 +557,7 @@ onUnmounted(() => {
               <em>@{{ acct.acct }}</em>
               <span v-if="acct.note" class="explore-person__bio">{{ stripHtml(acct.note) }}</span>
             </span>
-          </button>
+          </NuxtLink>
           <button
             v-if="tab === 'all' && accounts.length >= 8"
             type="button"
@@ -548,15 +570,14 @@ onUnmounted(() => {
 
         <section v-if="showTags" class="explore-people">
           <h2 class="explore-section-title">Tags</h2>
-          <button
+          <NuxtLink
             v-for="tag in hashtags"
             :key="tag.name"
-            type="button"
+            :to="`/groups/${encodeURIComponent(tag.name.replace(/^#/, ''))}`"
             class="explore-tag"
-            @click="openHashtag(tag.name)"
           >
             #{{ tag.name }}
-          </button>
+          </NuxtLink>
         </section>
 
         <section v-if="showPosts" class="explore-posts">
@@ -627,6 +648,7 @@ onUnmounted(() => {
     </p>
 
     <section class="explore-help">
+      <h2 class="explore-section-title explore-help__heading">Get started</h2>
       <div v-if="!isSignedIn" class="explore-help__card">
         <h3>Create</h3>
         <a
@@ -802,7 +824,7 @@ onUnmounted(() => {
     outline: none;
 
     &::placeholder {
-      color: var(--neo-text-disabled);
+      color: var(--neo-text-muted);
     }
   }
 }
@@ -1013,10 +1035,14 @@ onUnmounted(() => {
 
 .explore-section-title {
   margin: 0 0 0.55rem;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--neo-text-quaternary);
+  color: var(--neo-text-tertiary);
+}
+
+.explore-help__heading {
+  margin-bottom: 0.75rem;
 }
 
 .explore-people,
@@ -1036,6 +1062,7 @@ onUnmounted(() => {
   background: transparent;
   color: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 
   &:hover {
@@ -1091,6 +1118,7 @@ onUnmounted(() => {
   color: var(--neo-accent);
   font-size: 0.875rem;
   font-weight: 600;
+  text-decoration: none;
   cursor: pointer;
 
   &:hover {

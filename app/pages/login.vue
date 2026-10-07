@@ -6,6 +6,7 @@
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { friendlyServerError } from '~/utils/instances'
+import { sanitizeReturnTo } from '~/utils/oauthPkce'
 
 const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
@@ -18,6 +19,10 @@ const pickerRef = ref<{ setError: (msg: string | null) => void } | null>(null)
 
 /** Adding another account while already signed in */
 const isAddMode = computed(() => route.query.add === '1' || route.query.add === 'true')
+
+const returnTo = computed(() =>
+  sanitizeReturnTo(typeof route.query.returnTo === 'string' ? route.query.returnTo : null),
+)
 
 const mainHandle = computed(() => {
   const main = instancesStore.primaryAccount || instancesStore.activeAccount
@@ -48,7 +53,7 @@ onMounted(async () => {
         const parsed = JSON.parse(raw) as { instances?: { accessToken?: string }[] }
         const hasToken = parsed?.instances?.some((i) => !!i.accessToken)
         if (hasToken) {
-          router.replace('/')
+          router.replace(returnTo.value || '/')
         }
       }
     } catch {
@@ -59,7 +64,7 @@ onMounted(async () => {
   await instancesStore.initialize()
   settingsStore.loadLocalPreferences()
   if (instancesStore.isAuthenticated && !isAddMode.value) {
-    router.replace('/')
+    router.replace(returnTo.value || '/')
   }
 })
 
@@ -78,7 +83,10 @@ const startLogin = async (url: string) => {
       if (isAddMode.value) sessionStorage.setItem('neospace_auth_add', '1')
       else sessionStorage.removeItem('neospace_auth_add')
     }
-    const authUrl = await instancesStore.loginWithInstance(url)
+    const authUrl = await instancesStore.loginWithInstance(url, {
+      addMode: isAddMode.value,
+      returnTo: returnTo.value,
+    })
     window.location.href = authUrl
   } catch (e) {
     pickerRef.value?.setError(friendlyServerError(e))

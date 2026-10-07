@@ -10,6 +10,8 @@ defineProps<{
   results: mastodon.v1.Account[]
   searching?: boolean
   activeIndex: number
+  /** Open upward when there isn't room below (keyboard / bottom sheet) */
+  flipUp?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +24,7 @@ const emit = defineEmits<{
     v-if="searching || results.length"
     :id="id"
     class="compose-autocomplete"
+    :class="{ 'compose-autocomplete--up': flipUp }"
     role="listbox"
     aria-label="Mention suggestions"
   >
@@ -55,6 +58,11 @@ const emit = defineEmits<{
   right: 0;
   top: calc(100% + 0.25rem);
   z-index: 30;
+
+  &--up {
+    top: auto;
+    bottom: calc(100% + 0.25rem);
+  }
   max-height: 220px;
   overflow-y: auto;
   background: var(--neo-bg-secondary);

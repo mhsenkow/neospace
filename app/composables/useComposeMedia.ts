@@ -92,10 +92,7 @@ export function useComposeMedia() {
       if (!current) return
       current.remoteId = remote.id
       // Prefer server preview if available
-      if (remote.previewUrl) {
-        if (current.previewUrl.startsWith('blob:')) URL.revokeObjectURL(current.previewUrl)
-        current.previewUrl = remote.previewUrl
-      }
+      // Keep blob preview to avoid flicker; remote URL is used after post
     } catch (e: any) {
       patchAttachment(localId, {
         error: e?.message || 'Upload failed',
@@ -152,17 +149,21 @@ export function useComposeMedia() {
 
     // Filter first so oversize/wrong-type don't consume slots
     const candidates: { file: File; hint?: string | null }[] = []
-    list.forEach((file, i) => {
+    let descIdx = 0
+    for (const file of list) {
       if (!ACCEPT.test(file.type)) {
         rejected.push({ name: file.name, reason: 'Unsupported file type' })
-        return
+        descIdx += 1
+        continue
       }
       if (file.size > MAX_FILE_BYTES) {
         rejected.push({ name: file.name, reason: 'File too large (max 40MB)' })
-        return
+        descIdx += 1
+        continue
       }
-      candidates.push({ file, hint: descriptions?.[i] })
-    })
+      candidates.push({ file, hint: descriptions?.[descIdx] })
+      descIdx += 1
+    }
 
     const take = candidates.slice(0, room)
     for (const extra of candidates.slice(room)) {
@@ -219,7 +220,16 @@ export function useComposeMedia() {
         altTimers.delete(localId)
         const current = attachments.value.find((a) => a.localId === localId)
         if (!current?.remoteId) return
-        void statusStore.updateMediaDescription(current.remoteId, current.description.trim())
+        void statusStore
+          .updateMediaDescription(current.remoteId, current.description.trim())
+          .catch(async () => {
+            try {
+              const { useToastStore } = await import('~/stores/toast')
+              useToastStore().show({ message: 'Alt text not saved · tap to retry', duration: 4000 })
+            } catch {
+              /* toast optional */
+            }
+          })
       }, 450),
     )
   }

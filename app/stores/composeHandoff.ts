@@ -35,13 +35,21 @@ type StoredShare = {
   imageName?: string
 }
 
+const MAX_HANDOFF_BYTES = 25 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = /^image\/(png|jpeg|webp|gif|avif)$/
+const DATA_URL_IMAGE = /^data:image\/(png|jpeg|webp);base64,/
+
 async function fetchAsFile(url: string, filename: string, typeHint?: string): Promise<File | null> {
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return null
+    const len = res.headers.get('content-length')
+    if (len && Number(len) > MAX_HANDOFF_BYTES) return null
     const blob = await res.blob()
-    if (!blob.size || blob.type.startsWith('text/')) return null
-    const type = typeHint || (blob.type.startsWith('image/') ? blob.type : 'image/png')
+    if (!blob.size || blob.size > MAX_HANDOFF_BYTES) return null
+    if (blob.type.startsWith('text/')) return null
+    const type = typeHint || blob.type
+    if (!ALLOWED_IMAGE_TYPES.test(type)) return null
     return new File([blob], filename, { type })
   } catch {
     return null
@@ -60,6 +68,7 @@ async function fetchStoryImage(base: string, filename: string): Promise<File | n
 }
 
 async function fileFromDataUrl(dataUrl: string, name: string): Promise<File | null> {
+  if (!DATA_URL_IMAGE.test(dataUrl)) return null
   try {
     const res = await fetch(dataUrl)
     const blob = await res.blob()
@@ -122,6 +131,8 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     error: null as string | null,
     /** Dedupe repeated Loom postMessages / query ingest. */
     lastIngestKey: null as string | null,
+    /** In-flight ingest per story — avoids double chart upload. */
+    _ingestPromises: {} as Record<string, Promise<boolean>>,
   }),
 
   getters: {
@@ -145,6 +156,20 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
 
     async ingestStored(share: StoredShare) {
       const base = share.story ? storyBase(share.story) : null
+      const storyKey = share.story || `${share.text || ''}|${share.imageName || ''}`
+      const inflight = this._ingestPromises[storyKey]
+      if (inflight) return inflight
+
+      const run = this._ingestStoredOnce(share, base)
+      this._ingestPromises[storyKey] = run
+      try {
+        return await run
+      } finally {
+        delete this._ingestPromises[storyKey]
+      }
+    },
+
+    async _ingestStoredOnce(share: StoredShare, base: string | null) {
       // Key without img flag first — we upgrade after fetch
       const provisionalKey = `${share.story || ''}|${share.text || ''}`
       if (

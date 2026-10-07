@@ -50,11 +50,6 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     onPosted: null,
   }),
 
-  getters: {
-    isReply: (state) => !!state.inReplyToId,
-    isQuote: (state) => !!state.quoteUrl && !state.inReplyToId,
-  },
-
   actions: {
     show(opts?: {
       initialText?: string

@@ -44,28 +44,37 @@ const onPosted = (status: mastodon.v1.Status) => {
   sheet.posted(status)
 }
 
-const ariaLabel = computed(() => {
-  if (sheet.pickRecipient) return 'Choose who to message'
-  if (sheet.inReplyToId) return 'Reply'
-  if (sheet.quoteUrl) return 'Quote'
-  return 'New post'
-})
+const sheetTitleId = 'compose-sheet-title'
+const contextExpanded = ref(false)
+
+const isPicking = ref(false)
 
 const onPick = async (account: mastodon.v1.Account) => {
-  const { useConversationsStore } = await import('~/stores/conversations')
-  const conversations = useConversationsStore()
-  const router = useRouter()
-  if (!conversations.conversations.length) {
-    await conversations.fetchConversations({ quiet: true })
+  if (isPicking.value) return
+  isPicking.value = true
+  try {
+    const { useConversationsStore } = await import('~/stores/conversations')
+    const conversations = useConversationsStore()
+    const router = useRouter()
+    if (!conversations.conversations.length) {
+      await conversations.fetchConversations({ quiet: true })
+    }
+    const existing = conversations.findDirectWith(account.id)
+    if (existing?.lastStatus?.id) {
+      if (existing.unread) await conversations.markRead(existing.id)
+      sheet.hide()
+      await router.push(`/status/${existing.lastStatus.id}`)
+      return
+    }
+    sheet.continueWithRecipient(accountHandle(account))
+  } catch (e: any) {
+    const { useToastStore } = await import('~/stores/toast')
+    useToastStore().show({
+      message: e?.message || 'Couldn’t open that conversation',
+    })
+  } finally {
+    isPicking.value = false
   }
-  const existing = conversations.findDirectWith(account.id)
-  if (existing?.lastStatus?.id) {
-    if (existing.unread) await conversations.markRead(existing.id)
-    sheet.hide()
-    await router.push(`/status/${existing.lastStatus.id}`)
-    return
-  }
-  sheet.continueWithRecipient(accountHandle(account))
 }
 </script>
 
@@ -79,7 +88,7 @@ const onPick = async (account: mastodon.v1.Account) => {
         :style="viewportStyle"
         role="dialog"
         aria-modal="true"
-        :aria-label="ariaLabel"
+        :aria-labelledby="sheetTitleId"
       >
         <button
           type="button"
@@ -99,7 +108,7 @@ const onPick = async (account: mastodon.v1.Account) => {
               <button type="button" class="compose-sheet__close neo-btn neo-btn--tertiary" @click="requestClose">
                 Cancel
               </button>
-              <span class="compose-sheet__title">{{ sheet.title || 'New post' }}</span>
+              <span :id="sheetTitleId" class="compose-sheet__title">{{ sheet.title || 'New post' }}</span>
               <span class="compose-sheet__spacer" />
             </header>
             <div class="compose-sheet__body" @focusin="onFocusField">
@@ -115,7 +124,20 @@ const onPick = async (account: mastodon.v1.Account) => {
                     <strong>{{ sheet.contextPost.name }}</strong>
                     <span>@{{ sheet.contextPost.handle }}</span>
                   </p>
-                  <p class="compose-sheet__context-text">{{ sheet.contextPost.text }}</p>
+                  <p
+                    class="compose-sheet__context-text"
+                    :class="{ 'compose-sheet__context-text--collapsed': !contextExpanded }"
+                  >
+                    {{ sheet.contextPost.text }}
+                  </p>
+                  <button
+                    v-if="sheet.contextPost.text.length > 120"
+                    type="button"
+                    class="compose-sheet__context-toggle"
+                    @click="contextExpanded = !contextExpanded"
+                  >
+                    {{ contextExpanded ? 'Show less' : 'Show more' }}
+                  </button>
                 </div>
               </article>
               <RealComposeBox
@@ -173,7 +195,7 @@ const onPick = async (account: mastodon.v1.Account) => {
   flex-direction: column;
   width: 100%;
   max-height: min(92dvh, 100%);
-  min-height: min(56dvh, 420px);
+  min-height: min(56dvh, 420px, 100%);
   background: var(--neo-bg-primary);
   border-radius: 16px 16px 0 0;
   border: 1px solid var(--neo-border-color);
@@ -258,6 +280,24 @@ const onPick = async (account: mastodon.v1.Account) => {
   :deep(.compose-footer) {
     margin-top: auto;
   }
+}
+
+.compose-sheet__context-text--collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.compose-sheet__context-toggle {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-link);
+  cursor: pointer;
 }
 
 .compose-sheet__context {

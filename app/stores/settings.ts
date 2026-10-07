@@ -160,6 +160,8 @@ interface SettingsState {
 }
 
 const LOCAL_PREFS_KEY = 'neospace_local_prefs'
+
+let saveSuccessTimer: ReturnType<typeof setTimeout> | null = null
 const LOCAL_PREFS_VERSION = 1
 
 export const useSettingsStore = defineStore('settings', {
@@ -404,15 +406,23 @@ export const useSettingsStore = defineStore('settings', {
       try {
         const client = this.getClient()
         
-        // Load in parallel
-        const [preferences, account, filters] = await Promise.all([
+        const [prefResult, accountResult, filterResult] = await Promise.allSettled([
           client.v1.preferences.fetch(),
           client.v1.accounts.verifyCredentials(),
           this.loadFilters(),
         ])
-        
-        this.preferences = preferences as MastodonPreferences
-        this.account = account
+
+        if (accountResult.status === 'fulfilled') {
+          this.account = accountResult.value
+        } else {
+          throw accountResult.reason
+        }
+        if (prefResult.status === 'fulfilled') {
+          this.preferences = prefResult.value as MastodonPreferences
+        }
+        if (filterResult.status === 'fulfilled') {
+          this.filters = filterResult.value
+        }
         
         // Also load local preferences
         this.loadLocalPreferences()
@@ -439,6 +449,12 @@ export const useSettingsStore = defineStore('settings', {
       }
     },
     
+    clearModerationLists() {
+      this.mutedAccounts = []
+      this.blockedAccounts = []
+      this.blockedDomains = []
+    },
+
     /**
      * Load muted accounts
      */
@@ -733,10 +749,12 @@ export const useSettingsStore = defineStore('settings', {
      * Clear success message after delay
      */
     clearSuccess() {
-      setTimeout(() => {
+      if (saveSuccessTimer) clearTimeout(saveSuccessTimer)
+      saveSuccessTimer = setTimeout(() => {
         this.saveSuccess = false
+        saveSuccessTimer = null
       }, 3000)
-    }
+    },
   }
 })
 

@@ -5,6 +5,18 @@
 const AUTH_STATE_KEY = 'neospace_oauth_state'
 const AUTH_VERIFIER_KEY = 'neospace_oauth_verifier'
 const AUTH_SECRET_PREFIX = 'neospace_oauth_secret:'
+const PENDING_AUTH_KEY = 'neospace_pending_auth'
+const PENDING_TTL_MS = 10 * 60 * 1000
+
+export interface PendingAuthRecord {
+  state: string
+  verifier: string
+  instanceId: string
+  host: string
+  addMode: boolean
+  returnTo: string | null
+  createdAt: number
+}
 
 function randomString(bytes = 32): string {
   const arr = new Uint8Array(bytes)
@@ -25,7 +37,58 @@ async function sha256Base64Url(input: string): Promise<string> {
   return base64Url(digest)
 }
 
-export async function beginOAuthChallenge(): Promise<{
+function readPendingAuth(): PendingAuthRecord | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(PENDING_AUTH_KEY)
+    if (!raw) return null
+    const rec = JSON.parse(raw) as PendingAuthRecord
+    if (!rec?.state || !rec.verifier || Date.now() - rec.createdAt > PENDING_TTL_MS) {
+      localStorage.removeItem(PENDING_AUTH_KEY)
+      return null
+    }
+    return rec
+  } catch {
+    return null
+  }
+}
+
+function writePendingAuth(rec: PendingAuthRecord) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(PENDING_AUTH_KEY, JSON.stringify(rec))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function clearPendingAuth() {
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(AUTH_STATE_KEY)
+    sessionStorage.removeItem(AUTH_VERIFIER_KEY)
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(PENDING_AUTH_KEY)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Same-origin path only — blocks open redirects. */
+export function sanitizeReturnTo(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null
+  return raw
+}
+
+export async function beginOAuthChallenge(opts?: {
+  instanceId: string
+  host: string
+  addMode?: boolean
+  returnTo?: string | null
+}): Promise<{
   state: string
   codeChallenge: string
   codeVerifier: string
@@ -37,25 +100,47 @@ export async function beginOAuthChallenge(): Promise<{
     sessionStorage.setItem(AUTH_STATE_KEY, state)
     sessionStorage.setItem(AUTH_VERIFIER_KEY, codeVerifier)
   }
+  if (opts?.instanceId) {
+    writePendingAuth({
+      state,
+      verifier: codeVerifier,
+      instanceId: opts.instanceId,
+      host: opts.host,
+      addMode: !!opts.addMode,
+      returnTo: sanitizeReturnTo(opts.returnTo),
+      createdAt: Date.now(),
+    })
+  }
   return { state, codeChallenge, codeVerifier }
 }
 
 export function consumeOAuthChallenge(stateFromQuery: string | null): {
   ok: boolean
   codeVerifier: string | null
+  pending?: PendingAuthRecord | null
   error?: string
 } {
-  if (typeof sessionStorage === 'undefined') {
+  const pending = readPendingAuth()
+  if (typeof sessionStorage === 'undefined' && !pending) {
     return { ok: false, codeVerifier: null, error: 'No session storage' }
   }
-  const expected = sessionStorage.getItem(AUTH_STATE_KEY)
-  const verifier = sessionStorage.getItem(AUTH_VERIFIER_KEY)
-  sessionStorage.removeItem(AUTH_STATE_KEY)
-  sessionStorage.removeItem(AUTH_VERIFIER_KEY)
+  const expected =
+    pending?.state ||
+    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(AUTH_STATE_KEY) : null)
+  const verifier =
+    pending?.verifier ||
+    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(AUTH_VERIFIER_KEY) : null)
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(AUTH_STATE_KEY)
+    sessionStorage.removeItem(AUTH_VERIFIER_KEY)
+  }
   if (!expected || !stateFromQuery || expected !== stateFromQuery) {
     return { ok: false, codeVerifier: null, error: 'Invalid OAuth state' }
   }
-  return { ok: true, codeVerifier: verifier }
+  if (!verifier) {
+    return { ok: false, codeVerifier: null, error: 'Missing PKCE verifier' }
+  }
+  return { ok: true, codeVerifier: verifier, pending }
 }
 
 /**

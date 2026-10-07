@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { subscribeSharedRaf } from '~/utils/sharedRaf'
+
 /**
  * Square-mark L-system branching pulse — inspired by
  * https://mhsenkow.github.io/fun-loaders/ (L-System · Loader · Square)
@@ -62,7 +64,7 @@ const RULES = [
 const rootRef = ref<HTMLElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const renderSize = ref(props.variant === 'seed' ? Math.min(props.size, 56) : props.size)
-let raf = 0
+let unsubRaf: (() => void) | null = null
 let start = 0
 let segments: Segment[] = []
 let layout = { scale: 1, ox: 0, oy: 0 }
@@ -305,8 +307,7 @@ const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
   }
 }
 
-const tick = (now: number) => {
-  raf = 0
+const onSharedFrame = (now: number) => {
   if (!start) start = now
   if (typeof document !== 'undefined') {
     if (document.hidden) return
@@ -320,25 +321,17 @@ const tick = (now: number) => {
   const canvas = canvasRef.value
   const ctx = canvas?.getContext('2d')
   if (ctx) drawFrame(ctx, renderSize.value, now - start)
-  raf = requestAnimationFrame(tick)
 }
 
 const onVis = () => {
-  if (document.hidden) {
-    if (raf) cancelAnimationFrame(raf)
-    raf = 0
-    return
-  }
+  if (document.hidden) return
   if (prefersReducedMotion()) {
     const canvas = canvasRef.value
     const ctx = canvas?.getContext('2d')
     if (ctx) drawFrame(ctx, renderSize.value, 0)
     return
   }
-  if (!raf) {
-    start = performance.now()
-    raf = requestAnimationFrame(tick)
-  }
+  start = performance.now()
 }
 
 const applySize = (next: number) => {
@@ -395,14 +388,14 @@ onMounted(() => {
     const ctx = canvas?.getContext('2d')
     if (ctx) drawFrame(ctx, renderSize.value, 0)
   } else {
-    raf = requestAnimationFrame(tick)
+    unsubRaf = subscribeSharedRaf(onSharedFrame)
   }
   document.addEventListener('visibilitychange', onVis)
 })
 
 onUnmounted(() => {
-  cancelAnimationFrame(raf)
-  raf = 0
+  unsubRaf?.()
+  unsubRaf = null
   resizeObserver?.disconnect()
   resizeObserver = null
   document.removeEventListener('visibilitychange', onVis)

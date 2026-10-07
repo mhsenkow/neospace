@@ -254,12 +254,6 @@ export const useNotificationsStore = defineStore('notifications', {
     async fetchNotifications(refresh = false) {
       if (this.isLoading) return
 
-      if (refresh) {
-        this.notifications = []
-        this.cursors = {}
-        this.hasMore = true
-      }
-
       const instances = useInstancesStore()
       const authed = instances.authenticatedInstances
       if (!authed.length) {
@@ -450,13 +444,18 @@ export const useNotificationsStore = defineStore('notifications', {
         this.notifications.find((n) => n.id === keyOrId)
       if (!notif) return
 
+      const prev = this.notifications
+      this.notifications = this.notifications.filter((n) => n._key !== notif._key)
+      this.recomputeUnread()
+
       try {
         const client = clientFor(notif._instanceId)
         await client.v1.notifications.$select(notif.id).dismiss()
-        this.notifications = this.notifications.filter((n) => n._key !== notif._key)
-        this.recomputeUnread()
       } catch (e) {
+        this.notifications = prev
+        this.recomputeUnread()
         console.error('Failed to dismiss notification:', e)
+        throw e
       }
     },
 
@@ -465,22 +464,32 @@ export const useNotificationsStore = defineStore('notifications', {
       const authed = instances.authenticatedInstances
       if (!authed.length) return
 
+      const prev = {
+        notifications: this.notifications,
+        unreadCount: this.unreadCount,
+        cursors: { ...this.cursors },
+      }
+
       try {
-        await Promise.all(
+        const results = await Promise.allSettled(
           authed.map(async (inst) => {
-            try {
-              const client = clientFor(inst.id)
-              await client.v1.notifications.clear()
-            } catch (e) {
-              logWarn(`Failed to clear notifications on ${inst.url}:`, e)
-            }
+            const client = clientFor(inst.id)
+            await client.v1.notifications.clear()
           }),
         )
+        const anyOk = results.some((r) => r.status === 'fulfilled')
+        if (!anyOk) {
+          throw new Error('Couldn’t clear notifications')
+        }
         this.notifications = []
         this.unreadCount = 0
         this.cursors = {}
       } catch (e) {
+        this.notifications = prev.notifications
+        this.unreadCount = prev.unreadCount
+        this.cursors = prev.cursors
         console.error('Failed to clear notifications:', e)
+        throw e
       }
     },
   },

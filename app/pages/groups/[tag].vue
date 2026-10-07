@@ -17,8 +17,16 @@ const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
 
+function normalizeGroupTag(raw: string): string {
+  try {
+    return decodeURIComponent(String(raw)).replace(/^#/, '').trim()
+  } catch {
+    return String(raw).replace(/^#/, '').trim()
+  }
+}
+
 // Get the tag from route
-const tag = computed(() => route.params.tag as string)
+const tag = computed(() => normalizeGroupTag(route.params.tag as string))
 
 // The current group info
 const group = computed(() => groupsStore.getGroup(tag.value))
@@ -42,6 +50,17 @@ const displayGroup = computed(() => {
 
 const isJoining = ref(false)
 const isLeaving = ref(false)
+const loadMoreError = ref<string | null>(null)
+
+const showActionError = async (message: string, retry?: () => void) => {
+  const { useToastStore } = await import('~/stores/toast')
+  useToastStore().show({
+    message,
+    actionLabel: retry ? 'Retry' : undefined,
+    duration: retry ? 6000 : 4000,
+    onAction: retry,
+  })
+}
 
 const onGroupPosted = (status: mastodon.v1.Status) => {
   groupsStore.prependToTimeline(tag.value, status)
@@ -82,6 +101,7 @@ const handleJoin = async () => {
     await groupsStore.joinGroup(tag.value)
   } catch (e) {
     console.error('Failed to join:', e)
+    void showActionError('Couldn’t join group', () => { void handleJoin() })
   } finally {
     isJoining.value = false
   }
@@ -105,14 +125,21 @@ const handleLeave = async () => {
     })
   } catch (e) {
     console.error('Failed to leave:', e)
+    void showActionError('Couldn’t leave group', () => { void handleLeave() })
   } finally {
     isLeaving.value = false
   }
 }
 
 // Load more posts
-const handleLoadMore = () => {
-  groupsStore.loadMoreTimeline()
+const handleLoadMore = async () => {
+  loadMoreError.value = null
+  try {
+    await groupsStore.loadMoreTimeline()
+  } catch (e: any) {
+    loadMoreError.value = e?.message || 'Couldn’t load more posts'
+    void showActionError(loadMoreError.value, () => { void handleLoadMore() })
+  }
 }
 
 // Go back
@@ -169,7 +196,7 @@ useHead({
 
       <div class="group-info">
         <div class="group-icon">
-          <span>{{ displayGroup.icon }}</span>
+          <span aria-hidden="true">{{ displayGroup.icon }}</span>
         </div>
         
         <div class="group-meta">
@@ -207,7 +234,7 @@ useHead({
           <button
             v-else
             class="action-btn action-btn--join"
-            :disabled="isJoining || !instancesStore.isAuthenticated"
+            :disabled="isJoining"
             :title="instancesStore.isAuthenticated ? 'Join this group' : 'Log in to join'"
             @click="handleJoin"
           >
@@ -251,14 +278,16 @@ useHead({
       <div v-else-if="groupsStore.error" class="timeline-error">
         <span>😕</span>
         <p>{{ groupsStore.error }}</p>
-        <button @click="groupsStore.fetchGroupTimeline(tag, true)">Try Again</button>
+        <button type="button" class="neo-btn neo-btn--ghost" @click="groupsStore.fetchGroupTimeline(tag, true)">
+          Try again
+        </button>
       </div>
 
       <!-- Empty State -->
       <div v-else-if="groupsStore.groupTimeline.length === 0" class="timeline-empty">
         <span class="empty-emoji">📭</span>
         <h3>No posts yet</h3>
-        <p>Be the first to post in this group! Use #{{ tag }} in your posts.</p>
+        <p>No posts visible from your server yet. Use #{{ tag }} when you post.</p>
       </div>
 
       <!-- Posts -->

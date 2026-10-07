@@ -10,6 +10,7 @@ import { createRestAPIClient, type mastodon } from 'masto'
 import {
   beginOAuthChallenge,
   consumeOAuthChallenge,
+  clearPendingAuth,
   stashClientSecret,
   persistClientSecret,
   readClientSecret,
@@ -83,6 +84,55 @@ const LEGACY_AUTH_KEY = 'neospace_auth'
 const STORAGE_VERSION = 1
 const APP_NAME = 'NeoSpace'
 const SCOPES = 'read write follow push'
+const OAUTH_APP_CACHE_KEY = 'neospace_oauth_apps'
+const OAUTH_FETCH_TIMEOUT_MS = 15_000
+
+function readCachedOAuthApp(host: string): { clientId: string; clientSecret: string } | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
+    if (!raw) return null
+    const map = JSON.parse(raw) as Record<string, { clientId?: string; clientSecret?: string }>
+    const entry = map[host.toLowerCase()]
+    if (entry?.clientId && entry?.clientSecret) {
+      return { clientId: entry.clientId, clientSecret: entry.clientSecret }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function writeCachedOAuthApp(host: string, clientId: string, clientSecret: string) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, { clientId: string; clientSecret: string }>) : {}
+    map[host.toLowerCase()] = { clientId, clientSecret }
+    localStorage.setItem(OAUTH_APP_CACHE_KEY, JSON.stringify(map))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+async function oauthFetch(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(OAUTH_FETCH_TIMEOUT_MS),
+  })
+}
+
+async function parseOAuthResponse(response: Response): Promise<Record<string, unknown>> {
+  const text = await response.text()
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    if (text.trim().startsWith('<')) {
+      throw new Error('Server returned an error page instead of a token response')
+    }
+    throw new Error(text.slice(0, 120) || 'Unexpected server response')
+  }
+}
 
 /** Accept raw blobs or `{ v: 1, ... }` wrappers */
 function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
@@ -249,13 +299,18 @@ export const useInstancesStore = defineStore('instances', {
               continue
             }
             // Same slot — prefer authenticated + richer user
-            if (
-              (!!inst.accessToken && !prev.accessToken) ||
-              (!!inst.user && !prev.user)
-            ) {
+            if (!!inst.accessToken && !prev.accessToken) {
               const idx = kept.indexOf(prev)
-              if (idx !== -1) kept[idx] = { ...prev, ...inst, url: prev.url, id: prev.id }
-              seen.set(key, kept[idx]!)
+              if (idx !== -1) {
+                kept[idx] = { ...inst, id: prev.id, url: prev.url }
+                seen.set(key, kept[idx]!)
+              }
+            } else if (!!inst.user && !prev.user && !prev.accessToken) {
+              const idx = kept.indexOf(prev)
+              if (idx !== -1) {
+                kept[idx] = { ...inst, id: prev.id, url: prev.url }
+                seen.set(key, kept[idx]!)
+              }
             }
           }
           this.instances = kept
@@ -497,8 +552,10 @@ export const useInstancesStore = defineStore('instances', {
       this.saveToStorage()
     },
 
-    updateActiveAccount(user: mastodon.v1.Account) {
-      const account = this.instances.find((i) => i.id === this.activeAccount?.id)
+    updateActiveAccount(user: mastodon.v1.Account, instanceId?: string) {
+      const targetId = instanceId ?? this.activeAccount?.id
+      if (!targetId) return
+      const account = this.instances.find((i) => i.id === targetId)
       if (!account) return
       account.user = user
       this.saveToStorage()
@@ -572,7 +629,10 @@ export const useInstancesStore = defineStore('instances', {
      * If this server already has a signed-in account, open a new slot so we
      * don't silently overwrite (and orphan) the previous token.
      */
-    async loginWithInstance(instanceUrl: string): Promise<string> {
+    async loginWithInstance(
+      instanceUrl: string,
+      opts?: { addMode?: boolean; returnTo?: string | null },
+    ): Promise<string> {
       const url = instanceUrl.replace(/\/+$/, '')
       const existing = this.getInstanceByUrl(url)
       let instance: ConnectedInstance
@@ -583,10 +643,13 @@ export const useInstancesStore = defineStore('instances', {
       } else {
         instance = await this.addInstance(url)
       }
-      return await this.startAuth(instance.id)
+      return await this.startAuth(instance.id, opts)
     },
 
-    async startAuth(instanceId: string) {
+    async startAuth(
+      instanceId: string,
+      opts?: { addMode?: boolean; returnTo?: string | null },
+    ) {
       const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) throw new Error('Server not found')
 
@@ -594,19 +657,28 @@ export const useInstancesStore = defineStore('instances', {
       instance.error = null
 
       try {
-        const client = createRestAPIClient({ url: instance.url })
+        const host = instance.url.replace(/^https?:\/\//, '').toLowerCase()
+        const cached = readCachedOAuthApp(host)
 
-        const app = await client.v1.apps.create({
-          clientName: APP_NAME,
-          redirectUris: getRedirectUri(),
-          scopes: SCOPES,
-          website: 'https://neospace.ibm.io',
-        })
-
-        instance.clientId = app.clientId ?? null
-        // Keep secret in sessionStorage only — never long-term localStorage
-        instance.clientSecret = null
-        if (app.clientSecret) stashClientSecret(instanceId, app.clientSecret)
+        if (cached) {
+          instance.clientId = cached.clientId
+          instance.clientSecret = null
+          stashClientSecret(instanceId, cached.clientSecret)
+        } else {
+          const client = createRestAPIClient({ url: instance.url })
+          const app = await client.v1.apps.create({
+            clientName: APP_NAME,
+            redirectUris: getRedirectUri(),
+            scopes: SCOPES,
+            website: 'https://neospace.ibm.io',
+          })
+          instance.clientId = app.clientId ?? null
+          instance.clientSecret = null
+          if (app.clientId && app.clientSecret) {
+            stashClientSecret(instanceId, app.clientSecret)
+            writeCachedOAuthApp(host, app.clientId, app.clientSecret)
+          }
+        }
 
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('neospace_auth_instance_id', instanceId)
@@ -614,7 +686,12 @@ export const useInstancesStore = defineStore('instances', {
 
         this.saveToStorage()
 
-        const { state, codeChallenge } = await beginOAuthChallenge()
+        const { state, codeChallenge } = await beginOAuthChallenge({
+          instanceId,
+          host,
+          addMode: opts?.addMode,
+          returnTo: opts?.returnTo ?? null,
+        })
 
         const params = new URLSearchParams({
           client_id: instance.clientId!,
@@ -635,23 +712,28 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     async completeAuth(code: string, stateFromQuery: string | null = null) {
+      const challenge = consumeOAuthChallenge(stateFromQuery)
+      if (!challenge.ok) {
+        throw new Error(challenge.error || 'Invalid OAuth state')
+      }
+      if (!challenge.codeVerifier) {
+        throw new Error('Missing PKCE verifier')
+      }
+
       const instanceId =
-        typeof window !== 'undefined'
+        challenge.pending?.instanceId ||
+        (typeof window !== 'undefined'
           ? sessionStorage.getItem('neospace_auth_instance_id')
-          : null
+          : null)
 
       if (!instanceId) {
         throw new Error('No pending authentication')
       }
 
-      const challenge = consumeOAuthChallenge(stateFromQuery)
-      if (!challenge.ok) {
-        throw new Error(challenge.error || 'Invalid OAuth state')
-      }
-
       const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) throw new Error('Instance not found')
 
+      const hadTokenBefore = !!instance.accessToken
       instance.isConnecting = true
 
       try {
@@ -667,23 +749,41 @@ export const useInstancesStore = defineStore('instances', {
           grant_type: 'authorization_code',
           code,
           scope: SCOPES,
-        }
-        if (challenge.codeVerifier) {
-          tokenBody.code_verifier = challenge.codeVerifier
+          code_verifier: challenge.codeVerifier,
         }
 
-        const response = await fetch(`${instance.url}/oauth/token`, {
+        const response = await oauthFetch(`${instance.url}/oauth/token`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tokenBody),
         })
 
         if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.error_description || error.error || 'Token exchange failed')
+          const error = await parseOAuthResponse(response)
+          const code = String(error.error || '')
+          if (code === 'invalid_client') {
+            const host = instance.url.replace(/^https?:\/\//, '').toLowerCase()
+            if (typeof localStorage !== 'undefined') {
+              try {
+                const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
+                if (raw) {
+                  const map = JSON.parse(raw) as Record<string, unknown>
+                  delete map[host]
+                  localStorage.setItem(OAUTH_APP_CACHE_KEY, JSON.stringify(map))
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+          throw new Error(
+            String(error.error_description || error.error || 'Token exchange failed'),
+          )
         }
 
-        const data = await response.json()
+        const data = (await parseOAuthResponse(response)) as {
+          access_token?: string
+        }
         // Revoke any previous token on this slot before overwriting
         const previousToken = instance.accessToken
         if (previousToken && previousToken !== data.access_token && instance.clientId) {
@@ -726,12 +826,16 @@ export const useInstancesStore = defineStore('instances', {
         if (typeof window !== 'undefined') {
           sessionStorage.removeItem('neospace_auth_instance_id')
         }
+        clearPendingAuth()
 
         this.saveToStorage()
-        return instance
+        return { instance, pending: challenge.pending ?? null }
       } catch (e: any) {
         instance.error = e.message || 'Authentication failed'
         instance.isConnecting = false
+        if (!hadTokenBefore && !instance.accessToken) {
+          this.removeInstance(instanceId)
+        }
         throw e
       }
     },
@@ -839,11 +943,18 @@ export const useInstancesStore = defineStore('instances', {
               /* non-fatal */
             }
           } catch (e: any) {
-            if (e.status === 401 || e.status === 403) {
+            const status = e?.status ?? e?.statusCode
+            if (status === 401 || status === 403) {
               instance.accessToken = null
               instance.user = null
+              instance.error = 'Session expired — sign in again'
+            } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
+              instance.error = 'Offline — couldn’t verify your session'
+            } else if (status >= 500) {
+              instance.error = 'Server error — try again later'
+            } else {
+              instance.error = 'Couldn’t verify your session'
             }
-            instance.error = 'Session expired'
           }
         })
 
@@ -1127,6 +1238,7 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     async openPreview(domain: string) {
+      const ticket = domain
       this.previewingInstance = domain
       this.previewLoading = true
       this.previewError = null
@@ -1137,6 +1249,7 @@ export const useInstancesStore = defineStore('instances', {
         const client = createRestAPIClient({ url })
 
         const info = await client.v2.instance.fetch()
+        if (this.previewingInstance !== ticket) return
         this.previewInstanceInfo[domain] = {
           title: info.title,
           description: info.description || '',
@@ -1149,18 +1262,22 @@ export const useInstancesStore = defineStore('instances', {
         }
 
         try {
-          this.previewTimeline = await client.v1.timelines.public.list({
+          const timeline = await client.v1.timelines.public.list({
             local: true,
             limit: 10,
           })
+          if (this.previewingInstance !== ticket) return
+          this.previewTimeline = timeline
         } catch {
           // Auth-gated public timelines — preview still shows instance info
-          this.previewTimeline = []
+          if (this.previewingInstance === ticket) this.previewTimeline = []
         }
       } catch (e: any) {
-        this.previewError = e.message || 'Failed to load instance'
+        if (this.previewingInstance === ticket) {
+          this.previewError = e.message || 'Failed to load instance'
+        }
       } finally {
-        this.previewLoading = false
+        if (this.previewingInstance === ticket) this.previewLoading = false
       }
     },
 

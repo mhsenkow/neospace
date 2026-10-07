@@ -20,13 +20,20 @@ let trapStack: TrapEntry[] = []
 let idSeq = 0
 let listening = false
 
+function isVisible(el: HTMLElement): boolean {
+  if (typeof el.checkVisibility === 'function') {
+    return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+  }
+  return el.offsetParent !== null
+}
+
 function listFocusable(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
     (el) =>
       !el.hasAttribute('disabled') &&
       el.getAttribute('aria-hidden') !== 'true' &&
       el.tabIndex !== -1 &&
-      el.offsetParent !== null,
+      isVisible(el),
   )
 }
 
@@ -125,6 +132,7 @@ export function useFocusTrap(
       scrollHeld = true
     }
     await nextTick()
+    if (!locked) return
     const root = containerRef.value
     if (!root) return
     if (!root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1')

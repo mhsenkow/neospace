@@ -6,6 +6,7 @@
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
 import { friendlyAuthError } from '~/utils/authErrors'
+import { clearPendingAuth, sanitizeReturnTo } from '~/utils/oauthPkce'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,50 +15,84 @@ const instancesStore = useInstancesStore()
 
 const error = ref<string | null>(null)
 const status = ref('Signing you in…')
+const errorHeadingRef = ref<HTMLElement | null>(null)
+
+const scrubUrl = () => {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.delete('code')
+  url.searchParams.delete('state')
+  url.searchParams.delete('error')
+  url.searchParams.delete('error_description')
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+}
 
 onMounted(async () => {
   const code = route.query.code as string
   const errorParam = route.query.error as string
 
   if (errorParam) {
-    error.value = friendlyAuthError(
-      (route.query.error_description as string) || errorParam,
-    )
+    error.value = friendlyAuthError(String(route.query.error || errorParam))
+    clearPendingAuth()
+    scrubUrl()
+    await nextTick()
+    errorHeadingRef.value?.focus()
     return
   }
 
   if (!code) {
     error.value = 'This sign-in link is incomplete. Please try again from the sign-in page.'
+    clearPendingAuth()
+    scrubUrl()
+    await nextTick()
+    errorHeadingRef.value?.focus()
     return
   }
 
   try {
     status.value = 'Finishing up…'
     instancesStore.loadFromStorage()
-    const wasAdd =
-      typeof window !== 'undefined' &&
-      sessionStorage.getItem('neospace_auth_add') === '1'
-    await instancesStore.completeAuth(code, (route.query.state as string) || null)
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('neospace_auth_add')
-    }
+    const result = await instancesStore.completeAuth(code, (route.query.state as string) || null)
+    const instance = result.instance
+    const pending = result.pending
 
     if (instancesStore.userCustomCSS) {
       themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
     }
 
+    const handle = instance.user?.acct || instance.user?.username
+    const host = instance.url.replace(/^https?:\/\//, '')
+    const fullHandle = handle?.includes('@') ? `@${handle}` : handle ? `@${handle}@${host}` : null
+
+    const wasAdd = pending?.addMode
     status.value = wasAdd
-      ? 'Account linked — opening your profile…'
-      : 'You’re in — opening NeoSpace…'
-    await new Promise((r) => setTimeout(r, 400))
-    await router.replace(wasAdd ? '/profile?linked=1' : '/')
+      ? fullHandle
+        ? `Linked ${fullHandle} — opening your profile…`
+        : 'Account linked — opening your profile…'
+      : fullHandle
+        ? `Now posting as ${fullHandle} — opening NeoSpace…`
+        : 'You’re in — opening NeoSpace…'
+
+    scrubUrl()
+
+    const returnTo =
+      sanitizeReturnTo(pending?.returnTo) ||
+      sanitizeReturnTo(typeof route.query.returnTo === 'string' ? route.query.returnTo : null)
+    const defaultPath = wasAdd ? '/profile?linked=1' : '/'
+    await router.replace(returnTo || defaultPath)
   } catch (e: any) {
     error.value = friendlyAuthError(e.message || 'Authentication failed')
+    clearPendingAuth()
+    scrubUrl()
+    await nextTick()
+    errorHeadingRef.value?.focus()
   }
 })
 
 const handleRetry = () => {
-  router.push('/login')
+  const wasAdd =
+    typeof window !== 'undefined' && sessionStorage.getItem('neospace_auth_add') === '1'
+  router.push(wasAdd ? '/login?add=1' : '/login')
 }
 
 useHead({
@@ -76,8 +111,8 @@ definePageMeta({
     <main class="callback__card">
       <span class="callback__mark" aria-hidden="true">NS</span>
 
-      <div v-if="error" class="callback__body">
-        <h1>Couldn’t sign in</h1>
+      <div v-if="error" class="callback__body" role="alert">
+        <h1 ref="errorHeadingRef" tabindex="-1">Couldn’t sign in</h1>
         <p>{{ error }}</p>
         <button type="button" class="callback__btn" @click="handleRetry">
           Back to sign in

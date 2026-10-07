@@ -320,6 +320,14 @@ watch(
     padding-top: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
 
+    // Board keeps overflow:hidden; focused screens must scroll their own content
+    @media (max-width: 1023px) {
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+
     @media (min-width: 1024px) {
       padding: 1.25rem;
     }

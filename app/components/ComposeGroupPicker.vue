@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
           aria-modal="true"
           aria-labelledby="group-pick-title"
         >
-          <button type="button" class="group-pick-sheet__backdrop" aria-label="Close" @click="open = false" />
+          <button type="button" class="group-pick-sheet__backdrop" tabindex="-1" aria-hidden="true" @click="open = false" />
           <div class="group-pick-sheet__panel">
             <header class="group-pick-sheet__header">
               <h2 id="group-pick-title" class="group-pick-sheet__title">Community or topic</h2>
@@ -265,7 +265,7 @@ onBeforeUnmount(() => {
                 class="group-pick-sheet__row group-pick-sheet__row--use"
                 @click="useQueryAsTag"
               >
-                <span class="group-pick-sheet__row-icon">🏷️</span>
+                <span class="group-pick-sheet__row-icon" aria-hidden="true">🏷️</span>
                 <span class="group-pick-sheet__row-text">
                   <strong>Use #{{ queryTag }}</strong>
                   <em>Post into this hashtag group</em>
@@ -281,7 +281,7 @@ onBeforeUnmount(() => {
                   class="group-pick-sheet__row"
                   @click="pick(g.tag)"
                 >
-                  <span class="group-pick-sheet__row-icon">{{ g.icon }}</span>
+                  <span class="group-pick-sheet__row-icon" aria-hidden="true">{{ g.icon }}</span>
                   <span class="group-pick-sheet__row-text">
                     <strong>{{ g.name }}</strong>
                     <em>#{{ g.tag }}</em>
@@ -305,7 +305,7 @@ onBeforeUnmount(() => {
                     :aria-current="modelValue === g.tag ? 'true' : undefined"
                     @click="pick(g.tag)"
                   >
-                    <span class="group-pick-sheet__row-icon">{{ g.icon }}</span>
+                    <span class="group-pick-sheet__row-icon" aria-hidden="true">{{ g.icon }}</span>
                     <span class="group-pick-sheet__row-text">
                       <strong>{{ g.name }}</strong>
                       <em>#{{ g.tag }}</em>
@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
                     class="group-pick-sheet__row"
                     @click="pick(g.tag)"
                   >
-                    <span class="group-pick-sheet__row-icon">{{ g.icon }}</span>
+                    <span class="group-pick-sheet__row-icon" aria-hidden="true">{{ g.icon }}</span>
                     <span class="group-pick-sheet__row-text">
                       <strong>{{ g.name }}</strong>
                       <em>#{{ g.tag }}</em>

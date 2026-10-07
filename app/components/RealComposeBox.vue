@@ -276,11 +276,23 @@ watch([characterCount, isOverLimit, isNearLimit], () => {
 })
 
 const visibilityOptions = [
-  { value: 'public', label: 'Public' },
-  { value: 'unlisted', label: 'Unlisted' },
-  { value: 'private', label: 'Followers' },
-  { value: 'direct', label: 'Mentioned' },
+  { value: 'public', label: 'Public', icon: '🌐' },
+  { value: 'unlisted', label: 'Unlisted', icon: '🔓' },
+  { value: 'private', label: 'Followers only', icon: '🔒' },
+  { value: 'direct', label: 'Direct', icon: '✉️' },
 ] as const
+
+const mentionFlipUp = ref(false)
+
+const syncMentionPlacement = () => {
+  if (typeof window === 'undefined' || !mentionOpen.value) return
+  const ta = textareaRef.value
+  if (!ta) return
+  const rect = ta.getBoundingClientRect()
+  const vv = window.visualViewport
+  const viewportBottom = vv ? vv.offsetTop + vv.height : window.innerHeight
+  mentionFlipUp.value = viewportBottom - rect.bottom < 240
+}
 
 const resetForm = () => {
   content.value = props.inReplyToId && props.initialText ? props.initialText : ''
@@ -320,6 +332,7 @@ const submitShortcutTitle = computed(() => {
 
 const closeMentions = () => {
   mentionOpen.value = false
+  mentionFlipUp.value = false
   mentionIndex.value = 0
   mentionAt.value = -1
   clearMentions()
@@ -354,6 +367,7 @@ const syncMentions = (opts?: { resetIndex?: boolean }) => {
     mentionIndex.value = 0
   }
   searchMentions(ctx.query)
+  nextTick(syncMentionPlacement)
 }
 
 const insertMention = (account: mastodon.v1.Account) => {
@@ -446,9 +460,12 @@ const handlePost = async () => {
   }
 }
 
+const cwInputRef = ref<HTMLInputElement | null>(null)
+
 const toggleCW = () => {
   showCW.value = !showCW.value
   if (!showCW.value) spoilerText.value = ''
+  else nextTick(() => cwInputRef.value?.focus())
 }
 
 const openFilePicker = () => {
@@ -656,6 +673,7 @@ onUnmounted(() => {
           :results="mentionResults"
           :searching="mentionSearching"
           :active-index="mentionIndex"
+          :flip-up="mentionFlipUp"
           @select="insertMention"
         />
       </div>
@@ -737,6 +755,7 @@ onUnmounted(() => {
           :results="mentionResults"
           :searching="mentionSearching"
           :active-index="mentionIndex"
+          :flip-up="mentionFlipUp"
           @select="insertMention"
         />
       </div>
@@ -744,6 +763,7 @@ onUnmounted(() => {
 
     <div v-if="showCW" class="compose-cw" @click.stop>
       <input
+        ref="cwInputRef"
         v-model="spoilerText"
         type="text"
         class="compose-cw-input neo-input"
@@ -868,13 +888,13 @@ onUnmounted(() => {
             aria-label="Post visibility"
           >
             <option v-for="opt in visibilityOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
+              {{ opt.icon }} {{ opt.label }}
             </option>
           </select>
         </div>
         <span v-else class="compose-visibility-lock" title="Only mentioned people can see this">
-          <NeoIcon name="lock" :size="14" :stroke="2" />
-          Private
+          <NeoIcon name="message" :size="14" :stroke="2" />
+          Direct
         </span>
 
         <span v-if="hasMedia" class="compose-media-count">

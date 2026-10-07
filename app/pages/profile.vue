@@ -28,6 +28,7 @@ import {
 } from '~/utils/profileSources'
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
+import { formatCompact } from '~/utils/insights'
 import { useToastStore } from '~/stores/toast'
 import { setReadAccountOverride } from '~/composables/useMasto'
 
@@ -172,10 +173,7 @@ const profileTabDefs = [
 const avatarInput = ref<HTMLInputElement | null>(null)
 const headerInput = ref<HTMLInputElement | null>(null)
 
-const formatCount = (n: number) => {
-  if (n >= 10000) return `${(n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '')}K`
-  return n.toLocaleString()
-}
+const formatCount = (n: number) => formatCompact(n)
 
 const followerLabel = computed(() => {
   const n = profileStore.viewedProfile?.followersCount ?? 0
@@ -257,8 +255,11 @@ const shareProfile = async () => {
   }
   try {
     await navigator.clipboard.writeText(url)
+    const { useToastStore } = await import('~/stores/toast')
+    useToastStore().show({ message: 'Profile link copied' })
   } catch {
-    /* ignore */
+    const { useToastStore } = await import('~/stores/toast')
+    useToastStore().show({ message: 'Couldn’t copy link' })
   }
 }
 
@@ -343,6 +344,9 @@ watch(
 onUnmounted(() => {
   profileRace.abort()
   statusesRace.abort()
+  if (!profileStore.isOwnProfile && themeStore.isChaosMode) {
+    themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
+  }
   profileStore.clear()
 })
 
@@ -517,28 +521,29 @@ useHead({
                 placeholder="Display name"
               />
             </template>
-            <button
-              v-else-if="canSwitchAccounts"
-              type="button"
-              class="profile-name profile-name--switch"
-              aria-haspopup="dialog"
-              aria-label="Switch account"
-              @click="openAccountSwitcher"
-            >
-              <span class="profile-name__text" v-html="safeProfileName" />
-              <svg
-                class="profile-name__chevron"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                aria-hidden="true"
+            <h1 v-if="canSwitchAccounts" class="profile-name profile-name--heading">
+              <button
+                type="button"
+                class="profile-name profile-name--switch"
+                aria-haspopup="dialog"
+                @click="openAccountSwitcher"
               >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
+                <span class="profile-name__text" v-html="safeProfileName" />
+                <svg
+                  class="profile-name__chevron"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+                <span class="sr-only">Switch account</span>
+              </button>
+            </h1>
             <h1 v-else class="profile-name" v-html="safeProfileName" />
 
             <p class="profile-handle">
@@ -552,7 +557,8 @@ useHead({
                 class="profile-chip profile-chip--lock"
                 title="Private"
               >
-                <NeoIcon name="lock" :size="12" :stroke="2" />
+                <NeoIcon name="lock" :size="12" :stroke="2" aria-hidden="true" />
+                <span class="sr-only">Private account</span>
               </span>
             </p>
           </div>
@@ -560,7 +566,7 @@ useHead({
           <div class="profile-avatar-wrapper">
             <img
               :src="profileStore.viewedProfile.avatar"
-              :alt="profileStore.viewedProfile.displayName || profileStore.viewedProfile.username"
+              alt=""
               class="profile-avatar"
             />
             <button
@@ -612,7 +618,10 @@ useHead({
           >
             <span v-if="field.name" class="profile-token__label">{{ field.name }}</span>
             <span class="profile-token__value">{{ field.plainValue || '—' }}</span>
-            <span v-if="field.verifiedAt" class="profile-token__verified" title="Verified">✓</span>
+            <span v-if="field.verifiedAt" class="profile-token__verified" title="Verified">
+              ✓
+              <span class="sr-only">Verified</span>
+            </span>
           </component>
         </div>
 

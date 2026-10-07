@@ -64,6 +64,8 @@ interface GroupsState {
   /** Pagination */
   hasMore: boolean
   maxId: string | null
+  /** Followed-tags fetch failed — membership flags may be stale */
+  followedTagsError: string | null
 }
 
 // Predefined/suggested groups - friendly wrappers over popular hashtags
@@ -426,7 +428,8 @@ export const useGroupsStore = defineStore('groups', {
     isLoadingMore: false,
     error: null,
     hasMore: true,
-    maxId: null
+    maxId: null,
+    followedTagsError: null,
   }),
 
   getters: {
@@ -542,7 +545,14 @@ export const useGroupsStore = defineStore('groups', {
         this.error = null
 
         try {
-          this.groups = FEATURED_GROUPS.map((g) => ({ ...g, isMember: false, trending: false }))
+          const prevMembers = new Map(
+            this.groups.map((g) => [g.tag.toLowerCase(), g.isMember]),
+          )
+          this.groups = FEATURED_GROUPS.map((g) => ({
+            ...g,
+            isMember: prevMembers.get(g.tag.toLowerCase()) ?? false,
+            trending: false,
+          }))
 
           const instancesStore = useInstancesStore()
           await Promise.all([
@@ -676,6 +686,7 @@ export const useGroupsStore = defineStore('groups', {
       if (!instancesStore.isAuthenticated) return
 
       try {
+        this.followedTagsError = null
         const client = this.getClient()
         const tags = await client.v1.followedTags.list()
         this.followedTags = tags
@@ -703,6 +714,7 @@ export const useGroupsStore = defineStore('groups', {
           }
         }
       } catch (e: any) {
+        this.followedTagsError = e.message || 'Failed to load joined groups'
         console.error('Failed to fetch followed tags:', e)
       }
     },
@@ -867,6 +879,7 @@ export const useGroupsStore = defineStore('groups', {
       } catch (e: any) {
         if (requestId !== timelineRequestId) return
         console.error('Load more error:', e)
+        throw e
       } finally {
         if (requestId === timelineRequestId) this.isLoadingMore = false
       }

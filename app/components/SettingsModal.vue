@@ -168,10 +168,29 @@ watch(() => settingsStore.localPreferences, (prefs) => {
   }
 }, { immediate: true })
 
+const mutedLoading = ref(false)
+const mutedLoaded = ref(false)
+
 watch(
   () => settingsStore.activeCategory,
-  () => {
+  async (cat) => {
     if (contentEl.value) contentEl.value.scrollTop = 0
+    if (cat !== 'privacy' || mutedLoaded.value || mutedLoading.value) return
+    mutedLoading.value = true
+    try {
+      await settingsStore.loadMutedAccounts()
+      mutedLoaded.value = true
+    } finally {
+      mutedLoading.value = false
+    }
+  },
+)
+
+watch(
+  () => instancesStore.activeAccountId,
+  () => {
+    settingsStore.clearModerationLists()
+    mutedLoaded.value = false
   },
 )
 
@@ -180,11 +199,26 @@ const saveProfile = async () => {
   await settingsStore.updateProfile({
     displayName: profileForm.displayName,
     note: profileForm.note,
-    locked: profileForm.locked,
     bot: profileForm.bot,
     discoverable: profileForm.discoverable,
   })
   settingsStore.clearSuccess()
+}
+
+const savePrivacy = async () => {
+  await settingsStore.updateProfile({ locked: profileForm.locked })
+  settingsStore.clearSuccess()
+}
+
+const confirmDeleteFilter = async (filterId: string, title: string) => {
+  const ok = await overlayStore.openConfirm({
+    title: 'Delete this filter?',
+    body: `"${title}" will be removed from your account.`,
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
+  await settingsStore.deleteFilter(filterId)
 }
 
 const savePostingDefaults = () => {
@@ -363,6 +397,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 <span aria-hidden="true">⚠️</span> {{ settingsStore.error }}
               </div>
 
+              <template v-else>
               <!-- Profile Settings -->
               <section v-if="settingsStore.activeCategory === 'profile'" class="settings-section">
                 <div class="settings-section__header">
@@ -400,14 +435,6 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   </label>
 
                   <div class="settings-divider" />
-
-                  <label class="settings-toggle">
-                    <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">Require follow approval</span>
-                      <span class="settings-toggle__desc">New followers must be approved before they can see your posts</span>
-                    </div>
-                    <input v-model="profileForm.locked" type="checkbox" class="settings-checkbox" />
-                  </label>
 
                   <label class="settings-toggle">
                     <div class="settings-toggle__info">
@@ -467,7 +494,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     <button
                       class="settings-btn settings-btn--primary"
                       :disabled="settingsStore.isSaving"
-                      @click="saveProfile"
+                      @click="savePrivacy"
                     >
                       {{ settingsStore.isSaving ? 'Saving...' : 'Save Privacy' }}
                     </button>
@@ -478,7 +505,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <h3 class="settings-subheading">Muted Accounts</h3>
                   <p class="settings-hint">Accounts you've muted won't appear in your timelines.</p>
                   
-                  <div v-if="settingsStore.mutedAccounts.length === 0" class="settings-empty">
+                  <div v-if="mutedLoading" class="settings-empty" aria-busy="true">
+                    Loading muted accounts…
+                  </div>
+                  <div v-else-if="settingsStore.mutedAccounts.length === 0" class="settings-empty">
                     No muted accounts
                   </div>
                   <div v-else class="settings-account-list">
@@ -487,7 +517,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       :key="account.id"
                       class="settings-account-item"
                     >
-                      <img :src="account.avatar" :alt="account.displayName" class="settings-account-avatar" />
+                      <img :src="account.avatar" alt="" class="settings-account-avatar" />
                       <div class="settings-account-info">
                         <span class="settings-account-name">{{ account.displayName || account.username }}</span>
                         <span class="settings-account-handle">@{{ account.acct }}</span>
@@ -522,7 +552,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       :key="account.id"
                       class="settings-account-item"
                     >
-                      <img :src="account.avatar" :alt="account.displayName" class="settings-account-avatar" />
+                      <img :src="account.avatar" alt="" class="settings-account-avatar" />
                       <div class="settings-account-info">
                         <span class="settings-account-name">{{ account.displayName || account.username }}</span>
                         <span class="settings-account-handle">@{{ account.acct }}</span>
@@ -786,15 +816,6 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                     />
                   </label>
                 </div>
-
-                <div class="settings-actions">
-                  <button 
-                    class="settings-btn settings-btn--primary"
-                    @click="saveAppearance"
-                  >
-                    Save Appearance
-                  </button>
-                </div>
               </section>
 
               <!-- Posting Defaults -->
@@ -901,7 +922,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small settings-btn--danger"
-                        @click="settingsStore.deleteFilter(filter.id)"
+                        @click="confirmDeleteFilter(filter.id, filter.title)"
                       >
                         Delete
                       </button>
@@ -1044,6 +1065,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   </a>
                 </div>
               </section>
+              </template>
             </div>
           </div>
         </div>

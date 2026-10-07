@@ -42,8 +42,11 @@ const peekOpen = ref<boolean | null>(null)
 const peekUsers = ref<number | null>(null)
 const peekHost = ref<string | null>(null)
 const peekGated = ref(false)
+const peekFailed = ref(false)
 let peekTimer: ReturnType<typeof setTimeout> | null = null
 const peekRace = createRaceGuard()
+
+const inputErrorId = 'server-picker-input-error'
 
 const catalogHits = computed(() => {
   const q = query.value.trim()
@@ -64,6 +67,7 @@ const clearPeek = () => {
   peekUsers.value = null
   peekHost.value = null
   peekGated.value = false
+  peekFailed.value = false
 }
 
 const schedulePeek = () => {
@@ -89,11 +93,13 @@ const runPeek = async () => {
       peekTitle.value = info.title || host
       peekOpen.value = info.registrations ?? null
       peekUsers.value = info.stats?.userCount ?? null
+      peekFailed.value = false
       localError.value = null
     } else {
       peekTitle.value = null
       peekOpen.value = null
       peekUsers.value = null
+      peekFailed.value = true
     }
   } finally {
     if (ticket.isCurrent()) peekLoading.value = false
@@ -128,7 +134,8 @@ const submitCustom = () => {
 
 const onCatalogHit = (domain: string) => {
   query.value = domain
-  pick(domain)
+  localError.value = null
+  schedulePeek()
 }
 
 defineExpose({
@@ -152,7 +159,7 @@ onUnmounted(() => {
 
 <template>
   <div class="server-picker" :class="{ 'server-picker--disabled': disabled }">
-    <div v-if="localError" class="server-picker__error" role="alert">{{ localError }}</div>
+    <div v-if="localError" :id="inputErrorId" class="server-picker__error" role="alert">{{ localError }}</div>
 
     <div class="server-picker__custom">
       <form class="server-picker__form" @submit.prevent="submitCustom">
@@ -171,6 +178,8 @@ onUnmounted(() => {
           spellcheck="false"
           autofocus
           :disabled="disabled"
+          :aria-invalid="!!localError"
+          :aria-describedby="localError ? inputErrorId : undefined"
           @input="schedulePeek"
         />
         <p class="server-picker__hint">
@@ -179,8 +188,11 @@ onUnmounted(() => {
         </p>
 
         <!-- Live peek -->
-        <div v-if="peekHost && (peekLoading || peekTitle)" class="server-picker__peek" aria-live="polite">
+        <div v-if="peekHost && (peekLoading || peekTitle || peekFailed)" class="server-picker__peek" aria-live="polite">
           <div v-if="peekLoading" class="server-picker__peek-loading">Checking {{ peekHost }}…</div>
+          <div v-else-if="peekFailed" class="server-picker__peek-error" role="alert">
+            Couldn’t reach {{ peekHost }}
+          </div>
           <template v-else-if="peekTitle">
             <div class="server-picker__peek-title">{{ peekTitle }}</div>
             <div class="server-picker__peek-meta">
@@ -374,8 +386,10 @@ onUnmounted(() => {
     color: var(--neo-text-disabled);
   }
 
-  &:focus {
+  &:focus-visible {
     border-color: var(--neo-accent);
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 2px;
   }
 }
 
@@ -401,6 +415,11 @@ onUnmounted(() => {
 
 .server-picker__peek-loading {
   color: var(--neo-text-muted);
+}
+
+.server-picker__peek-error {
+  color: var(--neo-danger);
+  font-size: 0.875rem;
 }
 
 .server-picker__peek-title {
@@ -439,6 +458,11 @@ onUnmounted(() => {
   text-align: left;
   background: var(--neo-bg-primary);
   border: none;
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: -2px;
+  }
   border-bottom: 1px solid var(--neo-border-color);
   cursor: pointer;
   font-size: 0.875rem;

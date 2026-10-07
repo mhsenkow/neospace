@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useNotificationsStore, type ExtendedNotification, type NotificationFilterType, type SortOrder } from '~/stores/notifications'
 import { useInstancesStore } from '~/stores/instances'
+import { useToastStore } from '~/stores/toast'
 import type { mastodon } from 'masto'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
@@ -9,6 +10,7 @@ import type { NeoIconName } from '~/utils/neoIcons'
 
 const notificationsStore = useNotificationsStore()
 const instancesStore = useInstancesStore()
+const toastStore = useToastStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -30,6 +32,7 @@ const FILTER_KEYS: NotificationFilterType[] = [
   'reblog',
   'follow',
   'poll',
+  'status',
   'update',
 ]
 
@@ -37,6 +40,8 @@ const applyFilterFromRoute = () => {
   const raw = String(route.query.filter || '')
   if (FILTER_KEYS.includes(raw as NotificationFilterType)) {
     notificationsStore.setFilter(raw as NotificationFilterType)
+  } else {
+    notificationsStore.setFilter('all')
   }
 }
 
@@ -47,8 +52,12 @@ const filters: { key: NotificationFilterType; label: string; icon: NeoIconName }
   { key: 'reblog', label: 'Boosts', icon: 'reblog' },
   { key: 'follow', label: 'Follows', icon: 'user' },
   { key: 'poll', label: 'Polls', icon: 'poll' },
+  { key: 'status', label: 'Posts', icon: 'pen' },
   { key: 'update', label: 'Edits', icon: 'edit' },
 ]
+
+const skeletonLineWidths = ['68%', '42%', '55%', '38%', '62%', '45%', '50%', '36%']
+const skeletonLineShortWidths = ['28%', '34%', '22%', '30%', '26%', '32%', '24%', '29%']
 
 const sortOptions: { key: SortOrder; label: string }[] = [
   { key: 'newest', label: 'Newest first' },
@@ -94,8 +103,13 @@ const handleClearAll = async () => {
     danger: true,
   })
   if (!ok) return
-  await notificationsStore.clearAll()
-  actionsMenuOpen.value = false
+  try {
+    await notificationsStore.clearAll()
+    actionsMenuOpen.value = false
+    toastStore.show({ message: 'Notifications cleared' })
+  } catch {
+    toastStore.show({ message: 'Couldn’t clear notifications' })
+  }
 }
 
 const handleMarkRead = async () => {
@@ -326,8 +340,8 @@ onDeactivated(() => {
         <div v-for="i in 8" :key="i" class="notif-skeleton__item">
           <div class="notif-skeleton__avatar" />
           <div class="notif-skeleton__body">
-            <div class="notif-skeleton__line" :style="{ width: 40 + Math.random() * 40 + '%' }" />
-            <div class="notif-skeleton__line notif-skeleton__line--short" :style="{ width: 20 + Math.random() * 30 + '%' }" />
+            <div class="notif-skeleton__line" :style="{ width: skeletonLineWidths[i - 1] }" />
+            <div class="notif-skeleton__line notif-skeleton__line--short" :style="{ width: skeletonLineShortWidths[i - 1] }" />
           </div>
         </div>
       </div>
@@ -358,7 +372,7 @@ onDeactivated(() => {
       <!-- Notification list, grouped by time -->
       <div v-else class="notif-list">
         <div v-for="group in visibleGroups" :key="group" class="notif-group">
-          <div class="notif-group__label">{{ group }}</div>
+          <h2 class="notif-group__label">{{ group }}</h2>
           <div class="notif-group__items">
             <article
               v-for="notif in grouped[group]"
@@ -379,6 +393,7 @@ onDeactivated(() => {
                 v-if="notif.account"
                 type="button"
                 class="notif-item__avatar"
+                tabindex="-1"
                 :aria-label="`Open ${notif.account.displayName || notif.account.username}'s profile`"
                 @click="openNotifProfile(notif)"
               >
@@ -473,7 +488,13 @@ onDeactivated(() => {
         </div>
 
         <!-- Load more trigger -->
-        <div ref="loadTrigger" class="notif-loadmore">
+        <div
+          ref="loadTrigger"
+          class="notif-loadmore"
+          role="status"
+          aria-live="polite"
+          :aria-busy="notificationsStore.isLoadingMore"
+        >
           <div v-if="notificationsStore.isLoadingMore" class="notif-loadmore__spinner" />
           <span v-else-if="!notificationsStore.hasMore" class="notif-loadmore__end">
             That's everything
@@ -959,6 +980,8 @@ onDeactivated(() => {
   }
 
   &__body {
+    position: relative;
+    z-index: 1;
     min-width: 0;
     padding-right: 1.75rem;
   }
@@ -990,10 +1013,15 @@ onDeactivated(() => {
     text-align: left;
     -webkit-tap-highlight-color: transparent;
 
-    &:hover,
+    &:hover {
+      text-decoration: underline;
+    }
+
     &:focus-visible {
       text-decoration: underline;
-      outline: none;
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+      border-radius: 2px;
     }
   }
 

@@ -315,7 +315,8 @@ export function buildInsightsReport(opts: {
 }
 
 function escapeCsv(value: string | number): string {
-  const s = String(value ?? '')
+  let s = String(value ?? '')
+  if (/^[=+\-@]/.test(s)) s = `'${s}`
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }
@@ -345,7 +346,7 @@ export function insightPostsToCsv(rows: InsightPostRow[]): string {
   ]
   const header = cols.join(',')
   const body = rows.map((r) => cols.map((c) => escapeCsv(r[c] as string | number)).join(',')).join('\n')
-  return `${header}\n${body}`
+  return `\uFEFF${header}\n${body}`
 }
 
 export function insightDaysToCsv(rows: InsightDayRow[]): string {
@@ -359,7 +360,7 @@ export function insightDaysToCsv(rows: InsightDayRow[]): string {
   ]
   const header = cols.join(',')
   const body = rows.map((r) => cols.map((c) => escapeCsv(r[c])).join(',')).join('\n')
-  return `${header}\n${body}`
+  return `\uFEFF${header}\n${body}`
 }
 
 export function insightHeatmapToCsv(rows: InsightHeatCell[]): string {
@@ -369,7 +370,7 @@ export function insightHeatmapToCsv(rows: InsightHeatCell[]): string {
       [r.weekday, escapeCsv(r.weekday_name), r.hour, r.posts].join(','),
     )
     .join('\n')
-  return `${header}\n${body}`
+  return `\uFEFF${header}\n${body}`
 }
 
 export function formatCompact(nVal: number): string {

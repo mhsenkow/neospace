@@ -83,9 +83,10 @@ const categoryColor = (category: string) => {
 }
 
 useHead({
-  title: 'groups - neospace',
+  title: 'Groups',
+  titleTemplate: '%s | NeoSpace',
   meta: [
-    { name: 'description', content: 'Join communities and discover groups on neospace.' },
+    { name: 'description', content: 'Join communities and discover groups on NeoSpace.' },
   ],
 })
 </script>
@@ -98,7 +99,20 @@ useHead({
       </div>
     </header>
 
-    <main class="groups-main">
+    <div v-if="!instancesStore.isAuthenticated" class="login-notice login-notice--top">
+      <div class="notice-content">
+        <span class="notice-icon"><NeoIcon name="lock" :size="22" :stroke="1.75" /></span>
+        <div>
+          <h3>Log in to join groups</h3>
+          <p>
+            Browse freely — sign in to join and see group posts in your home feed.
+          </p>
+        </div>
+        <NuxtLink to="/login" class="notice-btn">Log in</NuxtLink>
+      </div>
+    </div>
+
+    <div class="groups-main">
       <!-- Search -->
       <div class="groups-search">
         <div class="search-input-wrapper">
@@ -112,12 +126,33 @@ useHead({
             class="search-input"
             aria-label="Search groups"
           />
-          <span v-if="isSearching" class="search-loading">...</span>
+          <span v-if="isSearching" class="search-loading" role="status" aria-live="polite">Searching…</span>
         </div>
+        <p
+          v-if="searchQuery.trim() && isSearching"
+          class="sr-only"
+          role="status"
+          aria-live="polite"
+        >
+          Searching groups…
+        </p>
       </div>
 
       <!-- Search Results -->
-      <section v-if="searchResults.length > 0" class="groups-section">
+      <section v-if="searchQuery.trim() && isSearching && searchResults.length === 0" class="groups-section">
+        <div class="loading-state" aria-busy="true">
+          <FunLoader fill label="Searching groups" />
+        </div>
+      </section>
+
+      <section v-else-if="searchQuery.trim() && !isSearching && searchResults.length === 0" class="groups-section">
+        <div class="empty-state">
+          <span class="empty-emoji" aria-hidden="true">🔍</span>
+          <p>No groups match “{{ searchQuery.trim() }}”.</p>
+        </div>
+      </section>
+
+      <section v-else-if="searchResults.length > 0" class="groups-section">
         <h2 class="section-title">Search results</h2>
         <div class="groups-grid">
           <GroupCard
@@ -212,9 +247,10 @@ useHead({
               :key="cat.id"
               type="button"
               :class="['category-btn', { active: selectedCategory === cat.id }]"
+              :aria-pressed="selectedCategory === cat.id"
               @click="selectedCategory = cat.id"
             >
-              <span class="cat-emoji">{{ cat.emoji }}</span>
+              <span class="cat-emoji" aria-hidden="true">{{ cat.emoji }}</span>
               <span class="cat-label">{{ cat.label }}</span>
             </button>
           </nav>
@@ -244,19 +280,7 @@ useHead({
         </section>
       </template>
 
-      <div v-if="!instancesStore.isAuthenticated" class="login-notice">
-        <div class="notice-content">
-            <span class="notice-icon"><NeoIcon name="lock" :size="22" :stroke="1.75" /></span>
-          <div>
-            <h3>Log in to join groups</h3>
-            <p>
-              Browse freely — sign in to join and see group posts in your home feed.
-            </p>
-          </div>
-          <NuxtLink to="/login" class="notice-btn">Log in</NuxtLink>
-        </div>
-      </div>
-    </main>
+    </div>
   </div>
 </template>
 
@@ -597,6 +621,11 @@ useHead({
 
 .login-notice {
   margin-top: 1.5rem;
+
+  &--top {
+    margin-top: 0;
+    margin-bottom: 1rem;
+  }
   padding: 1rem;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
