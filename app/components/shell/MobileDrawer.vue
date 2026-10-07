@@ -3,11 +3,15 @@ import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
+import { useAlgorithmsStore } from '~/stores/algorithms'
+import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
 import { useOverlayStore } from '~/stores/overlay'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { categoryTint, useShellAppearance } from '~/composables/useShellAppearance'
+import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
+import type { NeoIconName } from '~/utils/neoIcons'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -15,6 +19,9 @@ const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
 const conversationsStore = useConversationsStore()
 const groupsStore = useGroupsStore()
+const algorithmsStore = useAlgorithmsStore()
+algorithmsStore.hydrate()
+const columnsStore = useColumnsStore()
 const settingsStore = useSettingsStore()
 const themeStore = useThemeStore()
 const overlayStore = useOverlayStore()
@@ -46,6 +53,54 @@ const closeMobileMenu = () => {
 const openGroupFromMenu = (tag: string) => {
   closeMobileMenu()
   router.push(`/groups/${tag}`)
+}
+
+const localHostLabel = computed(() => {
+  const preferred =
+    instancesStore.activeAccount?.url ||
+    instancesStore.instances[0]?.url ||
+    resolvePublicInstanceUrl()
+  return hostnameOf(preferred) || 'this server'
+})
+
+const drawerAlgorithmItems = computed(() => {
+  const items: {
+    key: string
+    label: string
+    icon: NeoIconName
+    feedType: ColumnFeedType
+    feedParam?: string
+  }[] = [
+    { key: 'local', label: `Local (${localHostLabel.value})`, icon: 'globe', feedType: 'local' },
+    { key: 'federated', label: 'Federated', icon: 'servers', feedType: 'federated' },
+  ]
+  if (instancesStore.hasAuthenticatedInstance) {
+    items.push(
+      { key: 'favourites', label: 'Liked', icon: 'heart', feedType: 'favourites' },
+      { key: 'bookmarks', label: 'Saved', icon: 'bookmark', feedType: 'bookmarks' },
+    )
+  }
+  for (const recipe of algorithmsStore.allRecipes) {
+    items.push({
+      key: `algo-${recipe.id}`,
+      label: recipe.name,
+      icon: 'filter',
+      feedType: 'algorithm',
+      feedParam: recipe.id,
+    })
+  }
+  return items
+})
+
+const openBoardFeedFromDrawer = (feedType: ColumnFeedType, feedParam?: string) => {
+  closeMobileMenu()
+  columnsStore.ensureFocusedView(feedType, feedParam)
+  void router.push('/')
+}
+
+const openNewAlgorithmFromDrawer = () => {
+  closeMobileMenu()
+  algorithmsStore.openEditor()
 }
 
 const openSettingsFromDrawer = async () => {
@@ -111,122 +166,153 @@ useFocusTrap(mobileSidebarRef, open, {
       </button>
     </div>
 
-    <nav class="mobile-sidebar__nav" aria-label="Main menu">
-      <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
-      <NuxtLink
-        to="/explore"
-        class="mobile-sidebar__link"
-        :class="{ 'chrome-hint': boardPortal === 'search' }"
-        @click="closeMobileMenu"
-      >Search</NuxtLink>
-      <NuxtLink
-        to="/groups"
-        class="mobile-sidebar__link"
-        :class="{ 'chrome-hint': boardPortal === 'communities' }"
-        @click="closeMobileMenu"
-      >Groups</NuxtLink>
-      <NuxtLink
-        v-if="instancesStore.hasAuthenticatedInstance"
-        to="/messages"
-        class="mobile-sidebar__link"
-        :class="{ 'chrome-hint': boardPortal === 'inbox' }"
-        @click="closeMobileMenu"
-      >
-        Messages
-        <span v-if="messagesBadge" class="nav-badge nav-badge--inline">
-          {{ messagesBadge }}<span class="sr-only"> unread</span>
-        </span>
-      </NuxtLink>
-      <NuxtLink
-        v-if="instancesStore.hasAuthenticatedInstance"
-        to="/notifications"
-        class="mobile-sidebar__link"
-        :class="{ 'chrome-hint': boardPortal === 'activity' }"
-        @click="closeMobileMenu"
-      >
-        Activity
-        <span v-if="notifBadge" class="nav-badge nav-badge--inline">
-          {{ notifBadge }}<span class="sr-only"> unread</span>
-        </span>
-      </NuxtLink>
-    </nav>
+    <div class="mobile-sidebar__scroll">
+      <nav class="mobile-sidebar__nav" aria-label="Main menu">
+        <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
+        <NuxtLink
+          to="/explore"
+          class="mobile-sidebar__link"
+          :class="{ 'chrome-hint': boardPortal === 'search' }"
+          @click="closeMobileMenu"
+        >Search</NuxtLink>
+        <NuxtLink
+          to="/groups"
+          class="mobile-sidebar__link"
+          :class="{ 'chrome-hint': boardPortal === 'communities' }"
+          @click="closeMobileMenu"
+        >Groups</NuxtLink>
+        <NuxtLink
+          v-if="instancesStore.hasAuthenticatedInstance"
+          to="/messages"
+          class="mobile-sidebar__link"
+          :class="{ 'chrome-hint': boardPortal === 'inbox' }"
+          @click="closeMobileMenu"
+        >
+          Messages
+          <span v-if="messagesBadge" class="nav-badge nav-badge--inline">
+            {{ messagesBadge }}<span class="sr-only"> unread</span>
+          </span>
+        </NuxtLink>
+        <NuxtLink
+          v-if="instancesStore.hasAuthenticatedInstance"
+          to="/notifications"
+          class="mobile-sidebar__link"
+          :class="{ 'chrome-hint': boardPortal === 'activity' }"
+          @click="closeMobileMenu"
+        >
+          Activity
+          <span v-if="notifBadge" class="nav-badge nav-badge--inline">
+            {{ notifBadge }}<span class="sr-only"> unread</span>
+          </span>
+        </NuxtLink>
+      </nav>
 
-    <div
-      v-if="!instancesStore.hasAuthenticatedInstance"
-      class="mobile-sidebar__guest"
-    >
-      <p class="mobile-sidebar__guest-title">Browsing as a guest</p>
-      <p class="mobile-sidebar__guest-body">
-        Public posts work without an account. Sign in to post, follow people, and join groups.
-      </p>
-      <NuxtLink
-        to="/login"
-        class="mobile-sidebar__guest-cta"
-        @click="closeMobileMenu"
+      <div
+        v-if="!instancesStore.hasAuthenticatedInstance"
+        class="mobile-sidebar__guest"
       >
-        Sign in
-      </NuxtLink>
+        <p class="mobile-sidebar__guest-title">Browsing as a guest</p>
+        <p class="mobile-sidebar__guest-body">
+          Public posts work without an account. Sign in to post, follow people, and join groups.
+        </p>
+        <NuxtLink
+          to="/login"
+          class="mobile-sidebar__guest-cta"
+          @click="closeMobileMenu"
+        >
+          Sign in
+        </NuxtLink>
+      </div>
+
+      <section class="mobile-sidebar__groups" aria-label="Algorithms">
+        <div class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 class="mobile-sidebar__groups-title">Algorithms</h2>
+            <button
+              type="button"
+              class="mobile-sidebar__groups-all"
+              @click="openNewAlgorithmFromDrawer"
+            >
+              New
+            </button>
+          </div>
+          <ul class="mobile-sidebar__suggest-list">
+            <li v-for="item in drawerAlgorithmItems" :key="item.key">
+              <button
+                type="button"
+                class="mobile-sidebar__suggest"
+                @click="openBoardFeedFromDrawer(item.feedType, item.feedParam)"
+              >
+                <span class="mobile-sidebar__suggest-icon mobile-sidebar__suggest-icon--glyph">
+                  <NeoIcon :name="item.icon" :size="18" :stroke="1.75" />
+                </span>
+                <span class="mobile-sidebar__suggest-text">
+                  <span class="mobile-sidebar__suggest-name">{{ item.label }}</span>
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Threads-style communities hub in the side panel -->
+      <section
+        v-if="sidebarJoinedGroups.length || sidebarSuggestedGroups.length"
+        class="mobile-sidebar__groups"
+      >
+        <div v-if="sidebarJoinedGroups.length" class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 class="mobile-sidebar__groups-title">Your groups</h2>
+            <NuxtLink to="/groups" class="mobile-sidebar__groups-all" @click="closeMobileMenu">
+              See all
+            </NuxtLink>
+          </div>
+          <ul class="mobile-sidebar__group-chips">
+            <li v-for="group in sidebarJoinedGroups" :key="group.tag">
+              <button
+                type="button"
+                class="mobile-sidebar__group-chip"
+                @click="openGroupFromMenu(group.tag)"
+              >
+                <span
+                  class="mobile-sidebar__group-icon"
+                  :style="{ backgroundColor: categoryTint(group.category) }"
+                >
+                  {{ group.icon }}
+                </span>
+                <span class="mobile-sidebar__group-name">{{ group.name }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div v-if="sidebarSuggestedGroups.length" class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 class="mobile-sidebar__groups-title">Suggested</h2>
+          </div>
+          <ul class="mobile-sidebar__suggest-list">
+            <li v-for="group in sidebarSuggestedGroups" :key="`s-${group.tag}`">
+              <button
+                type="button"
+                class="mobile-sidebar__suggest"
+                @click="openGroupFromMenu(group.tag)"
+              >
+                <span
+                  class="mobile-sidebar__suggest-icon"
+                  :style="{ backgroundColor: categoryTint(group.category) }"
+                >
+                  {{ group.icon }}
+                </span>
+                <span class="mobile-sidebar__suggest-text">
+                  <span class="mobile-sidebar__suggest-name">{{ group.name }}</span>
+                  <span class="mobile-sidebar__suggest-tag">#{{ group.tag }}</span>
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
     </div>
-
-    <!-- Threads-style communities hub in the side panel -->
-    <section
-      v-if="sidebarJoinedGroups.length || sidebarSuggestedGroups.length"
-      class="mobile-sidebar__groups"
-    >
-      <div v-if="sidebarJoinedGroups.length" class="mobile-sidebar__groups-block">
-        <div class="mobile-sidebar__groups-head">
-          <h2 class="mobile-sidebar__groups-title">Your groups</h2>
-          <NuxtLink to="/groups" class="mobile-sidebar__groups-all" @click="closeMobileMenu">
-            See all
-          </NuxtLink>
-        </div>
-        <ul class="mobile-sidebar__group-chips">
-          <li v-for="group in sidebarJoinedGroups" :key="group.tag">
-            <button
-              type="button"
-              class="mobile-sidebar__group-chip"
-              @click="openGroupFromMenu(group.tag)"
-            >
-              <span
-                class="mobile-sidebar__group-icon"
-                :style="{ backgroundColor: categoryTint(group.category) }"
-              >
-                {{ group.icon }}
-              </span>
-              <span class="mobile-sidebar__group-name">{{ group.name }}</span>
-            </button>
-          </li>
-        </ul>
-      </div>
-
-      <div v-if="sidebarSuggestedGroups.length" class="mobile-sidebar__groups-block">
-        <div class="mobile-sidebar__groups-head">
-          <h2 class="mobile-sidebar__groups-title">Suggested</h2>
-        </div>
-        <ul class="mobile-sidebar__suggest-list">
-          <li v-for="group in sidebarSuggestedGroups" :key="`s-${group.tag}`">
-            <button
-              type="button"
-              class="mobile-sidebar__suggest"
-              @click="openGroupFromMenu(group.tag)"
-            >
-              <span
-                class="mobile-sidebar__suggest-icon"
-                :style="{ backgroundColor: categoryTint(group.category) }"
-              >
-                {{ group.icon }}
-              </span>
-              <span class="mobile-sidebar__suggest-text">
-                <span class="mobile-sidebar__suggest-name">{{ group.name }}</span>
-                <span class="mobile-sidebar__suggest-tag">#{{ group.tag }}</span>
-              </span>
-            </button>
-          </li>
-        </ul>
-      </div>
-    </section>
-
-    <div class="mobile-sidebar__spacer"></div>
 
     <div class="mobile-sidebar__footer">
       <button
@@ -300,12 +386,20 @@ useFocusTrap(mobileSidebarRef, open, {
   bottom: 0;
   width: 280px;
   max-width: calc(100vw - 56px);
+  max-height: 100dvh;
+  max-height: var(--neo-app-height, 100dvh);
   display: flex;
   flex-direction: column;
   background: var(--neo-bg-secondary);
   border-right: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-nav, 100);
-  overflow-y: auto;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  // Installed PWA (viewport-fit=cover): keep the close button off the notch and
+  // the last items above the home indicator
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
 
   :focus-visible {
     outline-offset: -2px;
@@ -577,6 +671,11 @@ useFocusTrap(mobileSidebarRef, open, {
     justify-content: center;
     font-size: 1.05rem;
     flex-shrink: 0;
+    color: var(--neo-text-primary);
+
+    &--glyph {
+      background: var(--neo-bg-tertiary);
+    }
   }
 
   &__suggest-text {
@@ -600,13 +699,20 @@ useFocusTrap(mobileSidebarRef, open, {
     color: var(--neo-text-muted);
   }
 
-  &__spacer {
-    flex: 1;
+  &__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   &__footer {
+    flex-shrink: 0;
     padding: 0.75rem;
     border-top: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-secondary);
   }
 
   &__action {

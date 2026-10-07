@@ -3,14 +3,16 @@ import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
 import { useComposeSheetStore } from '~/stores/composeSheet'
-import { useColumnsStore } from '~/stores/columns'
+import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
+import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useSettingsStore } from '~/stores/settings'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import {
   useShellAppearance,
   categoryTint,
 } from '~/composables/useShellAppearance'
+import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
@@ -18,6 +20,8 @@ const conversationsStore = useConversationsStore()
 const composeSheet = useComposeSheetStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
+const algorithmsStore = useAlgorithmsStore()
+algorithmsStore.hydrate()
 const settingsStore = useSettingsStore()
 const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
@@ -50,6 +54,7 @@ const {
 } = useShellAppearance()
 
 const groupsShowAll = ref(false)
+const algorithmsShowAll = ref(false)
 const inboxMenuOpen = ref(false)
 
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
@@ -68,6 +73,66 @@ const groupsCanToggle = computed(
     sidebarJoinedGroups.value.length > 5 ||
     (showSidebarSuggested.value && sidebarSuggestedGroups.value.length > 4),
 )
+
+const localHostLabel = computed(() => {
+  const preferred =
+    instancesStore.activeAccount?.url ||
+    instancesStore.instances[0]?.url ||
+    resolvePublicInstanceUrl()
+  return hostnameOf(preferred) || 'this server'
+})
+
+/** Built-in + custom recipes shown under Algorithms (Threads-style Other feeds). */
+const sidebarAlgorithmItems = computed(() => {
+  const items: {
+    key: string
+    label: string
+    icon: 'globe' | 'servers' | 'heart' | 'bookmark' | 'filter'
+    feedType: ColumnFeedType
+    feedParam?: string
+    auth?: boolean
+  }[] = [
+    { key: 'local', label: `Local`, icon: 'globe', feedType: 'local' },
+    { key: 'federated', label: 'Federated', icon: 'servers', feedType: 'federated' },
+  ]
+  if (instancesStore.hasAuthenticatedInstance) {
+    items.push(
+      { key: 'favourites', label: 'Liked', icon: 'heart', feedType: 'favourites', auth: true },
+      { key: 'bookmarks', label: 'Saved', icon: 'bookmark', feedType: 'bookmarks', auth: true },
+    )
+  }
+  for (const recipe of algorithmsStore.allRecipes) {
+    items.push({
+      key: `algo-${recipe.id}`,
+      label: recipe.name,
+      icon: 'filter',
+      feedType: 'algorithm',
+      feedParam: recipe.id,
+      auth: recipe.source === 'home',
+    })
+  }
+  return items
+})
+
+const visibleAlgorithmItems = computed(() =>
+  algorithmsShowAll.value ? sidebarAlgorithmItems.value : sidebarAlgorithmItems.value.slice(0, 5),
+)
+const algorithmsCanToggle = computed(() => sidebarAlgorithmItems.value.length > 5)
+
+const boardFeedActive = (feedType: ColumnFeedType, feedParam?: string) => {
+  if (path.value !== '/') return false
+  const col =
+    columnsStore.focusedColumn ||
+    (columnsStore.columns.length === 1 ? columnsStore.columns[0] : null)
+  if (!col || col.feedType !== feedType) return false
+  if (feedType === 'algorithm') return col.algorithmId === feedParam
+  return true
+}
+
+const openBoardFeed = (feedType: ColumnFeedType, feedParam?: string) => {
+  columnsStore.ensureFocusedView(feedType, feedParam)
+  if (path.value !== '/') void router.push('/')
+}
 const inboxActive = computed(
   () => path.value === '/messages' || path.value === '/notifications',
 )
@@ -270,6 +335,48 @@ watch(
         <span class="sidebar__label">Profile</span>
       </NuxtLink>
     </nav>
+
+    <section class="sidebar__section" aria-label="Algorithms">
+      <div class="sidebar__section-head">
+        <h2 class="sidebar__section-title">Algorithms</h2>
+        <button
+          type="button"
+          class="sidebar__section-action"
+          title="Create algorithm"
+          @click="algorithmsStore.openEditor()"
+        >
+          New
+        </button>
+      </div>
+      <ul class="sidebar__section-list">
+        <li v-for="item in visibleAlgorithmItems" :key="item.key">
+          <button
+            type="button"
+            class="sidebar__row"
+            :class="{ 'sidebar__row--on': boardFeedActive(item.feedType, item.feedParam) }"
+            :title="item.key === 'local' ? `Local (${localHostLabel})` : item.label"
+            @click="openBoardFeed(item.feedType, item.feedParam)"
+          >
+            <span class="sidebar__row-glyph" aria-hidden="true">
+              <NeoIcon :name="item.icon" :size="18" :stroke="1.75" />
+            </span>
+            <span class="sidebar__label">
+              <template v-if="item.key === 'local'">Local</template>
+              <template v-else>{{ item.label }}</template>
+            </span>
+          </button>
+        </li>
+      </ul>
+      <button
+        v-if="algorithmsCanToggle"
+        type="button"
+        class="sidebar__more"
+        :aria-expanded="algorithmsShowAll"
+        @click="algorithmsShowAll = !algorithmsShowAll"
+      >
+        {{ algorithmsShowAll ? 'Show less' : 'Show more' }}
+      </button>
+    </section>
 
     <section
       v-if="visibleJoinedGroups.length || showSidebarSuggested"
