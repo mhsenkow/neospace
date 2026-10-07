@@ -16,8 +16,15 @@ import {
   sanitizeDisplayName,
   sanitizeFieldHtml,
   sanitizeStatusHtml,
-  stripHtml,
 } from '~/utils/sanitizeHtml'
+import {
+  buildPresenceLinks,
+  extractHttpUrl,
+  isPresenceField,
+  mergePresenceIntoFields,
+  normalizeFieldKey,
+  readPresenceDraft,
+} from '~/utils/profileSources'
 
 const INTERNAL_FIELD_NAMES = new Set([
   'neospace_columns',
@@ -27,17 +34,6 @@ const INTERNAL_FIELD_NAMES = new Set([
   'style',
   'chaos_css',
 ])
-
-const normalizeFieldKey = (name: string) =>
-  name.toLowerCase().replace(/[^a-z_]/g, '')
-
-const extractHttpUrl = (raw: string): string | null => {
-  const plain = stripHtml(raw || '')
-  const hrefMatch = raw?.match(/href=["'](https?:\/\/[^"']+)["']/i)
-  if (hrefMatch?.[1]) return hrefMatch[1]
-  const bare = plain.match(/https?:\/\/[^\s<>"']+/i)
-  return bare?.[0] || null
-}
 
 const profileStore = useProfileStore()
 const instancesStore = useInstancesStore()
@@ -72,8 +68,9 @@ type ProfileFieldToken = {
 const fieldTokens = computed((): ProfileFieldToken[] =>
   (profileStore.viewedProfile?.fields || [])
     .filter((f) => !INTERNAL_FIELD_NAMES.has(normalizeFieldKey(f.name || '')))
+    .filter((f) => !isPresenceField(f))
     .map((f) => {
-      const plainValue = stripHtml(f.value || '')
+      const plainValue = (f.value || '').replace(/<[^>]*>/g, '').trim()
       return {
         name: f.name || '',
         plainValue,
@@ -85,12 +82,50 @@ const fieldTokens = computed((): ProfileFieldToken[] =>
     .filter((f) => f.name.trim() || f.plainValue.trim()),
 )
 
-const websiteFieldUrl = computed(() => {
-  const withUrl = fieldTokens.value.find((f) => f.href)
-  return withUrl?.href || null
-})
+const presenceLinks = computed(() =>
+  buildPresenceLinks({
+    mastodonUrl: profileStore.viewedProfile?.url,
+    fields: profileStore.viewedProfile?.fields,
+  }),
+)
+
+const websiteFieldUrl = computed(
+  () => presenceLinks.value.find((l) => l.kind === 'website')?.href || null,
+)
 
 const instanceProfileUrl = computed(() => profileStore.viewedProfile?.url || null)
+
+/** Dedicated cross-network inputs while editing (saved as Mastodon fields). */
+const presenceDraft = ref({ bluesky: '', seenu: '', website: '' })
+
+const syncPresenceDraft = () => {
+  presenceDraft.value = readPresenceDraft(profileStore.editForm.fields)
+}
+
+const startEdit = () => {
+  profileStore.toggleEditMode()
+  if (profileStore.isEditing) {
+    syncPresenceDraft()
+    // Presence lives in dedicated inputs; keep other fields editable
+    profileStore.editForm.fields = profileStore.editForm.fields.filter((f) => !isPresenceField(f))
+  }
+}
+
+const cancelEdit = () => {
+  profileStore.cancelEdit()
+  presenceDraft.value = { bluesky: '', seenu: '', website: '' }
+}
+
+const presenceSlotsUsed = computed(
+  () =>
+    [presenceDraft.value.bluesky, presenceDraft.value.seenu, presenceDraft.value.website].filter(
+      (v) => v.trim(),
+    ).length,
+)
+
+const canAddCustomField = computed(
+  () => profileStore.editForm.fields.length + presenceSlotsUsed.value < 4,
+)
 
 const chromeTitle = computed(() => {
   const p = profileStore.viewedProfile
@@ -104,40 +139,65 @@ const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void 
 // Relationship state
 const relationship = ref<mastodon.v1.Relationship | null>(null)
 const isFollowLoading = ref(false)
-const profileTab = ref<'posts' | 'replies' | 'media' | 'insights'>('posts')
+const profileTab = ref<'posts' | 'replies' | 'media' | 'reposts' | 'insights'>('posts')
 
 // File input refs
 const avatarInput = ref<HTMLInputElement | null>(null)
 const headerInput = ref<HTMLInputElement | null>(null)
 
+const formatCount = (n: number) => {
+  if (n >= 10000) return `${(n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '')}K`
+  return n.toLocaleString()
+}
+
 const followerLabel = computed(() => {
   const n = profileStore.viewedProfile?.followersCount ?? 0
-  const formatted = n >= 10000
-    ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '')}K`
-    : n.toLocaleString()
-  return `${formatted} follower${n === 1 ? '' : 's'}`
+  return `${formatCount(n)} follower${n === 1 ? '' : 's'}`
 })
+
+const statsLine = computed(() => {
+  const p = profileStore.viewedProfile
+  if (!p) return ''
+  const followers = `${formatCount(p.followersCount ?? 0)} follower${(p.followersCount ?? 0) === 1 ? '' : 's'}`
+  const following = `${formatCount(p.followingCount ?? 0)} following`
+  return `${followers} · ${following}`
+})
+
+const openCompose = () => {
+  composeSheet.show({
+    placeholder: "What's new?",
+    title: 'New post',
+    onPosted: async () => {
+      await profileStore.fetchStatuses(true, tabFetchOpts.value)
+    },
+  })
+}
 
 const tabFetchOpts = computed(() => {
   if (profileTab.value === 'media') return { onlyMedia: true, excludeReplies: true }
   if (profileTab.value === 'replies') return { excludeReplies: false, onlyMedia: false }
+  // posts + reposts: include boosts so the Reposts tab can filter them
   return { excludeReplies: true, onlyMedia: false }
 })
 
 const visibleStatuses = computed(() => {
   const list = profileStore.statuses
   if (profileTab.value === 'replies') {
-    // Prefer posts that are replies; fall back to full list if API didn't filter
     const replies = list.filter((s) => !!s.inReplyToId)
     return replies.length ? replies : list
   }
-  if (profileTab.value === 'posts') {
-    return list.filter((s) => !s.inReplyToId)
+  if (profileTab.value === 'reposts') {
+    return list.filter((s) => !!s.reblog)
   }
-  return list
+  if (profileTab.value === 'posts') {
+    return list.filter((s) => !s.inReplyToId && !s.reblog)
+  }
+  return list.filter((s) => !s.reblog)
 })
 
-const setProfileTab = async (tab: 'posts' | 'replies' | 'media' | 'insights') => {
+const setProfileTab = async (
+  tab: 'posts' | 'replies' | 'media' | 'reposts' | 'insights',
+) => {
   if (profileTab.value === tab) return
   profileTab.value = tab
   if (tab === 'insights') return
@@ -273,8 +333,12 @@ const handleHeaderChange = (event: Event) => {
 
 const handleSaveProfile = async () => {
   try {
+    profileStore.editForm.fields = mergePresenceIntoFields(
+      profileStore.editForm.fields,
+      presenceDraft.value,
+    )
     await profileStore.updateProfile()
-  } catch (e) {
+  } catch {
     // Error is handled in store
   }
 }
@@ -366,8 +430,57 @@ useHead({
     <!-- Profile Content -->
     <template v-else-if="profileStore.viewedProfile">
       <section class="profile-hero">
-        <!-- Threads-style top: avatar left, actions right -->
-        <div class="profile-top">
+        <!-- Threads-style: name + handle left, avatar right -->
+        <div class="profile-head">
+          <div class="profile-head__text">
+            <template v-if="profileStore.isEditing">
+              <input
+                v-model="profileStore.editForm.displayName"
+                type="text"
+                class="profile-name-input neo-input"
+                placeholder="Display name"
+              />
+            </template>
+            <button
+              v-else-if="canSwitchAccounts"
+              type="button"
+              class="profile-name profile-name--switch"
+              aria-haspopup="dialog"
+              aria-label="Switch account"
+              @click="openAccountSwitcher"
+            >
+              <span class="profile-name__text" v-html="safeProfileName" />
+              <svg
+                class="profile-name__chevron"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <h1 v-else class="profile-name" v-html="safeProfileName" />
+
+            <p class="profile-handle">
+              <span class="profile-handle__acct">@{{ profileStore.viewedProfile.username }}</span>
+              <span class="profile-handle__badge" title="Mastodon">
+                <NeoIcon name="servers" :size="12" :stroke="2" />
+              </span>
+              <span v-if="profileStore.viewedProfile.bot" class="profile-chip">bot</span>
+              <span
+                v-if="profileStore.viewedProfile.locked"
+                class="profile-chip profile-chip--lock"
+                title="Private"
+              >
+                <NeoIcon name="lock" :size="12" :stroke="2" />
+              </span>
+            </p>
+          </div>
+
           <div class="profile-avatar-wrapper">
             <img
               :src="profileStore.viewedProfile.avatar"
@@ -381,10 +494,7 @@ useHead({
               aria-label="Change avatar"
               @click="triggerAvatarUpload"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
+              <NeoIcon name="camera" :size="14" :stroke="2" />
             </button>
             <input
               ref="avatarInput"
@@ -394,199 +504,236 @@ useHead({
               @change="handleAvatarChange"
             />
           </div>
-
         </div>
 
-        <div class="profile-identity">
-          <template v-if="profileStore.isEditing">
-            <input
-              v-model="profileStore.editForm.displayName"
-              type="text"
-              class="profile-name-input neo-input"
-              placeholder="Display name"
-            />
-          </template>
-          <button
-            v-else-if="canSwitchAccounts"
-            type="button"
-            class="profile-name profile-name--switch"
-            aria-haspopup="dialog"
-            aria-label="Switch account"
-            @click="openAccountSwitcher"
-          >
-            <span class="profile-name__text" v-html="safeProfileName" />
-            <svg
-              class="profile-name__chevron"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              aria-hidden="true"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-          <h1 v-else class="profile-name" v-html="safeProfileName" />
-
-          <p class="profile-handle">
-            @{{ profileStore.viewedProfile.acct }}
-            <span v-if="profileStore.viewedProfile.bot" class="profile-chip">bot</span>
-            <span v-if="profileStore.viewedProfile.locked" class="profile-chip profile-chip--lock" title="Private">
-              <NeoIcon name="lock" :size="12" :stroke="2" />
-            </span>
-          </p>
-
-          <template v-if="profileStore.isEditing">
-            <textarea
-              v-model="profileStore.editForm.note"
-              class="profile-bio-input neo-input"
-              placeholder="Write a bio…"
-              rows="3"
-            />
-          </template>
-          <div
-            v-else-if="profileStore.viewedProfile.note"
-            class="profile-bio"
-            v-html="safeProfileNote"
+        <template v-if="profileStore.isEditing">
+          <textarea
+            v-model="profileStore.editForm.note"
+            class="profile-bio-input neo-input"
+            placeholder="Write a bio…"
+            rows="4"
           />
+        </template>
+        <div
+          v-else-if="profileStore.viewedProfile.note"
+          class="profile-bio"
+          v-html="safeProfileNote"
+        />
 
-          <!-- Profile fields as wrapping token chips (internal sync fields hidden) -->
-          <div v-if="!profileStore.isEditing && fieldTokens.length" class="profile-tokens">
-            <component
-              :is="field.href ? 'a' : 'span'"
-              v-for="field in fieldTokens"
-              :key="field.name + field.plainValue"
-              class="profile-token"
-              :class="{ 'profile-token--link': !!field.href }"
-              v-bind="
-                field.href
-                  ? { href: field.href, target: '_blank', rel: 'noopener noreferrer' }
-                  : {}
-              "
-              :title="field.plainValue || field.name"
-            >
-              <span v-if="field.name" class="profile-token__label">{{ field.name }}</span>
-              <span class="profile-token__value">{{ field.plainValue || '—' }}</span>
-              <span v-if="field.verifiedAt" class="profile-token__verified" title="Verified">✓</span>
-            </component>
-          </div>
+        <div v-if="!profileStore.isEditing && fieldTokens.length" class="profile-tokens">
+          <component
+            :is="field.href ? 'a' : 'span'"
+            v-for="field in fieldTokens"
+            :key="field.name + field.plainValue"
+            class="profile-token"
+            :class="{ 'profile-token--link': !!field.href }"
+            v-bind="
+              field.href
+                ? { href: field.href, target: '_blank', rel: 'noopener noreferrer' }
+                : {}
+            "
+            :title="field.plainValue || field.name"
+          >
+            <span v-if="field.name" class="profile-token__label">{{ field.name }}</span>
+            <span class="profile-token__value">{{ field.plainValue || '—' }}</span>
+            <span v-if="field.verifiedAt" class="profile-token__verified" title="Verified">✓</span>
+          </component>
+        </div>
 
+        <!-- Stats + open-web presence (Mastodon / Bluesky / SeenU / site) -->
+        <div v-if="!profileStore.isEditing" class="profile-social">
           <button
             type="button"
-            class="profile-followers"
+            class="profile-social__stats"
             @click="followersModalRef?.open('followers')"
           >
-            {{ followerLabel }}
+            {{ statsLine }}
           </button>
+          <div v-if="presenceLinks.length" class="profile-social__links">
+            <a
+              v-for="link in presenceLinks"
+              :key="link.kind"
+              class="profile-social__link neo-tip"
+              :href="link.href"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="`${link.label}: ${link.hint}`"
+            >
+              <NeoIcon v-if="link.kind === 'mastodon'" name="servers" :size="18" :stroke="1.75" />
+              <NeoIcon v-else-if="link.kind === 'website'" name="globe" :size="18" :stroke="1.75" />
+              <!-- Bluesky butterfly -->
+              <svg
+                v-else-if="link.kind === 'bluesky'"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M12 11.4c-.9-1.75-3.35-5-5.62-6.6C4.7 3.5 3.5 4.05 3.5 5.7c0 .55.3 4.55.5 5.25.6 2.15 2.7 2.85 4.6 2.5-.1.9-.15 1.75-.15 2.35 0 2.1 1.35 3.45 3.55 3.45s3.55-1.35 3.55-3.45c0-.6-.05-1.45-.15-2.35 1.9.35 4-.35 4.6-2.5.2-.7.5-4.7.5-5.25 0-1.65-1.2-2.2-2.88-.9C15.35 6.4 12.9 9.65 12 11.4z" />
+              </svg>
+              <!-- SeenU mark -->
+              <svg
+                v-else
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="8.25" />
+                <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+                <path d="M12 3.75v2.5M12 17.75v2.5M3.75 12h2.5M17.75 12h2.5" />
+              </svg>
+            </a>
+          </div>
+        </div>
 
-          <div class="profile-cta">
-            <template v-if="profileStore.isOwnProfile">
-              <template v-if="profileStore.isEditing">
-                <button
-                  type="button"
-                  class="neo-btn neo-btn--primary profile-cta__btn"
-                  :disabled="profileStore.isUpdating"
-                  @click="handleSaveProfile"
-                >
-                  {{ profileStore.isUpdating ? 'Saving…' : 'Done' }}
-                </button>
-                <button
-                  type="button"
-                  class="neo-btn neo-btn--secondary profile-cta__btn"
-                  @click="profileStore.cancelEdit"
-                >
-                  Cancel
-                </button>
-              </template>
-              <template v-else>
-                <button
-                  type="button"
-                  class="neo-btn neo-btn--secondary profile-cta__btn"
-                  @click="profileStore.toggleEditMode"
-                >
-                  Edit profile
-                </button>
-                <button
-                  type="button"
-                  class="neo-btn neo-btn--secondary profile-cta__btn"
-                  @click="shareProfile"
-                >
-                  Share profile
-                </button>
-              </template>
-            </template>
-            <template v-else>
+        <div class="profile-cta">
+          <template v-if="profileStore.isOwnProfile">
+            <template v-if="profileStore.isEditing">
               <button
                 type="button"
-                class="neo-btn profile-cta__btn"
-                :class="relationship?.following ? 'neo-btn--secondary' : 'neo-btn--primary'"
-                :disabled="isFollowLoading"
-                @click="handleFollow"
+                class="neo-btn neo-btn--primary profile-cta__btn"
+                :disabled="profileStore.isUpdating"
+                @click="handleSaveProfile"
               >
-                {{ relationship?.following ? 'Following' : 'Follow' }}
+                {{ profileStore.isUpdating ? 'Saving…' : 'Done' }}
               </button>
               <button
                 type="button"
                 class="neo-btn neo-btn--secondary profile-cta__btn"
-                @click="messageUser"
+                @click="cancelEdit"
               >
-                Message
+                Cancel
               </button>
             </template>
+            <template v-else>
+              <button
+                type="button"
+                class="neo-btn neo-btn--secondary profile-cta__btn"
+                @click="startEdit"
+              >
+                Edit profile
+              </button>
+              <button
+                type="button"
+                class="neo-btn neo-btn--secondary profile-cta__btn"
+                @click="setProfileTab('insights')"
+              >
+                View insights
+              </button>
+            </template>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="neo-btn profile-cta__btn"
+              :class="relationship?.following ? 'neo-btn--secondary' : 'neo-btn--primary'"
+              :disabled="isFollowLoading"
+              @click="handleFollow"
+            >
+              {{ relationship?.following ? 'Following' : 'Follow' }}
+            </button>
+            <button
+              type="button"
+              class="neo-btn neo-btn--secondary profile-cta__btn"
+              @click="messageUser"
+            >
+              Message
+            </button>
+          </template>
+        </div>
+
+        <div v-if="profileStore.isEditing" class="profile-edit-extras">
+          <div class="profile-sources-editor">
+            <p class="profile-sources-editor__label">Also on the open web</p>
+            <label class="profile-source-field">
+              <span>Bluesky</span>
+              <input
+                v-model="presenceDraft.bluesky"
+                type="text"
+                class="neo-input"
+                placeholder="@you.bsky.social or profile URL"
+                autocomplete="off"
+              />
+            </label>
+            <label class="profile-source-field">
+              <span>SeenU</span>
+              <input
+                v-model="presenceDraft.seenu"
+                type="text"
+                class="neo-input"
+                placeholder="handle or seenu.io/…"
+                autocomplete="off"
+              />
+            </label>
+            <label class="profile-source-field">
+              <span>Website</span>
+              <input
+                v-model="presenceDraft.website"
+                type="text"
+                class="neo-input"
+                placeholder="yoursite.com"
+                autocomplete="off"
+              />
+            </label>
+            <p class="profile-sources-editor__hint">
+              Saved as Mastodon profile fields so anyone can find you. Mastodon is always linked from this account.
+            </p>
           </div>
 
-          <!-- Edit-only extras (fields, header, privacy) stay tucked away -->
-          <div v-if="profileStore.isEditing" class="profile-edit-extras">
-            <button type="button" class="neo-btn neo-btn--ghost" @click="triggerHeaderUpload">
-              Change header image
-            </button>
-            <input
-              ref="headerInput"
-              type="file"
-              accept="image/*"
-              class="hidden-input"
-              @change="handleHeaderChange"
-            />
+          <button type="button" class="neo-btn neo-btn--ghost" @click="triggerHeaderUpload">
+            Change header image
+          </button>
+          <input
+            ref="headerInput"
+            type="file"
+            accept="image/*"
+            class="hidden-input"
+            @change="handleHeaderChange"
+          />
 
-            <div class="profile-fields-editor">
-              <div
-                v-for="(field, index) in profileStore.editForm.fields"
-                :key="index"
-                class="profile-field-row"
-              >
-                <input v-model="field.name" type="text" class="neo-input" placeholder="Label" />
-                <input v-model="field.value" type="text" class="neo-input" placeholder="Link or value" />
-                <button type="button" class="profile-field-remove" @click="profileStore.removeField(index)">✕</button>
-              </div>
-              <button
-                v-if="profileStore.editForm.fields.length < 4"
-                type="button"
-                class="neo-btn neo-btn--ghost"
-                @click="profileStore.addField"
-              >
-                + Add field
+          <div class="profile-fields-editor">
+            <p class="profile-sources-editor__label">Other fields</p>
+            <div
+              v-for="(field, index) in profileStore.editForm.fields"
+              :key="index"
+              class="profile-field-row"
+            >
+              <input v-model="field.name" type="text" class="neo-input" placeholder="Label" />
+              <input v-model="field.value" type="text" class="neo-input" placeholder="Link or value" />
+              <button type="button" class="profile-field-remove" @click="profileStore.removeField(index)">
+                ✕
               </button>
             </div>
-
-            <label class="profile-toggle">
-              <input v-model="profileStore.editForm.locked" type="checkbox" />
-              <span>Require follow approval</span>
-            </label>
-            <label class="profile-toggle">
-              <input v-model="profileStore.editForm.discoverable" type="checkbox" />
-              <span>Discoverable in search</span>
-            </label>
-            <label class="profile-toggle">
-              <input v-model="profileStore.editForm.bot" type="checkbox" />
-              <span>This is a bot account</span>
-            </label>
+            <button
+              v-if="canAddCustomField"
+              type="button"
+              class="neo-btn neo-btn--ghost"
+              @click="profileStore.addField"
+            >
+              + Add field
+            </button>
           </div>
+
+          <label class="profile-toggle">
+            <input v-model="profileStore.editForm.locked" type="checkbox" />
+            <span>Require follow approval</span>
+          </label>
+          <label class="profile-toggle">
+            <input v-model="profileStore.editForm.discoverable" type="checkbox" />
+            <span>Discoverable in search</span>
+          </label>
+          <label class="profile-toggle">
+            <input v-model="profileStore.editForm.bot" type="checkbox" />
+            <span>This is a bot account</span>
+          </label>
         </div>
       </section>
 
-      <!-- Threads-style tabs -->
       <nav class="profile-tabs" aria-label="Profile sections" role="tablist">
         <button
           type="button"
@@ -619,15 +766,14 @@ useHead({
           Media
         </button>
         <button
-          v-if="profileStore.isOwnProfile"
           type="button"
           role="tab"
           class="profile-tabs__tab"
-          :class="{ 'profile-tabs__tab--active': profileTab === 'insights' }"
-          :aria-selected="profileTab === 'insights'"
-          @click="setProfileTab('insights')"
+          :class="{ 'profile-tabs__tab--active': profileTab === 'reposts' }"
+          :aria-selected="profileTab === 'reposts'"
+          @click="setProfileTab('reposts')"
         >
-          Insights
+          Reposts
         </button>
       </nav>
 
@@ -637,6 +783,23 @@ useHead({
       />
 
       <template v-else>
+        <button
+          v-if="profileStore.isOwnProfile && profileTab === 'posts'"
+          type="button"
+          class="profile-compose"
+          @click="openCompose"
+        >
+          <img
+            :src="profileStore.viewedProfile.avatar"
+            alt=""
+            class="profile-compose__avatar"
+            width="36"
+            height="36"
+          />
+          <span class="profile-compose__placeholder">What's new?</span>
+          <span class="profile-compose__post">Post</span>
+        </button>
+
         <section v-if="profileStore.pinnedStatuses.length && profileTab === 'posts'" class="profile-pinned">
           <RealPostCard
             v-for="status in profileStore.pinnedStatuses"
@@ -675,7 +838,9 @@ useHead({
                   ? 'No media yet.'
                   : profileTab === 'replies'
                     ? 'No replies yet.'
-                    : 'No posts yet.'
+                    : profileTab === 'reposts'
+                      ? 'No reposts yet.'
+                      : 'No posts yet.'
               }}
             </p>
           </div>
@@ -752,15 +917,27 @@ useHead({
   to { transform: rotate(360deg); }
 }
 
-// Threads-style hero — no banner, left avatar, compact CTAs
+// Threads-style hero — name left, avatar right, presence row
 .profile-hero {
-  padding: 1rem 1rem 0.25rem;
+  padding: 0.85rem 1rem 0.35rem;
 }
 
-.profile-top {
+.profile-head {
   display: flex;
   align-items: flex-start;
-  margin-bottom: 0.75rem;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.profile-head__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  padding-top: 0.15rem;
 }
 
 .profile-avatar-wrapper {
@@ -769,12 +946,17 @@ useHead({
 }
 
 .profile-avatar {
-  width: 86px;
-  height: 86px;
+  width: 84px;
+  height: 84px;
   border-radius: 50%;
   object-fit: cover;
   background: var(--neo-bg-tertiary);
   border: 1px solid var(--neo-border-color);
+
+  @media (min-width: 480px) {
+    width: 96px;
+    height: 96px;
+  }
 }
 
 .profile-avatar__edit {
@@ -793,21 +975,13 @@ useHead({
   justify-content: center;
 }
 
-.profile-identity {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 0.35rem;
-}
-
 .profile-name {
   margin: 0;
-  font-size: 1.375rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--neo-text-primary);
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 
   :deep(img.emoji) {
     height: 1em;
@@ -858,8 +1032,23 @@ useHead({
   color: var(--neo-text-muted);
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+.profile-handle__acct {
+  color: var(--neo-text-secondary);
+}
+
+.profile-handle__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-tertiary);
 }
 
 .profile-chip {
@@ -956,8 +1145,17 @@ useHead({
   }
 }
 
-.profile-followers {
-  margin: 0.5rem 0 0;
+.profile-social {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.profile-social__stats {
+  margin: 0;
   padding: 0;
   border: none;
   background: none;
@@ -966,9 +1164,34 @@ useHead({
   font-weight: 500;
   color: var(--neo-text-muted);
   cursor: pointer;
+  text-align: left;
+  min-width: 0;
 
   &:hover {
     text-decoration: underline;
+    color: var(--neo-text-primary);
+  }
+}
+
+.profile-social__links {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.profile-social__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--neo-text-secondary);
+  text-decoration: none;
+
+  &:hover {
+    background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
   }
 }
@@ -978,7 +1201,7 @@ useHead({
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
   width: 100%;
-  margin-top: 0.85rem;
+  margin-top: 0.9rem;
 }
 
 .profile-cta__btn {
@@ -996,6 +1219,85 @@ useHead({
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--neo-border-color);
+}
+
+.profile-sources-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+
+  &__label {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--neo-text-quaternary);
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--neo-text-muted);
+  }
+}
+
+.profile-source-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+
+  .neo-input {
+    font-weight: 500;
+  }
+}
+
+.profile-compose {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-bottom: 1px solid var(--neo-border-color);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: color-mix(in srgb, var(--neo-text-primary) 3%, transparent);
+  }
+
+  &__avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  &__placeholder {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9375rem;
+    color: var(--neo-text-muted);
+  }
+
+  &__post {
+    flex-shrink: 0;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--neo-border-color);
+    font-size: 0.8125rem;
+    font-weight: 650;
+    color: var(--neo-text-secondary);
+  }
 }
 
 .profile-fields-editor {
