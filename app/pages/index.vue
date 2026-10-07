@@ -137,7 +137,7 @@ const feedTabsScroller = ref<HTMLElement | null>(null)
 
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(n, min), max)
 
-/** Desktop/iPad multi-column: elastic gutters absorb overscroll before Safari history */
+/** Desktop/iPad multi-column: end pad only (start pad was shifting col1 off-screen) */
 const showBoardGutters = computed(
   () => !isMobileUi.value && columnsStore.isMultiColumn && !columnsStore.focusedColumnId,
 )
@@ -153,7 +153,7 @@ const getColumnEls = (): HTMLElement[] => {
 const boardGutterWidth = () => {
   const el = columnsContainer.value
   if (!el || !showBoardGutters.value) return 0
-  const g = el.querySelector('.board-gutter--start') as HTMLElement | null
+  const g = el.querySelector('.board-gutter--end') as HTMLElement | null
   return g?.offsetWidth || 0
 }
 
@@ -187,57 +187,66 @@ const scrollToColumn = (index: number, behavior: ScrollBehavior = 'smooth') => {
   syncTabIntoView(colIdx, behavior)
 }
 
-/** Park on the nearest column (chunky snap); pull out of elastic gutters */
+/**
+ * Park on a column without overshooting. Stay on the active column unless
+ * you've clearly crossed mid (or flicked) — stops elastic settle landing on col2.
+ */
 const snapBoardToNearest = (velocity = 0) => {
   const el = columnsContainer.value
   const cols = getColumnEls()
   if (!el || !cols.length || isMobileUi.value) return
 
-  const predict = el.scrollLeft - velocity * 200
-  let best = 0
-  let bestDist = Infinity
-  for (let i = 0; i < cols.length; i++) {
-    const left = cols[i]!.offsetLeft
-    const d = Math.abs(left - predict)
-    if (d < bestDist) {
-      bestDist = d
-      best = i
+  const active = clamp(activeColumnIndex.value, 0, cols.length - 1)
+  let best = active
+
+  if (velocity < -FLICK_VX) {
+    best = Math.min(cols.length - 1, active + 1)
+  } else if (velocity > FLICK_VX) {
+    best = Math.max(0, active - 1)
+  } else {
+    const x = el.scrollLeft
+    const cur = cols[active]!
+    const curLeft = cur.offsetLeft
+    const curW = Math.max(1, cur.offsetWidth)
+    if (x > curLeft + curW * 0.55 && active < cols.length - 1) {
+      best = active + 1
+    } else if (x < curLeft - curW * 0.45 && active > 0) {
+      best = active - 1
+    } else {
+      best = active
     }
   }
-  if (velocity < -FLICK_VX) best = Math.min(cols.length - 1, best + 1)
-  else if (velocity > FLICK_VX) best = Math.max(0, best - 1)
 
   activeColumnIndex.value = best
-  el.scrollTo({ left: cols[best]!.offsetLeft, behavior: 'smooth' })
+  const target = cols[best]!.offsetLeft
+  if (Math.abs(el.scrollLeft - target) < 2) return
+  el.scrollTo({ left: target, behavior: 'smooth' })
 }
 
 /**
- * Scroll the board. Free travel across columns; light resistance only when
- * pulling past the parked column into a gutter (toward the true history edge).
- * If overflow is smaller than both gutters, stay linear so trackpads never jam.
+ * Free travel across columns. Light resistance only past the last column
+ * into the end pad (Safari history lives at the true edges).
  */
 const applyBoardScroll = (el: HTMLElement, raw: number) => {
   const max = Math.max(0, el.scrollWidth - el.clientWidth)
   const gutter = boardGutterWidth()
   const next = Math.max(0, Math.min(max, raw))
-  if (gutter <= 0 || max <= gutter * 2) {
-    el.scrollLeft = next
+
+  // Left edge: hard stop at 0 (first column parks here — no start spacer)
+  if (next <= 0) {
+    el.scrollLeft = 0
     return
   }
 
-  const lo = gutter
-  const hi = max - gutter
-  if (next < lo) {
-    const over = lo - next
-    const resisted = over / (1 + over / (gutter * 1.15))
-    el.scrollLeft = Math.max(0, lo - resisted)
-  } else if (next > hi) {
+  if (gutter > 0 && max > gutter && next > max - gutter) {
+    const hi = max - gutter
     const over = next - hi
-    const resisted = over / (1 + over / (gutter * 1.15))
+    const resisted = over / (1 + over / (gutter * 0.9))
     el.scrollLeft = Math.min(max, hi + resisted)
-  } else {
-    el.scrollLeft = next
+    return
   }
+
+  el.scrollLeft = next
 }
 
 let wheelSnapTimer = 0
@@ -779,13 +788,6 @@ useHead({ title: 'Home | NeoSpace' })
       :class="{ 'columns-container--gutters': showBoardGutters }"
       @scroll.passive="onColumnsScroll"
     >
-      <!-- Desktop/iPad: elastic lead-in before Safari history edge -->
-      <div
-        v-if="showBoardGutters"
-        class="board-gutter board-gutter--start"
-        aria-hidden="true"
-      />
-
       <!-- Mobile edge: keep swiping left → Profile, then Settings -->
       <aside
         v-if="isMobileUi"
@@ -1071,11 +1073,11 @@ useHead({ title: 'Home | NeoSpace' })
     user-select: none;
   }
 
-  // Elastic pads — park columns off the true scroll edges
+  // End pad only — start spacer was shoving col1 under the fold / looking like col2
   .board-gutter {
-    flex: 0 0 clamp(48px, 9vw, 96px);
-    width: clamp(48px, 9vw, 96px);
-    min-width: clamp(48px, 9vw, 96px);
+    flex: 0 0 clamp(36px, 6vw, 72px);
+    width: clamp(36px, 6vw, 72px);
+    min-width: clamp(36px, 6vw, 72px);
     pointer-events: none;
     flex-shrink: 0;
     scroll-snap-align: none;
@@ -1083,11 +1085,10 @@ useHead({ title: 'Home | NeoSpace' })
 
   &--gutters {
     @media (min-width: 1024px) and (max-width: 1366px) {
-      // iPad: thicker give so you really slide before history
-      .board-gutter {
-        flex-basis: clamp(64px, 11vw, 112px);
-        width: clamp(64px, 11vw, 112px);
-        min-width: clamp(64px, 11vw, 112px);
+      .board-gutter--end {
+        flex-basis: clamp(48px, 8vw, 88px);
+        width: clamp(48px, 8vw, 88px);
+        min-width: clamp(48px, 8vw, 88px);
       }
     }
   }
