@@ -7,7 +7,8 @@ import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeS
 import { useToastStore } from '~/stores/toast'
 import { useOverlayStore } from '~/stores/overlay'
 import { activeClient, clientFor } from '~/composables/useMasto'
-import { sanitizeDisplayName, sanitizeStatusHtml } from '~/utils/sanitizeHtml'
+import { sanitizeDisplayName, sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
+import { useMobileViewport } from '~/composables/useBreakpoint'
 
 interface Props {
   status: mastodon.v1.Status
@@ -89,6 +90,7 @@ function readReducedMotion() {
   )
 }
 const prefersReducedMotion = ref(readReducedMotion())
+const isMobileViewport = useMobileViewport()
 
 onMounted(() => {
   if (typeof window === 'undefined') return
@@ -142,11 +144,31 @@ const plainLength = computed(() =>
   (displayStatus.value.content || '').replace(/<[^>]*>/g, '').length,
 )
 /** Tighter clamp on mobile so media starts higher in the viewport */
-const isLongPost = computed(() => {
-  const mobile =
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
-  return plainLength.value > (mobile ? 220 : 320)
+const isLongPost = computed(() =>
+  plainLength.value > (isMobileViewport.value ? 220 : 320),
+)
+
+const pollDenominator = computed(() => {
+  const poll = displayStatus.value.poll
+  if (!poll) return 0
+  const voters = poll.votersCount ?? poll.votesCount
+  if (voters != null && voters > 0) return voters
+  return poll.options.reduce((sum, o) => sum + (o.votesCount || 0), 0)
 })
+
+const pollOptionPercent = (votes: number | null | undefined) => {
+  const total = pollDenominator.value
+  if (!total) return 0
+  return Math.round(((votes || 0) / total) * 100)
+}
+
+const mediaAspectRatio = (media: mastodon.v1.MediaAttachment) => {
+  const meta = media.meta as { original?: { width?: number; height?: number } } | undefined
+  const w = meta?.original?.width
+  const h = meta?.original?.height
+  if (w && h && w > 0 && h > 0) return `${w} / ${h}`
+  return undefined
+}
 
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 
@@ -341,17 +363,6 @@ const toggleBoost = async (wantBoost: boolean) => {
   }
 }
 
-const stripStatusHtml = (html: string) =>
-  (html || '')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim()
-
 const contextFromStatus = (): ComposeContextPost => {
   const s = displayStatus.value
   return {
@@ -359,7 +370,7 @@ const contextFromStatus = (): ComposeContextPost => {
     name: s.account.displayName || s.account.username,
     handle: s.account.acct,
     avatar: s.account.avatar,
-    text: stripStatusHtml(s.content).slice(0, 280),
+    text: stripHtml(s.content).slice(0, 280),
     url: statusUrl.value,
   }
 }
@@ -371,10 +382,10 @@ const requireAuth = () => {
 }
 
 /** Phone + iPad: open the thread with the floating reply bar (Threads-style) */
-const preferThreadReplyDock = () => {
-  if (typeof window === 'undefined') return true
-  return window.matchMedia('(max-width: 1023px), (hover: none), (pointer: coarse)').matches
-}
+const preferThreadReplyDock = () =>
+  isMobileViewport.value ||
+  (typeof window !== 'undefined' &&
+    window.matchMedia('(hover: none), (pointer: coarse)').matches)
 
 const openReplyComposer = async () => {
   if (!requireAuth() || isOpeningReply.value) return
@@ -472,7 +483,7 @@ const onShareSelect = async (id: string) => {
     if (!url || !navigator.share) return
     try {
       await navigator.share({
-        text: stripStatusHtml(displayStatus.value.content).slice(0, 200),
+        text: stripHtml(displayStatus.value.content).slice(0, 200),
         url,
       })
     } catch (e: any) {
@@ -713,10 +724,21 @@ const onContentClick = (e: MouseEvent) => {
   openThread()
 }
 
-const openLightbox = (media: mastodon.v1.MediaAttachment) => {
-  const src = media.url || media.previewUrl
-  if (!src) return
-  overlayStore.openLightbox({ src, alt: media.description || 'Image' })
+const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
+  const images = (displayStatus.value.mediaAttachments || []).filter((m) => m.type === 'image')
+  const items = images
+    .map((m, i) => {
+      const src = m.url || m.previewUrl
+      if (!src) return null
+      return {
+        src,
+        alt: m.description || `Image ${i + 1} of ${images.length}`,
+      }
+    })
+    .filter((item): item is { src: string; alt: string } => !!item)
+  const current = items[index]
+  if (!current) return
+  overlayStore.openLightbox({ ...current, items, index })
 }
 
 </script>
@@ -728,6 +750,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       'status-card--menu-open': isMenuOpen,
       'status-card--flip': isFlip,
       'status-card--flip-media': isFlip && !!flipMedia,
+      'status-card--reduce-motion': prefersReducedMotion,
       [`status-card--flip-align-${flipAlign}`]: isFlip,
       [`status-card--flip-size-${flipSize}`]: isFlip,
     }"
@@ -968,14 +991,25 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                 type="button"
                 class="status-media-hit"
                 :aria-label="media.description || `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}`"
-                @click.stop="openLightbox(media)"
+                @click.stop="openLightbox(media, mediaIdx)"
               >
                 <img
                   :src="media.previewUrl ?? media.url ?? undefined"
-                  :alt="media.description || `Image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}`"
+                  :alt="media.description || ''"
                   class="status-media-image"
+                  :style="mediaAspectRatio(media) ? { aspectRatio: mediaAspectRatio(media) } : undefined"
                   loading="lazy"
                 />
+                <span
+                  v-if="media.description?.trim()"
+                  class="status-media-alt-badge"
+                  title="Has alt text"
+                >ALT</span>
+                <span
+                  v-else
+                  class="status-media-alt-badge status-media-alt-badge--missing"
+                  title="No description"
+                >No description</span>
               </button>
               <video
                 v-else-if="media.type === 'video' || media.type === 'gifv'"
@@ -1004,15 +1038,26 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             v-for="option in displayStatus.poll.options"
             :key="option.title"
             class="status-poll-option"
+            role="meter"
+            :aria-valuenow="pollOptionPercent(option.votesCount)"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-label="`${option.title}: ${pollOptionPercent(option.votesCount)}%`"
           >
             <span class="status-poll-title">{{ option.title }}</span>
-            <span class="status-poll-votes">{{ option.votesCount }} votes</span>
+            <span class="status-poll-votes">
+              {{ pollOptionPercent(option.votesCount) }}%
+              <span class="status-poll-votes__count">({{ option.votesCount ?? 0 }})</span>
+            </span>
             <div
               class="status-poll-bar"
-              :style="{ width: `${(option.votesCount || 0) / (displayStatus.poll!.votesCount || 1) * 100}%` }"
+              :style="{ width: `${pollOptionPercent(option.votesCount)}%` }"
             />
           </div>
-          <p class="status-poll-info">{{ displayStatus.poll.votesCount }} votes · {{ displayStatus.poll.expired ? 'Closed' : 'Open' }}</p>
+          <p class="status-poll-info">
+            {{ pollDenominator }} {{ pollDenominator === 1 ? 'vote' : 'votes' }}
+            · {{ displayStatus.poll.expired ? 'Closed' : 'Open' }}
+          </p>
         </div>
 
         <!-- Actions: on mobile, like sits in the right thumb zone -->
@@ -1020,7 +1065,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           <button
             class="status-action status-action--reply neo-tip"
             aria-label="Reply"
-            title="Reply"
             :disabled="isOpeningReply"
             @click.stop="handleReply"
           >
@@ -1033,7 +1077,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             :class="{ 'status-action--boosted': displayStatus.reblogged }"
             :aria-disabled="isBoosting || undefined"
             aria-label="Repost"
-            title="Repost"
             :aria-pressed="!!displayStatus.reblogged"
             @click.stop="!isBoosting && handleBoost()"
           >
@@ -1044,7 +1087,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           <button
             class="status-action status-action--share neo-tip"
             aria-label="Share"
-            title="Share"
             @click.stop="handleShare"
           >
             <NeoIcon name="share" :size="20" :stroke="1.5" />
@@ -1055,7 +1097,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             :class="{ 'status-action--bookmarked': displayStatus.bookmarked }"
             :aria-disabled="isBookmarking || undefined"
             aria-label="Bookmark"
-            title="Bookmark"
             :aria-pressed="!!displayStatus.bookmarked"
             @click.stop="!isBookmarking && handleBookmark()"
           >
@@ -1072,7 +1113,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             }"
             :aria-disabled="isFavouriting || undefined"
             aria-label="Like"
-            title="Like"
             :aria-pressed="!!displayStatus.favourited"
             @click.stop="!isFavouriting && handleFavourite()"
           >
@@ -1878,7 +1918,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
 .status-see-more {
   margin-top: 0.25rem;
-  padding: 0;
+  min-height: 24px;
+  padding: 0.125rem 0;
   border: none;
   background: none;
   font-family: var(--neo-font-family-ui);
@@ -1905,16 +1946,58 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
+.status-card--reduce-motion {
+  .status-action,
+  .status-see-more,
+  .status-media-image,
+  .status-dropdown-item {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .status-action--pop .neo-icon,
+  .status-action--pop svg {
+    animation: none !important;
+  }
+}
+
+.status-media-hit {
+  position: relative;
+}
+
+.status-media-alt-badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--neo-radius-xs, 2px);
+  background: color-mix(in srgb, var(--neo-bg-primary) 82%, transparent);
+  color: var(--neo-text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+
+  &--missing {
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--neo-text-muted);
+  }
+}
+
 .status-media-image {
   width: 100%;
   max-width: 100%;
   height: auto;
   max-height: 350px;
   object-fit: cover;
-  border-radius: 12px;
+  border-radius: var(--neo-radius-md, 8px);
   display: block;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--neo-transition-fast, 0.15s ease);
+  background: var(--neo-bg-tertiary);
 
   &:hover { opacity: 0.95; }
 }
@@ -1923,7 +2006,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 .status-media-audio {
   width: 100%;
   max-width: 100%;
-  border-radius: 12px;
+  border-radius: var(--neo-radius-md, 8px);
   display: block;
 }
 
@@ -1945,7 +2028,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   position: relative;
   padding: 0.5rem 0.75rem;
   background-color: var(--neo-bg-tertiary);
-  border-radius: 8px;
+  border-radius: var(--neo-radius-md, 8px);
   display: flex;
   justify-content: space-between;
   overflow: hidden;

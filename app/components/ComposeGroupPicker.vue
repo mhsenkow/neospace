@@ -127,8 +127,15 @@ const useQueryAsTag = () => {
   pick(raw)
 }
 
+const inlineTriggerRef = ref<HTMLButtonElement | null>(null)
+const chipTriggerRef = ref<HTMLButtonElement | null>(null)
+
 const clear = () => {
   emit('update:modelValue', null)
+  nextTick(() => {
+    inlineTriggerRef.value?.focus()
+    chipTriggerRef.value?.focus()
+  })
 }
 
 const toggle = () => {
@@ -148,10 +155,11 @@ onBeforeUnmount(() => {
       <span class="group-pick__chev" aria-hidden="true">›</span>
       <button
         v-if="selected"
+        ref="inlineTriggerRef"
         type="button"
         class="group-pick__link group-pick__link--on"
         :aria-label="`Change group, currently ${selected.name}`"
-        :title="`Posting to #${selected.tag}`"
+        aria-current="true"
         @click="toggle"
       >
         <span class="group-pick__emoji" aria-hidden="true">{{ selected.icon }}</span>
@@ -181,10 +189,11 @@ onBeforeUnmount(() => {
     <template v-else>
       <div v-if="selected" class="group-pick__selected">
         <button
+          ref="chipTriggerRef"
           type="button"
           class="group-pick__chip group-pick__chip--active"
           :aria-label="`Change group, currently ${selected.name}`"
-          :title="`Posting to #${selected.tag}`"
+          aria-current="true"
           @click="toggle"
         >
           <span class="group-pick__emoji" aria-hidden="true">{{ selected.icon }}</span>
@@ -293,6 +302,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="group-pick-sheet__row"
                     :class="{ 'group-pick-sheet__row--on': modelValue === g.tag }"
+                    :aria-current="modelValue === g.tag ? 'true' : undefined"
                     @click="pick(g.tag)"
                   >
                     <span class="group-pick-sheet__row-icon">{{ g.icon }}</span>
@@ -362,9 +372,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+  min-height: 24px;
   max-width: 14rem;
   margin: 0;
-  padding: 0.1rem 0;
+  padding: 0.25rem 0;
   border: none;
   background: transparent;
   color: var(--neo-text-tertiary);
@@ -392,8 +403,10 @@ onBeforeUnmount(() => {
 }
 
 .group-pick__clear--inline {
-  width: 1.4rem;
-  height: 1.4rem;
+  min-width: 24px;
+  min-height: 24px;
+  width: 24px;
+  height: 24px;
   color: var(--neo-text-tertiary);
 
   &:hover {
@@ -464,8 +477,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  min-width: 24px;
+  min-height: 24px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 50%;
   background: transparent;

@@ -11,7 +11,12 @@ import { useComposeMedia } from '~/composables/useComposeMedia'
 import { isImeEvent, mastodonLength, useDraft } from '~/composables/useComposerCore'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 import { useOverlayStore } from '~/stores/overlay'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 import type { mastodon } from 'masto'
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 const props = withDefaults(
   defineProps<{
@@ -61,12 +66,15 @@ const spoilerText = ref('')
 const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
   props.initialVisibility || settingsStore.defaultVisibility,
 )
-const showCW = ref(settingsStore.defaultSensitive)
+const showCW = ref(false)
+const markSensitive = ref(settingsStore.defaultSensitive)
 const isPosting = ref(false)
 const error = ref<string | null>(null)
 const handoffNotice = ref<string | null>(null)
+let handoffNoticeTimer: ReturnType<typeof setTimeout> | null = null
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const composeMediaRef = ref<HTMLElement | null>(null)
 const composeFocused = ref(false)
 const selectedGroupTag = ref<string | null>(
   props.initialGroupTag ? props.initialGroupTag.replace(/^#/, '') : null,
@@ -76,6 +84,19 @@ const counterAnnounce = ref('')
 
 /** Only lock the visibility control when compose started as a DM */
 const isLockedDirect = computed(() => props.initialVisibility === 'direct')
+
+const composeAriaLabel = computed(() => {
+  if (props.inReplyToId) return props.title || 'Write a reply'
+  if (props.quoteUrl) return props.title || 'Write a quote post'
+  if (props.initialVisibility === 'direct') return props.title || 'Write a direct message'
+  return props.title || props.placeholder || 'Write a post'
+})
+
+const submitAriaLabel = computed(() => {
+  if (isPosting.value) return props.inReplyToId ? 'Replying' : 'Posting'
+  if (isUploading.value) return 'Uploading attachments'
+  return props.inReplyToId ? 'Reply' : 'Post'
+})
 
 /** Current post is a private mention/DM (locked or user-chosen) */
 const isDirectCompose = computed(
@@ -164,7 +185,9 @@ const maxLength = computed(() => instancesStore.statusMaxCharacters)
 const groupTagSuffix = computed(() => {
   const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
   if (!tag || isDirectCompose.value) return ''
-  const already = new RegExp(`(?:^|\\s)#${tag}\\b`, 'i').test(content.value)
+  const already = new RegExp(`(?:^|\\s)#${escapeRegExp(tag)}(?=$|\\s|[\\p{P}\\p{S}])`, 'iu').test(
+    content.value,
+  )
   return already ? '' : ` #${tag}`
 })
 
@@ -244,7 +267,8 @@ const visibilityOptions = [
 const resetForm = () => {
   content.value = props.inReplyToId && props.initialText ? props.initialText : ''
   spoilerText.value = ''
-  showCW.value = settingsStore.defaultSensitive
+  showCW.value = false
+  markSensitive.value = settingsStore.defaultSensitive
   visibility.value = props.initialVisibility || settingsStore.defaultVisibility
   selectedGroupTag.value = props.initialGroupTag
     ? props.initialGroupTag.replace(/^#/, '')
@@ -280,7 +304,7 @@ const getMentionContext = () => {
   const el = textareaRef.value
   const caret = el?.selectionStart ?? content.value.length
   const before = content.value.slice(0, caret)
-  const m = before.match(/(?:^|[\s([{“"'‘])@([a-zA-Z0-9_./-]*)$/)
+  const m = before.match(/(?:^|[\s([{“"'‘])@([a-zA-Z0-9_.@/-]*)$/)
   if (!m) return null
   const query = m[1] ?? ''
   const start = before.length - query.length - 1
@@ -328,7 +352,7 @@ watch(
     // Only apply defaults when compose is empty (don't yank mid-draft)
     if (!content.value.trim() && !hasMedia.value && !isPosting.value) {
       visibility.value = vis
-      showCW.value = sensitive
+      markSensitive.value = sensitive
     }
   },
 )
@@ -360,7 +384,7 @@ const handlePost = async () => {
     const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
     // Never append community tags to private messages
     if (tag && visibility.value !== 'direct' && props.initialVisibility !== 'direct') {
-      const hasTag = new RegExp(`(?:^|\\s)#${tag}\\b`, 'i').test(body)
+      const hasTag = new RegExp(`(?:^|\\s)#${escapeRegExp(tag)}(?=$|\\s|[\\p{P}\\p{S}])`, 'iu').test(body)
       if (!hasTag) body = `${body.trim()} #${tag}`.trim()
     }
 
@@ -374,7 +398,7 @@ const handlePost = async () => {
       visibility: postVisibility,
       spoilerText: showCW.value ? spoilerText.value : undefined,
       mediaIds: mediaIds.value,
-      sensitive: showCW.value || undefined,
+      sensitive: markSensitive.value || undefined,
       inReplyToId: props.inReplyToId,
     })
     clearDraft()
@@ -387,13 +411,18 @@ const handlePost = async () => {
         textareaRef.value?.setSelectionRange(len, len)
       }
     })
-  } catch (e: any) {
-    const raw = (e?.message || '').toString()
-    // Mastodon returns this when in_reply_to_id isn't on the posting server
-    if (/record not found|not found/i.test(raw) && props.inReplyToId) {
-      error.value = 'That post isn’t on your account’s server — try opening the thread and replying there.'
+  } catch (e: unknown) {
+    const friendly = mapErrorToMessage(e)
+    const raw = e && typeof e === 'object' && 'message' in e ? String((e as { message?: string }).message || '') : ''
+    if (friendly.title === 'Not found' && props.inReplyToId) {
+      error.value =
+        'That post isn’t on your account’s server — try opening the thread and replying there.'
+    } else if (friendly.title === 'Couldn’t save that') {
+      error.value = 'Media is still processing — wait a moment and try again.'
+    } else if (friendly.title === 'Slow down') {
+      error.value = friendly.detail
     } else {
-      error.value = raw || 'Failed to post'
+      error.value = friendly.detail || friendly.title || raw || 'Failed to post'
     }
   } finally {
     isPosting.value = false
@@ -479,20 +508,23 @@ const applyHandoff = async () => {
   const draft = handoffStore.take()
   if (!draft) return
   // Prefer handoff text; keep existing if user already typed and draft is media-only
-  if (draft.text && (!content.value.trim() || draft.files.length)) {
-    content.value = draft.text
+  if (draft.text) {
+    if (!content.value.trim()) {
+      content.value = draft.text
+    } else if (!content.value.includes(draft.text)) {
+      content.value = `${content.value.trim()}\n\n${draft.text}`
+    }
   }
   // Replace any prior handoff media so retries don't stack duplicates
   if (draft.files.length) {
     clearAttachments()
     await addFiles(draft.files, draft.descriptions)
   }
-  handoffNotice.value = draft.notice
-  if (handoffNotice.value) {
-    window.setTimeout(() => {
-      handoffNotice.value = null
-    }, 9000)
+  if (handoffNoticeTimer) {
+    clearTimeout(handoffNoticeTimer)
+    handoffNoticeTimer = null
   }
+  handoffNotice.value = draft.notice
   await nextTick()
   const ta = textareaRef.value
   if (ta) {
@@ -504,9 +536,7 @@ const applyHandoff = async () => {
   // After media attaches, keep chart + caption in view above the keyboard / Post bar
   if (draft.files.length) {
     await nextTick()
-    document
-      .querySelector('.compose-sheet .compose-media, .compose-media')
-      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    composeMediaRef.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }
 }
 
@@ -521,6 +551,14 @@ watch([content, spoilerText, visibility, showCW], () => {
   persistDraft()
 })
 
+const dismissHandoffNotice = () => {
+  handoffNotice.value = null
+  if (handoffNoticeTimer) {
+    clearTimeout(handoffNoticeTimer)
+    handoffNoticeTimer = null
+  }
+}
+
 onMounted(() => {
   restoreDraft()
   applyDraft()
@@ -532,6 +570,10 @@ onMounted(() => {
     })
   }
   void applyHandoff()
+})
+
+onUnmounted(() => {
+  if (handoffNoticeTimer) clearTimeout(handoffNoticeTimer)
 })
 </script>
 
@@ -573,14 +615,15 @@ onMounted(() => {
           class="compose-input neo-input"
           :placeholder="placeholder"
           rows="1"
-          :disabled="isPosting"
+          :readonly="isPosting"
+          :aria-busy="isPosting || isUploading || undefined"
           role="combobox"
           aria-autocomplete="list"
           :aria-expanded="mentionOpen"
           :aria-controls="mentionListId"
           :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
-          :aria-label="title || placeholder || 'Write a post'"
+          :aria-label="composeAriaLabel"
           @focus="composeFocused = true"
           @blur="composeFocused = false"
           @paste="onPaste"
@@ -622,11 +665,12 @@ onMounted(() => {
         type="button"
         class="compose-submit neo-btn neo-btn--primary"
         :disabled="!canPost"
+        :aria-label="submitAriaLabel"
         :title="isUploading ? 'Waiting for uploads…' : inReplyToId ? 'Reply (⌘↵)' : 'Post (⌘↵)'"
         @click="handlePost"
       >
         <span v-if="isPosting">{{ inReplyToId ? 'Replying…' : 'Posting…' }}</span>
-        <span v-else-if="isUploading">…</span>
+        <span v-else-if="isUploading">Uploading…</span>
         <span v-else>{{ inReplyToId ? 'Reply' : 'Post' }}</span>
       </button>
     </div>
@@ -671,14 +715,15 @@ onMounted(() => {
           class="compose-input neo-input"
           :placeholder="placeholder"
           :rows="3"
-          :disabled="isPosting"
+          :readonly="isPosting"
+          :aria-busy="isPosting || isUploading || undefined"
           role="combobox"
           aria-autocomplete="list"
           :aria-expanded="mentionOpen"
           :aria-controls="mentionListId"
           :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
-          :aria-label="title || placeholder || 'Write a post'"
+          :aria-label="composeAriaLabel"
           @paste="onPaste"
           @keydown="onKeydown"
           @input="onComposeInput"
@@ -729,9 +774,9 @@ onMounted(() => {
     </div>
 
     <!-- Media previews -->
-    <div v-if="attachments.length" class="compose-media" @click.stop>
+    <div v-if="attachments.length" ref="composeMediaRef" class="compose-media" @click.stop>
       <div
-        v-for="item in attachments"
+        v-for="(item, mediaIndex) in attachments"
         :key="item.localId"
         class="compose-media__item"
         :class="{
@@ -750,21 +795,18 @@ onMounted(() => {
           <span class="compose-media__video-name">{{ item.file.name }}</span>
         </div>
         <div v-if="item.uploading" class="compose-media__overlay">Uploading…</div>
-        <div
+        <button
           v-else-if="item.error"
+          type="button"
           class="compose-media__overlay compose-media__overlay--error"
-          role="button"
-          tabindex="0"
-          title="Tap to retry upload"
           @click="retryUpload(item.localId)"
-          @keydown.enter="retryUpload(item.localId)"
         >
           {{ item.error }} · retry
-        </div>
+        </button>
         <button
           type="button"
           class="compose-media__remove"
-          aria-label="Remove"
+          :aria-label="`Remove image ${mediaIndex + 1}`"
           :disabled="isPosting"
           @click="removeAttachment(item.localId)"
         >
@@ -783,7 +825,7 @@ onMounted(() => {
             class="compose-media__alt-input"
             rows="2"
             :maxlength="altMax"
-            :disabled="isPosting || item.uploading"
+            :disabled="isPosting"
             :value="item.description"
             placeholder="Describe this image for screen readers"
             @input="setDescription(item.localId, ($event.target as HTMLTextAreaElement).value)"
@@ -793,7 +835,10 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="handoffNotice" class="compose-handoff" role="status">{{ handoffNotice }}</div>
+    <div v-if="handoffNotice" class="compose-handoff" role="status">
+      <span>{{ handoffNotice }}</span>
+      <button type="button" class="compose-handoff__dismiss" @click="dismissHandoffNotice">Dismiss</button>
+    </div>
 
     <div
       v-if="error"
@@ -1330,8 +1375,10 @@ onMounted(() => {
   position: absolute;
   top: 0.35rem;
   left: calc(0.5rem + 96px - 1.65rem);
-  width: 1.5rem;
-  height: 1.5rem;
+  min-width: 24px;
+  min-height: 24px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   font-size: 1rem;
@@ -1426,12 +1473,29 @@ onMounted(() => {
 }
 
 .compose-handoff {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.65rem 0.75rem;
   background: var(--neo-accent-soft);
   border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, transparent);
   border-radius: var(--neo-radius-md);
   color: var(--neo-accent);
   font-size: 0.8125rem;
+}
+
+.compose-handoff__dismiss {
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--neo-accent) 40%, transparent);
+  border-radius: var(--neo-radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .compose-footer {

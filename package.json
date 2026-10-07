@@ -8,7 +8,8 @@
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
-    "generate": "nuxt generate && node scripts/spa-fallback.mjs",
+    "prepaint": "node scripts/build-prepaint.mjs",
+    "generate": "node scripts/build-prepaint.mjs && nuxt generate && node scripts/spa-fallback.mjs",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "test": "vitest run",

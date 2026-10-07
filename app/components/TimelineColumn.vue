@@ -11,9 +11,10 @@ import { useGroupsStore } from '~/stores/groups'
 import { useColumnsStore, type ColumnConfig, type ColumnFeedType } from '~/stores/columns'
 import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
-import { dedupeStatusesByIdentity, statusIdentity } from '~/utils/statusIdentity'
+import { dedupeStatusesByIdentity, statusIdentity, statusListKey } from '~/utils/statusIdentity'
 import { idLess } from '~/utils/compareId'
 import { mapErrorToMessage } from '~/utils/friendlyError'
+import { useToastStore } from '~/stores/toast'
 import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
@@ -171,6 +172,7 @@ let flipRo: ResizeObserver | null = null
 /** Newer posts waiting while you read (never auto-jump) */
 const pendingNew = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isNearTop = ref(true)
+const toastStore = useToastStore()
 
 /** Mobile pull-to-refresh (no preventDefault — that fights iOS compositing) */
 const pullDistance = ref(0)
@@ -336,7 +338,7 @@ const onComposePosted = (status: mastodon.v1.Status) => {
 
 const onScroll = () => {
   if (!scrollContainer.value) return
-  isNearTop.value = scrollContainer.value.scrollTop < 96
+  isNearTop.value = scrollContainer.value.scrollTop < 8
 }
 
 const onPullStart = (e: TouchEvent) => {
@@ -390,8 +392,8 @@ const onPullEnd = async () => {
         feedCursors.value = next
       }
     }
-  } catch {
-    /* quiet — keep existing feed */
+  } catch (e) {
+    toastStore.show({ message: 'Couldn’t refresh — try again', duration: 3500 })
   } finally {
     isRefreshing.value = false
   }
@@ -403,32 +405,14 @@ const pullHint = computed(() => {
   return 'Pull to refresh'
 })
 
-/**
- * Title sits outside NeoMenu’s root, so outside-click closes on pointerdown
- * before this click runs. If we toggled here, a close would immediately reopen.
- */
-const suppressTitleMenuOpen = ref(false)
-
-const onFeedTitlePointerDown = () => {
-  if (feedMenuOpen.value) suppressTitleMenuOpen.value = true
-}
-
-/** Tap feed title: if scrolled, jump to top; else open the feed menu */
+/** Tap feed title — scroll to top / jump to new posts (menu is on the chevron). */
 const onFeedTitleClick = () => {
-  if (scrollContainer.value && scrollContainer.value.scrollTop > 96) {
-    suppressTitleMenuOpen.value = false
-    if (pendingNew.value.length) {
-      jumpToNew()
-    } else {
-      scrollContainer.value.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-    return
+  if (!scrollContainer.value || scrollContainer.value.scrollTop <= 0) return
+  if (pendingNew.value.length) {
+    jumpToNew()
+  } else {
+    scrollContainer.value.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  if (suppressTitleMenuOpen.value) {
-    suppressTitleMenuOpen.value = false
-    return
-  }
-  feedMenuOpen.value = true
 }
 
 watch(feedMenuOpen, (open) => {
@@ -495,7 +479,7 @@ const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
   }
 }
 
-const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+const loadTimelinePage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
   if (props.column.feedType === 'group' && props.column.groupTag) {
     return await fetchGroupPage(props.column.groupTag)
   }
@@ -515,6 +499,8 @@ const fetchFreshPage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]
     limit: 20,
   })
 }
+
+const fetchFreshPage = () => loadTimelinePage()
 
 /** Recessed only pauses polling on mobile (one visible column); desktop multi-col keeps all live */
 const pauseForRecess = () => props.recessed && isMobileViewport()
@@ -591,26 +577,24 @@ const fetchTimeline = async (refresh = false) => {
   try {
     let result: (mastodon.v1.Status | ExtendedStatus)[] = []
 
-    if (props.column.feedType === 'group' && props.column.groupTag) {
-      result = await fetchGroupPage(props.column.groupTag)
-    } else if (props.column.feedType === 'home') {
-      if (!instancesStore.hasAuthenticatedInstance) {
+    if (
+      props.column.feedType === 'home' ||
+      props.column.feedType === 'local' ||
+      props.column.feedType === 'federated'
+    ) {
+      if (props.column.feedType === 'home' && !instancesStore.hasAuthenticatedInstance) {
         throw new Error('Log in or add an instance to view your home timeline')
       }
-      result = await instancesStore.fetchMergedHomeTimeline(20)
-      if (gen === fetchGen) seedFeedCursors(result)
-    } else if (instancesStore.instances.length > 0) {
-      result = await instancesStore.fetchMergedTimeline(
-        props.column.feedType as 'local' | 'federated',
-        20,
-      )
-      if (gen === fetchGen) seedFeedCursors(result)
+      result = await loadTimelinePage()
+      if (gen === fetchGen && props.column.feedType === 'home') seedFeedCursors(result)
+      if (
+        gen === fetchGen &&
+        (props.column.feedType === 'local' || props.column.feedType === 'federated')
+      ) {
+        seedFeedCursors(result)
+      }
     } else {
-      const client = publicClient()
-      result = await client.v1.timelines.public.list({
-        local: props.column.feedType === 'local',
-        limit: 20,
-      })
+      result = await loadTimelinePage()
     }
 
     if (gen !== fetchGen) return
@@ -864,7 +848,6 @@ onUnmounted(() => {
           type="button"
           class="column-feed-title"
           :aria-label="`${feedLabel}. Scroll to top`"
-          @pointerdown="onFeedTitlePointerDown"
           @click.stop="onFeedTitleClick"
         >
           <span class="column-feed-label">{{ feedLabel }}</span>
@@ -1216,7 +1199,7 @@ onUnmounted(() => {
         <template v-if="isFlip">
           <RealPostCard
             v-for="status in statuses"
-            :key="statusIdentity(status)"
+            :key="statusListKey(status)"
             :status="status"
             variant="flip"
             hide-inline-reply
@@ -1225,7 +1208,7 @@ onUnmounted(() => {
         <TransitionGroup v-else name="post-list">
           <RealPostCard
             v-for="status in statuses"
-            :key="statusIdentity(status)"
+            :key="statusListKey(status)"
             :status="status"
           />
         </TransitionGroup>

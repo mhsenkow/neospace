@@ -612,7 +612,7 @@ const onColumnsWheel = (e: WheelEvent) => {
 
   if (Math.abs(dx) < 0.5 || Math.abs(dx) <= Math.abs(dy) * 1.05) return
 
-  e.preventDefault()
+  if (e.cancelable) e.preventDefault()
   if (!wheelArmed) {
     wheelArmed = true
     el.style.scrollSnapType = 'none'
@@ -680,6 +680,16 @@ const onCarouselTouchMove = (e: TouchEvent) => {
   }
 
   if (g.locked !== 'x') return
+
+  // iOS/Chrome mark touchmove cancelable=false once scrolling has begun.
+  // Calling preventDefault then is ignored (Intervention) and fighting
+  // native scrollLeft makes the board vibrate.
+  if (!e.cancelable) {
+    el.style.scrollSnapType = ''
+    el.classList.remove('columns-container--swiping')
+    carouselGesture = null
+    return
+  }
 
   e.preventDefault()
   const dt = Math.max(1, now - g.lastT)
@@ -938,10 +948,10 @@ useHead({ title: 'Home | NeoSpace' })
 
         <!-- Jump arrows when multi-feed or edge portals exist -->
         <button
-          v-if="columnsStore.columnCount >= 2 || isMobileUi"
+          v-if="columnsStore.columnCount >= 2"
           type="button"
           class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Previous"
+          aria-label="Previous feed"
           :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
           @click="goPrevFeed"
         >
@@ -950,10 +960,10 @@ useHead({ title: 'Home | NeoSpace' })
           </svg>
         </button>
         <button
-          v-if="columnsStore.columnCount >= 2 || isMobileUi"
+          v-if="columnsStore.columnCount >= 2"
           type="button"
           class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Next"
+          aria-label="Next feed"
           :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
           @click="goNextFeed"
         >

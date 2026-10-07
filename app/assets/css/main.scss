@@ -344,7 +344,7 @@ ul, ol {
   }
 }
 
-// Immediate hover labels for icon-only controls (native title is too slow/easy to miss)
+// Immediate hover labels for icon-only controls — aria-label only (no title) avoids double tooltips
 @media (hover: hover) and (pointer: fine) {
   .neo-tip[aria-label],
   .neo-chrome-btn[aria-label],

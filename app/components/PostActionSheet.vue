@@ -19,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const sheetRef = ref<HTMLElement | null>(null)
+const titleId = computed(() => (props.title ? 'action-sheet-title' : undefined))
 const isOpen = computed(() => props.open)
 
 useFocusTrap(sheetRef, isOpen, {
@@ -36,11 +37,18 @@ useFocusTrap(sheetRef, isOpen, {
         class="action-sheet"
         role="dialog"
         aria-modal="true"
-        :aria-label="title || 'Actions'"
+        :aria-labelledby="titleId"
+        :aria-label="title ? undefined : 'Actions'"
       >
-        <button type="button" class="action-sheet__backdrop" aria-label="Close" @click="emit('close')" />
+        <button
+          type="button"
+          class="action-sheet__backdrop"
+          tabindex="-1"
+          aria-hidden="true"
+          @click="emit('close')"
+        />
         <div class="action-sheet__panel">
-          <p v-if="title" class="action-sheet__title">{{ title }}</p>
+          <p v-if="title" :id="titleId" class="action-sheet__title">{{ title }}</p>
           <button
             v-for="action in actions"
             :key="action.id"

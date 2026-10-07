@@ -32,6 +32,7 @@
 ) {
   --neo-bg-primary: #{$bg};
   --neo-bg-secondary: #{$face};
+  --neo-bg-elevated: #{$face};
   --neo-bg-tertiary: #{$hair};
   --neo-bg-card: #{$face};
   --neo-bg-overlay: color-mix(in srgb, #{$ink} 45%, transparent);

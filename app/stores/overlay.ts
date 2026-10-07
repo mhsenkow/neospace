@@ -4,10 +4,17 @@
 
 import { defineStore } from 'pinia'
 
+export type LightboxItem = {
+  src: string
+  alt: string
+}
+
 export type LightboxState = {
   open: boolean
   src: string
   alt: string
+  items: LightboxItem[]
+  index: number
 }
 
 export type ConfirmState = {
@@ -28,6 +35,8 @@ export const useOverlayStore = defineStore('overlay', {
       open: false,
       src: '',
       alt: '',
+      items: [],
+      index: 0,
     } as LightboxState,
     confirm: {
       open: false,
@@ -39,16 +48,34 @@ export const useOverlayStore = defineStore('overlay', {
   }),
 
   actions: {
-    openLightbox(opts: { src: string; alt?: string }) {
+    openLightbox(opts: { src: string; alt?: string; items?: LightboxItem[]; index?: number }) {
+      const items =
+        opts.items?.length
+          ? opts.items
+          : [{ src: opts.src, alt: opts.alt ?? '' }]
+      const index = Math.min(Math.max(opts.index ?? 0, 0), items.length - 1)
+      const current = items[index]!
       this.lightbox = {
         open: true,
-        src: opts.src,
-        alt: opts.alt ?? '',
+        src: current.src,
+        alt: current.alt,
+        items,
+        index,
       }
     },
 
+    lightboxStep(delta: number) {
+      const { items, index } = this.lightbox
+      if (items.length <= 1) return
+      const next = (index + delta + items.length) % items.length
+      const item = items[next]!
+      this.lightbox.index = next
+      this.lightbox.src = item.src
+      this.lightbox.alt = item.alt
+    },
+
     closeLightbox() {
-      this.lightbox = { open: false, src: '', alt: '' }
+      this.lightbox = { open: false, src: '', alt: '', items: [], index: 0 }
     },
 
     openConfirm(opts: {

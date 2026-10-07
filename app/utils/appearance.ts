@@ -345,23 +345,11 @@ export function applyAppearance(opts: {
   root.style.setProperty('--neo-font-family-ui', uiStack)
   root.style.setProperty('--neo-font-family-mono', TYPE_FACES[ui].mono)
 
-  // Reading measure / leading hints by face (CSS also sets per data-font)
-  if (font === 'book') {
-    root.style.setProperty('--neo-leading-body', '1.65')
-    root.style.setProperty('--neo-measure', '52ch')
-  } else if (font === 'dyslexic') {
-    root.style.setProperty('--neo-leading-body', '1.7')
-    root.style.setProperty('--neo-measure', '48ch')
-  } else if (font === 'mono') {
-    root.style.setProperty('--neo-leading-body', '1.45')
-  } else {
-    root.style.removeProperty('--neo-leading-body')
-    root.style.removeProperty('--neo-measure')
-  }
-
   // theme-color for mobile chrome
-  const meta = document.querySelector('meta[name="theme-color"]:not([media])')
-    || document.querySelector('meta[name="theme-color"]')
   const swatch = THEME_OPTIONS.find((t) => t.id === resolved)?.swatch
-  if (meta && swatch) meta.setAttribute('content', swatch)
+  if (swatch) {
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+      meta.setAttribute('content', swatch)
+    }
+  }
 }

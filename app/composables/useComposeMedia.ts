@@ -120,6 +120,28 @@ export function useComposeMedia() {
     if (!files || files.length === 0) return { accepted: 0, rejected }
 
     const list = Array.from(files)
+    const hasVideo = (f: File) => /^video\//i.test(f.type)
+    const incomingVideo = list.some(hasVideo)
+    const existingVideo = attachments.value.some((a) => hasVideo(a.file))
+    if (incomingVideo && (attachments.value.length > 0 || list.length > 1)) {
+      for (const file of list) {
+        rejected.push({
+          name: file.name,
+          reason: 'Video must be the only attachment',
+        })
+      }
+      return { accepted: 0, rejected }
+    }
+    if (existingVideo) {
+      for (const file of list) {
+        rejected.push({
+          name: file.name,
+          reason: 'Remove the video before adding other files',
+        })
+      }
+      return { accepted: 0, rejected }
+    }
+
     const room = MAX_ATTACHMENTS - attachments.value.length
     if (room <= 0) {
       for (const file of list) {
@@ -237,15 +259,20 @@ export function useComposeMedia() {
   }
 
   const onDrop = async (e: DragEvent) => {
+    const dt = e.dataTransfer
+    if (!dt?.types?.includes('Files') || !dt.files?.length) return
     e.preventDefault()
     dragDepth = 0
     isDragging.value = false
-    await addFiles(e.dataTransfer?.files)
+    await addFiles(dt.files)
   }
 
   const onPaste = async (e: ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
+    const hasText = Array.from(items).some(
+      (item) => item.kind === 'string' && item.type === 'text/plain',
+    )
     const files: File[] = []
     for (const item of Array.from(items)) {
       if (item.kind === 'file' && ACCEPT.test(item.type)) {
@@ -254,6 +281,7 @@ export function useComposeMedia() {
       }
     }
     if (files.length === 0) return
+    if (hasText) return
     e.preventDefault()
     await addFiles(files)
   }

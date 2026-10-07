@@ -13,6 +13,7 @@ export function useAccountSearch() {
   const following = ref<mastodon.v1.Account[]>([])
   const isSearching = ref(false)
   const isLoadingFollowing = ref(false)
+  const error = ref<string | null>(null)
   const searchRace = createRaceGuard()
   let searchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -44,9 +45,11 @@ export function useAccountSearch() {
       searchRace.next()
       results.value = []
       isSearching.value = false
+      error.value = null
       return
     }
     isSearching.value = true
+    error.value = null
     searchTimer = setTimeout(async () => {
       const ticket = searchRace.next()
       try {
@@ -66,6 +69,7 @@ export function useAccountSearch() {
         if (!ticket.isCurrent()) return
         console.warn('Account search failed:', e)
         results.value = []
+        error.value = 'Search failed — try again'
       } finally {
         if (ticket.isCurrent()) isSearching.value = false
       }
@@ -77,6 +81,7 @@ export function useAccountSearch() {
     searchRace.next()
     results.value = []
     isSearching.value = false
+    error.value = null
   }
 
   onUnmounted(() => {
@@ -89,6 +94,7 @@ export function useAccountSearch() {
     following,
     isSearching,
     isLoadingFollowing,
+    error,
     loadFollowing,
     search,
     clear,
