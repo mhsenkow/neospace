@@ -212,33 +212,36 @@ const snapBoardToNearest = (velocity = 0) => {
 }
 
 /**
- * Rubber-band into the gutters: ~2× gutter of travel before true edges
- * (where Safari history swipe can finally win). Middle zone is linear.
+ * Scroll the board. Free travel across columns; light resistance only when
+ * pulling past the parked column into a gutter (toward the true history edge).
+ * If overflow is smaller than both gutters, stay linear so trackpads never jam.
  */
 const applyBoardScroll = (el: HTMLElement, raw: number) => {
   const max = Math.max(0, el.scrollWidth - el.clientWidth)
   const gutter = boardGutterWidth()
-  if (gutter <= 0) {
-    el.scrollLeft = Math.max(0, Math.min(max, raw))
+  const next = Math.max(0, Math.min(max, raw))
+  if (gutter <= 0 || max <= gutter * 2) {
+    el.scrollLeft = next
     return
   }
 
-  if (raw < gutter) {
-    const over = gutter - raw
-    const t = over / (gutter * 2.25)
-    const eased = 1 - 1 / (1 + t * t * 2.8)
-    el.scrollLeft = Math.max(0, gutter * (1 - eased))
-  } else if (raw > max - gutter) {
-    const over = raw - (max - gutter)
-    const t = over / (gutter * 2.25)
-    const eased = 1 - 1 / (1 + t * t * 2.8)
-    el.scrollLeft = Math.min(max, max - gutter + gutter * eased)
+  const lo = gutter
+  const hi = max - gutter
+  if (next < lo) {
+    const over = lo - next
+    const resisted = over / (1 + over / (gutter * 1.15))
+    el.scrollLeft = Math.max(0, lo - resisted)
+  } else if (next > hi) {
+    const over = next - hi
+    const resisted = over / (1 + over / (gutter * 1.15))
+    el.scrollLeft = Math.min(max, hi + resisted)
   } else {
-    el.scrollLeft = raw
+    el.scrollLeft = next
   }
 }
 
 let wheelSnapTimer = 0
+let wheelSnapArmed = false
 
 const openPortal = async (kind: 'settings' | 'profile' | 'communities') => {
   if (portalActionLock) return
@@ -395,11 +398,13 @@ let carouselGesture: CarouselGesture | null = null
 
 /**
  * iPad Magic Keyboard / trackpad: map horizontal wheel onto the board scroller.
- * Rubber-band through gutters; claim the gesture so Safari history needs a long slide.
+ * Claim the gesture so Safari history needs a long slide into the gutter first.
  */
 const onColumnsWheel = (e: WheelEvent) => {
   const el = columnsContainer.value
-  if (!el) return
+  if (!el || isMobileUi.value) return
+  // Nothing to pan — don't steal the gesture
+  if (el.scrollWidth <= el.clientWidth + 2) return
 
   let dx = e.deltaX
   let dy = e.deltaY
@@ -421,12 +426,21 @@ const onColumnsWheel = (e: WheelEvent) => {
 
   // preventDefault even when clamped — blocks Safari history until true edge
   e.preventDefault()
+  if (!wheelSnapArmed) {
+    wheelSnapArmed = true
+    el.style.scrollSnapType = 'none'
+    el.classList.add('columns-container--swiping')
+  }
   applyBoardScroll(el, el.scrollLeft + dx)
 
-  if (!isMobileUi.value && showBoardGutters.value) {
-    window.clearTimeout(wheelSnapTimer)
-    wheelSnapTimer = window.setTimeout(() => snapBoardToNearest(0), 80)
-  }
+  window.clearTimeout(wheelSnapTimer)
+  wheelSnapTimer = window.setTimeout(() => {
+    wheelSnapArmed = false
+    el.style.scrollSnapType = ''
+    el.classList.remove('columns-container--swiping')
+    // Only chunk-snap when gutters/elastic pads are in play
+    if (showBoardGutters.value) snapBoardToNearest(0)
+  }, 140)
 }
 
 const onCarouselTouchStart = (e: TouchEvent) => {
@@ -536,6 +550,7 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('wheel', onColumnsWheel, true)
   el.removeEventListener('scrollend', onCarouselScrollEnd)
   window.clearTimeout(wheelSnapTimer)
+  wheelSnapArmed = false
   el.style.scrollSnapType = ''
   el.classList.remove('columns-container--swiping')
   carouselGesture = null
