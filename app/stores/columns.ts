@@ -19,8 +19,18 @@ export type ColumnFeedType =
   | 'notifications'
   | 'messages'
 
-/** Desktop board: squish all (up to 8) vs ~4 visible + horizontal scroll */
-export type DeskDensity = 'packed' | 'roomy'
+/** Desktop board: packed strip · roomy strip · focused tab (one wide column + tabs) */
+export type DeskDensity = 'packed' | 'roomy' | 'tabs'
+
+const DESK_DENSITY_ORDER: DeskDensity[] = ['packed', 'roomy', 'tabs']
+
+function normalizeDeskDensity(value: unknown): DeskDensity {
+  if (value === 'roomy' || value === 'tabs' || value === 'focused') {
+    // "focused" accepted as legacy alias if anything wrote it
+    return value === 'focused' ? 'tabs' : value
+  }
+  return 'packed'
+}
 
 /** Mobile reading mode — flow = Threads list, flip = full-bleed snap */
 export type ColumnViewMode = 'flow' | 'flip'
@@ -58,9 +68,9 @@ interface ColumnsState {
   accountKey: string
   syncing: boolean
   lastSyncError: string | null
-  /** Device-local: packed = all columns share the viewport; roomy ≈ 4 + scroll */
+  /** Device-local: packed / roomy strip, or tabs = one focused feed */
   deskDensity: DeskDensity
-  /** Device-local: when set, only this column is shown (desktop) */
+  /** Device-local: when set, only this column is shown (desktop); required in tabs mode */
   focusedColumnId: string | null
 }
 
@@ -95,7 +105,7 @@ function readDeskLayout(): { deskDensity: DeskDensity; focusedColumnId: string |
     if (!raw) return { deskDensity: 'packed', focusedColumnId: null }
     const parsed = JSON.parse(raw) as { deskDensity?: string; focusedColumnId?: string | null }
     return {
-      deskDensity: parsed.deskDensity === 'roomy' ? 'roomy' : 'packed',
+      deskDensity: normalizeDeskDensity(parsed.deskDensity),
       focusedColumnId: typeof parsed.focusedColumnId === 'string' ? parsed.focusedColumnId : null,
     }
   } catch {
@@ -205,6 +215,7 @@ export const useColumnsStore = defineStore('columns', {
     canAddColumn: (state): boolean => state.columns.length < MAX_COLUMNS,
     canRemoveColumn: (state): boolean => state.columns.length > 1,
     isMultiColumn: (state): boolean => state.columns.length > 1,
+    isTabsDensity: (state): boolean => state.deskDensity === 'tabs',
     focusedColumn: (state): ColumnConfig | null =>
       state.columns.find((c) => c.id === state.focusedColumnId) || null,
   },
@@ -304,18 +315,59 @@ export const useColumnsStore = defineStore('columns', {
       }
     },
 
+    ensureTabsFocus() {
+      if (this.deskDensity !== 'tabs') return
+      if (this.focusedColumnId && this.columns.some((c) => c.id === this.focusedColumnId)) return
+      this.focusedColumnId = this.columns[0]?.id ?? null
+      this.saveDeskLayout()
+    },
+
     toggleDeskDensity() {
-      this.deskDensity = this.deskDensity === 'packed' ? 'roomy' : 'packed'
-      this.focusedColumnId = null
+      const i = DESK_DENSITY_ORDER.indexOf(this.deskDensity)
+      const next = DESK_DENSITY_ORDER[(i + 1) % DESK_DENSITY_ORDER.length]!
+      this.deskDensity = next
+      if (next === 'tabs') {
+        this.focusedColumnId =
+          (this.focusedColumnId && this.columns.some((c) => c.id === this.focusedColumnId)
+            ? this.focusedColumnId
+            : null) ||
+          this.columns[0]?.id ||
+          null
+      } else {
+        this.focusedColumnId = null
+      }
+      this.saveDeskLayout()
+    },
+
+    setFocusedColumn(columnId: string) {
+      if (!this.columns.some((c) => c.id === columnId)) return
+      if (this.focusedColumnId === columnId) return
+      this.focusedColumnId = columnId
       this.saveDeskLayout()
     },
 
     toggleColumnFocus(columnId: string) {
+      if (this.deskDensity === 'tabs') {
+        // Tabs mode: pin switches feeds; pressing again on the active tab exits to Roomy
+        if (this.focusedColumnId === columnId) {
+          this.deskDensity = 'roomy'
+          this.focusedColumnId = null
+        } else {
+          this.focusedColumnId = columnId
+        }
+        this.saveDeskLayout()
+        return
+      }
       this.focusedColumnId = this.focusedColumnId === columnId ? null : columnId
       this.saveDeskLayout()
     },
 
     clearColumnFocus() {
+      if (this.deskDensity === 'tabs') {
+        // Keep a focused feed while in tabs density (Home nav shouldn't blank the board)
+        this.ensureTabsFocus()
+        return
+      }
       if (!this.focusedColumnId) return
       this.focusedColumnId = null
       this.saveDeskLayout()

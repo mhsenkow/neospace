@@ -222,11 +222,27 @@ const cycleLine = () => {
   nextTick(() => announceLook('Lines', currentLineLabel.value))
 }
 
-const densityTitle = computed(() =>
-  columnsStore.deskDensity === 'packed'
-    ? 'Packed — up to six across (four on smaller desks), then scroll.'
-    : 'Roomy — about three to four views, scroll for the rest.',
-)
+const densityTitle = computed(() => {
+  switch (columnsStore.deskDensity) {
+    case 'tabs':
+      return 'Focused tab — one wider feed at a time, with tabs for each column.'
+    case 'roomy':
+      return 'Roomy — about three to four views, scroll for the rest.'
+    default:
+      return 'Packed — up to six across (four on smaller desks), then scroll.'
+  }
+})
+
+const densityLabel = computed(() => {
+  switch (columnsStore.deskDensity) {
+    case 'tabs':
+      return 'Focused'
+    case 'roomy':
+      return 'Roomy'
+    default:
+      return 'Packed'
+  }
+})
 
 /** Polite live region for Look cycle buttons */
 const lookAnnounce = ref('')
@@ -722,20 +738,21 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             type="button"
             class="sidebar__row"
             :class="{
-              'sidebar__row--on': columnsStore.deskDensity === 'roomy',
+              'sidebar__row--on': columnsStore.deskDensity !== 'packed',
               'sidebar__density--roomy': columnsStore.deskDensity === 'roomy',
+              'sidebar__density--tabs': columnsStore.deskDensity === 'tabs',
             }"
             :title="densityTitle"
-            aria-label="Board density"
+            :aria-label="`Board density: ${densityLabel}. Click to cycle.`"
             :aria-describedby="'sidebar-density-desc'"
-            :aria-pressed="columnsStore.deskDensity === 'roomy'"
             @click="columnsStore.toggleDeskDensity()"
           >
             <span class="sidebar__row-glyph density-glyph" aria-hidden="true">
               <span class="density-glyph__packed"><i /><i /><i /><i /><i /><i /><i /><i /></span>
               <span class="density-glyph__roomy"><i /><i /><i /><i /></span>
+              <span class="density-glyph__tabs"><i /></span>
             </span>
-            <span class="sidebar__label">{{ columnsStore.deskDensity === 'roomy' ? 'Roomy' : 'Packed' }}</span>
+            <span class="sidebar__label">{{ densityLabel }}</span>
           </button>
           <p id="sidebar-density-desc" class="sr-only">{{ densityTitle }}</p>
         </section>
@@ -1216,8 +1233,15 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   display: flex;
   min-height: 100vh;
   min-height: 100dvh;
+  max-width: 100%;
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
+
+  @media (max-width: 1023px) {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
 
   // iPad / small laptop: give the board more horizontal room
   @media (min-width: 1024px) and (max-width: 1199px) {
@@ -1732,7 +1756,8 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   }
 
   .density-glyph__packed,
-  .density-glyph__roomy {
+  .density-glyph__roomy,
+  .density-glyph__tabs {
     position: absolute;
     inset: 0;
     display: flex;
@@ -1760,14 +1785,40 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
     }
   }
 
-  &__density--roomy .density-glyph,
-  &__row--on .density-glyph {
-    .density-glyph__packed {
+  .density-glyph__tabs {
+    opacity: 0;
+    transform: scale(0.86);
+    justify-content: center;
+    align-items: center;
+
+    i {
+      width: 14px;
+      height: 10px;
+      border-radius: 2px;
+    }
+  }
+
+  &__density--roomy .density-glyph {
+    .density-glyph__packed,
+    .density-glyph__tabs {
       opacity: 0;
       transform: scale(0.86);
     }
 
     .density-glyph__roomy {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  &__density--tabs .density-glyph {
+    .density-glyph__packed,
+    .density-glyph__roomy {
+      opacity: 0;
+      transform: scale(0.86);
+    }
+
+    .density-glyph__tabs {
       opacity: 1;
       transform: scale(1);
     }
@@ -2598,11 +2649,21 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   min-height: 100dvh;
   min-width: 0;
   width: 100%;
+  max-width: 100%;
   padding: var(--neo-mobile-chrome-top, 52px) 0.5rem
     calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
+
+  /* Mobile: lock to the chrome box so the board can't grow past the viewport */
+  @media (max-width: 1023px) {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
 
   @media (min-width: 600px) {
     padding-left: 1rem;
@@ -2610,6 +2671,10 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
   }
 
   @media (min-width: 1024px) {
+    display: block;
+    height: auto;
+    max-height: none;
+    overflow: visible;
     padding: 1.25rem 1.25rem;
     margin-left: var(--neo-sidebar-w, 248px);
     transition: margin-left 0.22s cubic-bezier(0.22, 1, 0.36, 1);

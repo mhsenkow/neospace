@@ -98,11 +98,26 @@ const feedTabs = computed(() =>
   })),
 )
 
+const isDeskTabs = computed(
+  () => columnsStore.deskDensity === 'tabs' && !isMobileUi.value,
+)
+
 const activeFeedTabId = computed({
-  get: () => columnsStore.columns[activeColumnIndex.value]?.id || feedTabs.value[0]?.id || '',
+  get: () => {
+    if (isDeskTabs.value && columnsStore.focusedColumnId) {
+      return columnsStore.focusedColumnId
+    }
+    return columnsStore.columns[activeColumnIndex.value]?.id || feedTabs.value[0]?.id || ''
+  },
   set: (id: string) => {
     const idx = columnsStore.columns.findIndex((c) => c.id === id)
-    if (idx >= 0) scrollToColumn(idx)
+    if (idx < 0) return
+    activeColumnIndex.value = idx
+    if (isDeskTabs.value) {
+      columnsStore.setFocusedColumn(id)
+      return
+    }
+    scrollToColumn(idx)
   },
 })
 
@@ -161,7 +176,13 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
     const idx = id
       ? columnsStore.columns.findIndex((c) => c.id === id)
       : columnsStore.columns.length - 1
-    if (idx >= 0) scrollToColumn(idx)
+    if (idx < 0) return
+    if (isDeskTabs.value && id) {
+      columnsStore.setFocusedColumn(id)
+      activeColumnIndex.value = idx
+      return
+    }
+    scrollToColumn(idx)
   })
 }
 
@@ -745,7 +766,18 @@ watch(
     if (activeColumnIndex.value >= count) {
       activeColumnIndex.value = Math.max(0, count - 1)
     }
+    if (columnsStore.deskDensity === 'tabs') {
+      columnsStore.ensureTabsFocus()
+      return
+    }
     nextTick(() => scrollToColumn(activeColumnIndex.value, 'auto'))
+  },
+)
+
+watch(
+  () => columnsStore.deskDensity,
+  (density) => {
+    if (density === 'tabs') columnsStore.ensureTabsFocus()
   },
 )
 
@@ -834,10 +866,46 @@ useHead({ title: 'Home | NeoSpace' })
       'columns-page--multi': columnsStore.isMultiColumn && !columnsStore.focusedColumnId,
       'columns-page--packed': columnsStore.deskDensity === 'packed',
       'columns-page--roomy': columnsStore.deskDensity === 'roomy',
+      'columns-page--tabs': isDeskTabs,
       'columns-page--focus': !!columnsStore.focusedColumnId && !isMobileUi,
     }"
   >
     <h1 class="sr-only">Home</h1>
+
+    <!-- Desktop focused-tab mode: one wide feed + tab strip -->
+    <nav
+      v-if="isDeskTabs"
+      class="desk-feed-tabs"
+      aria-label="Feeds"
+    >
+      <NeoTabs
+        class="desk-feed-tabs__neo"
+        :tabs="feedTabs"
+        :model-value="activeFeedTabId"
+        :panels="false"
+        @update:model-value="(id) => (activeFeedTabId = id)"
+      />
+      <div v-if="columnsStore.canAddColumn" class="desk-feed-tabs__add" @click.stop>
+        <NeoMenu
+          v-model:open="addMenuOpen"
+          class="add-column-neo add-column-neo--desk-tabs"
+          align="end"
+          :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          <template #items>
+            <span class="add-column-menu__title">Add feed</span>
+            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
+            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">Local</button>
+            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+          </template>
+        </NeoMenu>
+      </div>
+    </nav>
+
     <!-- Mobile: feed strip + thumb-zone prev/next + add -->
     <nav class="mobile-feed-tabs" aria-label="Feeds">
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
@@ -1304,7 +1372,7 @@ useHead({ title: 'Home | NeoSpace' })
 
     <!-- Desktop Add Column Panel -->
     <div
-      v-if="columnsStore.canAddColumn"
+      v-if="columnsStore.canAddColumn && !isDeskTabs"
       class="add-column-panel"
       :class="{ 'add-column-panel--expanded': addMenuOpen }"
       @click.stop
@@ -1457,26 +1525,27 @@ useHead({ title: 'Home | NeoSpace' })
     width: calc(100% + 4rem);
   }
 
-  // Mobile: fill viewport minus header + nav; full-bleed so slides are true page width
+  // Mobile: fill the padded main box (don't re-subtract chrome — that grew past the screen)
   @media (max-width: 1023px) {
+    flex: 1;
     flex-direction: column;
-    height: calc(
-      100dvh - var(--neo-mobile-chrome-top, 52px) - var(--neo-mobile-nav-h, 64px) -
-        env(safe-area-inset-bottom, 0px)
-    );
-    margin-inline: -0.5rem;
-    width: calc(100% + 1rem);
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    margin-inline: 0;
   }
 
-  @media (max-width: 1023px) and (min-width: 600px) {
-    margin-inline: -1rem;
-    width: calc(100% + 2rem);
-  }
-
-  // Single column mode on desktop: center the content
+  // Single column / focused tab: center the content
   &:not(.columns-page--multi) {
     @media (min-width: 1024px) {
       justify-content: center;
+    }
+  }
+
+  &--tabs {
+    @media (min-width: 1024px) {
+      flex-direction: column;
+      align-items: stretch;
     }
   }
 
@@ -1504,9 +1573,10 @@ useHead({ title: 'Home | NeoSpace' })
 
 .columns-container {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   // none (not contain) — stop Safari history swipe at the board edges
@@ -1534,7 +1604,7 @@ useHead({ title: 'Home | NeoSpace' })
   }
 
   // Single column: cap width for readability
-  .columns-page:not(.columns-page--multi) & {
+  .columns-page:not(.columns-page--multi):not(.columns-page--tabs) & {
     @media (min-width: 1024px) {
       max-width: 620px;
       overflow-x: hidden;
@@ -1544,6 +1614,25 @@ useHead({ title: 'Home | NeoSpace' })
       :deep(.panel-column) {
         flex: 1 1 auto;
         min-width: 0;
+      }
+    }
+  }
+
+  // Focused tab: one wider reading column
+  .columns-page--tabs & {
+    @media (min-width: 1024px) {
+      max-width: min(840px, 100%);
+      width: 100%;
+      margin-inline: auto;
+      overflow-x: hidden;
+      touch-action: pan-y;
+
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 1 1 auto;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
       }
     }
   }
@@ -1975,6 +2064,63 @@ useHead({ title: 'Home | NeoSpace' })
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+// ========================================
+// Desktop focused-tab strip
+// ========================================
+.desk-feed-tabs {
+  display: none;
+
+  @media (min-width: 1024px) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    max-width: min(840px, 100%);
+    width: 100%;
+    margin: 0 auto;
+    padding: 0.35rem 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--neo-border-color);
+    box-sizing: border-box;
+  }
+
+  &__neo {
+    flex: 1;
+    min-width: 0;
+
+    :deep(.neo-tabs__list) {
+      gap: 0.25rem;
+      border-bottom: none;
+      overflow-x: auto;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+    }
+
+    :deep(.neo-tabs__tab) {
+      flex-shrink: 0;
+      min-height: 40px;
+      padding: 0.45rem 0.95rem;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      white-space: nowrap;
+      border-radius: 999px;
+      box-shadow: none;
+
+      &[aria-selected='true'] {
+        color: var(--neo-text-inverse, #fff);
+        background: var(--neo-accent);
+        box-shadow: none;
+      }
+    }
+  }
+
+  &__add {
+    flex-shrink: 0;
+  }
 }
 
 // ========================================
