@@ -109,9 +109,10 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
+    <!-- Live region stays mounted (a11y); pill chrome only when there is a message -->
     <div class="acct-switch__toast" role="status" aria-live="polite" aria-atomic="true">
       <Transition name="acct-toast">
-        <span v-if="switchedToast">{{ switchedToast }}</span>
+        <span v-if="switchedToast" class="acct-switch__toast-msg">{{ switchedToast }}</span>
       </Transition>
     </div>
 
@@ -267,6 +268,16 @@ onUnmounted(() => {
   bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 320;
+  pointer-events: none;
+  // No chrome when empty — an always-painted pill was showing as a blank bubble
+
+  @media (min-width: 1024px) {
+    bottom: 2rem;
+  }
+}
+
+.acct-switch__toast-msg {
+  display: block;
   white-space: nowrap;
   padding: 0.55rem 0.9rem;
   border-radius: 999px;
@@ -276,11 +287,6 @@ onUnmounted(() => {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--neo-text-primary);
-  pointer-events: none;
-
-  @media (min-width: 1024px) {
-    bottom: 2rem;
-  }
 }
 
 .acct-sheet {
@@ -626,7 +632,7 @@ onUnmounted(() => {
 .acct-toast-enter-from,
 .acct-toast-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(6px);
+  transform: translateY(6px);
 }
 
 html.acct-sheet-open {
