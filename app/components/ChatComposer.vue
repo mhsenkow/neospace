@@ -137,7 +137,12 @@ const send = async () => {
     emit('posted', status)
     textareaRef.value?.focus()
   } catch (e: any) {
-    error.value = e?.message || 'Couldn’t send'
+    const raw = (e?.message || '').toString()
+    if (/record not found|not found/i.test(raw)) {
+      error.value = 'That conversation isn’t on your account’s server.'
+    } else {
+      error.value = raw || 'Couldn’t send'
+    }
   } finally {
     isSending.value = false
   }
@@ -158,13 +163,37 @@ const onFileChange = (e: Event) => {
   input.value = ''
 }
 
+/** Keep the bar above the soft keyboard (iOS visualViewport) */
+const barStyle = ref<Record<string, string>>({})
+
+const syncKeyboardOffset = () => {
+  if (typeof window === 'undefined') return
+  const vv = window.visualViewport
+  if (!vv) {
+    barStyle.value = { bottom: '0px' }
+    return
+  }
+  const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+  barStyle.value = { bottom: `${inset}px` }
+}
+
 onMounted(() => {
+  syncKeyboardOffset()
+  window.visualViewport?.addEventListener('resize', syncKeyboardOffset)
+  window.visualViewport?.addEventListener('scroll', syncKeyboardOffset)
+  window.addEventListener('resize', syncKeyboardOffset)
   nextTick(() => textareaRef.value?.focus())
+})
+
+onUnmounted(() => {
+  window.visualViewport?.removeEventListener('resize', syncKeyboardOffset)
+  window.visualViewport?.removeEventListener('scroll', syncKeyboardOffset)
+  window.removeEventListener('resize', syncKeyboardOffset)
 })
 </script>
 
 <template>
-  <div class="chat-composer">
+  <div class="chat-composer" :style="barStyle">
     <div class="chat-composer__inner">
       <div v-if="attachments.length" class="chat-composer__media">
         <div
@@ -398,10 +427,13 @@ onMounted(() => {
   background: transparent;
   color: var(--neo-text-primary);
   font: inherit;
+  /* ≥16px avoids iOS auto-zoom on focus */
   font-size: 1rem;
   line-height: 1.35;
   resize: none;
   outline: none;
+  /* Soft keyboards: Enter sends; Shift+Enter still available on hardware */
+  touch-action: manipulation;
 
   &::placeholder {
     color: var(--neo-text-muted);

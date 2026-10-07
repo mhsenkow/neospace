@@ -276,7 +276,13 @@ const handlePost = async () => {
       }
     })
   } catch (e: any) {
-    error.value = e.message || 'Failed to post'
+    const raw = (e?.message || '').toString()
+    // Mastodon returns this when in_reply_to_id isn't on the posting server
+    if (/record not found|not found/i.test(raw) && props.inReplyToId) {
+      error.value = 'That post isn’t on your account’s server — try opening the thread and replying there.'
+    } else {
+      error.value = raw || 'Failed to post'
+    }
   } finally {
     isPosting.value = false
   }

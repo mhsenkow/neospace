@@ -60,6 +60,8 @@ const isMuting = ref(false)
 const isBlocking = ref(false)
 const showCopiedToast = ref(false)
 const showReplyToast = ref(false)
+const showReplyErrorToast = ref(false)
+const isOpeningReply = ref(false)
 const showBoostToast = ref(false)
 const likePop = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
@@ -322,28 +324,41 @@ const requireAuth = () => {
 }
 
 const openReplyComposer = async () => {
-  if (!requireAuth()) return
-  const ctx = await getActionContext()
-  if (!ctx) {
-    if (statusUrl.value) window.open(statusUrl.value, '_blank')
-    return
+  if (!requireAuth() || isOpeningReply.value) return
+  isOpeningReply.value = true
+  try {
+    // Replies always post via the active account — resolve a local id first.
+    // (Likes/boosts may use another linked account's client; create cannot.)
+    const ext = displayStatus.value as ExtendedStatus
+    const replyId = await statusStore.resolveReplyId({
+      id: displayStatus.value.id,
+      url: statusUrl.value,
+      sourceInstanceUrl: ext._instanceUrl || null,
+    })
+    if (!replyId) {
+      showReplyErrorToast.value = true
+      setTimeout(() => { showReplyErrorToast.value = false }, 4200)
+      return
+    }
+    const handle = displayStatus.value.account.acct
+    const isDm = displayStatus.value.visibility === 'direct'
+    composeSheet.show({
+      title: isDm ? 'Message' : 'Reply',
+      placeholder: isDm ? `Message @${handle}…` : `Reply to @${handle}…`,
+      initialText: `@${handle} `,
+      inReplyToId: replyId,
+      visibility: isDm ? 'direct' : undefined,
+      contextPost: contextFromStatus(),
+      onPosted: (created) => {
+        displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
+        emit('replied', created)
+        showReplyToast.value = true
+        setTimeout(() => { showReplyToast.value = false }, 3500)
+      },
+    })
+  } finally {
+    isOpeningReply.value = false
   }
-  const handle = displayStatus.value.account.acct
-  const isDm = displayStatus.value.visibility === 'direct'
-  composeSheet.show({
-    title: isDm ? 'Message' : 'Reply',
-    placeholder: isDm ? `Message @${handle}…` : `Reply to @${handle}…`,
-    initialText: `@${handle} `,
-    inReplyToId: ctx.id,
-    visibility: isDm ? 'direct' : undefined,
-    contextPost: contextFromStatus(),
-    onPosted: (created) => {
-      displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
-      emit('replied', created)
-      showReplyToast.value = true
-      setTimeout(() => { showReplyToast.value = false }, 3500)
-    },
-  })
 }
 
 const openQuoteComposer = async () => {
@@ -867,6 +882,7 @@ onUnmounted(() => {
             class="status-action status-action--reply neo-tip"
             aria-label="Reply"
             title="Reply"
+            :disabled="isOpeningReply"
             @click.stop="handleReply"
           >
             <NeoIcon name="message" :size="20" :stroke="1.5" />
@@ -943,6 +959,16 @@ onUnmounted(() => {
           <button type="button" class="status-toast__btn" @click="openThread(); showReplyToast = false">
             View
           </button>
+        </div>
+      </Transition>
+      <Transition name="toast-fade">
+        <div
+          v-if="showReplyErrorToast"
+          class="status-toast status-toast--action"
+          role="alert"
+          aria-live="assertive"
+        >
+          <span>Couldn’t find that post on your account’s server.</span>
         </div>
       </Transition>
       <PostActionSheet

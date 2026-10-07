@@ -7,7 +7,6 @@ import type { mastodon } from 'masto'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
-import { useComposeSheetStore } from '~/stores/composeSheet'
 import { activeClient } from '~/composables/useMasto'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
 import { stripHtml } from '~/utils/sanitizeHtml'
@@ -38,7 +37,6 @@ const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
 const router = useRouter()
 const route = useRoute()
-const composeSheet = useComposeSheetStore()
 
 const selectedCategory = ref('all')
 const query = ref('')
@@ -57,7 +55,6 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 const isSignedIn = computed(() => instancesStore.hasAuthenticatedInstance)
-const linkedCount = computed(() => instancesStore.authenticatedInstances.length)
 const hasQuery = computed(() => query.value.trim().length >= 2)
 
 const filteredInstances = computed(() => {
@@ -280,7 +277,6 @@ const applyTopic = (tag: string) => {
 const goSignIn = () => router.push('/login')
 const goAddAccount = () => router.push('/login?add=1')
 const goGroups = () => router.push('/groups')
-const openCompose = () => composeSheet.show({ title: "What's new?" })
 
 watch(query, (q) => {
   if (searchTimer) clearTimeout(searchTimer)
@@ -389,29 +385,16 @@ onUnmounted(() => {
       <p v-else-if="searchError" class="explore-error" role="alert">{{ searchError }}</p>
     </div>
 
-    <div class="explore-cta-row">
-      <template v-if="!isSignedIn">
-        <a
-          href="https://joinmastodon.org/servers"
-          target="_blank"
-          rel="noopener"
-          class="explore-btn explore-btn--primary"
-        >
-          Create a free account
-        </a>
-        <NuxtLink to="/login" class="explore-btn explore-btn--ghost">I already have an account</NuxtLink>
-      </template>
-      <template v-else>
-        <button type="button" class="explore-btn explore-btn--primary" @click="goAddAccount">
-          Link another server
-        </button>
-        <button type="button" class="explore-btn explore-btn--ghost" @click="openCompose">
-          New post
-        </button>
-        <p class="explore-cta-note">
-          {{ linkedCount }} linked {{ linkedCount === 1 ? 'account' : 'accounts' }}
-        </p>
-      </template>
+    <div v-if="!isSignedIn" class="explore-cta-row">
+      <a
+        href="https://joinmastodon.org/servers"
+        target="_blank"
+        rel="noopener"
+        class="explore-btn explore-btn--primary"
+      >
+        Create a free account
+      </a>
+      <NuxtLink to="/login" class="explore-btn explore-btn--ghost">I already have an account</NuxtLink>
     </div>
 
     <template v-if="!hasQuery">
@@ -456,22 +439,6 @@ onUnmounted(() => {
               </button>
               <button type="button" class="explore-do-card" @click="setTab('servers')">
                 <strong>Servers</strong>
-              </button>
-              <button
-                v-if="isSignedIn"
-                type="button"
-                class="explore-do-card"
-                @click="goAddAccount"
-              >
-                <strong>Link account</strong>
-              </button>
-              <button
-                v-if="isSignedIn"
-                type="button"
-                class="explore-do-card"
-                @click="openCompose"
-              >
-                <strong>New post</strong>
               </button>
             </div>
           </div>
@@ -648,7 +615,7 @@ onUnmounted(() => {
     </p>
 
     <section class="explore-help">
-      <div class="explore-help__card">
+      <div v-if="!isSignedIn" class="explore-help__card">
         <h3>Create</h3>
         <a
           href="https://joinmastodon.org/servers"
@@ -659,11 +626,11 @@ onUnmounted(() => {
           Directory →
         </a>
       </div>
-      <div class="explore-help__card">
+      <div v-if="!isSignedIn" class="explore-help__card">
         <h3>Sign in</h3>
         <button type="button" class="explore-text-link" @click="goSignIn">Continue →</button>
       </div>
-      <div class="explore-help__card">
+      <div v-if="isSignedIn" class="explore-help__card">
         <h3>Link more</h3>
         <button type="button" class="explore-text-link" @click="goAddAccount">
           Add server →
@@ -882,13 +849,6 @@ onUnmounted(() => {
   margin-bottom: 1.25rem;
   padding-bottom: 1.15rem;
   border-bottom: 1px solid var(--neo-border-color);
-}
-
-.explore-cta-note {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-  line-height: 1.4;
 }
 
 .explore-btn {

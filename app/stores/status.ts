@@ -9,6 +9,7 @@ import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, publicClient } from '~/composables/useMasto'
+import { hostnameOf } from '~/utils/instances'
 
 interface StatusState {
   error: string | null
@@ -162,6 +163,49 @@ export const useStatusStore = defineStore('status', {
         console.warn('Failed to resolve status:', e)
         return null
       }
+    },
+
+    /**
+     * Resolve a status id that is valid for the *active* posting account.
+     * Multi-account / merged feeds often carry foreign ids that 404 on create.
+     */
+    async resolveReplyId(opts: {
+      id?: string | null
+      url?: string | null
+      /** Origin instance URL the status was fetched from (e.g. _instanceUrl) */
+      sourceInstanceUrl?: string | null
+    }): Promise<string | null> {
+      const instances = useInstancesStore()
+      const activeUrl = instances.instanceUrl
+      if (!activeUrl) return null
+
+      const activeHost = hostnameOf(activeUrl)
+      const id = opts.id?.trim() || null
+      const url = opts.url?.trim() || null
+      const sourceHost = opts.sourceInstanceUrl
+        ? hostnameOf(opts.sourceInstanceUrl)
+        : ''
+
+      // Same server as the posting account — raw id is already local
+      if (id && sourceHost && sourceHost === activeHost) return id
+      if (id && url && hostnameOf(url) === activeHost) return id
+
+      if (url) {
+        const resolved = await this.resolveStatus(url)
+        if (resolved) return resolved
+      }
+
+      // Last resort: verify the raw id exists on the active account
+      if (id) {
+        try {
+          await this.fetchStatus(id)
+          return id
+        } catch {
+          /* foreign id */
+        }
+      }
+
+      return null
     },
 
     async resolveAccount(acct: string): Promise<string | null> {

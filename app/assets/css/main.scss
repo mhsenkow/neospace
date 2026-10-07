@@ -609,6 +609,21 @@ ul, ol {
   }
 }
 
+// iOS zooms focused inputs under 16px — keep touch keyboards stable
+@media (max-width: 1023px) {
+  .neo-input,
+  .compose-input,
+  .chat-composer__input,
+  .recipient-picker input,
+  .group-pick-sheet__input,
+  .notes-input,
+  .notes-textarea,
+  textarea.neo-input,
+  input.neo-input {
+    font-size: 16px !important;
+  }
+}
+
 // ============================================
 // TYPOGRAPHY UTILITIES
 // ============================================
@@ -922,7 +937,12 @@ html.compact-mode {
   --neo-spacing-4: 0.5rem;
   --neo-spacing-6: 0.75rem;
   --neo-spacing-8: 1rem;
+  /* Keep ≥16px on touch so dense mode doesn't trigger iOS input zoom */
   --neo-font-size-base: 0.875rem;
+
+  @media (max-width: 1023px) {
+    --neo-font-size-base: 1rem;
+  }
 
   .neo-card {
     padding: 0.75rem;

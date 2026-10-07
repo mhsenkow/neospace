@@ -161,17 +161,22 @@ const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
   return !prev || prev.account.id !== status.account.id
 }
 
-const openFocusReply = () => {
+const openFocusReply = async () => {
   const s = replyTarget.value
   if (!s || !canReply.value) return
   // Public threads still use the sheet; DMs type inline via ChatComposer
   if (isDirectThread.value) return
+  const replyId =
+    (await statusStore.resolveReplyId({
+      id: s.id,
+      url: s.url || s.uri || queryUrl.value,
+    })) || s.id
   const handle = s.account.acct
   composeSheet.show({
     title: 'Reply',
     placeholder: `Reply to @${handle}…`,
     initialText: `@${handle} `,
-    inReplyToId: s.id,
+    inReplyToId: replyId,
     contextPost: contextFromStatus(s),
     onPosted: onReplyPosted,
   })

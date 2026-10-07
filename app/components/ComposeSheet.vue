@@ -11,9 +11,14 @@ const sheet = useComposeSheetStore()
 const panelRef = ref<HTMLElement | null>(null)
 const sheetOpen = computed(() => sheet.open)
 
+const { viewportStyle, onFocusField } = useKeyboardViewport(sheetOpen, {
+  lockScroll: true,
+})
+
 useFocusTrap(panelRef, sheetOpen, {
   onEscape: () => sheet.hide(),
-  initialFocus: '.compose-sheet__close, textarea, .compose-input',
+  // Prefer the composer — Cancel is first in the DOM and stole focus on mobile
+  initialFocus: 'textarea, .compose-input, .group-pick-sheet__input, .compose-sheet__close',
 })
 
 const onPosted = (status: mastodon.v1.Status) => {
@@ -43,18 +48,6 @@ const onPick = async (account: mastodon.v1.Account) => {
   }
   sheet.continueWithRecipient(accountHandle(account))
 }
-
-watch(
-  () => sheet.open,
-  (open) => {
-    if (typeof document === 'undefined') return
-    document.body.style.overflow = open ? 'hidden' : ''
-  },
-)
-
-onUnmounted(() => {
-  if (typeof document !== 'undefined') document.body.style.overflow = ''
-})
 </script>
 
 <template>
@@ -64,6 +57,7 @@ onUnmounted(() => {
         v-if="sheet.open"
         ref="panelRef"
         class="compose-sheet"
+        :style="viewportStyle"
         role="dialog"
         aria-modal="true"
         :aria-label="ariaLabel"
@@ -83,7 +77,7 @@ onUnmounted(() => {
               <span class="compose-sheet__title">{{ sheet.title || 'New post' }}</span>
               <span class="compose-sheet__spacer" />
             </header>
-            <div class="compose-sheet__body">
+            <div class="compose-sheet__body" @focusin="onFocusField">
               <article v-if="sheet.contextPost" class="compose-sheet__context">
                 <img
                   v-if="sheet.contextPost.avatar"
@@ -122,11 +116,14 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .compose-sheet {
   position: fixed;
+  /* Fallback when visualViewport style isn't applied yet */
   inset: 0;
   z-index: 200;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  /* When :style sets top/left/width/height, clear inset so keyboard fit works */
+  box-sizing: border-box;
 
   @media (min-width: 1024px) {
     justify-content: center;
@@ -150,7 +147,7 @@ onUnmounted(() => {
   flex-direction: column;
   width: 100%;
   max-height: min(92dvh, 100%);
-  min-height: min(72dvh, 560px);
+  min-height: min(56dvh, 420px);
   background: var(--neo-bg-primary);
   border-radius: 16px 16px 0 0;
   border: 1px solid var(--neo-border-color);
@@ -227,7 +224,8 @@ onUnmounted(() => {
     flex: 1;
     min-height: 10rem;
     max-height: none;
-    font-size: 1.0625rem;
+    /* ≥16px avoids iOS auto-zoom on focus */
+    font-size: 1rem;
     line-height: 1.45;
   }
 
