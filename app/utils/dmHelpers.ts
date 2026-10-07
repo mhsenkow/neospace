@@ -7,6 +7,20 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { accountHandle } from '~/composables/useAccountSearch'
 
+/** Exact 1:1 DM with this account — never fall back to a group thread */
+export function findExactOneToOne<T extends { accounts?: { id: string }[] | null }>(
+  conversations: T[],
+  accountId: string,
+): T | null {
+  if (!accountId) return null
+  return (
+    conversations.find((c) => {
+      const ids = (c.accounts || []).map((a) => a.id)
+      return ids.length === 1 && ids[0] === accountId
+    }) || null
+  )
+}
+
 export async function openOrComposeDirect(
   account: mastodon.v1.Account,
   router: { push: (to: string) => Promise<unknown> | unknown },

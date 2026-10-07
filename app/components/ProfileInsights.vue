@@ -64,7 +64,7 @@ const onExportLoom = async () => {
     exportNote.value =
       result === 'posted'
         ? 'Opened Loom with your insight datasets.'
-        : 'Popup blocked — CSVs downloaded instead.'
+        : 'Loom didn’t acknowledge — CSVs downloaded instead.'
   } catch {
     exportNote.value = 'Export failed — try Download CSV.'
   } finally {
@@ -96,26 +96,95 @@ const areaPath = computed(() => {
   return { line, area, max, w, h }
 })
 
-const heatMax = computed(() =>
-  Math.max(1, ...(report.value?.heatmap.map((c) => c.posts) || [1])),
-)
-
-const heatCell = (weekday: number, hour: number) => {
-  const cell = report.value?.heatmap.find((c) => c.weekday === weekday && c.hour === hour)
-  return cell?.posts || 0
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const
+const TYPE_KINDS = new Set(['original', 'reply', 'boost'])
+const ATTR_KINDS = new Set(['media', 'poll', 'cw'])
+const TYPE_LABELS: Record<string, string> = {
+  original: 'Original',
+  reply: 'Reply',
+  boost: 'Boost',
+  media: 'With media',
+  poll: 'Poll',
+  cw: 'Content warning',
 }
 
-const mixTotal = computed(() =>
-  (report.value?.mix || []).reduce((s, m) => s + m.count, 0) || 1,
+/** Precomputed 7×24 matrix — avoid Array.find per cell */
+const heatMatrix = computed(() => {
+  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0))
+  for (const c of report.value?.heatmap || []) {
+    if (c.weekday >= 0 && c.weekday < 7 && c.hour >= 0 && c.hour < 24) {
+      grid[c.weekday]![c.hour] = c.posts
+    }
+  }
+  return grid
+})
+
+const heatMax = computed(() => {
+  let max = 0
+  for (const row of heatMatrix.value) {
+    for (const n of row) if (n > max) max = n
+  }
+  return Math.max(1, max)
+})
+
+const heatCell = (weekday: number, hour: number) =>
+  heatMatrix.value[weekday]?.[hour] || 0
+
+const heatSummary = computed(() => {
+  let peakPosts = 0
+  let peakDay = 0
+  let peakHour = 0
+  let activeCells = 0
+  let totalPosts = 0
+  for (let w = 0; w < 7; w++) {
+    for (let h = 0; h < 24; h++) {
+      const n = heatCell(w, h)
+      if (n > 0) {
+        activeCells++
+        totalPosts += n
+      }
+      if (n > peakPosts) {
+        peakPosts = n
+        peakDay = w
+        peakHour = h
+      }
+    }
+  }
+  if (!peakPosts) return 'No posts in this window yet.'
+  return `Most active: ${DAY_NAMES[peakDay]} ${String(peakHour).padStart(2, '0')}:00 (${peakPosts} post${peakPosts === 1 ? '' : 's'}) · ${activeCells} active slots · ${totalPosts} posts`
+})
+
+const heatTableRows = computed(() => {
+  const rows: { day: string; hour: number; posts: number }[] = []
+  for (let w = 0; w < 7; w++) {
+    for (let h = 0; h < 24; h++) {
+      const posts = heatCell(w, h)
+      if (posts > 0) rows.push({ day: DAY_NAMES[w]!, hour: h, posts })
+    }
+  }
+  return rows.sort((a, b) => b.posts - a.posts || a.day.localeCompare(b.day) || a.hour - b.hour)
+})
+
+const typeMix = computed(() =>
+  (report.value?.mix || []).filter((m) => TYPE_KINDS.has(m.kind)),
+)
+
+const attrMix = computed(() =>
+  (report.value?.mix || []).filter((m) => ATTR_KINDS.has(m.kind)),
+)
+
+const typeMixTotal = computed(() =>
+  typeMix.value.reduce((s, m) => s + m.count, 0) || 1,
 )
 
 const waffleCells = computed(() => {
-  const mix = report.value?.mix || []
+  const mix = typeMix.value
   const total = 100
   const cells: { kind: string; i: number }[] = []
   let used = 0
   for (const m of mix) {
-    const n = Math.max(0, Math.round((m.count / mixTotal.value) * total))
+    const n = Math.max(0, Math.round((m.count / typeMixTotal.value) * total))
     for (let i = 0; i < n && used < total; i++) {
       cells.push({ kind: m.kind, i: used++ })
     }
@@ -123,6 +192,11 @@ const waffleCells = computed(() => {
   while (cells.length < total) cells.push({ kind: 'empty', i: cells.length })
   return cells.slice(0, total)
 })
+
+const heatCellStyle = (posts: number) => {
+  if (posts <= 0) return undefined
+  return { opacity: String(0.22 + (posts / heatMax.value) * 0.78) }
+}
 
 const kpi = computed(() => {
   const t = report.value?.totals
@@ -250,7 +324,13 @@ const kpi = computed(() => {
       <div v-if="report.posts.length" class="insights__card">
         <h3 class="insights__card-title">When you post</h3>
         <p class="insights__card-sub">Hour × weekday heatmap</p>
-        <div class="insights__heat" role="img" aria-label="Posting heatmap by weekday and hour">
+        <p class="insights__card-summary" id="insights-heat-summary">{{ heatSummary }}</p>
+        <div
+          class="insights__heat"
+          role="img"
+          :aria-label="heatSummary"
+          aria-describedby="insights-heat-summary insights-heat-legend"
+        >
           <div class="insights__heat-corner" />
           <div
             v-for="h in 24"
@@ -260,22 +340,52 @@ const kpi = computed(() => {
             {{ (h - 1) % 6 === 0 ? String(h - 1).padStart(2, '0') : '' }}
           </div>
           <template v-for="w in 7" :key="'w-' + (w - 1)">
-            <div class="insights__heat-day">{{ ['S', 'M', 'T', 'W', 'T', 'F', 'S'][w - 1] }}</div>
+            <div class="insights__heat-day">
+              <abbr :title="DAY_NAMES[w - 1]">{{ DAY_LETTERS[w - 1] }}</abbr>
+            </div>
             <div
               v-for="h in 24"
               :key="`${w}-${h}`"
               class="insights__heat-cell"
-              :title="`${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][w - 1]} ${h - 1}:00 — ${heatCell(w - 1, h - 1)} posts`"
-              :style="{
-                opacity: 0.12 + (heatCell(w - 1, h - 1) / heatMax) * 0.88,
-              }"
+              :class="{ 'insights__heat-cell--empty': heatCell(w - 1, h - 1) === 0 }"
+              :title="`${DAY_NAMES[w - 1]} ${h - 1}:00 — ${heatCell(w - 1, h - 1)} posts`"
+              :style="heatCellStyle(heatCell(w - 1, h - 1))"
             />
           </template>
         </div>
+        <div id="insights-heat-legend" class="insights__heat-legend" aria-hidden="true">
+          <span class="insights__heat-legend-swatch insights__heat-legend-swatch--empty" /> None
+          <span class="insights__heat-legend-swatch insights__heat-legend-swatch--low" /> Low
+          <span class="insights__heat-legend-swatch insights__heat-legend-swatch--high" /> High
+        </div>
+        <details class="insights__data-table">
+          <summary>View heatmap data</summary>
+          <table id="insights-heat-data">
+            <caption class="sr-only">Posts by weekday and hour</caption>
+            <thead>
+              <tr>
+                <th scope="col">Day</th>
+                <th scope="col">Hour</th>
+                <th scope="col">Posts</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in heatTableRows" :key="`${row.day}-${row.hour}`">
+                <td>{{ row.day }}</td>
+                <td>{{ String(row.hour).padStart(2, '0') }}:00</td>
+                <td>{{ row.posts }}</td>
+              </tr>
+              <tr v-if="!heatTableRows.length">
+                <td colspan="3">No posts in this window</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
       </div>
 
-      <div v-if="waffleCells.length && report.posts.length" class="insights__card">
-        <h3 class="insights__card-title">Content mix</h3>
+      <div v-if="typeMix.length && report.posts.length" class="insights__card">
+        <h3 class="insights__card-title">Post types</h3>
+        <p class="insights__card-sub">Exclusive mix — each post counts once</p>
         <div class="insights__waffle" aria-hidden="true">
           <span
             v-for="cell in waffleCells"
@@ -285,9 +395,34 @@ const kpi = computed(() => {
           />
         </div>
         <ul class="insights__legend">
-          <li v-for="m in report.mix" :key="m.kind">
+          <li v-for="m in typeMix" :key="m.kind">
             <span class="insights__swatch" :data-kind="m.kind" />
-            {{ m.kind }} · {{ m.count }}
+            {{ TYPE_LABELS[m.kind] || m.kind }} · {{ m.count }}
+            ({{ Math.round((m.count / typeMixTotal) * 100) }}%)
+          </li>
+        </ul>
+      </div>
+
+      <div v-if="attrMix.length && report.posts.length" class="insights__card">
+        <h3 class="insights__card-title">Attributes</h3>
+        <p class="insights__card-sub">Overlapping flags — a post can have several</p>
+        <ul class="insights__attrs">
+          <li v-for="m in attrMix" :key="m.kind" class="insights__attr">
+            <div class="insights__attr-head">
+              <span>{{ TYPE_LABELS[m.kind] || m.kind }}</span>
+              <span class="insights__attr-count">
+                {{ m.count }}
+                ({{ Math.round((m.count / Math.max(1, report.totals.posts)) * 100) }}%)
+              </span>
+            </div>
+            <div
+              class="insights__attr-bar"
+              role="presentation"
+              :style="{
+                width: `${Math.min(100, Math.round((m.count / Math.max(1, report.totals.posts)) * 100))}%`,
+              }"
+              :data-kind="m.kind"
+            />
           </li>
         </ul>
       </div>
@@ -578,6 +713,49 @@ const kpi = computed(() => {
   border-radius: 2px;
   background: var(--neo-accent);
   min-height: 0.45rem;
+
+  &--empty {
+    background: color-mix(in srgb, var(--neo-text-primary) 8%, var(--neo-bg-primary));
+    opacity: 1;
+  }
+}
+
+.insights__heat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  margin-top: 0.35rem;
+  font-size: 0.6875rem;
+  color: var(--neo-text-muted);
+}
+
+.insights__heat-legend-swatch {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 2px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 0.2rem;
+
+  &--empty {
+    background: color-mix(in srgb, var(--neo-text-primary) 8%, var(--neo-bg-primary));
+    box-shadow: inset 0 0 0 1px var(--neo-border-color);
+  }
+
+  &--low {
+    background: var(--neo-accent);
+    opacity: 0.28;
+  }
+
+  &--high {
+    background: var(--neo-accent);
+    opacity: 1;
+  }
+}
+
+.insights__heat-day abbr {
+  text-decoration: none;
 }
 
 .insights__waffle {
@@ -600,11 +778,42 @@ const kpi = computed(() => {
   &[data-kind='boost'] {
     background: color-mix(in srgb, var(--neo-accent) 30%, var(--neo-text-muted));
   }
+}
+
+.insights__attrs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.insights__attr-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.insights__attr-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--neo-text-muted);
+}
+
+.insights__attr-bar {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-text-muted));
+  min-width: 0.35rem;
+
   &[data-kind='media'] {
-    background: color-mix(in srgb, var(--neo-accent) 70%, #2a6);
+    background: color-mix(in srgb, var(--neo-accent) 70%, var(--neo-success, #2a6));
   }
   &[data-kind='poll'] {
-    background: color-mix(in srgb, var(--neo-accent) 50%, #26a);
+    background: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-info, #26a));
   }
   &[data-kind='cw'] {
     background: color-mix(in srgb, var(--neo-text-muted) 70%, var(--neo-accent));
@@ -639,15 +848,6 @@ const kpi = computed(() => {
   }
   &[data-kind='boost'] {
     background: color-mix(in srgb, var(--neo-accent) 30%, var(--neo-text-muted));
-  }
-  &[data-kind='media'] {
-    background: color-mix(in srgb, var(--neo-accent) 70%, #2a6);
-  }
-  &[data-kind='poll'] {
-    background: color-mix(in srgb, var(--neo-accent) 50%, #26a);
-  }
-  &[data-kind='cw'] {
-    background: color-mix(in srgb, var(--neo-text-muted) 70%, var(--neo-accent));
   }
 }
 

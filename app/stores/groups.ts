@@ -11,6 +11,7 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { useSettingsStore } from './settings'
 import { activeClient, publicClient } from '~/composables/useMasto'
+import { guessCategory as guessCategoryUtil } from '~/utils/guessCategory'
 
 /** Prevent concurrent initializeGroups races that double-push trending tags */
 let groupsInitPromise: Promise<void> | null = null
@@ -411,39 +412,6 @@ export const GROUP_CATEGORIES = [
 ]
 
 /** Rough bucket for live tags so they land somewhere useful */
-const CATEGORY_KEYWORDS: Array<{ category: GroupCategory; words: string[] }> = [
-  {
-    category: 'tech',
-    words: [
-      'tech', 'linux', 'foss', 'opensource', 'privacy', 'security', 'coding', 'programming',
-      'python', 'javascript', 'webdev', 'ai', 'ml', 'selfhost', 'nixos', 'android', 'ios',
-      'fediverse', 'mastodon', 'activitypub', 'infosec', 'cyber',
-    ],
-  },
-  {
-    category: 'creative',
-    words: [
-      'art', 'photo', 'music', 'book', 'write', 'poem', 'design', 'film', 'movie', 'craft',
-      'draw', 'paint', 'illustration', 'animation', 'mastoart', 'nature', 'landscape',
-    ],
-  },
-  {
-    category: 'gaming',
-    words: ['game', 'gaming', 'gamedev', 'steam', 'nintendo', 'playstation', 'xbox', 'rpg', 'indie'],
-  },
-  {
-    category: 'social',
-    words: [
-      'cat', 'dog', 'food', 'cook', 'garden', 'travel', 'parent', 'lgbt', 'disability',
-      'mentalhealth', 'introduction', 'ask', 'help', 'friend',
-    ],
-  },
-  {
-    category: 'news',
-    words: ['news', 'politics', 'climate', 'science', 'world', 'election', 'breaking'],
-  },
-]
-
 /** Bumps on each timeline fetch so a slow prior tag cannot overwrite the current one */
 let timelineRequestId = 0
 
@@ -623,16 +591,7 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     guessCategory(tag: string): GroupCategory {
-      const lower = tag.toLowerCase()
-      // Tokenize so 'ai' does not match rain/Taiwan/mail, 'cat' does not match education
-      const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean)
-      const tokenSet = new Set(tokens)
-      for (const bucket of CATEGORY_KEYWORDS) {
-        if (bucket.words.some((w) => tokenSet.has(w) || tokens.some((t) => t === w))) {
-          return bucket.category
-        }
-      }
-      return 'other'
+      return guessCategoryUtil(tag) as GroupCategory
     },
 
     /**

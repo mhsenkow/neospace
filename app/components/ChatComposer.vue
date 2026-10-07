@@ -33,6 +33,70 @@ const error = ref<string | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
+/** Optimistic bubble shown until the server acks (or fails) */
+type PendingSend = {
+  status: mastodon.v1.Status
+  delivery: 'pending' | 'failed'
+  body: string
+  mediaIds: string[]
+}
+const pendingSend = ref<PendingSend | null>(null)
+
+const makeOptimisticStatus = (body: string): mastodon.v1.Status => {
+  const me = instancesStore.currentUser
+  const now = new Date().toISOString()
+  return {
+    id: `pending-${Date.now()}`,
+    uri: '',
+    url: null,
+    createdAt: now,
+    content: body ? `<p>${body.replace(/</g, '&lt;')}</p>` : '',
+    visibility: 'direct',
+    sensitive: false,
+    spoilerText: '',
+    repliesCount: 0,
+    reblogsCount: 0,
+    favouritesCount: 0,
+    editedAt: null,
+    favourited: false,
+    reblogged: false,
+    muted: false,
+    bookmarked: false,
+    pinned: false,
+    account: me || {
+      id: 'me',
+      username: 'you',
+      acct: 'you',
+      displayName: 'You',
+      avatar: '',
+      avatarStatic: '',
+      header: '',
+      headerStatic: '',
+      note: '',
+      url: '',
+      followersCount: 0,
+      followingCount: 0,
+      statusesCount: 0,
+      bot: false,
+      locked: false,
+      createdAt: now,
+      emojis: [],
+      fields: [],
+    },
+    mediaAttachments: [],
+    mentions: [],
+    tags: [],
+    emojis: [],
+    application: null,
+    language: null,
+    inReplyToId: props.inReplyToId,
+    inReplyToAccountId: null,
+    reblog: null,
+    poll: null,
+    card: null,
+  } as mastodon.v1.Status
+}
+
 const {
   attachments,
   isUploading,
@@ -94,6 +158,7 @@ const canSend = computed(() => {
   return (
     (hasText || hasMedia.value) &&
     !isSending.value &&
+    !pendingSend.value &&
     !isUploading.value &&
     allReady.value &&
     !overLimit.value &&
@@ -130,19 +195,16 @@ const buildBody = () => {
   return text
 }
 
-const send = async () => {
-  if (!canSend.value) return
+const postBody = async (body: string, ids: string[]) => {
   isSending.value = true
   error.value = null
   try {
-    const status = await statusStore.postStatus(buildBody(), {
+    const status = await statusStore.postStatus(body, {
       visibility: 'direct',
       inReplyToId: props.inReplyToId,
-      mediaIds: mediaIds.value,
+      mediaIds: ids,
     })
-    content.value = ''
-    clearAttachments()
-    await nextTick(autosize)
+    pendingSend.value = null
     emit('posted', status)
     textareaRef.value?.focus()
   } catch (e: any) {
@@ -152,9 +214,31 @@ const send = async () => {
     } else {
       error.value = raw || 'Couldn’t send'
     }
+    if (pendingSend.value) {
+      pendingSend.value = { ...pendingSend.value, delivery: 'failed' }
+    }
   } finally {
     isSending.value = false
   }
+}
+
+const send = async () => {
+  if (!canSend.value) return
+  const body = buildBody()
+  const ids = [...mediaIds.value]
+  const optimistic = makeOptimisticStatus(content.value.trim() || body)
+  pendingSend.value = { status: optimistic, delivery: 'pending', body, mediaIds: ids }
+  content.value = ''
+  clearAttachments()
+  await nextTick(autosize)
+  await postBody(body, ids)
+}
+
+const retryPending = async () => {
+  const pending = pendingSend.value
+  if (!pending || pending.delivery !== 'failed' || isSending.value) return
+  pendingSend.value = { ...pending, delivery: 'pending' }
+  await postBody(pending.body, pending.mediaIds)
 }
 
 const onKeydown = (e: KeyboardEvent) => {
@@ -208,6 +292,15 @@ onUnmounted(() => {
 <template>
   <div class="chat-composer" :style="barStyle">
     <div class="chat-composer__inner">
+      <div v-if="pendingSend" class="chat-composer__pending">
+        <MessageBubble
+          :status="pendingSend.status"
+          mine
+          :delivery="pendingSend.delivery"
+          @retry="retryPending"
+        />
+      </div>
+
       <div v-if="attachments.length" class="chat-composer__media">
         <div
           v-for="(item, idx) in attachments"
@@ -366,6 +459,11 @@ onUnmounted(() => {
 .chat-composer__inner {
   width: 100%;
   max-width: 36rem;
+}
+
+.chat-composer__pending {
+  margin: 0 0 0.55rem;
+  pointer-events: auto;
 }
 
 .chat-composer__media {

@@ -4,6 +4,10 @@ import { useInstancesStore } from './instances'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { logWarn } from '~/utils/log'
 import { idGreater } from '~/utils/compareId'
+import {
+  collapseConsecutiveNotifications,
+  type CollapsedNotification,
+} from '~/utils/notifGroup'
 
 export type NotificationFilterType =
   | 'all'
@@ -110,14 +114,19 @@ export const useNotificationsStore = defineStore('notifications', {
       return items
     },
 
-    groupedByTime(): Record<string, ExtendedNotification[]> {
-      const groups: Record<string, ExtendedNotification[]> = {}
+    /** Filtered + consecutive same type/status collapsed into one row */
+    collapsedNotifications(): CollapsedNotification<ExtendedNotification>[] {
+      return collapseConsecutiveNotifications(this.filteredNotifications)
+    },
+
+    groupedByTime(): Record<string, CollapsedNotification<ExtendedNotification>[]> {
+      const groups: Record<string, CollapsedNotification<ExtendedNotification>[]> = {}
       const now = new Date()
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
       const yesterdayStart = new Date(todayStart.getTime() - 86400000)
       const weekStart = new Date(todayStart.getTime() - 7 * 86400000)
 
-      for (const notif of this.filteredNotifications) {
+      for (const notif of this.collapsedNotifications) {
         const date = new Date(notif.createdAt)
         let label: string
 

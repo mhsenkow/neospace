@@ -8,6 +8,7 @@ import type { mastodon } from 'masto'
 import { activeClient } from '~/composables/useMasto'
 import { useInstancesStore } from './instances'
 import { logWarn } from '~/utils/log'
+import { findExactOneToOne } from '~/utils/dmHelpers'
 
 const PAGE_LIMIT = 40
 const POLL_MS = 45_000
@@ -170,13 +171,7 @@ export const useConversationsStore = defineStore('conversations', {
 
     /** Exact 1:1 DM with this account — never fall back to a group thread */
     findDirectWith(accountId: string): mastodon.v1.Conversation | null {
-      if (!accountId) return null
-      return (
-        this.conversations.find((c) => {
-          const ids = (c.accounts || []).map((a) => a.id)
-          return ids.length === 1 && ids[0] === accountId
-        }) || null
-      )
+      return findExactOneToOne(this.conversations, accountId)
     },
 
     async remove(conversationId: string) {

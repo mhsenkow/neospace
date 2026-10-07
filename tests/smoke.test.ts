@@ -174,23 +174,67 @@ describe('daySeparatorLabel', () => {
 })
 
 describe('conversation matching helpers', () => {
-  it('matches exact 1:1 participants only', () => {
-    // Mirrors conversations.findDirectWith / markReadForThread exact-set rules
-    const exactOneToOne = (
-      conversations: { accounts: { id: string }[] }[],
-      accountId: string,
-    ) =>
-      conversations.find((c) => {
-        const ids = c.accounts.map((a) => a.id)
-        return ids.length === 1 && ids[0] === accountId
-      }) || null
-
+  it('matches exact 1:1 participants only via findExactOneToOne', async () => {
+    const { findExactOneToOne } = await import('../app/utils/dmHelpers')
     const list = [
       { accounts: [{ id: 'alice' }, { id: 'bob' }] },
       { accounts: [{ id: 'alice' }] },
     ]
-    expect(exactOneToOne(list, 'alice')?.accounts).toEqual([{ id: 'alice' }])
-    expect(exactOneToOne(list, 'bob')).toBeNull()
+    expect(findExactOneToOne(list, 'alice')?.accounts).toEqual([{ id: 'alice' }])
+    expect(findExactOneToOne(list, 'bob')).toBeNull()
+    expect(findExactOneToOne(list, '')).toBeNull()
+  })
+})
+
+describe('rateLimit', () => {
+  it('allows up to the limit then blocks within the window', async () => {
+    const { allowRequest } = await import('../functions/utils/rateLimit')
+    const key = `test-${Date.now()}-${Math.random()}`
+    expect(allowRequest(key, 2, 60_000)).toBe(true)
+    expect(allowRequest(key, 2, 60_000)).toBe(true)
+    expect(allowRequest(key, 2, 60_000)).toBe(false)
+  })
+
+  it('prefers CF-Connecting-IP for clientIp', async () => {
+    const { clientIp } = await import('../functions/utils/rateLimit')
+    const req = new Request('https://example.com', {
+      headers: {
+        'CF-Connecting-IP': '1.2.3.4',
+        'X-Forwarded-For': '9.9.9.9',
+      },
+    })
+    expect(clientIp(req)).toBe('1.2.3.4')
+  })
+})
+
+describe('guessCategory', () => {
+  it('matches whole tokens only', async () => {
+    const { guessCategory } = await import('../app/utils/guessCategory')
+    expect(guessCategory('ai')).toBe('tech')
+    expect(guessCategory('linux')).toBe('tech')
+    expect(guessCategory('rain')).toBe('other') // must not match 'ai'
+    expect(guessCategory('Taiwan')).toBe('other')
+    expect(guessCategory('education')).toBe('other') // must not match 'cat'
+    expect(guessCategory('cat')).toBe('social')
+    expect(guessCategory('gaming-news')).toBe('gaming') // first matching bucket wins
+  })
+})
+
+describe('notifGroup', () => {
+  it('collapses consecutive same type+status with count', async () => {
+    const { collapseConsecutiveNotifications, groupActorLabel } = await import(
+      '../app/utils/notifGroup'
+    )
+    const collapsed = collapseConsecutiveNotifications([
+      { type: 'favourite', createdAt: '2026-10-07T12:00:00Z', status: { id: 's1' }, account: { username: 'a' }, _key: '1', _instanceId: 'i' },
+      { type: 'favourite', createdAt: '2026-10-07T11:59:00Z', status: { id: 's1' }, account: { username: 'b' }, _key: '2', _instanceId: 'i' },
+      { type: 'favourite', createdAt: '2026-10-07T11:58:00Z', status: { id: 's1' }, account: { username: 'c' }, _key: '3', _instanceId: 'i' },
+      { type: 'reblog', createdAt: '2026-10-07T11:57:00Z', status: { id: 's1' }, account: { username: 'd' }, _key: '4', _instanceId: 'i' },
+    ])
+    expect(collapsed).toHaveLength(2)
+    expect(collapsed[0]!._groupCount).toBe(3)
+    expect(collapsed[0]!._groupedKeys).toEqual(['2', '3'])
+    expect(groupActorLabel('Alice', 4)).toBe('Alice and 3 others')
   })
 })
 

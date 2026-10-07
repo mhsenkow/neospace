@@ -300,7 +300,106 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /** Other tabs changed accounts — reload after a short debounce */
+    /**
+     * Cross-tab sync: merge remote instances by id instead of wiping local state.
+     * Preserves in-flight UI fields (isConnecting, clientSecret) on matching ids.
+     */
+    mergeFromStorage() {
+      if (typeof window === 'undefined') return
+
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY)
+        if (!saved) return
+        const data = unwrapStoragePayload(JSON.parse(saved))
+        if (!data) return
+
+        const raw = ((data.instances as ConnectedInstance[]) || []).map((i: ConnectedInstance) => ({
+          ...i,
+          clientSecret: null,
+          isConnecting: false,
+          error: null,
+        })) as ConnectedInstance[]
+
+        const seen = new Map<string, ConnectedInstance>()
+        const remoteKept: ConnectedInstance[] = []
+        for (const inst of raw) {
+          const urlKey = (inst.url || '').replace(/\/+$/, '').toLowerCase()
+          if (!urlKey) continue
+          const userKey = inst.user?.id || inst.id
+          const key = `${urlKey}::${userKey}`
+          const prev = seen.get(key)
+          if (!prev) {
+            seen.set(key, inst)
+            remoteKept.push(inst)
+            continue
+          }
+          if (
+            (!!inst.accessToken && !prev.accessToken) ||
+            (!!inst.user && !prev.user)
+          ) {
+            const idx = remoteKept.indexOf(prev)
+            if (idx !== -1) remoteKept[idx] = { ...prev, ...inst, url: prev.url, id: prev.id }
+            seen.set(key, remoteKept[idx]!)
+          }
+        }
+
+        const localById = new Map(this.instances.map((i) => [i.id, i]))
+        const merged: ConnectedInstance[] = []
+        for (const remote of remoteKept) {
+          const local = localById.get(remote.id)
+          if (local) {
+            merged.push({
+              ...remote,
+              // Keep tab-local ephemeral / session-only fields
+              isConnecting: local.isConnecting,
+              error: local.isConnecting ? local.error : remote.error,
+              clientSecret: local.clientSecret ?? remote.clientSecret,
+            })
+          } else {
+            merged.push(remote)
+          }
+        }
+
+        this.instances = merged
+
+        const remoteFilter = (data.activeInstanceFilter as string | null) || null
+        const remoteActive = (data.activeAccountId as string | null) || null
+        const remotePrimary = (data.primaryAccountId as string | null) || null
+
+        if (
+          remoteFilter &&
+          this.instances.some((i) => i.id === remoteFilter)
+        ) {
+          this.activeInstanceFilter = remoteFilter
+        } else if (
+          this.activeInstanceFilter &&
+          !this.instances.some((i) => i.id === this.activeInstanceFilter)
+        ) {
+          this.activeInstanceFilter = null
+        }
+
+        if (remoteActive && this.instances.some((i) => i.id === remoteActive)) {
+          this.activeAccountId = remoteActive
+        } else if (
+          this.activeAccountId &&
+          !this.instances.some((i) => i.id === this.activeAccountId)
+        ) {
+          this.activeAccountId = null
+        }
+
+        if (remotePrimary && this.instances.some((i) => i.id === remotePrimary)) {
+          this.primaryAccountId = remotePrimary
+        }
+
+        this.ensurePrimaryAccount()
+        clearClientCache()
+      } catch (e) {
+        logError('Failed to merge instances from storage:', e)
+        this.loadFromStorage()
+      }
+    },
+
+    /** Other tabs changed accounts — merge by id after a short debounce */
     bindStorageListener() {
       if (typeof window === 'undefined' || storageListenerBound) return
       storageListenerBound = true
@@ -309,7 +408,7 @@ export const useInstancesStore = defineStore('instances', {
         if (storageReloadTimer) clearTimeout(storageReloadTimer)
         storageReloadTimer = setTimeout(() => {
           storageReloadTimer = null
-          this.loadFromStorage()
+          this.mergeFromStorage()
         }, 200)
       })
     },

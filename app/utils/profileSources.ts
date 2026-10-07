@@ -196,9 +196,10 @@ export function mergePresenceIntoFields(
     const raw = extractHttpUrl(f.value || '') || stripHtml(f.value || '').trim()
     if (!raw) continue
     const byName = kindFromFieldName(f.name || '')
-    const kind = byName || kindFromUrl(raw)
+    const fromUrl = kindFromUrl(raw)
+    const kind = byName || fromUrl
     if (!kind || kind === 'mastodon') {
-      other.push({ name: f.name || 'Other', value: raw })
+      other.push({ name: f.name?.trim() || 'Other', value: raw })
       continue
     }
     const href = normalizePresenceInput(kind, raw)

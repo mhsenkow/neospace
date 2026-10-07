@@ -14,10 +14,19 @@ const props = defineProps<{
   showMeta?: boolean
   /** Optional day chip above this bubble */
   dayLabel?: string | null
+  /** Optimistic send state for own bubbles */
+  delivery?: 'pending' | 'failed' | 'sent'
+}>()
+
+const emit = defineEmits<{
+  retry: []
 }>()
 
 const overlay = useOverlayStore()
 const revealed = ref(false)
+
+const isPending = computed(() => props.delivery === 'pending')
+const isFailed = computed(() => props.delivery === 'failed')
 
 /** Drop leading @handles so bubbles read like chat, not posts */
 const bubbleHtml = computed(() => {
@@ -95,8 +104,11 @@ const mediaButtonLabel = (item: mastodon.v1.MediaAttachment) => {
       'msg-bubble--mine': mine,
       'msg-bubble--theirs': !mine,
       'msg-bubble--meta': showMeta,
+      'msg-bubble--pending': isPending,
+      'msg-bubble--failed': isFailed,
     }"
-    :aria-label="`${speakerLabel}, ${timeLabel}`"
+    :aria-label="`${speakerLabel}, ${timeLabel}${isPending ? ', sending' : isFailed ? ', not delivered' : ''}`"
+    :aria-busy="isPending || undefined"
   >
     <span class="sr-only">{{ speakerLabel }}</span>
 
@@ -167,7 +179,20 @@ const mediaButtonLabel = (item: mastodon.v1.MediaAttachment) => {
           </div>
         </template>
 
-        <time class="msg-bubble__time" :datetime="status.createdAt">{{ timeLabel }}</time>
+        <time
+          v-if="!isPending && !isFailed"
+          class="msg-bubble__time"
+          :datetime="status.createdAt"
+        >{{ timeLabel }}</time>
+        <p v-else-if="isPending" class="msg-bubble__delivery" role="status">Sending…</p>
+        <button
+          v-else
+          type="button"
+          class="msg-bubble__delivery msg-bubble__delivery--failed"
+          @click="emit('retry')"
+        >
+          Not delivered · Retry
+        </button>
       </div>
     </div>
   </article>
@@ -325,6 +350,29 @@ const mediaButtonLabel = (item: mastodon.v1.MediaAttachment) => {
 
   &--mine &__time {
     text-align: right;
+  }
+
+  &--pending &__body {
+    opacity: 0.72;
+  }
+
+  &__delivery {
+    margin: 0;
+    padding: 0 0.35rem;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 0.6875rem;
+    color: var(--neo-text-tertiary);
+    text-align: right;
+
+    &--failed {
+      color: var(--neo-danger, #c44);
+      cursor: pointer;
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
   }
 }
 </style>

@@ -6,6 +6,7 @@
  * but presented as a cohesive group experience.
  */
 
+import type { mastodon } from 'masto'
 import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore } from '~/stores/columns'
@@ -42,7 +43,7 @@ const displayGroup = computed(() => {
 const isJoining = ref(false)
 const isLeaving = ref(false)
 
-const onGroupPosted = (status: import('masto').mastodon.v1.Status) => {
+const onGroupPosted = (status: mastodon.v1.Status) => {
   groupsStore.prependToTimeline(tag.value, status)
 }
 

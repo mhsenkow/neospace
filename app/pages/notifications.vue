@@ -4,6 +4,7 @@ import { useInstancesStore } from '~/stores/instances'
 import type { mastodon } from 'masto'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
+import { groupActorLabel } from '~/utils/notifGroup'
 import type { NeoIconName } from '~/utils/neoIcons'
 
 const notificationsStore = useNotificationsStore()
@@ -102,8 +103,19 @@ const handleMarkRead = async () => {
   actionsMenuOpen.value = false
 }
 
-const handleDismiss = (id: string) => {
-  notificationsStore.dismissNotification(id)
+const handleDismiss = (notif: { _key: string; _groupedKeys?: string[] }) => {
+  notificationsStore.dismissNotification(notif._key)
+  for (const key of notif._groupedKeys || []) {
+    notificationsStore.dismissNotification(key)
+  }
+}
+
+const actorLabel = (notif: {
+  account?: { displayName?: string | null; username?: string } | null
+  _groupCount?: number
+}) => {
+  const name = notif.account?.displayName || notif.account?.username || 'Someone'
+  return groupActorLabel(name, notif._groupCount || 1)
 }
 
 const showAccountHost = computed(() => instancesStore.authenticatedInstances.length > 1)
@@ -387,7 +399,7 @@ onDeactivated(() => {
                       class="notif-item__name"
                       @click="openNotifProfile(notif)"
                     >
-                      {{ notif.account.displayName || notif.account.username }}
+                      {{ actorLabel(notif) }}
                     </button>
                     <button
                       type="button"
@@ -452,7 +464,7 @@ onDeactivated(() => {
                 class="notif-item__dismiss"
                 aria-label="Dismiss notification"
                 title="Dismiss"
-                @click="handleDismiss(notif._key)"
+                @click="handleDismiss(notif)"
               >
                 <NeoIcon name="x" :size="14" :stroke="2" />
               </button>
