@@ -1203,7 +1203,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         padding: 2.5rem var(--flip-pad-inline) 5.5rem;
       }
 
-      .status-header {
+      :deep(.status-header) {
         order: 1;
         justify-content: var(--flip-items);
         padding: 0 0 0.85rem;
@@ -1222,12 +1222,12 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         .status-time {
           display: none;
         }
+      }
 
-        .status-menu-container {
-          position: absolute;
-          right: 0.5rem;
-          top: 0.65rem;
-        }
+      .status-menu-container {
+        position: absolute;
+        right: 0.5rem;
+        top: 0.65rem;
       }
 
       .status-content-wrap,
@@ -1507,76 +1507,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
   overflow: visible;
 }
 
-// Header
-.status-header {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  max-width: 100%;
-  overflow: visible;
-}
-
-.status-author {
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-  text-decoration: none;
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  min-height: 32px;
-  padding: 0.15rem 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  -webkit-tap-highlight-color: transparent;
-
-  &:hover .status-display-name {
-    text-decoration: underline;
-  }
-}
-
-.status-display-name {
-  font-weight: 600;
-  font-size: 0.9375rem;
-  color: var(--neo-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-
-  :deep(img.emoji) {
-    height: 1em;
-    vertical-align: middle;
-  }
-}
-
-.status-handle {
-  flex-shrink: 1;
-  min-width: 0;
-  font-size: 0.8125rem;
-  font-weight: 400;
-  color: var(--neo-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 10rem;
-}
-
-.status-time {
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-  white-space: nowrap;
-  text-decoration: none;
-  flex-shrink: 0;
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
+// Header layout lives in PostHeader.vue (scoped there after extract)
 
 // ========================================
 // Three-dot menu
