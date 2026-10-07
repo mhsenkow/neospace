@@ -13,12 +13,14 @@ import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore, MAX_COLUMNS, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 import { useSettingsStore } from '~/stores/settings'
+import { THEME_OPTIONS, UI_OPTIONS, resolveTheme } from '~/utils/appearance'
 
 const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
+const { setBoardPortal } = useBoardPortal()
 const router = useRouter()
 
 const addMenuOpen = ref(false)
@@ -196,25 +198,50 @@ const syncActiveColumnFromScroll = () => {
 let wheelIdleTimer = 0
 let wheelArmed = false
 
+const portalThemeLabel = computed(() => {
+  const id = resolveTheme(settingsStore.localPreferences.theme)
+  return THEME_OPTIONS.find((t) => t.id === id)?.label || id
+})
+
+const portalUiLabel = computed(() => {
+  const id = settingsStore.localPreferences.ui
+  return UI_OPTIONS.find((u) => u.id === id)?.label || id
+})
+
+const portalUser = computed(() => instancesStore.currentUser)
+
+const portalGroupChips = computed(() => {
+  const joined = groupsStore.joinedGroups.slice(0, 6)
+  if (joined.length) return joined
+  return groupsStore.recommendedGroups.slice(0, 6)
+})
+
+const syncBoardPortalFromSlide = (index: number) => {
+  if (!isMobileUi.value) {
+    setBoardPortal(null)
+    return
+  }
+  const feeds = columnsStore.columns.length
+  if (index === 0) setBoardPortal('settings')
+  else if (index === 1) setBoardPortal('profile')
+  else if (index >= EDGE_LEFT + feeds) setBoardPortal('communities')
+  else setBoardPortal(null)
+}
+
 const openPortal = async (kind: 'settings' | 'profile' | 'communities') => {
   if (portalActionLock) return
   portalActionLock = true
   try {
     if (kind === 'settings') {
       settingsStore.open()
-      scrollToColumn(0, 'smooth')
       return
     }
-    // Park on nearest feed so Back lands on a real column
     if (kind === 'profile') {
-      scrollToColumn(0, 'auto')
       await router.push(instancesStore.isAuthenticated ? '/profile' : '/login')
       return
     }
-    scrollToColumn(Math.max(0, columnsStore.columns.length - 1), 'auto')
     await router.push('/groups')
   } finally {
-    // Allow another edge settle after navigation/modal settles
     window.setTimeout(() => {
       portalActionLock = false
     }, 400)
@@ -231,16 +258,11 @@ const settleCarousel = (slideIndex: number, behavior: ScrollBehavior = 'smooth')
   const maxSlide = EDGE_LEFT + feeds + EDGE_RIGHT - 1
   const idx = clamp(slideIndex, 0, maxSlide)
 
-  if (idx === 0) {
-    void openPortal('settings')
-    return
-  }
-  if (idx === 1) {
-    void openPortal('profile')
-    return
-  }
-  if (idx >= EDGE_LEFT + feeds) {
-    void openPortal('communities')
+  // Edge portals stay parked (filled cards + chrome hints) — CTA opens the destination
+  if (idx === 0 || idx === 1 || idx >= EDGE_LEFT + feeds) {
+    carouselSlideIndex.value = idx
+    syncBoardPortalFromSlide(idx)
+    scrollToSlide(idx, behavior)
     return
   }
   scrollToColumn(idx - EDGE_LEFT, behavior)
@@ -295,6 +317,7 @@ const onColumnsScroll = () => {
 
   const index = Math.round(el.scrollLeft / el.clientWidth)
   carouselSlideIndex.value = index
+  syncBoardPortalFromSlide(index)
   const feeds = columnsStore.columns.length
   // Only remap tab highlight while parked on a real feed
   if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
@@ -530,6 +553,15 @@ watch(
   },
 )
 
+/** Re-park on the active feed after layout chrome returns (e.g. back from Messages). */
+const restoreFeedPark = () => {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      scrollToColumn(activeColumnIndex.value, 'auto')
+    })
+  })
+}
+
 onMounted(async () => {
   await instancesStore.initialize()
   columnsStore.initialize()
@@ -554,7 +586,17 @@ onMounted(async () => {
   })
 })
 
+onActivated(() => {
+  // keepalive: onMounted won't re-run; subview back can leave scroll at Settings (slide 0)
+  restoreFeedPark()
+})
+
+onDeactivated(() => {
+  setBoardPortal(null)
+})
+
 onUnmounted(() => {
+  setBoardPortal(null)
   document.removeEventListener('click', closeAddMenu)
   unbindCarouselGestures()
   mobileMq?.removeEventListener('change', syncMobileUi)
@@ -725,27 +767,75 @@ useHead({ title: 'Home | NeoSpace' })
       <!-- Mobile edge: keep swiping left → Profile, then Settings -->
       <aside
         v-if="isMobileUi"
-        class="feed-portal"
+        class="feed-portal feed-portal--settings"
         aria-label="Settings"
       >
+        <p class="feed-portal__kicker">Edge</p>
         <h2 class="feed-portal__title">Settings</h2>
-        <p class="feed-portal__body">Appearance and defaults.</p>
+        <p class="feed-portal__body">Appearance, posting defaults, and accounts.</p>
+
+        <div class="feed-portal__panel">
+          <button
+            type="button"
+            class="feed-portal__row"
+            @click="settingsStore.cycleTheme()"
+          >
+            <span class="feed-portal__swatch" aria-hidden="true" />
+            <span class="feed-portal__row-text">
+              <strong>Theme</strong>
+              <span>{{ portalThemeLabel }}</span>
+            </span>
+            <span class="feed-portal__row-action">Tap to cycle</span>
+          </button>
+          <button
+            type="button"
+            class="feed-portal__row"
+            @click="settingsStore.cycleUi()"
+          >
+            <NeoIcon name="settings" :size="18" :stroke="1.75" />
+            <span class="feed-portal__row-text">
+              <strong>Chrome</strong>
+              <span>{{ portalUiLabel }}</span>
+            </span>
+            <span class="feed-portal__row-action">Tap to cycle</span>
+          </button>
+        </div>
+
         <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('settings')">
-          Open
+          Open settings
         </button>
       </aside>
 
       <aside
         v-if="isMobileUi"
-        class="feed-portal"
+        class="feed-portal feed-portal--profile"
         aria-label="Profile"
       >
+        <p class="feed-portal__kicker">Edge</p>
         <h2 class="feed-portal__title">Profile</h2>
-        <p class="feed-portal__body">
-          {{ instancesStore.isAuthenticated ? 'Your posts and follows.' : 'Sign in to continue.' }}
+
+        <div v-if="portalUser" class="feed-portal__identity">
+          <img
+            :src="portalUser.avatar"
+            alt=""
+            class="feed-portal__avatar"
+          />
+          <div class="feed-portal__who">
+            <strong>{{ portalUser.displayName || portalUser.username }}</strong>
+            <span>@{{ portalUser.acct }}</span>
+          </div>
+          <p class="feed-portal__stats">
+            <span><b>{{ portalUser.statusesCount ?? 0 }}</b> posts</span>
+            <span><b>{{ portalUser.followingCount ?? 0 }}</b> following</span>
+            <span><b>{{ portalUser.followersCount ?? 0 }}</b> followers</span>
+          </p>
+        </div>
+        <p v-else class="feed-portal__body">
+          Sign in to post, follow people, and keep your layout.
         </p>
+
         <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('profile')">
-          {{ instancesStore.isAuthenticated ? 'Open' : 'Sign in' }}
+          {{ portalUser ? 'Open profile' : 'Sign in' }}
         </button>
       </aside>
 
@@ -798,13 +888,34 @@ useHead({ title: 'Home | NeoSpace' })
       <!-- Mobile edge: past the last feed → find communities -->
       <aside
         v-if="isMobileUi"
-        class="feed-portal"
+        class="feed-portal feed-portal--communities"
         aria-label="Find communities"
       >
+        <p class="feed-portal__kicker">Edge</p>
         <h2 class="feed-portal__title">Groups</h2>
-        <p class="feed-portal__body">Communities and tags.</p>
+        <p class="feed-portal__body">
+          {{
+            groupsStore.joinedGroups.length
+              ? 'Communities you follow — swipe back for feeds.'
+              : 'Find communities and tags to follow.'
+          }}
+        </p>
+
+        <div v-if="portalGroupChips.length" class="feed-portal__chips">
+          <button
+            v-for="group in portalGroupChips"
+            :key="group.tag"
+            type="button"
+            class="feed-portal__chip"
+            @click="router.push(`/groups/${encodeURIComponent(group.tag)}`)"
+          >
+            <span aria-hidden="true">{{ group.icon }}</span>
+            {{ group.name }}
+          </button>
+        </div>
+
         <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('communities')">
-          Browse
+          Browse groups
         </button>
       </aside>
 
@@ -947,7 +1058,7 @@ useHead({ title: 'Home | NeoSpace' })
   @media (max-width: 1023px) {
     flex-direction: column;
     height: calc(
-      100dvh - var(--neo-mobile-chrome-top, 52px) - var(--neo-mobile-nav-h, 56px) -
+      100dvh - var(--neo-mobile-chrome-top, 52px) - var(--neo-mobile-nav-h, 64px) -
         env(safe-area-inset-bottom, 0px)
     );
   }
@@ -995,6 +1106,15 @@ useHead({ title: 'Home | NeoSpace' })
   // Let iPad finger + trackpad claim horizontal; nested feeds keep pan-y for vertical
   touch-action: pan-x pan-y;
   scrollbar-width: thin;
+  // Keep first column clear of the fixed sidebar when board scrolls
+  scroll-padding-inline-start: 0.5rem;
+  padding-inline-start: 0.25rem;
+  box-sizing: border-box;
+
+  @media (min-width: 1024px) {
+    scroll-padding-inline-start: 0.75rem;
+    padding-inline-start: 0.5rem;
+  }
 
   &--swiping {
     scroll-snap-type: none !important;
@@ -1176,7 +1296,152 @@ useHead({ title: 'Home | NeoSpace' })
   }
 
   &__cta {
-    margin-top: 0.5rem;
+    margin-top: 0.35rem;
+  }
+
+  &__panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: min(100%, 20rem);
+    margin-top: 0.15rem;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    width: 100%;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: 12px;
+    background: var(--neo-bg-card, var(--neo-bg-secondary));
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
+  }
+
+  &__swatch {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 30% 30%, var(--neo-accent) 0 35%, transparent 36%),
+      linear-gradient(135deg, var(--neo-bg-card) 45%, var(--neo-text-primary) 46%);
+    border: 1.5px solid var(--neo-border-color-dark);
+  }
+
+  &__row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    flex: 1;
+
+    strong {
+      font-size: 0.8125rem;
+      font-weight: 650;
+    }
+
+    span {
+      font-size: 0.8125rem;
+      color: var(--neo-text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  &__row-action {
+    flex-shrink: 0;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+  }
+
+  &__identity {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.65rem;
+    width: min(100%, 20rem);
+  }
+
+  &__avatar {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--neo-border-color);
+    background: var(--neo-bg-tertiary);
+  }
+
+  &__who {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+
+    strong {
+      font-size: 1.125rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    span {
+      font-size: 0.875rem;
+      color: var(--neo-text-secondary);
+    }
+  }
+
+  &__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neo-text-secondary);
+
+    b {
+      color: var(--neo-text-primary);
+      font-weight: 650;
+    }
+  }
+
+  &__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    width: min(100%, 22rem);
+  }
+
+  &__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-card, var(--neo-bg-secondary));
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 550;
+    cursor: pointer;
+
+    &:hover {
+      border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
+      background: var(--neo-accent-soft);
+    }
   }
 }
 

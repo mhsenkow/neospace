@@ -38,6 +38,7 @@ const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
+const { boardPortal } = useBoardPortal()
 const router = useRouter()
 const route = useRoute()
 /** Pages may redirect `/messages` → `/messages/`; normalize before route checks. */
@@ -535,6 +536,9 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
       'neo-layout--profile': isProfileRoute,
       'neo-layout--subview': isMobileSubview,
       'neo-layout--rail': sidebarRail,
+      'neo-layout--portal-settings': boardPortal === 'settings',
+      'neo-layout--portal-profile': boardPortal === 'profile',
+      'neo-layout--portal-communities': boardPortal === 'communities',
     }"
   >
     <a href="#main-content" class="skip-link">Skip to content</a>
@@ -904,6 +908,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
       <div class="mobile-header__start">
         <button
           class="mobile-header__btn"
+          :class="{ 'chrome-hint': boardPortal === 'settings' || boardPortal === 'communities' }"
           @click="mobileMenuOpen = !mobileMenuOpen"
           aria-label="Menu"
           type="button"
@@ -926,6 +931,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         </NuxtLink>
         <button
           class="mobile-header__btn"
+          :class="{ 'chrome-hint': boardPortal === 'settings' }"
           @click="cycleTheme"
           aria-label="Theme"
           type="button"
@@ -965,7 +971,12 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         <nav class="mobile-sidebar__nav">
           <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
           <NuxtLink to="/explore" class="mobile-sidebar__link" @click="closeMobileMenu">Search</NuxtLink>
-          <NuxtLink to="/groups" class="mobile-sidebar__link" @click="closeMobileMenu">Groups</NuxtLink>
+          <NuxtLink
+            to="/groups"
+            class="mobile-sidebar__link"
+            :class="{ 'chrome-hint': boardPortal === 'communities' }"
+            @click="closeMobileMenu"
+          >Groups</NuxtLink>
           <NuxtLink
             v-if="instancesStore.hasAuthenticatedInstance"
             to="/messages"
@@ -1064,7 +1075,12 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         <div class="mobile-sidebar__spacer"></div>
 
         <div class="mobile-sidebar__footer">
-          <button class="mobile-sidebar__action" @click="settingsStore.open(); closeMobileMenu()" type="button">
+          <button
+            class="mobile-sidebar__action"
+            :class="{ 'chrome-hint': boardPortal === 'settings' }"
+            @click="settingsStore.open(); closeMobileMenu()"
+            type="button"
+          >
             Settings
           </button>
           <button
@@ -1178,7 +1194,10 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         v-else
         to="/groups"
         class="mobile-nav__item"
-        :class="{ active: route.path.startsWith('/groups') }"
+        :class="{
+          active: route.path.startsWith('/groups'),
+          'chrome-hint': boardPortal === 'communities',
+        }"
         aria-label="Groups"
         :aria-current="route.path.startsWith('/groups') ? 'page' : undefined"
       >
@@ -1190,12 +1209,16 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         v-if="instancesStore.hasAuthenticatedInstance"
         placement="nav"
         compact
+        :class="{ 'chrome-hint': boardPortal === 'profile' }"
       />
       <NuxtLink
         v-else
         to="/login"
         class="mobile-nav__item"
-        :class="{ active: route.path === '/login' }"
+        :class="{
+          active: route.path === '/login',
+          'chrome-hint': boardPortal === 'profile',
+        }"
         aria-label="Sign in"
       >
         <NeoIcon name="user" :size="22" :stroke="1.5" />
@@ -1986,6 +2009,41 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
       radial-gradient(circle at 30% 30%, var(--neo-accent) 0 35%, transparent 36%),
       linear-gradient(135deg, var(--neo-bg-card) 45%, var(--neo-text-primary) 46%);
     border: 1.5px solid var(--neo-border-color-dark);
+  }
+}
+
+/* Edge-portal cue: pulse the matching chrome control */
+.chrome-hint {
+  color: var(--neo-accent) !important;
+  background: var(--neo-accent-soft) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
+  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
+}
+
+:deep(.acct-switch.chrome-hint .acct-switch__trigger) {
+  color: var(--neo-accent);
+  background: var(--neo-accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
+  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+@keyframes chrome-hint-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--neo-accent) 22%, transparent);
+  }
+}
+
+.neo-layout--portal-settings,
+.neo-layout--portal-profile,
+.neo-layout--portal-communities {
+  :deep(.mobile-feed-tabs) {
+    opacity: 0.45;
+    transition: opacity 0.2s ease;
   }
 }
 
