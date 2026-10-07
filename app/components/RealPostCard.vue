@@ -1120,7 +1120,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       position: relative;
     }
 
-    .status-header {
+    :deep(.status-header) {
       order: 2;
       padding: 0.65rem 4.25rem 0 1rem;
       align-items: center;
@@ -1166,7 +1166,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
     }
 
     &.status-card--flip-media .status-content-wrap,
-    &.status-card--flip-media .status-header {
+    &.status-card--flip-media :deep(.status-header) {
       background: linear-gradient(
         to top,
         color-mix(in srgb, var(--neo-bg-primary) 92%, transparent) 0%,
@@ -1331,25 +1331,25 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
 
     // Media Flip captions also honor alignment
     &.status-card--flip-media.status-card--flip-align-left {
-      .status-header,
+      :deep(.status-header),
       .status-content-wrap,
       .status-cw {
         text-align: left;
       }
 
-      .status-header {
+      :deep(.status-header) {
         justify-content: flex-start;
       }
     }
 
     &.status-card--flip-media.status-card--flip-align-right {
-      .status-header,
+      :deep(.status-header),
       .status-content-wrap,
       .status-cw {
         text-align: right;
       }
 
-      .status-header {
+      :deep(.status-header) {
         justify-content: flex-end;
 
         .status-author {
@@ -2086,11 +2086,11 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
 }
 
 // Chaos mode
-:global(.chaos-active) {
-  .status-display-name {
-    text-shadow: 0 0 5px currentColor;
-  }
+:global(.chaos-active .status-display-name) {
+  text-shadow: 0 0 5px currentColor;
+}
 
+:global(.chaos-active) {
   .status-action--liked,
   .status-action--boosted,
   .status-action--bookmarked {
