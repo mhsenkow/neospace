@@ -538,6 +538,9 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
       'neo-layout--rail': sidebarRail,
       'neo-layout--portal-settings': boardPortal === 'settings',
       'neo-layout--portal-profile': boardPortal === 'profile',
+      'neo-layout--portal-search': boardPortal === 'search',
+      'neo-layout--portal-inbox': boardPortal === 'inbox',
+      'neo-layout--portal-activity': boardPortal === 'activity',
       'neo-layout--portal-communities': boardPortal === 'communities',
     }"
   >
@@ -923,11 +926,14 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         <NuxtLink
           to="/explore"
           class="mobile-header__btn"
-          :class="{ 'mobile-header__btn--active': route.path === '/explore' }"
+          :class="{
+            'mobile-header__btn--active': route.path === '/explore',
+            'chrome-hint': boardPortal === 'search',
+          }"
           aria-label="Search"
           title="Search"
         >
-          <NeoIcon name="search" :size="20" :stroke="route.path === '/explore' ? 2 : 1.75" />
+          <NeoIcon name="search" :size="20" :stroke="route.path === '/explore' || boardPortal === 'search' ? 2 : 1.75" />
         </NuxtLink>
         <button
           class="mobile-header__btn"
@@ -970,7 +976,12 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
 
         <nav class="mobile-sidebar__nav">
           <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
-          <NuxtLink to="/explore" class="mobile-sidebar__link" @click="closeMobileMenu">Search</NuxtLink>
+          <NuxtLink
+            to="/explore"
+            class="mobile-sidebar__link"
+            :class="{ 'chrome-hint': boardPortal === 'search' }"
+            @click="closeMobileMenu"
+          >Search</NuxtLink>
           <NuxtLink
             to="/groups"
             class="mobile-sidebar__link"
@@ -981,6 +992,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             v-if="instancesStore.hasAuthenticatedInstance"
             to="/messages"
             class="mobile-sidebar__link"
+            :class="{ 'chrome-hint': boardPortal === 'inbox' }"
             @click="closeMobileMenu"
           >
             Messages
@@ -990,6 +1002,7 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
             v-if="instancesStore.hasAuthenticatedInstance"
             to="/notifications"
             class="mobile-sidebar__link"
+            :class="{ 'chrome-hint': boardPortal === 'activity' }"
             @click="closeMobileMenu"
           >
             Notifications
@@ -1137,15 +1150,18 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         v-if="instancesStore.hasAuthenticatedInstance"
         to="/messages"
         class="mobile-nav__item mobile-nav__item--badge"
-        :class="{ active: route.path === '/messages' }"
+        :class="{
+          active: path === '/messages',
+          'chrome-hint': boardPortal === 'inbox',
+        }"
         :aria-label="messagesBadge ? `Messages, ${messagesBadge} unread` : 'Messages'"
-        :aria-current="route.path === '/messages' ? 'page' : undefined"
+        :aria-current="path === '/messages' ? 'page' : undefined"
       >
         <NeoIcon
           name="message"
           :size="22"
-          :stroke="route.path === '/messages' ? 2 : 1.5"
-          :filled="route.path === '/messages'"
+          :stroke="path === '/messages' || boardPortal === 'inbox' ? 2 : 1.5"
+          :filled="path === '/messages'"
         />
         <span class="mobile-nav__label">Inbox</span>
         <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
@@ -1154,10 +1170,13 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         v-else
         to="/login"
         class="mobile-nav__item"
-        :class="{ active: route.path === '/login' }"
+        :class="{
+          active: path === '/login',
+          'chrome-hint': boardPortal === 'inbox',
+        }"
         aria-label="Messages — sign in"
       >
-        <NeoIcon name="message" :size="22" :stroke="1.5" />
+        <NeoIcon name="message" :size="22" :stroke="boardPortal === 'inbox' ? 2 : 1.5" />
         <span class="mobile-nav__label">Inbox</span>
       </NuxtLink>
 
@@ -1177,15 +1196,18 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
         v-if="instancesStore.hasAuthenticatedInstance"
         to="/notifications"
         class="mobile-nav__item mobile-nav__item--badge"
-        :class="{ active: route.path === '/notifications' }"
+        :class="{
+          active: path === '/notifications',
+          'chrome-hint': boardPortal === 'activity',
+        }"
         :aria-label="notifBadge ? `Activity, ${notifBadge} unread` : 'Activity'"
-        :aria-current="route.path === '/notifications' ? 'page' : undefined"
+        :aria-current="path === '/notifications' ? 'page' : undefined"
       >
         <NeoIcon
           name="heart"
           :size="22"
-          :stroke="route.path === '/notifications' ? 2 : 1.5"
-          :filled="route.path === '/notifications' && route.query.filter !== 'mention'"
+          :stroke="path === '/notifications' || boardPortal === 'activity' ? 2 : 1.5"
+          :filled="path === '/notifications' && route.query.filter !== 'mention'"
         />
         <span class="mobile-nav__label">Activity</span>
         <span v-if="notifBadge" class="nav-badge" aria-hidden="true">{{ notifBadge }}</span>
@@ -2040,6 +2062,9 @@ useFocusTrap(mobileSidebarRef, mobileMenuOpen, {
 
 .neo-layout--portal-settings,
 .neo-layout--portal-profile,
+.neo-layout--portal-search,
+.neo-layout--portal-inbox,
+.neo-layout--portal-activity,
 .neo-layout--portal-communities {
   :deep(.mobile-feed-tabs) {
     opacity: 0.45;

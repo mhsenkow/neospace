@@ -13,13 +13,20 @@ import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore, MAX_COLUMNS, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 import { useSettingsStore } from '~/stores/settings'
+import { useConversationsStore } from '~/stores/conversations'
+import { useNotificationsStore } from '~/stores/notifications'
 import { THEME_OPTIONS, UI_OPTIONS, resolveTheme } from '~/utils/appearance'
+import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
+import { BOARD_RIGHT_PORTALS, type BoardPortal } from '~/composables/useBoardPortal'
+import { participantLabel } from '~/utils/dmHelpers'
 
 const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
+const conversationsStore = useConversationsStore()
+const notificationsStore = useNotificationsStore()
 const { setBoardPortal } = useBoardPortal()
 const router = useRouter()
 
@@ -30,12 +37,13 @@ const activeColumnIndex = ref(0)
 const draggingColumnId = ref<string | null>(null)
 const dropTargetColumnId = ref<string | null>(null)
 
-/** Mobile-only edge slides: Settings → Profile → feeds → Communities */
+/** Mobile-only: Settings → Profile → feeds → Search → Inbox → Activity → Groups */
 const MOBILE_CAROUSEL_MQ = '(max-width: 1023px)'
 const EDGE_LEFT = 2
-const EDGE_RIGHT = 1
+const EDGE_RIGHT = BOARD_RIGHT_PORTALS.length
 const isMobileUi = ref(false)
 const carouselSlideIndex = ref(0)
+const portalSearch = ref('')
 let portalActionLock = false
 let mobileMq: MediaQueryList | null = null
 
@@ -56,11 +64,27 @@ const FEED_LABELS: Record<string, string> = {
   messages: 'Messages',
 }
 
+const localHostLabel = computed(() => {
+  const filteredId = instancesStore.activeInstanceFilter
+  const filtered = filteredId
+    ? instancesStore.instances.find((i) => i.id === filteredId)
+    : null
+  const preferred =
+    filtered?.url ||
+    instancesStore.activeAccount?.url ||
+    instancesStore.instances[0]?.url ||
+    resolvePublicInstanceUrl()
+  return hostnameOf(preferred) || 'this server'
+})
+
 const columnTabLabels = computed(() =>
   columnsStore.columns.map((column) => {
     if (column.feedType === 'group' && column.groupTag) {
       const group = groupsStore.getGroup(column.groupTag)
       return group ? `${group.icon} ${group.name}` : `#${column.groupTag}`
+    }
+    if (column.feedType === 'local') {
+      return `Local (${localHostLabel.value})`
     }
     return FEED_LABELS[column.feedType] ?? column.feedType
   }),
@@ -113,16 +137,6 @@ const moveColumnRight = (index: number) => {
   withActivePreserved(() => columnsStore.moveColumn(index, index + 1))
 }
 
-const closeAddMenu = (e: MouseEvent) => {
-  const target = e.target as HTMLElement
-  if (
-    !target.closest('.add-column-panel') &&
-    !target.closest('.mobile-feed-tabs')
-  ) {
-    addMenuOpen.value = false
-  }
-}
-
 const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
   const id = columnsStore.addColumn(feedType, groupTag)
   addMenuOpen.value = false
@@ -134,6 +148,10 @@ const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
     if (idx >= 0) scrollToColumn(idx)
   })
 }
+
+watch(addMenuOpen, (open) => {
+  if (!open) addGroupsExpanded.value = false
+})
 
 const feedTabsScroller = ref<HTMLElement | null>(null)
 
@@ -216,6 +234,42 @@ const portalGroupChips = computed(() => {
   return groupsStore.recommendedGroups.slice(0, 6)
 })
 
+const portalInboxRows = computed(() => {
+  const myId = instancesStore.currentUser?.id || ''
+  const myAcct = instancesStore.currentUser?.acct || ''
+  return conversationsStore.conversations.slice(0, 4).map((c) => ({
+    id: c.id,
+    label: participantLabel(c),
+    preview: conversationsStore.previewFor(c, myId, myAcct),
+    unread: !!c.unread,
+    statusId: c.lastStatus?.id || null,
+    avatar: c.accounts?.[0]?.avatar || '',
+  }))
+})
+
+const portalActivityRows = computed(() =>
+  notificationsStore.notifications.slice(0, 4).map((n) => {
+    const who = n.account?.displayName || n.account?.username || 'Someone'
+    const verb =
+      n.type === 'mention'
+        ? 'mentioned you'
+        : n.type === 'favourite'
+          ? 'liked your post'
+          : n.type === 'reblog'
+            ? 'boosted you'
+            : n.type === 'follow'
+              ? 'followed you'
+              : n.type === 'poll'
+                ? 'poll ended'
+                : 'interacted'
+    return {
+      id: n.id,
+      label: `${who} ${verb}`,
+      avatar: n.account?.avatar || '',
+    }
+  }),
+)
+
 const syncBoardPortalFromSlide = (index: number) => {
   if (!isMobileUi.value) {
     setBoardPortal(null)
@@ -224,11 +278,16 @@ const syncBoardPortalFromSlide = (index: number) => {
   const feeds = columnsStore.columns.length
   if (index === 0) setBoardPortal('settings')
   else if (index === 1) setBoardPortal('profile')
-  else if (index >= EDGE_LEFT + feeds) setBoardPortal('communities')
-  else setBoardPortal(null)
+  else if (index >= EDGE_LEFT + feeds) {
+    const ri = index - (EDGE_LEFT + feeds)
+    setBoardPortal((BOARD_RIGHT_PORTALS[ri] as BoardPortal) ?? null)
+  } else setBoardPortal(null)
 }
 
-const openPortal = async (kind: 'settings' | 'profile' | 'communities') => {
+const openPortal = async (
+  kind: Exclude<BoardPortal, null>,
+  opts?: { q?: string; filter?: string },
+) => {
   if (portalActionLock) return
   portalActionLock = true
   try {
@@ -240,12 +299,43 @@ const openPortal = async (kind: 'settings' | 'profile' | 'communities') => {
       await router.push(instancesStore.isAuthenticated ? '/profile' : '/login')
       return
     }
+    if (kind === 'search') {
+      const q = (opts?.q ?? portalSearch.value).trim()
+      await router.push(q ? { path: '/explore', query: { q } } : '/explore')
+      return
+    }
+    if (kind === 'inbox') {
+      await router.push(
+        instancesStore.hasAuthenticatedInstance ? '/messages' : '/login',
+      )
+      return
+    }
+    if (kind === 'activity') {
+      if (!instancesStore.hasAuthenticatedInstance) {
+        await router.push('/login')
+        return
+      }
+      await router.push(
+        opts?.filter
+          ? { path: '/notifications', query: { filter: opts.filter } }
+          : '/notifications',
+      )
+      return
+    }
     await router.push('/groups')
   } finally {
     window.setTimeout(() => {
       portalActionLock = false
     }, 400)
   }
+}
+
+const openInboxRow = async (statusId: string | null) => {
+  if (!statusId) {
+    await openPortal('inbox')
+    return
+  }
+  await router.push(`/status/${statusId}`)
 }
 
 const settleCarousel = (slideIndex: number, behavior: ScrollBehavior = 'smooth') => {
@@ -573,8 +663,6 @@ onMounted(async () => {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   }
 
-  document.addEventListener('click', closeAddMenu)
-
   mobileMq = window.matchMedia(MOBILE_CAROUSEL_MQ)
   isMobileUi.value = mobileMq.matches
   mobileMq.addEventListener('change', syncMobileUi)
@@ -597,7 +685,6 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   setBoardPortal(null)
-  document.removeEventListener('click', closeAddMenu)
   unbindCarouselGestures()
   mobileMq?.removeEventListener('change', syncMobileUi)
   mobileMq = null
@@ -697,43 +784,43 @@ useHead({ title: 'Home | NeoSpace' })
         </button>
 
         <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
-          <button
-            type="button"
-            class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__add-btn"
-            :title="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
-            aria-label="Add feed"
-            @click="addMenuOpen = !addMenuOpen"
+          <NeoMenu
+            v-model:open="addMenuOpen"
+            class="add-column-neo add-column-neo--mobile"
+            align="end"
+            :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-          </button>
-
-          <Transition name="add-menu">
-            <div v-if="addMenuOpen" class="add-column-menu add-column-menu--mobile">
+            <template #items>
               <span class="add-column-menu__title">Add Feed</span>
-              <button class="add-column-menu__item" @click="addColumn('home')">For You</button>
-              <button class="add-column-menu__item" @click="addColumn('local')">Local</button>
-              <button class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
-              <div class="add-column-menu__divider"></div>
-              <button class="add-column-menu__item" @click="addColumn('search')">Search</button>
-              <button class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">Local</button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
               <button
                 v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
                 class="add-column-menu__item"
                 @click="addColumn('notifications')"
               >Notifications</button>
               <button
                 v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
                 class="add-column-menu__item"
                 @click="addColumn('messages')"
               >Messages</button>
               <template v-if="groupsStore.joinedGroups.length > 0">
-                <div class="add-column-menu__divider"></div>
-                <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+                <div class="add-column-menu__divider" role="separator" />
+                <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
                   <span>Groups</span>
-                  <svg :class="{ 'rotated': addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 </button>
@@ -741,6 +828,8 @@ useHead({ title: 'Home | NeoSpace' })
                   <button
                     v-for="group in groupsStore.joinedGroups"
                     :key="group.tag"
+                    type="button"
+                    role="menuitem"
                     class="add-column-menu__item add-column-menu__item--group"
                     @click="addColumn('group', group.tag)"
                   >
@@ -753,8 +842,8 @@ useHead({ title: 'Home | NeoSpace' })
                 {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }}
                 <template v-if="instancesStore.isAuthenticated"> · syncs to your profile</template>
               </span>
-            </div>
-          </Transition>
+            </template>
+          </NeoMenu>
         </div>
       </div>
     </nav>
@@ -885,7 +974,151 @@ useHead({ title: 'Home | NeoSpace' })
         />
       </template>
 
-      <!-- Mobile edge: past the last feed → find communities -->
+      <!-- Mobile edge: past last feed → Search → Inbox → Activity → Groups -->
+      <aside
+        v-if="isMobileUi"
+        class="feed-portal feed-portal--search"
+        aria-label="Search"
+      >
+        <p class="feed-portal__kicker">Edge</p>
+        <h2 class="feed-portal__title">Search</h2>
+        <p class="feed-portal__body">People, posts, tags, and servers.</p>
+
+        <label class="feed-portal__search">
+          <span class="sr-only">Search the fediverse</span>
+          <NeoIcon name="search" :size="18" :stroke="1.75" />
+          <input
+            v-model="portalSearch"
+            type="search"
+            class="feed-portal__search-input"
+            placeholder="Search…"
+            autocomplete="off"
+            enterkeyhint="search"
+            @keydown.enter.prevent="openPortal('search')"
+          />
+        </label>
+
+        <div class="feed-portal__chips">
+          <button type="button" class="feed-portal__chip" @click="openPortal('search', { q: 'fediverse' })">
+            #fediverse
+          </button>
+          <button
+            type="button"
+            class="feed-portal__chip"
+            @click="router.push({ path: '/explore', query: { tab: 'people' } })"
+          >
+            People
+          </button>
+          <button
+            type="button"
+            class="feed-portal__chip"
+            @click="router.push({ path: '/explore', query: { tab: 'servers' } })"
+          >
+            Servers
+          </button>
+        </div>
+
+        <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('search')">
+          Open search
+        </button>
+      </aside>
+
+      <aside
+        v-if="isMobileUi"
+        class="feed-portal feed-portal--inbox"
+        aria-label="Inbox"
+      >
+        <p class="feed-portal__kicker">Edge</p>
+        <h2 class="feed-portal__title">
+          Inbox
+          <span v-if="conversationsStore.badgeLabel" class="feed-portal__badge">
+            {{ conversationsStore.badgeLabel }}
+          </span>
+        </h2>
+        <p class="feed-portal__body">
+          {{
+            instancesStore.hasAuthenticatedInstance
+              ? 'Direct messages and group chats.'
+              : 'Sign in to read and send messages.'
+          }}
+        </p>
+
+        <div v-if="portalInboxRows.length" class="feed-portal__list">
+          <button
+            v-for="row in portalInboxRows"
+            :key="row.id"
+            type="button"
+            class="feed-portal__list-row"
+            :class="{ 'feed-portal__list-row--unread': row.unread }"
+            @click="openInboxRow(row.statusId)"
+          >
+            <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" />
+            <span v-else class="feed-portal__list-avatar feed-portal__list-avatar--empty" />
+            <span class="feed-portal__row-text">
+              <strong>{{ row.label }}</strong>
+              <span>{{ row.preview }}</span>
+            </span>
+          </button>
+        </div>
+
+        <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('inbox')">
+          {{ instancesStore.hasAuthenticatedInstance ? 'Open inbox' : 'Sign in' }}
+        </button>
+      </aside>
+
+      <aside
+        v-if="isMobileUi"
+        class="feed-portal feed-portal--activity"
+        aria-label="Activity"
+      >
+        <p class="feed-portal__kicker">Edge</p>
+        <h2 class="feed-portal__title">
+          Activity
+          <span v-if="notificationsStore.badgeLabel" class="feed-portal__badge">
+            {{ notificationsStore.badgeLabel }}
+          </span>
+        </h2>
+        <p class="feed-portal__body">
+          {{
+            instancesStore.hasAuthenticatedInstance
+              ? 'Mentions, likes, boosts, and follows.'
+              : 'Sign in to see notifications.'
+          }}
+        </p>
+
+        <div v-if="instancesStore.hasAuthenticatedInstance" class="feed-portal__chips">
+          <button type="button" class="feed-portal__chip" @click="openPortal('activity', { filter: 'mention' })">
+            Mentions
+          </button>
+          <button type="button" class="feed-portal__chip" @click="openPortal('activity', { filter: 'favourite' })">
+            Likes
+          </button>
+          <button type="button" class="feed-portal__chip" @click="openPortal('activity', { filter: 'reblog' })">
+            Boosts
+          </button>
+        </div>
+
+        <div v-if="portalActivityRows.length" class="feed-portal__list">
+          <button
+            v-for="row in portalActivityRows"
+            :key="row.id"
+            type="button"
+            class="feed-portal__list-row"
+            @click="openPortal('activity')"
+          >
+            <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" />
+            <span v-else class="feed-portal__list-avatar feed-portal__list-avatar--empty" />
+            <span class="feed-portal__row-text">
+              <strong>{{ row.label }}</strong>
+            </span>
+          </button>
+        </div>
+
+        <button type="button" class="neo-btn neo-btn--primary feed-portal__cta" @click="openPortal('activity')">
+          {{ instancesStore.hasAuthenticatedInstance ? 'Open activity' : 'Sign in' }}
+        </button>
+      </aside>
+
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--communities"
@@ -928,29 +1161,25 @@ useHead({ title: 'Home | NeoSpace' })
       :class="{ 'add-column-panel--expanded': addMenuOpen }"
       @click.stop
     >
-      <button
-        type="button"
-        class="neo-btn neo-btn--tertiary neo-btn--icon add-column-btn"
-        :title="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
-        :aria-label="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
-        @click="addMenuOpen = !addMenuOpen"
+      <NeoMenu
+        v-model:open="addMenuOpen"
+        class="add-column-neo add-column-neo--desktop"
+        align="end"
+        :label="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
-      </button>
-
-      <Transition name="add-menu">
-        <div v-if="addMenuOpen" class="add-column-menu">
+        <template #items>
           <span class="add-column-menu__title">Add Column</span>
-          <button class="add-column-menu__item" @click="addColumn('home')">
+          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
             </svg>
             For You
           </button>
-          <button class="add-column-menu__item" @click="addColumn('local')">
+          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <circle cx="12" cy="12" r="10" />
               <line x1="2" y1="12" x2="22" y2="12" />
@@ -958,7 +1187,7 @@ useHead({ title: 'Home | NeoSpace' })
             </svg>
             Local
           </button>
-          <button class="add-column-menu__item" @click="addColumn('federated')">
+          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <circle cx="12" cy="12" r="10" />
               <path d="M2 12h20" />
@@ -966,16 +1195,15 @@ useHead({ title: 'Home | NeoSpace' })
             </svg>
             Federated
           </button>
-
-          <div class="add-column-menu__divider"></div>
-          <button class="add-column-menu__item" @click="addColumn('search')">
+          <div class="add-column-menu__divider" role="separator" />
+          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <circle cx="11" cy="11" r="8" />
               <path d="M21 21l-4.35-4.35" />
             </svg>
             Search
           </button>
-          <button class="add-column-menu__item" @click="addColumn('profile')">
+          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
               <circle cx="12" cy="7" r="4" />
@@ -984,6 +1212,8 @@ useHead({ title: 'Home | NeoSpace' })
           </button>
           <button
             v-if="instancesStore.hasAuthenticatedInstance"
+            type="button"
+            role="menuitem"
             class="add-column-menu__item"
             @click="addColumn('notifications')"
           >
@@ -995,6 +1225,8 @@ useHead({ title: 'Home | NeoSpace' })
           </button>
           <button
             v-if="instancesStore.hasAuthenticatedInstance"
+            type="button"
+            role="menuitem"
             class="add-column-menu__item"
             @click="addColumn('messages')"
           >
@@ -1003,12 +1235,11 @@ useHead({ title: 'Home | NeoSpace' })
             </svg>
             Messages
           </button>
-
           <template v-if="groupsStore.joinedGroups.length > 0">
-            <div class="add-column-menu__divider"></div>
-            <button class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+            <div class="add-column-menu__divider" role="separator" />
+            <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
               <span>Groups</span>
-              <svg :class="{ 'rotated': addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
@@ -1016,6 +1247,8 @@ useHead({ title: 'Home | NeoSpace' })
               <button
                 v-for="group in groupsStore.joinedGroups"
                 :key="group.tag"
+                type="button"
+                role="menuitem"
                 class="add-column-menu__item add-column-menu__item--group"
                 @click="addColumn('group', group.tag)"
               >
@@ -1024,13 +1257,12 @@ useHead({ title: 'Home | NeoSpace' })
               </button>
             </template>
           </template>
-
           <span class="add-column-menu__hint">
             {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns
             <template v-if="instancesStore.isAuthenticated"> · syncs to profile</template>
           </span>
-        </div>
-      </Transition>
+        </template>
+      </NeoMenu>
     </div>
   </div>
 </template>
@@ -1443,6 +1675,117 @@ useHead({ title: 'Home | NeoSpace' })
       background: var(--neo-accent-soft);
     }
   }
+
+  &__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    margin-left: 0.4rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: var(--neo-accent);
+    color: var(--neo-on-accent, #fff);
+    font-size: 0.75rem;
+    font-weight: 700;
+    vertical-align: middle;
+  }
+
+  &__search {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: min(100%, 22rem);
+    padding: 0.65rem 0.85rem;
+    border-radius: 12px;
+    border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-card, var(--neo-bg-secondary));
+    color: var(--neo-text-secondary);
+  }
+
+  &__search-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.9375rem;
+
+    &:focus {
+      outline: none;
+    }
+
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    width: min(100%, 22rem);
+  }
+
+  &__list-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    width: 100%;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: 12px;
+    background: var(--neo-bg-card, var(--neo-bg-secondary));
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
+
+    &--unread {
+      border-color: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
+      background: var(--neo-accent-soft);
+    }
+
+    &--static {
+      cursor: default;
+
+      &:hover {
+        border-color: var(--neo-border-color);
+        background: var(--neo-bg-card, var(--neo-bg-secondary));
+      }
+    }
+  }
+
+  &__list-avatar {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--neo-bg-tertiary);
+
+    &--empty {
+      display: block;
+    }
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 // ========================================
@@ -1644,35 +1987,50 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
-.add-column-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+.add-column-neo {
+  :deep(.neo-menu__trigger) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    color: var(--neo-text-secondary);
 
-  @media (hover: none), (pointer: coarse) {
-    width: 44px;
-    height: 44px;
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
+    }
+
+    @media (hover: none), (pointer: coarse) {
+      width: 44px;
+      height: 44px;
+    }
   }
-}
 
-.add-column-menu {
-  position: absolute;
-  top: 0.5rem;
-  right: calc(100% + 0.5rem);
-  width: 200px;
-  background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-  box-shadow: var(--neo-shadow-xl);
-  padding: 0.5rem;
-  z-index: 50;
+  :deep(.neo-menu__panel) {
+    width: 200px;
+    background: var(--neo-bg-secondary);
+    border-radius: 12px;
+    box-shadow: var(--neo-shadow-xl);
+    padding: 0.5rem;
+    z-index: 50;
+  }
 
-  &--mobile {
+  &--desktop :deep(.neo-menu__panel) {
+    top: 0;
+    right: calc(100% + 0.5rem);
+    left: auto;
+  }
+
+  &--mobile :deep(.neo-menu__panel) {
     top: calc(100% + 0.35rem);
     right: 0;
     left: auto;
   }
+}
 
+.add-column-menu {
   &__title {
     display: block;
     padding: 0.375rem 0.75rem 0.5rem;
