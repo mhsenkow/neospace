@@ -193,6 +193,54 @@ export const ICONS = {
       d: 'M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15',
     }),
   ],
+  /** Play / resume live */
+  play: ({ filled }: IconCtx) => [
+    h('polygon', {
+      points: '5 3 19 12 5 21 5 3',
+      fill: filled ? 'currentColor' : 'none',
+    }),
+  ],
+  /** Pause scrub */
+  pause: ({ filled }: IconCtx) => [
+    h('rect', {
+      x: 6,
+      y: 4,
+      width: 4,
+      height: 16,
+      rx: 0.5,
+      fill: filled ? 'currentColor' : 'none',
+    }),
+    h('rect', {
+      x: 14,
+      y: 4,
+      width: 4,
+      height: 16,
+      rx: 0.5,
+      fill: filled ? 'currentColor' : 'none',
+    }),
+  ],
+  /** Focus lens — circle peephole */
+  circle: () => [h('circle', { cx: 12, cy: 12, r: 9 })],
+  /** Focus lens — square frame */
+  square: () => [h('rect', { x: 4, y: 4, width: 16, height: 16, rx: 1 })],
+  /** Focus lens — horizontal bar */
+  'focus-bar': () => [
+    h('rect', { x: 2, y: 8, width: 20, height: 8, rx: 1 }),
+  ],
+  /** Sort / reorder */
+  sort: () => [
+    h('path', { d: 'M11 5h10' }),
+    h('path', { d: 'M11 12h7' }),
+    h('path', { d: 'M11 19h4' }),
+    h('path', { d: 'M3 5l2 2 2-2' }),
+    h('path', { d: 'M5 7V3' }),
+    h('path', { d: 'M3 19l2-2 2 2' }),
+    h('path', { d: 'M5 17v4' }),
+  ],
+  /** Zap / loud energy */
+  zap: () => [
+    h('polygon', { points: '13 2 3 14 12 14 11 22 21 10 12 10 13 2' }),
+  ],
 } as const satisfies Record<string, IconDef>
 
 export type NeoIconName = keyof typeof ICONS

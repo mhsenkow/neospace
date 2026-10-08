@@ -15,6 +15,7 @@ import { activeClient } from '~/composables/useMasto'
 import { sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
 import { faceSpecFor, MOOD_GLYPH } from '~/utils/edwardFaces'
 import { statusKind } from '~/utils/edwardSemantics'
+import NeoIcon from '~/components/NeoIcon.vue'
 
 const props = defineProps<{
   status: ExtendedStatus
@@ -299,7 +300,7 @@ onMounted(() => {
           aria-label="Close"
           @click="emit('close')"
         >
-          ×
+          <NeoIcon name="x" :size="16" :stroke="2" />
         </button>
       </header>
 
@@ -338,7 +339,7 @@ onMounted(() => {
           aria-label="Heart"
           @click="handleFavourite()"
         >
-          <span aria-hidden="true">♥</span>
+          <NeoIcon name="heart" :size="15" :stroke="1.85" :filled="!!body.favourited" />
           <em>{{ body.favouritesCount ?? 0 }}</em>
         </button>
         <button
@@ -350,7 +351,7 @@ onMounted(() => {
           aria-label="Boost"
           @click="toggleBoost(!body.reblogged)"
         >
-          <span aria-hidden="true">↺</span>
+          <NeoIcon name="reblog" :size="15" :stroke="1.85" />
           <em>{{ body.reblogsCount ?? 0 }}</em>
         </button>
         <button
@@ -360,7 +361,7 @@ onMounted(() => {
           aria-label="Reply"
           @click="handleReply()"
         >
-          <span aria-hidden="true">💬</span>
+          <NeoIcon name="message" :size="15" :stroke="1.85" />
           <em>{{ body.repliesCount ?? 0 }}</em>
         </button>
         <button
@@ -372,7 +373,7 @@ onMounted(() => {
           aria-label="Bookmark"
           @click="handleBookmark()"
         >
-          <span aria-hidden="true">⌁</span>
+          <NeoIcon name="bookmark" :size="15" :stroke="1.85" :filled="!!body.bookmarked" />
         </button>
       </div>
 
@@ -546,6 +547,9 @@ onMounted(() => {
 }
 
 .edward-modal__x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   width: 32px;
   height: 32px;
@@ -553,7 +557,6 @@ onMounted(() => {
   border-radius: 2px;
   background: transparent;
   color: color-mix(in srgb, #fff8d6 70%, transparent);
-  font-size: 1.35rem;
   line-height: 1;
   cursor: pointer;
 

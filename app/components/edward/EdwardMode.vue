@@ -18,8 +18,25 @@ import {
   parseEdwardExplore,
 } from '~/utils/edwardExplore'
 import { dialectForHost } from '~/utils/edwardServers'
+import NeoIcon from '~/components/NeoIcon.vue'
+import type { NeoIconName } from '~/utils/neoIcons'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
+
+const CHIP_ICONS: Record<string, NeoIconName> = {
+  you: 'user',
+  media: 'image',
+  anger: 'alert',
+  love: 'heart',
+  replies: 'message',
+  asks: 'mention',
+  near: 'sparkle',
+  loud: 'zap',
+}
+
+function chipIcon(label: string): NeoIconName | null {
+  return CHIP_ICONS[label] ?? null
+}
 
 type WatchCard = {
   identity: string
@@ -47,6 +64,12 @@ const error = computed(() => edward.error)
 const recessed = computed(() => edward.recessed)
 const sourceCount = computed(() => edward.sourceCount)
 const focusMode = computed(() => edward.focusMode)
+const lensIcon = computed((): NeoIconName => {
+  if (focusMode.value === 'bar') return 'focus-bar'
+  if (focusMode.value === 'square') return 'square'
+  if (focusMode.value === 'circle') return 'circle'
+  return 'eye-off'
+})
 const exploreQuery = computed({
   get: () => edward.exploreQuery,
   set: (v: string) => edward.setExploreQuery(v),
@@ -120,14 +143,12 @@ const sessionAge = computed(() => {
 })
 let sessionTimer: ReturnType<typeof setInterval> | null = null
 const focusLabel = computed(() => {
-  if (focusMode.value === 'bar') return 'lens · bar'
-  if (focusMode.value === 'square') return 'lens · square'
-  if (focusMode.value === 'circle') return 'lens · circle'
-  return 'lens · off'
+  if (focusMode.value === 'bar') return 'bar'
+  if (focusMode.value === 'square') return 'square'
+  if (focusMode.value === 'circle') return 'circle'
+  return 'off'
 })
-const sortLabel = computed(
-  () => `sort · ${EDWARD_SORT_LABELS[edward.exploreSort]}`,
-)
+const sortLabel = computed(() => EDWARD_SORT_LABELS[edward.exploreSort])
 
 const blink = ref(true)
 const placeholderIdx = ref(0)
@@ -351,8 +372,14 @@ onUnmounted(() => {
               <template v-else>{{ count }}</template>
               coins
             </span>
-            <span v-if="sourceCount" class="edward-mode__stat">{{ sourceCount }} srv</span>
-            <span class="edward-mode__stat edward-mode__stat--sort">{{ sortLabel }}</span>
+            <span v-if="sourceCount" class="edward-mode__stat">
+              <NeoIcon name="servers" :size="12" :stroke="1.75" />
+              {{ sourceCount }}
+            </span>
+            <span class="edward-mode__stat edward-mode__stat--sort">
+              <NeoIcon name="sort" :size="12" :stroke="1.75" />
+              {{ sortLabel }}
+            </span>
           </div>
 
           <div class="edward-mode__header-actions">
@@ -362,7 +389,8 @@ onUnmounted(() => {
               :aria-label="`Cycle focus lens, currently ${focusLabel}`"
               @click="cycleFocus"
             >
-              {{ focusLabel }}
+              <NeoIcon :name="lensIcon" :size="14" :stroke="1.85" />
+              <span>{{ focusLabel }}</span>
             </button>
             <button
               type="button"
@@ -370,7 +398,7 @@ onUnmounted(() => {
               aria-label="Exit edward mode"
               @click="exit"
             >
-              ×
+              <NeoIcon name="x" :size="16" :stroke="2" />
             </button>
           </div>
         </div>
@@ -418,9 +446,15 @@ onUnmounted(() => {
             aria-label="Previous watched post"
             @click="watchPrev"
           >
-            ←
+            <NeoIcon name="chevron-left" :size="16" :stroke="2" />
           </button>
           <span class="edward-mode__watch-label">
+            <NeoIcon
+              :name="watchScrubbing ? 'pause' : 'play'"
+              :size="12"
+              :stroke="1.85"
+              :filled="!watchScrubbing"
+            />
             {{ watchScrubbing ? 'paused · scrub' : 'watching · live' }}
           </span>
           <button
@@ -430,7 +464,7 @@ onUnmounted(() => {
             aria-label="Next watched post"
             @click="watchNext"
           >
-            →
+            <NeoIcon name="chevron-right" :size="16" :stroke="2" />
           </button>
           <button
             v-if="watchScrubbing"
@@ -438,6 +472,7 @@ onUnmounted(() => {
             class="edward-mode__watch-live"
             @click="resumeLive"
           >
+            <NeoIcon name="play" :size="12" :stroke="2" filled />
             live
           </button>
         </div>
@@ -516,7 +551,7 @@ onUnmounted(() => {
         </div>
 
         <p class="edward-mode__watch-hint">
-          trailing ← current → ahead · click tile · esc live
+          trailing · current · ahead · click tile · esc live
         </p>
       </aside>
 
@@ -531,7 +566,9 @@ onUnmounted(() => {
         aria-label="Explore thought stream"
       >
         <div class="edward-mode__explore-row">
-          <span class="edward-mode__explore-prompt" aria-hidden="true">&gt;</span>
+          <span class="edward-mode__explore-prompt" aria-hidden="true">
+            <NeoIcon name="search" :size="14" :stroke="1.85" />
+          </span>
           <input
             ref="exploreInput"
             v-model="exploreQuery"
@@ -550,6 +587,7 @@ onUnmounted(() => {
             :aria-label="`Cycle sort, currently ${sortLabel}`"
             @click="cycleSort"
           >
+            <NeoIcon name="sort" :size="13" :stroke="1.85" />
             {{ sortLabel }}
           </button>
           <button
@@ -559,7 +597,7 @@ onUnmounted(() => {
             aria-label="Clear explore filters"
             @click="clearExplore"
           >
-            clr
+            <NeoIcon name="x" :size="13" :stroke="2" />
           </button>
         </div>
         <div class="edward-mode__explore-chips" role="group" aria-label="Quick filters">
@@ -572,6 +610,15 @@ onUnmounted(() => {
             :title="chip.hint"
             @click="toggleChip(chip.query)"
           >
+            <NeoIcon
+              v-if="chipIcon(chip.label)"
+              :name="chipIcon(chip.label) as NeoIconName"
+              :size="12"
+              :stroke="1.85"
+              :filled="
+                chipActive(chip.query) && (chip.label === 'love' || chip.label === 'replies')
+              "
+            />
             {{ chip.label }}
           </button>
           <button
@@ -584,12 +631,13 @@ onUnmounted(() => {
             :title="srv.host"
             @click="toggleChip(srv.token)"
           >
+            <NeoIcon name="globe" :size="11" :stroke="1.75" />
             {{ srv.short }}
           </button>
         </div>
         <p class="edward-mode__explore-crumb" aria-live="polite">
           {{ exploreCrumb }}
-          <span class="edward-mode__explore-hint"> · / search · ←→ scrub · esc clears</span>
+          <span class="edward-mode__explore-hint"> · / search · scrub · esc clears</span>
         </p>
       </div>
 
@@ -716,6 +764,9 @@ onUnmounted(() => {
 }
 
 .edward-mode__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   font-size: 0.625rem;
   letter-spacing: 0.06em;
   color: #fff8d6;
@@ -772,6 +823,9 @@ onUnmounted(() => {
 }
 
 .edward-mode__exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 2.1rem;
   height: 2.1rem;
   padding: 0;
@@ -780,7 +834,6 @@ onUnmounted(() => {
   background: #1a1420;
   color: #ffe566;
   font-family: inherit;
-  font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
   box-shadow: 2px 2px 0 #ff7eb3;
@@ -798,6 +851,9 @@ onUnmounted(() => {
 }
 
 .edward-mode__focus-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   flex-shrink: 0;
   padding: 0.35rem 0.65rem;
   border: 2px solid #59d1e0;
@@ -894,8 +950,13 @@ onUnmounted(() => {
 
 .edward-mode__watch-step,
 .edward-mode__watch-live {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
   flex-shrink: 0;
   min-width: 1.75rem;
+  min-height: 1.75rem;
   padding: 0.15rem 0.4rem;
   border: 1px solid #59d1e0;
   border-radius: 2px;
@@ -930,6 +991,9 @@ onUnmounted(() => {
 }
 
 .edward-mode__watch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   flex: 1;
   font-size: 0.5625rem;
   letter-spacing: 0.14em;
@@ -1145,10 +1209,10 @@ onUnmounted(() => {
 }
 
 .edward-mode__explore-prompt {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
   color: #ff7eb3;
-  font-size: 0.9rem;
-  font-weight: 700;
 }
 
 .edward-mode__explore-input {
@@ -1175,6 +1239,10 @@ onUnmounted(() => {
 
 .edward-mode__explore-sort,
 .edward-mode__explore-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
   flex-shrink: 0;
   padding: 0.28rem 0.5rem;
   border: 1px solid #59d1e0;
@@ -1219,6 +1287,9 @@ onUnmounted(() => {
 }
 
 .edward-mode__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   padding: 0.18rem 0.45rem;
   border: 1px dashed color-mix(in srgb, #ffe566 45%, transparent);
   border-radius: 2px;
