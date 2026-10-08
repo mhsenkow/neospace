@@ -3,12 +3,12 @@
  * Edward Mode — Radical Edward Session OS thought stream.
  */
 
-import { useEdwardStore } from '~/stores/edward'
+import { useEdwardStore, edwardBallFor } from '~/stores/edward'
+import { useMediaQuery } from '~/composables/useBreakpoint'
 import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND, MOOD_GLYPH } from '~/utils/edwardFaces'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { statusIdentity } from '~/utils/statusIdentity'
-import { statusToEdwardBall } from '~/utils/edwardSemantics'
 import type { ExtendedStatus } from '~/stores/instances'
 import {
   EDWARD_EXPLORE_CHIPS,
@@ -22,6 +22,7 @@ import NeoIcon from '~/components/NeoIcon.vue'
 import type { NeoIconName } from '~/utils/neoIcons'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
+import EdwardWatchActions from '~/components/edward/EdwardWatchActions.vue'
 
 const CHIP_ICONS: Record<string, NeoIconName> = {
   'no bots': 'ban',
@@ -57,6 +58,19 @@ const stream = useEdwardStream()
 const router = useRouter()
 const rootEl = ref<HTMLElement | null>(null)
 const exploreInput = ref<HTMLInputElement | null>(null)
+const exploreEl = ref<HTMLElement | null>(null)
+/** Console height → CSS var, so the phone watch deck docks right on top of it */
+const exploreH = ref(0)
+let exploreRo: ResizeObserver | null = null
+watch(exploreEl, (el) => {
+  exploreRo?.disconnect()
+  exploreRo = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  exploreRo = new ResizeObserver(() => {
+    exploreH.value = Math.round(el.getBoundingClientRect().height)
+  })
+  exploreRo.observe(el)
+})
 const visible = ref(false)
 
 const selected = computed(() => edward.selectedStatus)
@@ -89,7 +103,7 @@ const exploreCrumb = computed(() => {
 })
 const cardFromStatus = (status: ExtendedStatus, identity: string, offset: number, current: boolean): WatchCard => {
   const body = status.reblog || status
-  const ball = statusToEdwardBall(status, edward.affinity)
+  const ball = edwardBallFor(status, edward.affinity)
   let host: string | null = null
   try {
     host = status._instanceUrl ? new URL(status._instanceUrl).host : null
@@ -105,7 +119,7 @@ const cardFromStatus = (status: ExtendedStatus, identity: string, offset: number
     identity,
     offset,
     current,
-    name: body.account?.displayName || body.account?.acct || 'someone',
+    name: ball.label,
     host,
     text: stripHtml(body.content || '').slice(0, current ? 180 : 72) || '···',
     media,
@@ -129,8 +143,44 @@ const watchFilm = computed((): WatchCard[] => {
 const watchCurrent = computed(() => watchFilm.value.find((c) => c.current) || null)
 const watchTrail = computed(() => watchFilm.value.filter((c) => c.offset < 0))
 const watchAhead = computed(() => watchFilm.value.filter((c) => c.offset > 0))
+const watchStatus = computed((): ExtendedStatus | null => {
+  const id = watchCurrent.value?.identity
+  if (!id) return null
+  return edward.statuses.find((s) => statusIdentity(s) === id) || null
+})
 
 const watchScrubbing = computed(() => edward.watchScrubbing)
+const watchDeckShown = computed(() => !!watchCurrent.value && !selected.value && !recessed.value)
+/** ≥1100px: deck is a left column, actions get their own right-hand rail */
+const isWideDesk = useMediaQuery('(min-width: 1100px)')
+
+/** Reaching for the deck freezes it, so ♥ / ghost hit the post you're looking at */
+let holdReleaseTimer: ReturnType<typeof setTimeout> | null = null
+const holdWatch = (v: boolean) => {
+  if (holdReleaseTimer) clearTimeout(holdReleaseTimer)
+  holdReleaseTimer = null
+  edward.setWatchHold(v)
+}
+/** Touch lifts fire pointerleave immediately — linger so a second tap still lands */
+const onWatchPointerLeave = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') {
+    holdWatch(false)
+    return
+  }
+  if (holdReleaseTimer) clearTimeout(holdReleaseTimer)
+  holdReleaseTimer = setTimeout(() => {
+    holdReleaseTimer = null
+    edward.setWatchHold(false)
+  }, 2500)
+}
+const onWatchFocusOut = (e: FocusEvent) => {
+  const deck = e.currentTarget as HTMLElement | null
+  if (deck && e.relatedTarget instanceof Node && deck.contains(e.relatedTarget)) return
+  edward.setWatchHold(false)
+}
+watch(watchDeckShown, (shown) => {
+  if (!shown) edward.setWatchHold(false)
+})
 const canPrev = computed(() => edward.watchCanPrev)
 const canNext = computed(() => edward.watchCanNext)
 const servers = computed(() => edward.serverDialects)
@@ -151,6 +201,25 @@ const focusLabel = computed(() => {
   return 'off'
 })
 const sortLabel = computed(() => EDWARD_SORT_LABELS[edward.exploreSort])
+
+/**
+ * Screen readers hear filter results when *you* change the filter — not the
+ * crumb re-counting on every poll.
+ */
+const exploreAnnounce = ref('')
+let announceTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => [edward.exploreQuery, edward.exploreSort] as const,
+  () => {
+    if (announceTimer) clearTimeout(announceTimer)
+    announceTimer = setTimeout(() => {
+      const { matched, total, active } = edward.exploreSummary
+      exploreAnnounce.value = active
+        ? `${matched} of ${total} posts match, sorted by ${sortLabel.value}`
+        : `Showing all ${total} posts`
+    }, 700)
+  },
+)
 
 const blink = ref(true)
 const placeholderIdx = ref(0)
@@ -270,6 +339,27 @@ const onKey = (e: KeyboardEvent) => {
     return
   }
 
+  // Enter opens what's in the lens (the watch deck subject)
+  if (
+    e.key === 'Enter' &&
+    !typing &&
+    !edward.selectedIdentity &&
+    !(target && target.closest('button, a, [role="button"]'))
+  ) {
+    if (edward.focusedIdentity) {
+      e.preventDefault()
+      openFocused()
+    }
+    return
+  }
+
+  // L cycles the lens shape (bar → square → circle → off)
+  if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'l' || e.key === 'L')) {
+    e.preventDefault()
+    edward.cycleFocusMode()
+    return
+  }
+
   // ← → scrub watch history when something cool just flew by
   if (!typing && (e.key === 'ArrowLeft' || e.key === '[')) {
     e.preventDefault()
@@ -326,6 +416,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (announceTimer) clearTimeout(announceTimer)
+  exploreRo?.disconnect()
+  if (holdReleaseTimer) clearTimeout(holdReleaseTimer)
   document.removeEventListener('keydown', onKey, true)
   document.body.style.overflow = prevOverflow
   if (blinkTimer) clearInterval(blinkTimer)
@@ -345,6 +438,7 @@ onUnmounted(() => {
         'is-visible': visible,
         'is-recessed': recessed,
       }"
+      :style="exploreH ? { '--edward-explore-h': `${exploreH}px` } : undefined"
       role="dialog"
       aria-modal="true"
       aria-label="Edward mode session"
@@ -355,7 +449,8 @@ onUnmounted(() => {
 
       <div class="edward-mode__scan" aria-hidden="true" />
 
-      <header class="edward-mode__header" aria-live="polite">
+      <!-- Not a live region: the clock ticks every second and coins every poll -->
+      <header class="edward-mode__header">
         <div class="edward-mode__header-row">
           <div class="edward-mode__brand">
             <span class="edward-mode__session">
@@ -436,9 +531,13 @@ onUnmounted(() => {
       </header>
 
       <aside
-        v-if="watchCurrent && !selected && !recessed"
+        v-if="watchCurrent && watchDeckShown"
         class="edward-mode__watch"
-        :class="{ 'is-scrubbing': watchScrubbing }"
+        :class="{ 'is-scrubbing': watchScrubbing, 'is-held': edward.watchHold }"
+        @pointerenter="holdWatch(true)"
+        @pointerleave="onWatchPointerLeave"
+        @focusin="holdWatch(true)"
+        @focusout="onWatchFocusOut"
       >
         <div class="edward-mode__watch-nav">
           <button
@@ -457,7 +556,7 @@ onUnmounted(() => {
               :stroke="1.85"
               :filled="!watchScrubbing"
             />
-            {{ watchScrubbing ? 'paused · scrub' : 'watching · live' }}
+            {{ watchScrubbing ? 'paused · scrub' : edward.watchHold ? 'held · live' : 'watching · live' }}
           </span>
           <button
             type="button"
@@ -502,32 +601,38 @@ onUnmounted(() => {
             <span class="edward-mode__film-name">{{ card.name }}</span>
           </button>
 
-          <button
-            type="button"
+          <div
             class="edward-mode__watch-hero"
             :style="{ '--srv': watchCurrent.accent }"
-            @click="openCard(watchCurrent.identity)"
           >
-            <div class="edward-mode__watch-hero-media">
-              <img
-                v-if="watchCurrent.media"
-                :src="watchCurrent.media"
-                alt=""
-                class="edward-mode__watch-hero-img"
-                loading="lazy"
-              />
-              <div v-else class="edward-mode__watch-hero-face" aria-hidden="true">
-                {{ watchCurrent.moodGlyph }}
+            <button
+              type="button"
+              class="edward-mode__watch-hero-main"
+              @click="openCard(watchCurrent.identity)"
+            >
+              <div class="edward-mode__watch-hero-media">
+                <img
+                  v-if="watchCurrent.media"
+                  :src="watchCurrent.media"
+                  alt=""
+                  class="edward-mode__watch-hero-img"
+                  loading="lazy"
+                />
+                <div v-else class="edward-mode__watch-hero-face" aria-hidden="true">
+                  {{ watchCurrent.moodGlyph }}
+                </div>
               </div>
-            </div>
-            <div class="edward-mode__watch-copy">
-              <strong class="edward-mode__watch-name">{{ watchCurrent.name }}</strong>
-              <span v-if="watchCurrent.host" class="edward-mode__watch-host">{{
-                watchCurrent.host
-              }}</span>
-              <span class="edward-mode__watch-text">{{ watchCurrent.text }}</span>
-            </div>
-          </button>
+              <div class="edward-mode__watch-copy">
+                <strong class="edward-mode__watch-name">{{ watchCurrent.name }}</strong>
+                <span v-if="watchCurrent.host" class="edward-mode__watch-host">{{
+                  watchCurrent.host
+                }}</span>
+                <span class="edward-mode__watch-text">{{ watchCurrent.text }}</span>
+              </div>
+            </button>
+            <!-- Desktop: actions live in the right-hand rail instead -->
+            <EdwardWatchActions v-if="watchStatus && !isWideDesk" :status="watchStatus" />
+          </div>
 
           <button
             v-for="card in watchAhead"
@@ -553,8 +658,26 @@ onUnmounted(() => {
         </div>
 
         <p class="edward-mode__watch-hint">
-          trailing · current · ahead · click tile · esc live
+          edges scroll · middle 3d · heart stash beam · esc live
         </p>
+      </aside>
+
+      <!-- Desktop: actions on the watched post as a list on the right edge -->
+      <aside
+        v-if="watchCurrent && watchDeckShown && watchStatus && isWideDesk"
+        class="edward-mode__actions-rail"
+        :style="{ '--srv': watchCurrent.accent }"
+        aria-label="Actions on the watched post"
+        @pointerenter="holdWatch(true)"
+        @pointerleave="onWatchPointerLeave"
+        @focusin="holdWatch(true)"
+        @focusout="onWatchFocusOut"
+      >
+        <p class="edward-mode__actions-rail-head">
+          <span>acting on</span>
+          <strong>{{ watchCurrent.name }}</strong>
+        </p>
+        <EdwardWatchActions :status="watchStatus" variant="rail" />
       </aside>
 
       <p v-if="error" class="edward-mode__error" role="alert">
@@ -563,6 +686,7 @@ onUnmounted(() => {
 
       <div
         v-if="!recessed"
+        ref="exploreEl"
         class="edward-mode__explore"
         role="search"
         aria-label="Explore thought stream"
@@ -637,9 +761,10 @@ onUnmounted(() => {
             {{ srv.short }}
           </button>
         </div>
-        <p class="edward-mode__explore-crumb" aria-live="polite">
+        <p class="sr-only" role="status" aria-live="polite">{{ exploreAnnounce }}</p>
+        <p class="edward-mode__explore-crumb">
           {{ exploreCrumb }}
-          <span class="edward-mode__explore-hint"> · / search · scrub · esc clears</span>
+          <span class="edward-mode__explore-hint"> · / search · ←→ scrub · ⏎ open · L lens · esc clears</span>
         </p>
       </div>
 
@@ -925,7 +1050,8 @@ onUnmounted(() => {
 .edward-mode__watch {
   position: absolute;
   left: max(0.75rem, env(safe-area-inset-left));
-  bottom: max(7.25rem, calc(env(safe-area-inset-bottom) + 6.5rem));
+  // Clear the explore console (measured → --edward-explore-h) on every width
+  bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + var(--edward-explore-h, 112px) + 0.6rem);
   z-index: 3;
   width: min(420px, calc(100vw - 1.5rem));
   padding: 0.55rem;
@@ -1073,23 +1199,38 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-  gap: 0.4rem;
+  gap: 0;
   min-width: 0;
-  padding: 0;
+  padding: 0 0 0.45rem;
   border: 2px solid var(--srv, #ffe566);
   border-radius: 3px;
   background: #1a1420;
   color: inherit;
+  overflow: hidden;
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--srv, #ff7eb3) 70%, transparent);
+}
+
+.edward-mode__watch-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  overflow: hidden;
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--srv, #ff7eb3) 70%, transparent);
 
   &:focus-visible {
     outline: 2px solid #59d1e0;
-    outline-offset: 2px;
+    outline-offset: -2px;
   }
+}
+
+.edward-mode__watch-hero :deep(.edward-watch-actions) {
+  margin: 0 0.45rem;
 }
 
 .edward-mode__watch-hero-media {
@@ -1346,5 +1487,297 @@ onUnmounted(() => {
 
 .edward-mode__explore-hint {
   color: color-mix(in srgb, #59d1e0 70%, transparent);
+}
+
+/* ============================================================
+ * Phones: the canvas is the show. Keep chrome to three slim layers —
+ * header row · (lens stage) · watch deck docked on the console.
+ * The canvas reserves a fixed band above the console for the deck
+ * (PHONE_DECK_RESERVE in EdwardCanvas) — keep the deck under ~180px.
+ * ========================================================== */
+@media (max-width: 639px) {
+  .edward-mode__header {
+    padding-bottom: 0.4rem;
+  }
+
+  .edward-mode__header-row {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .edward-mode__title {
+    font-size: 0.875rem;
+  }
+
+  .edward-mode__stats {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  // Sort is already on the console; server count is a desktop nicety
+  .edward-mode__stat--sort,
+  .edward-mode__stat:nth-child(2) {
+    display: none;
+  }
+
+  // Face legend + server rail duplicate the console chips — too much on a phone
+  .edward-mode__header-rail {
+    display: none;
+  }
+
+  .edward-mode__focus-btn span {
+    display: none;
+  }
+}
+
+/* Phones + tablets: the watch deck docks on the console as one compact card.
+ * EdwardCanvas reserves PHONE_DECK_RESERVE px for it below DOCKED_DECK_MAX_W. */
+@media (max-width: 1099px) {
+  .edward-mode__watch {
+    left: max(0.5rem, env(safe-area-inset-left));
+    right: max(0.5rem, env(safe-area-inset-right));
+    width: auto;
+    bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + var(--edward-explore-h, 104px) + 0.4rem);
+    padding: 0.35rem 0.4rem 0.4rem;
+    box-shadow: 3px 3px 0 #ff7eb3;
+  }
+
+  .edward-mode__watch-nav {
+    margin-bottom: 0.3rem;
+  }
+
+  // One post at a time — the filmstrip lives on larger screens
+  .edward-mode__watch-film .edward-mode__film-tile,
+  .edward-mode__watch-hint {
+    display: none;
+  }
+
+  .edward-mode__watch-hero {
+    padding-bottom: 0.35rem;
+    box-shadow: none;
+  }
+
+  .edward-mode__watch-hero-main {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.35rem 0.4rem 0;
+  }
+
+  .edward-mode__watch-hero-media {
+    flex: 0 0 52px;
+    width: 52px;
+    height: 52px;
+    aspect-ratio: 1;
+    border-radius: 2px;
+  }
+
+  .edward-mode__watch-hero-face {
+    font-size: 1rem;
+  }
+
+  .edward-mode__watch-copy {
+    flex: 1;
+    padding: 0;
+  }
+
+  .edward-mode__watch-name {
+    display: inline;
+    font-size: 0.8125rem;
+    margin-right: 0.35rem;
+  }
+
+  .edward-mode__watch-host {
+    display: inline;
+  }
+
+  .edward-mode__watch-text {
+    margin-top: 0.15rem;
+    -webkit-line-clamp: 2;
+  }
+
+  .edward-mode__watch-hero :deep(.edward-watch-actions) {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    margin: 0.35rem 0.4rem 0;
+    padding-top: 0.35rem;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+}
+
+/* Tablets: console stays a centered 640px panel — dock the deck to match */
+@media (min-width: 640px) and (max-width: 1099px) {
+  .edward-mode__watch {
+    left: 50%;
+    right: auto;
+    width: min(640px, calc(100vw - 1.5rem));
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 639px) {
+  .edward-mode__explore {
+    left: max(0.5rem, env(safe-area-inset-left));
+    right: max(0.5rem, env(safe-area-inset-right));
+    width: auto;
+    transform: none;
+    padding: 0.45rem 0.5rem 0.4rem;
+  }
+
+  // Chips scroll sideways instead of stacking three rows deep
+  .edward-mode__explore-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    margin-inline: -0.5rem;
+    padding-inline: 0.5rem;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .edward-mode__chip {
+    flex-shrink: 0;
+  }
+}
+
+/* Fingers, not cursors: real targets + no keyboard-only hints */
+@media (pointer: coarse) {
+  .edward-mode__exit {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .edward-mode__focus-btn {
+    min-height: 2.5rem;
+    min-width: 2.5rem;
+    justify-content: center;
+  }
+
+  .edward-mode__watch-step,
+  .edward-mode__watch-live {
+    min-width: 2.5rem;
+    min-height: 2.25rem;
+  }
+
+  .edward-mode__explore-sort,
+  .edward-mode__explore-clear {
+    min-height: 2.25rem;
+  }
+
+  .edward-mode__explore-clear {
+    min-width: 2.25rem;
+  }
+
+  .edward-mode__chip,
+  .edward-mode__srv-chip {
+    min-height: 2.125rem;
+    padding-inline: 0.6rem;
+  }
+
+  .edward-mode__explore-hint {
+    display: none;
+  }
+}
+
+/* Landscape phones: one-line deck so the stage isn't all chrome
+ * (EdwardCanvas SHORT_DECK_RESERVE matches this height) */
+@media (max-width: 1099px) and (max-height: 519px) {
+  .edward-mode__watch {
+    padding: 0.25rem 0.4rem;
+  }
+
+  .edward-mode__watch-nav {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.4rem;
+    margin: 0;
+    gap: 0.25rem;
+  }
+
+  .edward-mode__watch-label {
+    display: none;
+  }
+
+  .edward-mode__watch-hero {
+    border: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  .edward-mode__watch-hero-main {
+    padding: 0;
+    padding-right: 7rem;
+  }
+
+  .edward-mode__watch-hero-media {
+    flex-basis: 40px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .edward-mode__watch-text {
+    -webkit-line-clamp: 1;
+  }
+
+  .edward-mode__watch-hero :deep(.edward-watch-actions) {
+    display: none;
+  }
+
+  // Quick-filter chips + legend rail: keep the field, drop the extras
+  .edward-mode__explore-chips,
+  .edward-mode__explore-crumb,
+  .edward-mode__header-rail {
+    display: none;
+  }
+}
+
+/* Desktop action rail — right edge, clear of the lens (EdwardCanvas reserves
+ * DESK_RAIL_COLUMN for it). Same chrome language as the watch deck. */
+.edward-mode__actions-rail {
+  position: absolute;
+  top: 50%;
+  right: max(0.75rem, env(safe-area-inset-right));
+  z-index: 3;
+  width: 11rem;
+  transform: translateY(-50%);
+  padding: 0.55rem;
+  border: 2px solid #ffe566;
+  border-radius: 4px;
+  background: color-mix(in srgb, #12081c 95%, transparent);
+  color: #fff8d6;
+  box-shadow: 4px 4px 0 #ff7eb3;
+}
+
+.edward-mode__actions-rail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px dashed color-mix(in srgb, #59d1e0 40%, transparent);
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ff7eb3;
+
+  strong {
+    overflow: hidden;
+    color: var(--srv, #ffe566);
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }
 </style>

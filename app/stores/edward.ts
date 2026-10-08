@@ -3,6 +3,7 @@
  */
 
 import { defineStore } from 'pinia'
+import { toRaw } from 'vue'
 import type { ExtendedStatus } from '~/stores/instances'
 import {
   statusToEdwardBall,
@@ -21,6 +22,26 @@ import {
 import { dialectForHost, type EdwardServerDialect } from '~/utils/edwardServers'
 
 export const EDWARD_MAX_BALLS = 280
+
+/**
+ * Descriptor per status object — the stream re-renders on every poll, and three
+ * getters (+ the watch deck) used to rebuild all ~280 descriptors each time.
+ * Keyed by the raw status; invalidated when the affinity context is replaced.
+ */
+const ballCache = new WeakMap<object, { affinity: object; ball: EdwardBallDescriptor }>()
+
+export function edwardBallFor(
+  status: ExtendedStatus,
+  affinity: EdwardAffinityContext,
+): EdwardBallDescriptor {
+  const raw = toRaw(status) as ExtendedStatus
+  const aff = toRaw(affinity) as EdwardAffinityContext
+  const hit = ballCache.get(raw)
+  if (hit && hit.affinity === aff) return hit.ball
+  const ball = statusToEdwardBall(raw, aff)
+  ballCache.set(raw, { affinity: aff, ball })
+  return ball
+}
 
 export type EdwardFocusMode = 'off' | 'square' | 'bar' | 'circle'
 
@@ -43,6 +64,11 @@ interface EdwardState {
   watchHistory: string[]
   /** When true, live focus updates pause — you're scrubbing history */
   watchScrubbing: boolean
+  /**
+   * Pointer / focus is on the watch deck — hold the current post so it can't
+   * swap out from under a tap on heart / boost / ghost.
+   */
+  watchHold: boolean
   /** Index into watchHistory while scrubbing; -1 when live */
   watchCursor: number
   loading: boolean
@@ -65,6 +91,7 @@ export const useEdwardStore = defineStore('edward', {
     exploreSort: 'stream',
     watchHistory: [],
     watchScrubbing: false,
+    watchHold: false,
     watchCursor: -1,
     loading: false,
     error: null,
@@ -75,28 +102,31 @@ export const useEdwardStore = defineStore('edward', {
 
   getters: {
     balls(state): EdwardBallDescriptor[] {
-      return state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
+      return state.statuses.map((s) => edwardBallFor(s, state.affinity))
+    },
+
+    /** One filter + sort pass shared by the canvas and the HUD summary */
+    exploreResult(): { balls: EdwardBallDescriptor[]; sort: EdwardSortMode } {
+      const { balls, sort } = filterAndSortBalls(this.balls, this.exploreQuery, this.exploreSort)
+      return { balls, sort }
     },
 
     /** Filtered + sorted view the canvas actually renders */
-    visibleBalls(state): EdwardBallDescriptor[] {
-      const all = state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
-      return filterAndSortBalls(all, state.exploreQuery, state.exploreSort).balls
+    visibleBalls(): EdwardBallDescriptor[] {
+      return this.exploreResult.balls
     },
 
-    exploreSummary(state): {
+    exploreSummary(): {
       matched: number
       total: number
       sort: EdwardSortMode
       active: boolean
     } {
-      const all = state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
-      const { balls, sort } = filterAndSortBalls(all, state.exploreQuery, state.exploreSort)
       return {
-        matched: balls.length,
-        total: all.length,
-        sort,
-        active: !!state.exploreQuery.trim() || state.exploreSort !== 'stream',
+        matched: this.exploreResult.balls.length,
+        total: this.statuses.length,
+        sort: this.exploreResult.sort,
+        active: !!this.exploreQuery.trim() || this.exploreSort !== 'stream',
       }
     },
 
@@ -227,6 +257,7 @@ export const useEdwardStore = defineStore('edward', {
       this.exploreSort = 'stream'
       this.watchHistory = []
       this.watchScrubbing = false
+      this.watchHold = false
       this.watchCursor = -1
       this.loading = false
       this.error = null
@@ -293,8 +324,8 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     setFocusedIdentity(id: string | null) {
-      // Live autofocus must not clobber a scrub session
-      if (this.watchScrubbing) return
+      // Live autofocus must not clobber a scrub session or a reach for the deck
+      if (this.watchScrubbing || this.watchHold) return
       if (id && id !== this.focusedIdentity) this.pushWatchHistory(id)
       this.focusedIdentity = id
     },
@@ -411,6 +442,30 @@ export const useEdwardStore = defineStore('edward', {
       if (!added.length) return []
       this.statuses = [...added, ...this.statuses].slice(0, EDWARD_MAX_BALLS)
       return addedIds
+    },
+
+    setWatchHold(v: boolean) {
+      this.watchHold = v
+    },
+
+    /** Ghosted / shaped someone — their posts leave the stream right away */
+    dropAuthor(acct: string) {
+      const key = acct.replace(/^@/, '').toLowerCase()
+      if (!key) return
+      const authorOf = (s: ExtendedStatus) =>
+        ((s.reblog || s).account?.acct || '').replace(/^@/, '').toLowerCase()
+      const gone = new Set(
+        this.statuses.filter((s) => authorOf(s) === key).map((s) => statusIdentity(s)),
+      )
+      if (!gone.size) return
+      this.statuses = this.statuses.filter((s) => !gone.has(statusIdentity(s)))
+      this.watchHistory = this.watchHistory.filter((id) => !gone.has(id))
+      if (this.focusedIdentity && gone.has(this.focusedIdentity)) {
+        this.focusedIdentity = null
+        this.watchHold = false
+        this.resumeWatchLive()
+      }
+      if (this.selectedIdentity && gone.has(this.selectedIdentity)) this.selectedIdentity = null
     },
 
     clearStatuses() {

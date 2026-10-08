@@ -12,7 +12,8 @@ import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeS
 import { useEdwardStore } from '~/stores/edward'
 import { usePostActions } from '~/composables/usePostActions'
 import { activeClient } from '~/composables/useMasto'
-import { sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
+import { sanitizeDisplayName, sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
+import { emojify, emojiUrlSet } from '~/utils/emojify'
 import { faceSpecFor, MOOD_GLYPH } from '~/utils/edwardFaces'
 import { accountLooksBot, statusKind } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
@@ -44,6 +45,11 @@ const displayName = computed(
     body.value.account?.acct ||
     'someone',
 )
+/** Display name with the account's custom emoji, sanitized like everywhere else */
+const safeDisplayName = computed(() => {
+  const emojis = body.value.account?.emojis || []
+  return sanitizeDisplayName(emojify(displayName.value, emojis), emojiUrlSet(emojis))
+})
 const acct = computed(() => (body.value.account?.acct || '').replace(/^@/, ''))
 const avatar = computed(() => body.value.account?.avatar || body.value.account?.avatarStatic || '')
 const safeHtml = computed(() => sanitizeStatusHtml(body.value.content || ''))
@@ -92,6 +98,13 @@ const requireAuth = () => {
   return false
 }
 
+/**
+ * Content warnings / sensitive media stay folded until asked — the firehose
+ * is strangers' posts, so honor what the author (or their server) flagged.
+ */
+const needsReveal = computed(() => !!spoiler.value || !!body.value.sensitive)
+const revealed = ref(false)
+
 const {
   isFavouriting,
   isBoosting,
@@ -100,6 +113,7 @@ const {
   handleFavourite,
   toggleBoost,
   handleBookmark,
+  clearActionCache,
 } = usePostActions({
   displayStatus: body,
   statusUrl,
@@ -242,15 +256,33 @@ watch(
   },
 )
 
+const syncJoined = () => {
+  joinedTag.value =
+    !!topTag.value &&
+    canAuth.value &&
+    groupsStore.followedTags.some((t) => t.name?.toLowerCase() === topTag.value!.toLowerCase())
+}
+
+// Keep Tab inside the peek; Edward's own key handler owns Escape
+useFocusTrap(panelEl, ref(true), { initialFocus: '.edward-modal__x' })
+
 onMounted(() => {
-  nextTick(() => panelEl.value?.focus())
   void refreshRelationship()
-  if (topTag.value && canAuth.value) {
-    joinedTag.value = groupsStore.followedTags.some(
-      (t) => t.name?.toLowerCase() === topTag.value!.toLowerCase(),
-    )
-  }
+  syncJoined()
 })
+
+// Same modal, different post (watch deck / keyboard): reset per-post state
+watch(
+  () => props.status.id,
+  () => {
+    clearActionCache()
+    revealed.value = false
+    following.value = false
+    followRequested.value = false
+    void refreshRelationship()
+    syncJoined()
+  },
+)
 </script>
 
 <template>
@@ -285,7 +317,7 @@ onMounted(() => {
             loading="lazy"
           >
           <div class="edward-modal__meta">
-            <span class="edward-modal__name">{{ displayName }}</span>
+            <span class="edward-modal__name" v-html="safeDisplayName" />
             <span v-if="acct" class="edward-modal__acct">@{{ acct }}</span>
             <span class="edward-modal__mood">
               <span aria-hidden="true">{{ MOOD_GLYPH[face.mood] }}</span>
@@ -304,8 +336,19 @@ onMounted(() => {
         </button>
       </header>
 
-      <p v-if="spoiler" class="edward-modal__cw">{{ spoiler }}</p>
+      <div v-if="needsReveal" class="edward-modal__cw">
+        <span>{{ spoiler || 'Sensitive content' }}</span>
+        <button
+          type="button"
+          class="edward-modal__cw-toggle"
+          :aria-expanded="revealed"
+          @click="revealed = !revealed"
+        >
+          {{ revealed ? 'hide' : 'show' }}
+        </button>
+      </div>
 
+      <template v-if="!needsReveal || revealed">
       <div
         v-if="safeHtml"
         class="edward-modal__content"
@@ -314,8 +357,9 @@ onMounted(() => {
       <p v-else class="edward-modal__content edward-modal__content--plain">
         {{ plainPreview }}
       </p>
+      </template>
 
-      <div v-if="media.length" class="edward-modal__media">
+      <div v-if="media.length && (!needsReveal || revealed)" class="edward-modal__media">
         <img
           v-for="(m, i) in media.slice(0, 4)"
           :key="m.id || i"
@@ -446,6 +490,7 @@ onMounted(() => {
 .edward-modal__panel {
   width: min(460px, 100%);
   max-height: min(82vh, 680px);
+  max-height: min(82dvh, 680px);
   overflow: auto;
   overscroll-behavior: contain;
   padding: 1rem 1.1rem 1.05rem;
@@ -522,6 +567,14 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   color: #fff;
+
+  // Custom emoji from emojify()
+  :deep(img.emoji) {
+    height: 1.1em;
+    width: auto;
+    vertical-align: -0.2em;
+    display: inline;
+  }
 }
 
 .edward-modal__acct {
@@ -573,6 +626,10 @@ onMounted(() => {
 }
 
 .edward-modal__cw {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
   margin: 0 0 0.65rem;
   padding: 0.4rem 0.55rem;
   font-size: 0.75rem;
@@ -580,6 +637,27 @@ onMounted(() => {
   border: 1px solid color-mix(in srgb, #f2ad52 35%, transparent);
   border-radius: 2px;
   color: #f2ad52;
+}
+
+.edward-modal__cw-toggle {
+  flex-shrink: 0;
+  min-height: 2rem;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid #f2ad52;
+  border-radius: 2px;
+  background: transparent;
+  color: #f2ad52;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: #f2ad52;
+    color: #1a1420;
+  }
 }
 
 .edward-modal__content {

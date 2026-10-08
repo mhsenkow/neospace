@@ -89,8 +89,17 @@ const STREAM_BOTTOM = -18
 const STREAM_TOP = 18
 const STREAM_SPAN = STREAM_TOP - STREAM_BOTTOM
 const MAX_BALLS = 72
+/** Phones: fewer, readable faces (and far less GPU) than the desktop swarm */
+const MAX_BALLS_COMPACT = 38
+const isCompact = () =>
+  typeof window !== 'undefined' &&
+  (window.innerWidth < 640 || window.matchMedia('(pointer: coarse)').matches)
+const maxBalls = () => (isCompact() ? MAX_BALLS_COMPACT : MAX_BALLS)
+/** DPR 2 + transmission glass melts phone GPUs — 1.5 still looks crisp */
+const pixelRatio = () => Math.min(window.devicePixelRatio || 1, isCompact() ? 1.5 : 2)
 
 let disposed = false
+let contextLost = false
 let raf = 0
 let THREE: ThreeMod | null = null
 let renderer: InstanceType<ThreeMod['WebGLRenderer']> | null = null
@@ -106,12 +115,33 @@ let torusGeo: InstanceType<ThreeMod['TorusGeometry']> | null = null
 let raycaster: InstanceType<ThreeMod['Raycaster']> | null = null
 let envMap: InstanceType<ThreeMod['Texture']> | null = null
 let pointerNdc = { x: 0, y: 0 }
+/** Normalized pointer 0–1 in host (for edge zones) */
+let pointerUv = { x: 0.5, y: 0.5 }
+let pointerInside = false
 let dragging = false
 let dragMoved = false
+/** Edge rails scrub the stream; middle orbits the camera */
+let dragMode: 'orbit' | 'scroll' = 'orbit'
 let lastPtr = { x: 0, y: 0 }
 let camYaw = 0.18
 let camPitch = 0.08
+/** User zoom (wheel / pinch) as a multiplier on the fitted distance */
+let camZoom = 1
 let camDist = 26
+/**
+ * Fit the stream's width, not just its height: on a tall phone a fixed
+ * distance shows a narrow sliver at huge scale — a wall of bubbles.
+ */
+const fittedDist = () => {
+  const aspect = camera?.aspect || 1
+  // Lanes span ~8–10 world units; frame ~13 across so a phone shows the
+  // swarm with breathing room (tan(26°) ≈ 0.4877 for the 52° FOV)
+  const forWidth = 13 / (2 * 0.4877 * Math.max(0.3, aspect))
+  return Math.min(46, Math.max(26, forWidth))
+}
+/** Soft edge bands — L/R rails + thin T/B */
+const EDGE_X = 0.13
+const EDGE_Y = 0.11
 let reducedMotion = false
 let balls: BallRuntime[] = []
 let identityToBall = new Map<string, BallRuntime>()
@@ -463,7 +493,7 @@ const packByExploreRank = (descriptors: EdwardBallDescriptor[]) => {
 
 const syncBallsFromStore = () => {
   if (!THREE || !ballGroup) return
-  const descriptors = edward.visibleBalls.slice(0, MAX_BALLS)
+  const descriptors = edward.visibleBalls.slice(0, maxBalls())
   const keep = new Set(descriptors.map((d) => d.identity))
   const byId = new Map(descriptors.map((d) => [d.identity, d]))
   const exploreKey = `${edward.exploreSort}|${edward.exploreQuery}|${descriptors.length}`
@@ -666,49 +696,168 @@ const rebuildFilaments = () => {
   old.dispose()
 }
 
+/** Scratch vector — projection runs for every ball, every frame */
+let _projV: InstanceType<ThreeMod['Vector3']> | null = null
+/** Host size, read once per frame (was one layout read per ball) */
+let hostW = 1
+let hostH = 1
+
 const projectScreen = (
   x: number,
   y: number,
   z: number,
 ): { x: number; y: number; behind: boolean } | null => {
-  if (!camera || !hostEl.value || !THREE) return null
-  const v = new THREE.Vector3(x, y, z)
-  v.project(camera)
+  if (!camera || !THREE) return null
+  const v = (_projV ||= new THREE.Vector3())
+  v.set(x, y, z).project(camera)
   if (v.z > 1) return { x: 0, y: 0, behind: true }
-  const rect = hostEl.value.getBoundingClientRect()
   return {
-    x: (v.x * 0.5 + 0.5) * rect.width,
-    y: (-v.y * 0.5 + 0.5) * rect.height,
+    x: (v.x * 0.5 + 0.5) * hostW,
+    y: (-v.y * 0.5 + 0.5) * hostH,
     behind: false,
   }
 }
 
-const focusNormRect = (): { x0: number; y0: number; x1: number; y1: number } | null => {
+/**
+ * Focus lens geometry in host pixels — one source of truth for drawing the
+ * lens and for deciding what's "in" it. Sits in the open stage: below the
+ * header, above the explore console and (on phones) a fixed reserve for the
+ * watch deck, so the deck never covers the thing it describes. The reserve is
+ * constant on purpose — measuring the deck itself would make the lens jump
+ * whenever the deck appears.
+ */
+type Lens = { mode: 'bar' | 'square' | 'circle'; cx: number; cy: number; w: number; h: number }
+const PHONE_MAX_W = 640
+/** Below this the watch deck docks on the console (EdwardMode CSS) */
+const DOCKED_DECK_MAX_W = 1100
+const PHONE_DECK_RESERVE = 188
+/** Keep in sync with EdwardMode's (max-height: 519px) deck */
+const SHORT_DECK_RESERVE = 84
+/** Wide screens: the deck is a fixed left column — keep the lens right of it */
+const DESK_DECK_COLUMN = 452
+/** …and the action rail on the right (EdwardMode .edward-mode__actions-rail) */
+const DESK_RAIL_COLUMN = 204
+const lens = ref<Lens | null>(null)
+let lensTick = 0
+/** Open stage (px) between header and console — speech bubbles stay inside it */
+let stageTop = 0
+let stageBottom = Number.POSITIVE_INFINITY
+
+const measureLens = () => {
   const mode = edward.focusMode
-  if (mode === 'off') return null
-  if (mode === 'square') return { x0: 0.28, y0: 0.28, x1: 0.72, y1: 0.72 }
-  if (mode === 'circle') return { x0: 0.32, y0: 0.28, x1: 0.68, y1: 0.72 }
-  return { x0: 0.08, y0: 0.38, x1: 0.92, y1: 0.62 }
+  if (!hostEl.value) {
+    lens.value = null
+    return
+  }
+  const host = hostEl.value.getBoundingClientRect()
+  const W = host.width
+  const H = host.height
+  const header = document.querySelector('.edward-mode__header')
+  const explore = document.querySelector('.edward-mode__explore')
+  let top = (header ? header.getBoundingClientRect().bottom - host.top : 0) + 12
+  let bottom = (explore ? explore.getBoundingClientRect().top - host.top : H) - 12
+  stageTop = top
+  stageBottom = bottom
+  if (mode === 'off') {
+    lens.value = null
+    centerSwarmOn(
+      W / 2 + (W >= DOCKED_DECK_MAX_W ? (DESK_DECK_COLUMN - DESK_RAIL_COLUMN) / 2 : 0),
+      top + (bottom - top) / 2,
+      W,
+      H,
+    )
+    return
+  }
+  // Short screens (landscape phones) get a one-line deck — reserve less
+  if (W < DOCKED_DECK_MAX_W) bottom -= H < 520 ? SHORT_DECK_RESERVE : PHONE_DECK_RESERVE
+  // With a lens on, the phone deck owns that band — keep bubbles above it too
+  stageBottom = bottom
+  // Squeezed (landscape phone, soft keyboard up) — fall back to the middle
+  if (bottom - top < Math.min(150, H * 0.28)) {
+    top = H * 0.22
+    bottom = H * 0.7
+  }
+  const stageH = bottom - top
+  // Horizontal stage: full width, or right of the desktop deck column
+  const left = W >= DOCKED_DECK_MAX_W ? DESK_DECK_COLUMN : 0
+  const right = W >= DOCKED_DECK_MAX_W ? DESK_RAIL_COLUMN : 0
+  const stageW = W - left - right
+  const cx = left + stageW / 2
+  const cy = top + stageH / 2
+  let w: number
+  let h: number
+  if (mode === 'bar') {
+    w = stageW * (W < PHONE_MAX_W ? 0.9 : 0.86)
+    h = Math.min(220, Math.max(96, stageH * 0.3))
+  } else {
+    const side = Math.min(stageW * (W < PHONE_MAX_W ? 0.7 : 0.5), stageH * 0.82, mode === 'circle' ? 380 : 440)
+    w = side
+    h = side
+  }
+  centerSwarmOn(cx, cy, W, H)
+  const prev = lens.value
+  // Only touch reactive state when it actually moved (template re-renders)
+  if (
+    !prev ||
+    prev.mode !== mode ||
+    Math.abs(prev.cx - cx) > 1 ||
+    Math.abs(prev.cy - cy) > 1 ||
+    Math.abs(prev.w - w) > 1 ||
+    Math.abs(prev.h - h) > 1
+  ) {
+    lens.value = { mode, cx, cy, w, h }
+  }
 }
 
-/** Circle focus uses radial distance from viewport center */
-const inFocusZone = (nx: number, ny: number): boolean => {
-  const mode = edward.focusMode
-  if (mode === 'off') return false
-  if (mode === 'circle') {
-    const dx = nx - 0.5
-    const dy = ny - 0.5
-    return Math.hypot(dx, dy / 0.85) < 0.22
+/**
+ * Slide the rendered scene so the swarm's center sits on the open stage
+ * (above the phone deck, right of the desktop deck) — lens and swarm line up
+ * on every screen. setViewOffset keeps projection + raycasting consistent.
+ */
+let viewShift = { x: 0, y: 0, w: 0, h: 0 }
+const centerSwarmOn = (cx: number, cy: number, W: number, H: number) => {
+  if (!camera) return
+  const dx = Math.round(cx - W / 2)
+  const dy = Math.round(cy - H / 2)
+  if (viewShift.x === dx && viewShift.y === dy && viewShift.w === W && viewShift.h === H) return
+  viewShift = { x: dx, y: dy, w: W, h: H }
+  camera.setViewOffset(W, H, -dx, -dy, W, H)
+}
+
+const lensStyle = computed(() => {
+  const l = lens.value
+  if (!l) return undefined
+  return {
+    left: `${l.cx - l.w / 2}px`,
+    top: `${l.cy - l.h / 2}px`,
+    width: `${l.w}px`,
+    height: `${l.h}px`,
   }
-  const r = focusNormRect()
-  if (!r) return false
-  return nx >= r.x0 && nx <= r.x1 && ny >= r.y0 && ny <= r.y1
+})
+
+/** Same geometry the lens is drawn with — circle is a true circle */
+const inFocusZone = (px: number, py: number): boolean => {
+  const l = lens.value
+  if (!l) return false
+  if (l.mode === 'circle') return Math.hypot(px - l.cx, py - l.cy) <= l.w / 2
+  return Math.abs(px - l.cx) <= l.w / 2 && Math.abs(py - l.cy) <= l.h / 2
+}
+
+const _wobbleQ: { q: InstanceType<ThreeMod['Quaternion']> | null; e: InstanceType<ThreeMod['Euler']> | null } = {
+  q: null,
+  e: null,
 }
 
 const updateBalls = (t: number, dt: number) => {
   if (!camera || !THREE || !hostEl.value) return
-  const rect = hostEl.value.getBoundingClientRect()
-  const focus = focusNormRect()
+  hostW = Math.max(1, hostEl.value.clientWidth)
+  hostH = Math.max(1, hostEl.value.clientHeight)
+  // Header / console sizes rarely change — re-measure the lens a few times a second
+  if (lensTick++ % 20 === 0 || (edward.focusMode === 'off') !== !lens.value) measureLens()
+  const maxBubbles = hostW < PHONE_MAX_W ? 3 : 5
+  const focus = lens.value
+  /** Current watch subject still inside the lens? Then it keeps the deck. */
+  let currentStillInLens = false
   let bestFocus: { id: string; score: number } | null = null
   const nextBubbles: { id: string; text: string; x: number; y: number; scale: number }[] = []
 
@@ -729,10 +878,10 @@ const updateBalls = (t: number, dt: number) => {
     // Face stays flat + readable — always toward camera
     b.face.quaternion.copy(camera.quaternion)
     if (!reducedMotion) {
-      const wobble = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, 0, Math.sin(t * b.spin * 0.8 + b.phase) * 0.08),
-      )
-      b.face.quaternion.multiply(wobble)
+      const e = (_wobbleQ.e ||= new THREE.Euler())
+      const q = (_wobbleQ.q ||= new THREE.Quaternion())
+      e.set(0, 0, Math.sin(t * b.spin * 0.8 + b.phase) * 0.08)
+      b.face.quaternion.multiply(q.setFromEuler(e))
     }
 
     b.spark.quaternion.copy(camera.quaternion)
@@ -744,13 +893,14 @@ const updateBalls = (t: number, dt: number) => {
 
     const screen = projectScreen(p.x, p.y, p.z)
     if (!screen || screen.behind) continue
-    const nx = screen.x / Math.max(1, rect.width)
-    const ny = screen.y / Math.max(1, rect.height)
+    const nx = screen.x / hostW
 
     const isWatched = edward.focusedIdentity === b.identity && edward.watchScrubbing
 
-    if (focus && inFocusZone(nx, ny)) {
-      const dist = Math.hypot(nx - 0.5, ny - 0.5)
+    if (focus && inFocusZone(screen.x, screen.y)) {
+      if (b.identity === edward.focusedIdentity) currentStillInLens = true
+      // Closest to the lens center wins; affinity + nearness break ties
+      const dist = Math.hypot(screen.x - focus.cx, screen.y - focus.cy) / Math.max(focus.w, focus.h)
       const score = 1 - dist + b.affinity * 0.35 + -b.z * 0.02
       if (!bestFocus || score > bestFocus.score) {
         bestFocus = { id: b.identity, score }
@@ -762,21 +912,27 @@ const updateBalls = (t: number, dt: number) => {
       b.root.scale.setScalar(b.size)
     }
 
+    const bubbleY = screen.y - 36 - b.size * 10
     if (
       b.isShort &&
       b.shortText &&
       !b.badges.includes('cw') &&
-      nextBubbles.length < 5 &&
+      nextBubbles.length < maxBubbles &&
       nx > 0.05 &&
       nx < 0.95 &&
-      ny > 0.08 &&
-      ny < 0.9
+      // Inside the open stage only — not under the header / deck / console
+      bubbleY > stageTop &&
+      screen.y < stageBottom &&
+      // The lens subject is already in the watch deck; don't bury it in text
+      !(focus && inFocusZone(screen.x, screen.y))
     ) {
+      // Keep the whole speech bubble on screen (max-width min(200px, 42vw))
+      const bubbleW = Math.min(200, hostW * 0.42) + 12
       nextBubbles.push({
         id: b.identity,
         text: b.shortText,
-        x: screen.x,
-        y: screen.y - 36 - b.size * 10,
+        x: Math.min(Math.max(8, screen.x), hostW - bubbleW - 8),
+        y: bubbleY,
         scale: 0.85 + Math.min(0.4, b.affinity * 0.3),
       })
     }
@@ -784,7 +940,9 @@ const updateBalls = (t: number, dt: number) => {
 
   bubbles.value = nextBubbles
 
-  const focusedId = bestFocus?.id || null
+  // Sticky focus: let the reader finish — swap only once the watched post
+  // drifts out of the lens (it used to flip to every slightly-closer ball)
+  const focusedId = currentStillInLens ? edward.focusedIdentity : bestFocus?.id || null
   if (focusedId !== edward.focusedIdentity) {
     edward.setFocusedIdentity(focusedId)
   }
@@ -792,6 +950,7 @@ const updateBalls = (t: number, dt: number) => {
 
 const applyCamera = () => {
   if (!camera) return
+  camDist = fittedDist() * camZoom
   const x = Math.sin(camYaw) * Math.cos(camPitch) * camDist
   const y = Math.sin(camPitch) * camDist * 0.35
   const z = Math.cos(camYaw) * Math.cos(camPitch) * camDist
@@ -834,29 +993,109 @@ const hitTest = (): BallRuntime | null => {
   return identityToBall.get(id) || null
 }
 
+const syncPointerUv = (clientX: number, clientY: number) => {
+  if (!hostEl.value) return
+  const rect = hostEl.value.getBoundingClientRect()
+  const w = Math.max(1, rect.width)
+  const h = Math.max(1, rect.height)
+  pointerUv.x = (clientX - rect.left) / w
+  pointerUv.y = (clientY - rect.top) / h
+  pointerNdc.x = pointerUv.x * 2 - 1
+  pointerNdc.y = -(pointerUv.y * 2 - 1)
+}
+
+/** Near the rim → stream scroll; open middle → full 3D orbit */
+const pointerInScrollEdge = (nx = pointerUv.x, ny = pointerUv.y) =>
+  nx < EDGE_X || nx > 1 - EDGE_X || ny < EDGE_Y || ny > 1 - EDGE_Y
+
+const setHostCursor = (kind: 'grab' | 'grabbing' | 'pointer' | 'scroll') => {
+  if (!hostEl.value) return
+  if (kind === 'scroll') hostEl.value.style.cursor = 'ns-resize'
+  else hostEl.value.style.cursor = kind
+}
+
+/** Nudge every bubble along the stream (positive dy = content moves down / rewind) */
+const scrubStream = (dyWorld: number) => {
+  if (!dyWorld || !balls.length) return
+  for (const b of balls) {
+    b.y += dyWorld
+    // Keep a little velocity so they don't look glued after a scrub
+    b.vy += dyWorld * 2.5
+    if (b.y > STREAM_TOP + 3) {
+      b.y = STREAM_BOTTOM + (b.y - STREAM_TOP)
+    } else if (b.y < STREAM_BOTTOM - 3) {
+      b.y = STREAM_TOP - (STREAM_BOTTOM - b.y)
+    }
+  }
+}
+
+/** Two-finger pinch zooms (touch has no wheel) */
+const activePtrs = new Map<number, { x: number; y: number }>()
+let pinch: { dist: number; zoom: number } | null = null
+const pinchDist = () => {
+  const [a, b] = [...activePtrs.values()]
+  return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0
+}
+
 const onPointerDown = (e: PointerEvent) => {
+  activePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (activePtrs.size === 2) {
+    // Second finger: switch from orbit/scroll to pinch, and never "tap" a face
+    pinch = { dist: Math.max(1, pinchDist()), zoom: camZoom }
+    dragMoved = true
+    hoverCard.value = null
+    hoverIdentity = null
+    return
+  }
+  syncPointerUv(e.clientX, e.clientY)
   dragging = true
   dragMoved = false
+  dragMode = pointerInScrollEdge() ? 'scroll' : 'orbit'
   lastPtr = { x: e.clientX, y: e.clientY }
+  setHostCursor(dragMode === 'scroll' ? 'scroll' : 'grabbing')
   hostEl.value?.setPointerCapture?.(e.pointerId)
 }
 
 const onPointerMove = (e: PointerEvent) => {
   if (!hostEl.value) return
-  const rect = hostEl.value.getBoundingClientRect()
-  pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-  pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+  if (activePtrs.has(e.pointerId)) activePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (pinch && activePtrs.size >= 2) {
+    const d = pinchDist()
+    if (d > 0) {
+      // Fingers apart → closer (smaller multiplier)
+      camZoom = Math.min(1.6, Math.max(0.55, pinch.zoom * (pinch.dist / d)))
+      applyCamera()
+    }
+    return
+  }
+  pointerInside = true
+  syncPointerUv(e.clientX, e.clientY)
 
   if (dragging) {
     const dx = e.clientX - lastPtr.x
     const dy = e.clientY - lastPtr.y
     if (Math.abs(dx) + Math.abs(dy) > 3) dragMoved = true
-    camYaw -= dx * 0.005
-    camPitch = Math.min(0.55, Math.max(-0.35, camPitch + dy * 0.004))
     lastPtr = { x: e.clientX, y: e.clientY }
-    applyCamera()
     hoverCard.value = null
     hoverIdentity = null
+
+    if (dragMode === 'scroll') {
+      // Pixel drag → world stream scrub (up drag = go forward in time / rise)
+      scrubStream(-dy * 0.045)
+      setHostCursor('scroll')
+    } else {
+      camYaw -= dx * 0.005
+      camPitch = Math.min(0.55, Math.max(-0.35, camPitch + dy * 0.004))
+      applyCamera()
+      setHostCursor('grabbing')
+    }
+    return
+  }
+
+  if (pointerInScrollEdge()) {
+    hoverIdentity = null
+    hoverCard.value = null
+    setHostCursor('scroll')
     return
   }
 
@@ -864,28 +1103,52 @@ const onPointerMove = (e: PointerEvent) => {
   if (hit) {
     hoverIdentity = hit.identity
     projectHover(hit)
-    hostEl.value.style.cursor = 'pointer'
+    setHostCursor('pointer')
   } else {
     hoverIdentity = null
     hoverCard.value = null
-    hostEl.value.style.cursor = 'grab'
+    setHostCursor('grab')
   }
 }
 
 const onPointerUp = (e: PointerEvent) => {
+  activePtrs.delete(e.pointerId)
+  if (pinch) {
+    if (activePtrs.size < 2) pinch = null
+    // Lifting one finger of a pinch ends the gesture outright
+    dragging = false
+    return
+  }
   if (!dragging) return
+  const wasScroll = dragMode === 'scroll'
   dragging = false
   try {
     hostEl.value?.releasePointerCapture?.(e.pointerId)
   } catch {
     /* ignore */
   }
-  if (dragMoved) return
+  syncPointerUv(e.clientX, e.clientY)
+  setHostCursor(pointerInScrollEdge() ? 'scroll' : 'grab')
+  // Edge scrubs never pick a face — middle clicks still do
+  if (dragMoved || wasScroll) return
   const hit = hitTest()
   if (hit) emit('pick', hit.identity)
 }
 
+/** OS took the gesture (scroll, system swipe) — clean up, never open a post */
+const onPointerCancel = (e: PointerEvent) => {
+  activePtrs.delete(e.pointerId)
+  if (activePtrs.size < 2) pinch = null
+  dragging = false
+  try {
+    hostEl.value?.releasePointerCapture?.(e.pointerId)
+  } catch {
+    /* ignore */
+  }
+}
+
 const onPointerLeave = () => {
+  pointerInside = false
   if (dragging) return
   hoverIdentity = null
   hoverCard.value = null
@@ -893,8 +1156,31 @@ const onPointerLeave = () => {
 
 const onWheel = (e: WheelEvent) => {
   e.preventDefault()
-  camDist = Math.min(42, Math.max(14, camDist + e.deltaY * 0.02))
+  syncPointerUv(e.clientX, e.clientY)
+  if (pointerInScrollEdge()) {
+    scrubStream(-e.deltaY * 0.018)
+    return
+  }
+  // Middle: dolly the camera in 3D
+  camZoom = Math.min(1.6, Math.max(0.55, camZoom + e.deltaY * 0.0008))
   applyCamera()
+}
+
+/** Hovering the rim gently feeds the stream — invisible scroll */
+const applyEdgeHoverScroll = (dt: number) => {
+  if (!pointerInside || dragging || reducedMotion) return
+  const { x: nx, y: ny } = pointerUv
+  let scrub = 0
+  // Top / bottom bands — stronger the closer to the rim
+  if (ny < EDGE_Y) scrub = (1 - ny / EDGE_Y) * 2.8
+  else if (ny > 1 - EDGE_Y) scrub = -((ny - (1 - EDGE_Y)) / EDGE_Y) * 2.8
+  // Side rails: vertical position still drives direction
+  if (nx < EDGE_X || nx > 1 - EDGE_X) {
+    const side = nx < EDGE_X ? 1 - nx / EDGE_X : (nx - (1 - EDGE_X)) / EDGE_X
+    const fromY = (0.5 - ny) * 3.2
+    scrub += fromY * Math.min(1, side)
+  }
+  if (Math.abs(scrub) > 0.05) scrubStream(scrub * dt)
 }
 
 const onResize = () => {
@@ -904,7 +1190,11 @@ const onResize = () => {
   camera.aspect = w / Math.max(1, h)
   camera.updateProjectionMatrix()
   renderer.setSize(w, h, false)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  renderer.setPixelRatio(pixelRatio())
+  // Rotation / fold: refit the stream, move the lens, re-apply the ball budget
+  applyCamera()
+  measureLens()
+  syncBallsFromStore()
 }
 
 let lastFrameT = 0
@@ -921,6 +1211,7 @@ const frame = () => {
     camYaw += 0.00015
     applyCamera()
   }
+  applyEdgeHoverScroll(dt)
   updateBalls(t, dt)
 
   if (++filamentTick % 30 === 0) rebuildFilaments()
@@ -944,7 +1235,7 @@ const onVisibility = () => {
     raf = 0
     return
   }
-  if (!raf && renderer && scene && camera) {
+  if (!raf && !contextLost && renderer && scene && camera) {
     lastFrameT = performance.now()
     raf = requestAnimationFrame(frame)
   }
@@ -998,7 +1289,7 @@ const disposeScene = () => {
     hostEl.value.removeEventListener('pointerdown', onPointerDown)
     hostEl.value.removeEventListener('pointermove', onPointerMove)
     hostEl.value.removeEventListener('pointerup', onPointerUp)
-    hostEl.value.removeEventListener('pointercancel', onPointerUp)
+    hostEl.value.removeEventListener('pointercancel', onPointerCancel)
     hostEl.value.removeEventListener('pointerleave', onPointerLeave)
     hostEl.value.removeEventListener('wheel', onWheel)
   }
@@ -1043,6 +1334,9 @@ const disposeScene = () => {
   stars = null
   ballGroup = null
   renderer?.dispose()
+  // Hand the GL context back now — browsers cap live contexts (~16) and kill the
+  // oldest, which used to take down a fresh Edward session after a few re-opens
+  renderer?.forceContextLoss()
   if (renderer?.domElement?.parentNode) {
     renderer.domElement.parentNode.removeChild(renderer.domElement)
   }
@@ -1071,13 +1365,30 @@ const init = async () => {
   camera = new THREE.PerspectiveCamera(52, w / Math.max(1, h), 0.1, 200)
   applyCamera()
 
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: false,
-    powerPreference: 'high-performance',
+  try {
+    renderer = new THREE.WebGLRenderer({
+      // MSAA is costly on phone GPUs at DPR 1.5 — the glass hides the jaggies
+      antialias: !isCompact(),
+      alpha: false,
+      powerPreference: 'high-performance',
+    })
+  } catch {
+    edward.setError('Edward needs WebGL, and this browser/device won’t start it.')
+    return
+  }
+  // Phones drop GPU contexts under memory pressure / backgrounding — say so
+  // instead of freezing on the last frame.
+  renderer.domElement.addEventListener('webglcontextlost', (ev) => {
+    // A previous (disposed) canvas being reclaimed isn't this session's problem
+    if (disposed) return
+    ev.preventDefault()
+    contextLost = true
+    cancelAnimationFrame(raf)
+    raf = 0
+    edward.setError('Your device paused the 3D view. Exit and reopen Edward to restart it.')
   })
   renderer.setSize(w, h, false)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  renderer.setPixelRatio(pixelRatio())
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.08
@@ -1183,14 +1494,14 @@ const init = async () => {
   hostEl.value.addEventListener('pointerdown', onPointerDown)
   hostEl.value.addEventListener('pointermove', onPointerMove)
   hostEl.value.addEventListener('pointerup', onPointerUp)
-  hostEl.value.addEventListener('pointercancel', onPointerUp)
+  hostEl.value.addEventListener('pointercancel', onPointerCancel)
   hostEl.value.addEventListener('pointerleave', onPointerLeave)
   hostEl.value.addEventListener('wheel', onWheel, { passive: false })
   window.addEventListener('resize', onResize)
   document.addEventListener('visibilitychange', onVisibility)
+  // Starts the loop when the tab is visible. (A second unconditional rAF here
+  // used to run two loops at once: double-speed physics, every frame drawn twice.)
   onVisibility()
-
-  raf = requestAnimationFrame(frame)
 }
 
 watch(
@@ -1212,6 +1523,7 @@ watch(
 
 onMounted(() => {
   disposed = false
+  contextLost = false
   void init()
 })
 
@@ -1222,10 +1534,17 @@ onUnmounted(() => {
 
 <template>
   <div ref="hostEl" class="edward-canvas" aria-hidden="true">
+    <!-- Invisible scroll rails — cursor ns-resize; middle stays 3D -->
+    <div class="edward-canvas__edge edward-canvas__edge--l" aria-hidden="true" />
+    <div class="edward-canvas__edge edward-canvas__edge--r" aria-hidden="true" />
+    <div class="edward-canvas__edge edward-canvas__edge--t" aria-hidden="true" />
+    <div class="edward-canvas__edge edward-canvas__edge--b" aria-hidden="true" />
+
     <div
-      v-if="focusFrame !== 'off'"
+      v-if="focusFrame !== 'off' && lensStyle"
       class="edward-canvas__focus"
       :class="`edward-canvas__focus--${focusFrame}`"
+      :style="lensStyle"
       aria-hidden="true"
     />
 
@@ -1269,6 +1588,64 @@ onUnmounted(() => {
 
   &:active {
     cursor: grabbing;
+  }
+}
+
+/* Barely-there rim cue — reads as atmosphere, not UI chrome */
+.edward-canvas__edge {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.55;
+
+  &--l,
+  &--r {
+    top: 0;
+    bottom: 0;
+    width: 13%;
+  }
+
+  &--l {
+    left: 0;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, #59d1e0 10%, transparent),
+      transparent
+    );
+  }
+
+  &--r {
+    right: 0;
+    background: linear-gradient(
+      270deg,
+      color-mix(in srgb, #ff7eb3 10%, transparent),
+      transparent
+    );
+  }
+
+  &--t,
+  &--b {
+    left: 0;
+    right: 0;
+    height: 11%;
+  }
+
+  &--t {
+    top: 0;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffe566 8%, transparent),
+      transparent
+    );
+  }
+
+  &--b {
+    bottom: 0;
+    background: linear-gradient(
+      0deg,
+      color-mix(in srgb, #ffe566 8%, transparent),
+      transparent
+    );
   }
 }
 
@@ -1364,26 +1741,15 @@ onUnmounted(() => {
     inset 0 0 40px color-mix(in srgb, #ff7eb3 12%, transparent);
   border-radius: 4px;
 
-  &--bar {
-    left: 8%;
-    right: 8%;
-    top: 38%;
-    height: 24%;
-  }
-
-  &--square {
-    left: 28%;
-    top: 28%;
-    width: 44%;
-    height: 44%;
-  }
+  // Position + size come from measureLens() (inline px) — same geometry as
+  // the in-focus test, kept clear of the header / console / phone deck.
+  transition:
+    top 0.25s ease,
+    height 0.25s ease,
+    width 0.25s ease,
+    left 0.25s ease;
 
   &--circle {
-    left: 50%;
-    top: 50%;
-    width: min(42vmin, 380px);
-    height: min(42vmin, 380px);
-    transform: translate(-50%, -50%);
     border-radius: 50%;
     border-style: solid;
     border-width: 2px;

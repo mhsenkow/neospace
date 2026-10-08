@@ -162,8 +162,13 @@ export function statusToEdwardBall(
   const preview = stripHtml(body.content || '').slice(0, 160)
   // Include spoiler text in spicy/mood sniff so CW'd spicy still maps
   const moodText = `${body.spoilerText || ''} ${preview}`.trim()
+  // Plain-text contexts (canvas chip, deck) can't show custom emoji — drop the
+  // :shortcodes: rather than printing ":v_enby: :v_trans:" as the name
   const displayName =
-    (body.account?.displayName || body.account?.username || body.account?.acct || 'someone').trim()
+    (body.account?.displayName || '').replace(/:[a-zA-Z0-9_]+:/g, '').replace(/\s+/g, ' ').trim() ||
+    body.account?.username ||
+    body.account?.acct ||
+    'someone'
   const label = displayName.slice(0, 48)
   const acct = (body.account?.acct || '').replace(/^@/, '')
 

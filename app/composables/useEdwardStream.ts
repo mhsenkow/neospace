@@ -13,21 +13,38 @@ import {
   emptyAffinityContext,
   type EdwardAffinityContext,
 } from '~/utils/edwardAffinity'
+import { httpStatusFrom } from '~/utils/friendlyError'
 
-const POLL_MS = 6_000
+/**
+ * Mastodon allows ~300 requests / 5 min per account (and per IP for guests) —
+ * shared with every other open column. Each poll costs 1–2 requests per server,
+ * so poll at a calm pace, fetch `local` only every few polls, and back off hard
+ * on 429 / errors instead of hammering through them.
+ */
+const POLL_MS = 12_000
+const POLL_MAX_MS = 120_000
+/** Federated every poll; local every Nth (it overlaps heavily anyway) */
+const LOCAL_EVERY = 3
 const SEED_LIMIT = 40
 const POLL_LIMIT = 25
 const FOLLOWING_PAGE = 80
 const FOLLOWING_MAX = 300
 const HOME_SAMPLE = 40
+/** Who-you-follow barely changes between sessions — don't refetch it each time */
+const AFFINITY_TTL_MS = 15 * 60_000
+let affinityCache: { userKey: string; at: number; ctx: EdwardAffinityContext } | null = null
 
 export function useEdwardStream() {
   const edward = useEdwardStore()
   const instances = useInstancesStore()
   const groups = useGroupsStore()
 
-  let timer: ReturnType<typeof setInterval> | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
   let running = false
+  let pollCount = 0
+  let failStreak = 0
+  /** Set by fetchFromTargets when any server answered 429 */
+  let rateLimited = false
   /** Newest status id per instance for sinceId polls */
   let sinceCursors: Record<string, string> = {}
   let affinityLoaded = false
@@ -60,6 +77,9 @@ export function useEdwardStream() {
     }
 
     const errors: string[] = []
+    let succeeded = 0
+    // Seed always pulls local for density; polls only every few rounds
+    const withLocal = !opts?.since || pollCount % LOCAL_EVERY === 0
     const pages = await Promise.all(
       targets.map(async (instance) => {
         try {
@@ -76,12 +96,15 @@ export function useEdwardStream() {
               limit,
               ...(cursor ? (opts?.since ? { sinceId: cursor } : { maxId: cursor }) : {}),
             }),
-            client.v1.timelines.public.list({
-              local: true,
-              limit: Math.ceil(limit / 2),
-              ...(cursor ? (opts?.since ? { sinceId: cursor } : {}) : {}),
-            }),
+            withLocal
+              ? client.v1.timelines.public.list({
+                  local: true,
+                  limit: Math.ceil(limit / 2),
+                  ...(cursor ? (opts?.since ? { sinceId: cursor } : {}) : {}),
+                })
+              : Promise.resolve([] as Awaited<ReturnType<typeof client.v1.timelines.public.list>>),
           ])
+          succeeded += 1
           const map = (s: (typeof fed)[number]): ExtendedStatus => ({
             ...s,
             _instanceId: instance.id,
@@ -89,6 +112,7 @@ export function useEdwardStream() {
           })
           return [...fed.map(map), ...local.map(map)]
         } catch (e: unknown) {
+          if (httpStatusFrom(e) === 429) rateLimited = true
           const message = e instanceof Error ? e.message : 'Failed'
           errors.push(`${instance.name}: ${message}`)
           return []
@@ -97,7 +121,9 @@ export function useEdwardStream() {
     )
 
     let all = pages.flat()
-    if (!all.length) {
+    // Guest fallback only when no server could answer — an empty *poll*
+    // (nothing new since the cursor) must not pull a stranger's firehose in.
+    if (!all.length && !succeeded && !rateLimited) {
       // Guest / gated fallback
       try {
         const client = publicClient()
@@ -123,6 +149,11 @@ export function useEdwardStream() {
     const user = instances.currentUser
     if (!user) {
       edward.setAffinity(ctx)
+      return
+    }
+    const userKey = `${instances.primaryInstance?.id || ''}:${user.id}`
+    if (affinityCache && affinityCache.userKey === userKey && Date.now() - affinityCache.at < AFFINITY_TTL_MS) {
+      edward.setAffinity(affinityCache.ctx)
       return
     }
 
@@ -182,6 +213,7 @@ export function useEdwardStream() {
       /* guest / soft-fail */
     }
 
+    affinityCache = { userKey, at: Date.now(), ctx }
     if (!running) return
     edward.setAffinity(ctx)
   }
@@ -189,12 +221,17 @@ export function useEdwardStream() {
   const seed = async () => {
     edward.setLoading(true)
     edward.setError(null)
+    rateLimited = false
     try {
       void loadAffinity()
       const page = await fetchFromTargets(SEED_LIMIT)
       edward.replaceStatuses(page)
       refreshSinceCursors()
       edward.setSourceCount(firehoseTargets().length || 1)
+      if (!page.length && rateLimited) {
+        failStreak += 1
+        edward.setError('Your server is rate-limiting us — the stream will fill in shortly.')
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load thought stream'
       edward.setError(msg)
@@ -204,15 +241,23 @@ export function useEdwardStream() {
     }
   }
 
-  const poll = async () => {
-    if (!edward.active || !running) return
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-    if (!edward.statuses.length) {
-      await seed()
-      return
-    }
+  let inFlight = false
+  let lastPollAt = 0
 
+  const poll = async () => {
+    if (!edward.active || !running || inFlight) return
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    inFlight = true
+    lastPollAt = Date.now()
+    rateLimited = false
+    pollCount += 1
+    // Re-seeding manages its own backoff bookkeeping
+    const reseeding = !edward.statuses.length
     try {
+      if (reseeding) {
+        await seed()
+        return
+      }
       if (!Object.keys(sinceCursors).length) refreshSinceCursors()
       const newer = await fetchFromTargets(POLL_LIMIT, { ...sinceCursors }, { since: true })
       if (!edward.active) return
@@ -228,28 +273,47 @@ export function useEdwardStream() {
         refreshSinceCursors()
       }
     } catch {
-      /* soft-fail */
+      /* soft-fail — backoff below */
+    } finally {
+      inFlight = false
+      if (!reseeding) failStreak = rateLimited ? failStreak + 1 : 0
     }
+  }
+
+  /** Next poll delay: calm by default, doubling per consecutive rate-limit */
+  const nextDelay = () =>
+    failStreak ? Math.min(POLL_MAX_MS, POLL_MS * 2 ** failStreak) : POLL_MS
+
+  const schedule = () => {
+    if (!running) return
+    timer = setTimeout(async () => {
+      timer = null
+      await poll()
+      schedule()
+    }, nextDelay())
   }
 
   const onVisibility = () => {
     if (typeof document === 'undefined') return
-    if (document.visibilityState === 'visible' && edward.active && running) {
-      void poll()
-    }
+    if (document.visibilityState !== 'visible' || !edward.active || !running) return
+    // Coming back to the tab: catch up once, unless we polled moments ago
+    // or the server asked us to back off.
+    if (failStreak || Date.now() - lastPollAt < POLL_MS / 2) return
+    void poll()
   }
 
   const start = async () => {
     if (running) return
     running = true
     affinityLoaded = false
+    pollCount = 0
+    failStreak = 0
     edward.clearStatuses()
     edward.setAffinity(emptyAffinityContext())
     await seed()
     if (!running) return
-    timer = setInterval(() => {
-      void poll()
-    }, POLL_MS)
+    lastPollAt = Date.now()
+    schedule()
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibility)
     }
@@ -259,7 +323,7 @@ export function useEdwardStream() {
     running = false
     affinityLoaded = false
     if (timer) {
-      clearInterval(timer)
+      clearTimeout(timer)
       timer = null
     }
     sinceCursors = {}
