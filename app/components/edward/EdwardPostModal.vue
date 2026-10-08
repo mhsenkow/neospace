@@ -14,7 +14,7 @@ import { usePostActions } from '~/composables/usePostActions'
 import { activeClient } from '~/composables/useMasto'
 import { sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
 import { faceSpecFor, MOOD_GLYPH } from '~/utils/edwardFaces'
-import { statusKind } from '~/utils/edwardSemantics'
+import { accountLooksBot, statusKind } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
 
 const props = defineProps<{
@@ -64,7 +64,7 @@ const badges = computed(() => {
   if (body.value.poll) b.push('poll')
   if (body.value.sensitive || spoiler.value) b.push('cw')
   if (body.value.card?.url) b.push('link')
-  if (body.value.account?.bot) b.push('bot')
+  if (accountLooksBot(body.value.account)) b.push('bot')
   return b
 })
 
@@ -78,7 +78,7 @@ const face = computed(() =>
       (body.value.repliesCount || 0),
     text: plainPreview.value,
     hasCard: !!body.value.card?.url,
-    isBot: !!body.value.account?.bot,
+    isBot: accountLooksBot(body.value.account),
     mentionCount: body.value.mentions?.length || 0,
     tagCount: body.value.tags?.length || 0,
   }),

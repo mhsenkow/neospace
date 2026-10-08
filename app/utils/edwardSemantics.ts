@@ -110,6 +110,36 @@ function hostOf(url?: string | null): string | null {
   }
 }
 
+/**
+ * Bot faces track Mastodon's `account.bot` flag, plus obvious self-marks
+ * in handle / display name (e.g. `_bot`, `[bot]`). Unmarked stealth bots
+ * will still slip through — that's a fediverse limit, not a face bug.
+ */
+export function accountLooksBot(
+  account?: {
+    acct?: string | null
+    displayName?: string | null
+    username?: string | null
+    bot?: boolean | null
+  } | null,
+): boolean {
+  if (!account) return false
+  if (account.bot) return true
+
+  const handle = (account.acct || account.username || '')
+    .toLowerCase()
+    .replace(/^@/, '')
+    .split('@')[0] || ''
+  const name = (account.displayName || '').toLowerCase()
+
+  if (/\[bot\]|\(bot\)|｛bot｝|🤖/.test(name)) return true
+  if (/(^|[\s._-])bot([\s._-]|$)/.test(name)) return true
+  if (/(^|_)bot(_|$)/.test(handle)) return true
+  if (/_bot$|^bot_|-bot$|^bot-/.test(handle)) return true
+
+  return false
+}
+
 export function statusToEdwardBall(
   status: EdwardStatusLike,
   affinityCtx?: EdwardAffinityContext | null,
@@ -120,13 +150,14 @@ export function statusToEdwardBall(
   const reblogs = n(body.reblogsCount)
   const replies = n(body.repliesCount)
   const engagement = favourites + reblogs + replies
+  const isBot = accountLooksBot(body.account)
 
   const badges: EdwardBadge[] = []
   if ((body.mediaAttachments?.length || 0) > 0) badges.push('media')
   if (body.poll) badges.push('poll')
   if (body.sensitive || (body.spoilerText && body.spoilerText.trim())) badges.push('cw')
   if (body.card?.url) badges.push('link')
-  if (body.account?.bot) badges.push('bot')
+  if (isBot) badges.push('bot')
 
   const preview = stripHtml(body.content || '').slice(0, 160)
   // Include spoiler text in spicy/mood sniff so CW'd spicy still maps
@@ -171,7 +202,7 @@ export function statusToEdwardBall(
       engagement,
       text: moodText,
       hasCard: !!body.card?.url,
-      isBot: !!body.account?.bot,
+      isBot,
     }),
   )) {
     opacity *= 0.6
@@ -183,7 +214,7 @@ export function statusToEdwardBall(
     engagement,
     text: moodText,
     hasCard: !!body.card?.url,
-    isBot: !!body.account?.bot,
+    isBot,
     mentionCount: mentionAccts.length,
     tagCount: tagNames.length,
   }
@@ -220,7 +251,7 @@ export function statusToEdwardBall(
     createdAt: Number.isFinite(created) ? created : Date.now(),
     topTag,
     hasCard: !!body.card?.url,
-    isBot: !!body.account?.bot,
+    isBot,
     instanceHost: hostOf(status._instanceUrl) || hostOf(body.url || body.uri),
     affinity,
     isShort: preview.length > 0 && preview.length <= 72,

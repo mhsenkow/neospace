@@ -258,15 +258,25 @@ export const useEdwardStore = defineStore('edward', {
     /** Toggle a chip query token into / out of the explore bar */
     toggleExploreChip(token: string) {
       const q = this.exploreQuery.trim()
-      if (!q) {
-        this.exploreQuery = token
-        return
-      }
-      const parts = q.split(/\s+/).filter(Boolean)
+      const parts = q ? q.split(/\s+/).filter(Boolean) : []
       const key = token.toLowerCase()
       const idx = parts.findIndex((p) => p.toLowerCase() === key)
-      if (idx >= 0) parts.splice(idx, 1)
-      else parts.push(token)
+      if (idx >= 0) {
+        parts.splice(idx, 1)
+      } else {
+        // bot show/hide are mutually exclusive
+        const hideBot = new Set(['-bot', '-bots', 'nobot', 'nobots', 'humans'])
+        if (key === 'bot') {
+          for (let i = parts.length - 1; i >= 0; i--) {
+            if (hideBot.has(parts[i]!.toLowerCase())) parts.splice(i, 1)
+          }
+        } else if (hideBot.has(key)) {
+          for (let i = parts.length - 1; i >= 0; i--) {
+            if (parts[i]!.toLowerCase() === 'bot') parts.splice(i, 1)
+          }
+        }
+        parts.push(token)
+      }
       this.exploreQuery = parts.join(' ')
     },
 

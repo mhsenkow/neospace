@@ -14,6 +14,8 @@ export type EdwardExploreParsed = {
   moods: Set<EdwardFaceMood>
   kinds: Set<EdwardKind>
   badges: Set<EdwardBadge>
+  /** Negated badges — e.g. `-bot` / `nobot` hides bot faces */
+  excludeBadges: Set<EdwardBadge>
   tags: Set<string>
   authors: Set<string>
   /** Server hosts (from srv:host chips) */
@@ -116,20 +118,22 @@ export const EDWARD_EXPLORE_CHIPS: {
   query: string
   hint: string
 }[] = [
+  { label: 'no bots', query: '-bot', hint: 'hide marked & obvious bots' },
   { label: 'you', query: 'you', hint: 'related to you' },
   { label: 'media', query: 'media', hint: 'pics & video' },
   { label: 'anger', query: 'mood:anger', hint: 'mad faces' },
   { label: 'love', query: 'mood:love', hint: 'heart energy' },
   { label: 'replies', query: 'kind:reply', hint: 'conversations' },
   { label: 'asks', query: 'mood:ask', hint: 'questions' },
+  { label: 'bots', query: 'bot', hint: 'only bot accounts' },
   { label: 'near', query: 'sort:near', hint: 'pull close' },
   { label: 'loud', query: 'sort:loud', hint: 'viral first' },
 ]
 
 /** Rotating placeholders — teach the grammar by example */
 export const EDWARD_EXPLORE_PLACEHOLDERS = [
-  'try: anger · #art · srv:host · you · sort:loud',
-  'tap a server chip · pull related closer · ←→ scrub',
+  'try: -bot · anger · #art · you · sort:loud',
+  'tap no bots · hide the ▣▣ faces · ←→ scrub',
   'mood:love · kind:reply · sort:near · lens circle',
   'type a word, #tag, @someone, or srv:instance',
   'chaos below · filters above · dive when something hits',
@@ -140,6 +144,7 @@ const emptyParsed = (raw: string): EdwardExploreParsed => ({
   moods: new Set(),
   kinds: new Set(),
   badges: new Set(),
+  excludeBadges: new Set(),
   tags: new Set(),
   authors: new Set(),
   servers: new Set(),
@@ -162,6 +167,30 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
     if (lower === 'you' || lower === 'related' || lower === 'mine') {
       out.minAffinity = Math.max(out.minAffinity, 0.28)
       continue
+    }
+
+    // Hide bots — first-class, because the stream is thick with them
+    if (
+      lower === 'nobot' ||
+      lower === 'nobots' ||
+      lower === 'humans' ||
+      lower === '-bot' ||
+      lower === '-bots'
+    ) {
+      out.excludeBadges.add('bot')
+      out.badges.delete('bot')
+      continue
+    }
+
+    // Generic badge negation: -media, -cw, …
+    if (lower.startsWith('-')) {
+      const key = lower.slice(1)
+      const badge = BADGE_ALIASES[key]
+      if (badge) {
+        out.excludeBadges.add(badge)
+        out.badges.delete(badge)
+        continue
+      }
     }
 
     if (lower.startsWith('srv:') || lower.startsWith('server:')) {
@@ -213,8 +242,10 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
       continue
     }
     if (BADGE_ALIASES[lower]) {
-      out.badges.add(BADGE_ALIASES[lower]!)
-      // media badge also commonly means sparkle mood — keep badge only
+      const badge = BADGE_ALIASES[lower]!
+      // Tapping "bots" after "no bots" should flip to show-only
+      out.excludeBadges.delete(badge)
+      out.badges.add(badge)
       continue
     }
     if (SORT_ALIASES[lower] && (lower === 'near' || lower === 'loud' || lower === 'new')) {
@@ -241,6 +272,11 @@ export function ballMatchesExplore(
   if (q.badges.size) {
     for (const b of q.badges) {
       if (!ball.badges.includes(b)) return false
+    }
+  }
+  if (q.excludeBadges.size) {
+    for (const b of q.excludeBadges) {
+      if (ball.badges.includes(b) || (b === 'bot' && ball.isBot)) return false
     }
   }
   if (q.tags.size) {
@@ -348,6 +384,9 @@ export function describeEdwardExplore(
   if (parsed.moods.size) bits.push([...parsed.moods].join('+'))
   if (parsed.kinds.size) bits.push([...parsed.kinds].join('+'))
   if (parsed.badges.size) bits.push([...parsed.badges].join('+'))
+  if (parsed.excludeBadges.size) {
+    bits.push([...parsed.excludeBadges].map((b) => `-${b}`).join(' '))
+  }
   if (parsed.tags.size) bits.push([...parsed.tags].map((t) => `#${t}`).join(' '))
   if (parsed.authors.size) bits.push([...parsed.authors].map((a) => `@${a}`).join(' '))
   if (parsed.servers.size) bits.push([...parsed.servers].map((s) => `srv:${s}`).join(' '))

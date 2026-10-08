@@ -88,7 +88,7 @@ type BallRuntime = {
 const STREAM_BOTTOM = -18
 const STREAM_TOP = 18
 const STREAM_SPAN = STREAM_TOP - STREAM_BOTTOM
-const MAX_BALLS = 96
+const MAX_BALLS = 72
 
 let disposed = false
 let raf = 0
@@ -119,10 +119,10 @@ let clockStart = 0
 let hoverIdentity: string | null = null
 let sharedHaloMat: InstanceType<ThreeMod['MeshBasicMaterial']> | null = null
 let sharedSparkMat: InstanceType<ThreeMod['MeshBasicMaterial']> | null = null
-/** Roaming caustic lights that hitch to bright clusters */
-let causticLights: InstanceType<ThreeMod['PointLight']>[] = []
+/** Single roaming caustic — updated sparsely */
+let causticLight: InstanceType<ThreeMod['PointLight']> | null = null
+let physicsTick = 0
 const _tmpV = { x: 0, y: 0, z: 0 }
-const _tmpV2 = { x: 0, y: 0, z: 0 }
 
 const hash01 = (s: string) => {
   let h = 2166136261
@@ -301,30 +301,26 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
   const root = new THREE.Group()
   root.userData.identity = d.identity
 
-  // Thin soap film — water IOR, high transmission, iridescent skin
+  // Candy glass — lighter than full soap transmission (that melts mobile GPUs)
   const atten = new THREE.Color(spec.fill)
   const tintColor = new THREE.Color(tint)
   const shellMat = new THREE.MeshPhysicalMaterial({
-    color: tintColor.clone().lerp(new THREE.Color('#fff8f0'), 0.35),
-    metalness: 0,
-    roughness: 0.035,
-    transmission: 0.94,
-    thickness: 0.28,
-    ior: 1.33,
+    color: tintColor.clone().lerp(new THREE.Color('#fff8f0'), 0.28),
+    metalness: 0.05,
+    roughness: 0.12,
+    transmission: 0.42,
+    thickness: 0.55,
+    ior: 1.4,
     transparent: true,
-    opacity: 1,
-    clearcoat: 1,
-    clearcoatRoughness: 0.02,
-    iridescence: 1,
-    iridescenceIOR: 1.85,
-    iridescenceThicknessRange: [140, 720],
-    specularIntensity: 1,
-    envMapIntensity: 1.85,
+    opacity: 0.92,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.08,
+    iridescence: 0.65,
+    iridescenceIOR: 1.6,
+    iridescenceThicknessRange: [200, 480],
+    envMapIntensity: 1.35,
     attenuationColor: atten.clone(),
-    attenuationDistance: 0.85,
-    sheen: 0.55,
-    sheenRoughness: 0.28,
-    sheenColor: new THREE.Color(tint),
+    attenuationDistance: 1.4,
     side: THREE.FrontSide,
     depthWrite: false,
   })
@@ -350,13 +346,13 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
   face.userData.identity = d.identity
 
   const halo = new THREE.Mesh(sphereGeo, sharedHaloMat)
-  halo.scale.setScalar(1.22)
+  halo.scale.setScalar(1.18)
   halo.raycast = () => {}
 
-  // Specular catch-light — steered by camera + neighbor bounce each frame
+  // Specular catch-light — camera-facing, cheap
   const spark = new THREE.Mesh(sparkGeo, sharedSparkMat)
-  spark.position.set(0.42, 0.48, 0.72)
-  spark.scale.setScalar(0.14)
+  spark.position.set(0.4, 0.46, 0.68)
+  spark.scale.setScalar(0.13)
   spark.raycast = () => {}
 
   let ring: InstanceType<ThreeMod['Mesh']> | null = null
@@ -515,12 +511,13 @@ const ballWorldPos = (b: BallRuntime, _t?: number) => ({
 })
 
 /**
- * Soap-bubble dynamics — buoyancy, lane springs, soft collisions,
- * and short-range surface tension so clusters cling like real foam.
+ * Light bubble dynamics — springs + buoyancy every frame,
+ * soft collide only every few ticks (keeps foam feel without melting the CPU).
  */
 const integrateBubblePhysics = (t: number, dt: number) => {
   const n = balls.length
   if (!n) return
+  physicsTick++
 
   if (reducedMotion) {
     for (const b of balls) {
@@ -535,206 +532,98 @@ const integrateBubblePhysics = (t: number, dt: number) => {
     return
   }
 
-  const ax = new Float32Array(n)
-  const ay = new Float32Array(n)
-  const az = new Float32Array(n)
-
+  // Integrate motion cheaply
+  const damp = Math.exp(-2.2 * dt)
   for (let i = 0; i < n; i++) {
     const b = balls[i]!
-    // Spring toward affinity / sort lane
-    ax[i] = (b.homeX - b.x) * 2.4
-    az[i] = (b.homeZ - b.z) * 2.4
-    // Buoyancy — bigger films rise a bit slower, denser bobble
-    ay[i] = 0.9 + b.speed * 0.55 - b.size * 0.08
-    // Tiny thermal drift so they never freeze into a grid
-    ax[i]! += Math.sin(t * b.speed * 0.85 + b.phase) * 0.35
-    az[i]! += Math.cos(t * b.speed * 0.7 + b.phase * 1.2) * 0.28
-    ay[i]! += Math.sin(t * 1.6 + b.phase) * 0.18
-  }
-
-  // Pairwise soft collide + surface tension (n ≤ 96 → fine)
-  for (let i = 0; i < n; i++) {
-    const A = balls[i]!
-    const rA = A.size * 0.98
-    for (let j = i + 1; j < n; j++) {
-      const B = balls[j]!
-      const dx = B.x - A.x
-      const dy = B.y - A.y
-      const dz = B.z - A.z
-      const distSq = dx * dx + dy * dy + dz * dz
-      const minDist = rA + B.size * 0.98
-      const tensionR = minDist * 1.45
-      if (distSq > tensionR * tensionR || distSq < 1e-6) continue
-      const dist = Math.sqrt(distSq)
-      const nx = dx / dist
-      const ny = dy / dist
-      const nz = dz / dist
-      const invMassA = 1 / (0.6 + A.size)
-      const invMassB = 1 / (0.6 + B.size)
-
-      if (dist < minDist) {
-        // Soft overlap — push apart (foam packing)
-        const overlap = minDist - dist
-        const push = overlap * 36
-        ax[i]! -= nx * push * invMassA
-        ay[i]! -= ny * push * invMassA
-        az[i]! -= nz * push * invMassA
-        ax[j]! += nx * push * invMassB
-        ay[j]! += ny * push * invMassB
-        az[j]! += nz * push * invMassB
-        // Exchange a little velocity on contact (jiggle)
-        const dvx = B.vx - A.vx
-        const dvy = B.vy - A.vy
-        const dvz = B.vz - A.vz
-        const vn = dvx * nx + dvy * ny + dvz * nz
-        if (vn < 0) {
-          const bounce = vn * 0.35
-          A.vx += bounce * nx
-          A.vy += bounce * ny
-          A.vz += bounce * nz
-          B.vx -= bounce * nx
-          B.vy -= bounce * ny
-          B.vz -= bounce * nz
-        }
-      } else {
-        // Surface tension — cling when almost touching
-        const cling = (1 - dist / tensionR) * 3.2
-        ax[i]! += nx * cling * invMassA
-        ay[i]! += ny * cling * invMassA
-        az[i]! += nz * cling * invMassA
-        ax[j]! -= nx * cling * invMassB
-        ay[j]! -= ny * cling * invMassB
-        az[j]! -= nz * cling * invMassB
-      }
-    }
-  }
-
-  const damp = Math.exp(-2.8 * dt)
-  for (let i = 0; i < n; i++) {
-    const b = balls[i]!
-    b.vx = (b.vx + ax[i]! * dt) * damp
-    b.vy = (b.vy + ay[i]! * dt) * damp
-    b.vz = (b.vz + az[i]! * dt) * damp
-    // Cap so a pile-up doesn't launch coins into orbit
-    const sp = Math.hypot(b.vx, b.vy, b.vz)
-    if (sp > 4.5) {
-      const s = 4.5 / sp
-      b.vx *= s
-      b.vy *= s
-      b.vz *= s
-    }
+    const ax =
+      (b.homeX - b.x) * 2.1 + Math.sin(t * b.speed * 0.85 + b.phase) * 0.28
+    const az =
+      (b.homeZ - b.z) * 2.1 + Math.cos(t * b.speed * 0.7 + b.phase * 1.2) * 0.22
+    const ay = 0.85 + b.speed * 0.5 - b.size * 0.06 + Math.sin(t * 1.5 + b.phase) * 0.12
+    b.vx = (b.vx + ax * dt) * damp
+    b.vy = (b.vy + ay * dt) * damp
+    b.vz = (b.vz + az * dt) * damp
     b.x += b.vx * dt
     b.y += b.vy * dt
     b.z += b.vz * dt
     if (b.y > STREAM_TOP + 2) {
       b.y = STREAM_BOTTOM - hash01(b.identity + String(Math.floor(t))) * 2.2
-      b.vy = 0.5 + hash01(b.identity + ':re') * 0.4
-      b.x = b.homeX + (hash01(b.identity + ':rx') - 0.5) * 1.2
-      b.z = b.homeZ + (hash01(b.identity + ':rz') - 0.5) * 1.2
+      b.vy = 0.5 + hash01(b.identity + ':re') * 0.35
+      b.x = b.homeX + (hash01(b.identity + ':rx') - 0.5)
+      b.z = b.homeZ + (hash01(b.identity + ':rz') - 0.5)
+    }
+  }
+
+  // Soft collide every 3rd frame — positional push only
+  if (physicsTick % 3 !== 0) return
+  for (let i = 0; i < n; i++) {
+    const A = balls[i]!
+    const rA = A.size * 0.95
+    for (let j = i + 1; j < n; j++) {
+      const B = balls[j]!
+      const dx = B.x - A.x
+      const dy = B.y - A.y
+      const dz = B.z - A.z
+      const minDist = rA + B.size * 0.95
+      const distSq = dx * dx + dy * dy + dz * dz
+      if (distSq >= minDist * minDist || distSq < 1e-6) continue
+      const dist = Math.sqrt(distSq)
+      const push = ((minDist - dist) / dist) * 0.32
+      A.x -= dx * push
+      A.y -= dy * push
+      A.z -= dz * push
+      B.x += dx * push
+      B.y += dy * push
+      B.z += dz * push
+      A.vx *= 0.9
+      A.vy *= 0.9
+      A.vz *= 0.9
+      B.vx *= 0.9
+      B.vy *= 0.9
+      B.vz *= 0.9
     }
   }
 }
 
-/**
- * Neighbor light interplay — iridescence + catch-lights borrow from nearby films,
- * caustic point lights hitch to bright clusters.
- */
+/** Catch-lights + one caustic hitch — no per-frame material thrash */
 const updateBubbleOptics = (t: number) => {
   if (!THREE || !camera) return
   const n = balls.length
+  if (!n) return
   const cam = camera.position
 
+  // Sparks only — cheap, reads as bounce light
   for (let i = 0; i < n; i++) {
     const b = balls[i]!
-    let nearDist = Infinity
-    let near: BallRuntime | null = null
-    const searchR = b.size * 4.2
-    const searchR2 = searchR * searchR
-    for (let j = 0; j < n; j++) {
-      if (i === j) continue
-      const o = balls[j]!
-      const dx = o.x - b.x
-      const dy = o.y - b.y
-      const dz = o.z - b.z
-      const d2 = dx * dx + dy * dy + dz * dz
-      if (d2 < nearDist && d2 < searchR2) {
-        nearDist = d2
-        near = o
-      }
-    }
-
-    const mat = b.shell.material as InstanceType<ThreeMod['MeshPhysicalMaterial']>
-    const mix = near ? Math.max(0, 1 - Math.sqrt(nearDist) / searchR) : 0
-    mat.envMapIntensity = 1.55 + mix * 1.65 + b.affinity * 0.35
-    mat.iridescenceThicknessRange = [
-      120 + mix * 220 + Math.sin(t * 0.7 + b.phase) * 40,
-      480 + mix * 520 + Math.cos(t * 0.55 + b.phase) * 80,
-    ]
-    mat.thickness = 0.22 + mix * 0.2
-    mat.sheen = 0.4 + mix * 0.45
-    if (near) {
-      mat.attenuationColor.copy(b.baseAtten).lerp(near.tintColor, mix * 0.55)
-      mat.sheenColor.copy(b.tintColor).lerp(near.tintColor, mix * 0.7)
-    } else {
-      mat.attenuationColor.copy(b.baseAtten)
-      mat.sheenColor.copy(b.tintColor)
-    }
-
-    // Specular spark: half-vector of camera + bounce from neighbor
     _tmpV.x = cam.x - b.x
-    _tmpV.y = cam.y - b.y
+    _tmpV.y = cam.y - b.y + 0.4
     _tmpV.z = cam.z - b.z
-    let len = Math.hypot(_tmpV.x, _tmpV.y, _tmpV.z) || 1
-    _tmpV.x /= len
-    _tmpV.y /= len
-    _tmpV.z /= len
-    if (near) {
-      _tmpV2.x = near.x - b.x
-      _tmpV2.y = near.y - b.y
-      _tmpV2.z = near.z - b.z
-      len = Math.hypot(_tmpV2.x, _tmpV2.y, _tmpV2.z) || 1
-      _tmpV2.x /= len
-      _tmpV2.y /= len
-      _tmpV2.z /= len
-      _tmpV.x = _tmpV.x * 0.65 + _tmpV2.x * 0.35 * mix
-      _tmpV.y = _tmpV.y * 0.65 + _tmpV2.y * 0.35 * mix
-      _tmpV.z = _tmpV.z * 0.65 + _tmpV2.z * 0.35 * mix
-      len = Math.hypot(_tmpV.x, _tmpV.y, _tmpV.z) || 1
-      _tmpV.x /= len
-      _tmpV.y /= len
-      _tmpV.z /= len
-    }
-    // Local-ish offset on the front hemisphere
+    const len = Math.hypot(_tmpV.x, _tmpV.y, _tmpV.z) || 1
     b.spark.position.set(
-      _tmpV.x * 0.55 + 0.12,
-      _tmpV.y * 0.55 + 0.18,
-      Math.max(0.45, _tmpV.z * 0.55 + 0.55),
+      (_tmpV.x / len) * 0.5 + 0.1,
+      (_tmpV.y / len) * 0.5 + 0.15,
+      Math.max(0.5, (_tmpV.z / len) * 0.45 + 0.55),
     )
-    b.spark.scale.setScalar(0.11 + mix * 0.1 + Math.sin(t * 3 + b.phase) * 0.02)
-
+    b.spark.scale.setScalar(0.12 + Math.sin(t * 2.4 + b.phase) * 0.015)
   }
 
-  // Hitch caustic lights to the densest / brightest nearby pairs
-  if (causticLights.length && n) {
-    const scored: { b: BallRuntime; s: number }[] = []
+  // Caustic follows highest-affinity ball every ~12 frames
+  if (causticLight && physicsTick % 12 === 0) {
+    let best: BallRuntime | null = null
+    let bestScore = -1
     for (const b of balls) {
-      let neighbors = 0
-      for (const o of balls) {
-        if (o === b) continue
-        const d2 = (o.x - b.x) ** 2 + (o.y - b.y) ** 2 + (o.z - b.z) ** 2
-        if (d2 < (b.size * 3.5) ** 2) neighbors++
+      const s = b.affinity * 2 + b.size * 0.3
+      if (s > bestScore) {
+        bestScore = s
+        best = b
       }
-      scored.push({ b, s: neighbors + b.affinity * 2 + (b.mood === 'swoon' ? 0.5 : 0) })
     }
-    scored.sort((a, c) => c.s - a.s)
-    for (let i = 0; i < causticLights.length; i++) {
-      const light = causticLights[i]!
-      const pick = scored[i]?.b || scored[0]?.b
-      if (!pick) continue
-      light.position.set(pick.x, pick.y, pick.z)
-      light.color.copy(pick.tintColor)
-      light.intensity = 10 + Math.min(22, (scored[i]?.s || 0) * 4)
-      light.distance = 6 + pick.size * 3
+    if (best) {
+      causticLight.position.set(best.x, best.y, best.z)
+      causticLight.color.copy(best.tintColor)
+      causticLight.intensity = 8 + best.affinity * 10
+      causticLight.distance = 7 + best.size * 2
     }
   }
 }
@@ -1085,19 +974,10 @@ const buildEnvMap = () => {
   softbox(0xffe566, 0, -5, 6, 2.6)
   softbox(0xffffff, 2, 7, -2, 1.6)
   softbox(0xff9ad5, -2, 4, 5, 1.8)
-  // Tiny mirror bubbles for high-frequency specular glitter
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2
-    softbox(
-      i % 2 ? 0xffe566 : 0x59d1e0,
-      Math.cos(a) * 7,
-      Math.sin(a * 1.7) * 3,
-      Math.sin(a) * 7,
-      0.35 + (i % 3) * 0.12,
-    )
-  }
+  softbox(0x59d1e0, 6, -2, -5, 0.8)
+  softbox(0xffe566, -4, 3, 6, 0.7)
 
-  const rt = pmrem.fromScene(envScene, 0.035)
+  const rt = pmrem.fromScene(envScene, 0.04)
   envMap = rt.texture
   scene.environment = envMap
   pmrem.dispose()
@@ -1153,7 +1033,8 @@ const disposeScene = () => {
   envMap = null
   sharedHaloMat = null
   sharedSparkMat = null
-  causticLights = []
+  causticLight = null
+  physicsTick = 0
   sphereGeo = null
   faceGeo = null
   sparkGeo = null
@@ -1222,17 +1103,11 @@ const init = async () => {
   point.position.set(0, 4, 6)
   scene.add(point)
 
-  // Caustic hitchhikers — follow dense foam clusters each frame
-  causticLights = []
-  for (const color of [0xff7eb3, 0x59d1e0, 0xffe566]) {
-    const c = new THREE.PointLight(color, 12, 8, 2)
-    scene.add(c)
-    causticLights.push(c)
-  }
+  causticLight = new THREE.PointLight(0xff7eb3, 10, 8, 2)
+  scene.add(causticLight)
 
   raycaster = new THREE.Raycaster()
-  // Smooth glass orbs — transmission reads better with denser mesh
-  sphereGeo = new THREE.SphereGeometry(1, 40, 32)
+  sphereGeo = new THREE.SphereGeometry(1, 28, 22)
   faceGeo = new THREE.CircleGeometry(1, 40)
   sparkGeo = new THREE.SphereGeometry(1, 12, 10)
   torusGeo = new THREE.TorusGeometry(1.05, 0.055, 8, 48)

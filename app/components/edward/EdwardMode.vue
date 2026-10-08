@@ -24,12 +24,14 @@ import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
 
 const CHIP_ICONS: Record<string, NeoIconName> = {
+  'no bots': 'ban',
   you: 'user',
   media: 'image',
   anger: 'alert',
   love: 'heart',
   replies: 'message',
   asks: 'mention',
+  bots: 'servers',
   near: 'sparkle',
   loud: 'zap',
 }
