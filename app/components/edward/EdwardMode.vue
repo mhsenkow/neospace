@@ -133,7 +133,7 @@ onUnmounted(() => {
       </p>
 
       <p class="edward-mode__hint">
-        drag to look · scroll to zoom · click a thought
+        rises from below · hover for info · click to open
       </p>
 
       <EdwardPostModal
