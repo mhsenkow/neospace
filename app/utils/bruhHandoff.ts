@@ -6,7 +6,11 @@
  * Text only — never tokens, never files.
  */
 
-export const BRUH_ORIGINS = new Set(['https://bruh.ibm.io', 'https://bruh.pages.dev'])
+export const BRUH_ORIGINS = new Set([
+  'https://bruh.ibm.io',
+  'https://bruh.mhsenkow.workers.dev',
+  'https://bruh-15b.pages.dev',
+])
 
 export type BruhShareMessage = {
   type: 'bruh-neospace-share'
