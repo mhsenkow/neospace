@@ -13,6 +13,7 @@ import {
   MOOD_GLYPH,
   type EdwardFaceMood,
 } from '~/utils/edwardFaces'
+import { dialectForHost, paintServerDialect } from '~/utils/edwardServers'
 
 const emit = defineEmits<{
   pick: [identity: string]
@@ -179,7 +180,10 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
     hasCard: d.hasCard,
     isBot: d.isBot,
   })
-  drawEmoticoin(ctx, spec, hash01(d.identity))
+  const dialect = dialectForHost(d.instanceHost)
+  const seed = hash01(d.identity)
+  drawEmoticoin(ctx, spec, seed)
+  paintServerDialect(ctx, dialect, seed)
   paintAuthorChip(ctx, d)
 
   const tex = new THREE!.CanvasTexture(canvas)
@@ -192,7 +196,8 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
     img.crossOrigin = 'anonymous'
     img.onload = () => {
       if (disposed) return
-      drawEmoticoin(ctx, spec, hash01(d.identity))
+      drawEmoticoin(ctx, spec, seed)
+      paintServerDialect(ctx, dialect, seed)
       paintMediaPeek(ctx, img)
       paintAuthorChip(ctx, d)
       tex.needsUpdate = true
@@ -221,16 +226,22 @@ const roundChip = (
   ctx.closePath()
 }
 
-const laneFor = (identity: string, affinity = 0) => {
+/**
+ * Lane layout — affinity + explore-sort rank pull bubbles closer / center.
+ * rankNorm 1 = top of current sort (loud/near/new/you).
+ */
+const laneFor = (identity: string, affinity = 0, rankNorm = 0) => {
   const a = hash01(identity)
   const b = hash01(identity + ':z')
-  const pull = Math.min(1, Math.max(0, affinity))
-  const xScatter = 8 - pull * 4.5
+  const pull = Math.min(1, Math.max(0, affinity, rankNorm * 0.92))
+  const xScatter = 8 - pull * 5.2
   return {
     x: (a - 0.5) * xScatter,
-    z: 4 - b * 10 - pull * 3.2,
+    z: 4 - b * 10 - pull * 4.2,
   }
 }
+
+let lastExploreKey = ''
 
 const disposeBall = (b: BallRuntime) => {
   ballGroup?.remove(b.root)
@@ -264,11 +275,13 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     hasCard: d.hasCard,
     isBot: d.isBot,
   })
-  const lane = laneFor(d.identity, d.affinity)
+  const lane = laneFor(d.identity, d.affinity, d.exploreRankNorm)
   const nearBoost = 1 + Math.max(0, (-lane.z) / 10) * 1.1
-  const affBoost = 1 + d.affinity * 0.55
+  const affBoost = 1 + d.affinity * 0.55 + d.exploreRankNorm * 0.65
   const size = (0.95 + d.size * 1.55) * nearBoost * affBoost
-  const tint = d.affinity > 0.45 ? '#ff7eb3' : spec.rim
+  const dialect = dialectForHost(d.instanceHost)
+  const tint =
+    d.affinity > 0.45 || d.exploreRankNorm > 0.7 ? '#ff7eb3' : dialect.accent || spec.rim
 
   const root = new THREE.Group()
   root.userData.identity = d.identity
@@ -393,7 +406,7 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
 }
 
 const applyAffinityLayout = (b: BallRuntime, d: EdwardBallDescriptor) => {
-  const lane = laneFor(d.identity, d.affinity)
+  const lane = laneFor(d.identity, d.affinity, d.exploreRankNorm)
   b.x = lane.x
   b.z = lane.z
   b.affinity = d.affinity
@@ -401,10 +414,25 @@ const applyAffinityLayout = (b: BallRuntime, d: EdwardBallDescriptor) => {
   b.shortText = d.shortText
   b.moodWhy = d.moodWhy
   const nearBoost = 1 + Math.max(0, (-lane.z) / 10) * 1.1
-  const affBoost = 1 + d.affinity * 0.55
+  const affBoost = 1 + d.affinity * 0.55 + d.exploreRankNorm * 0.65
   const size = (0.95 + d.size * 1.55) * nearBoost * affBoost
   b.size = size
   b.root.scale.setScalar(size)
+}
+
+/** Pack top-ranked results into the mid band so sort is visibly felt */
+const packByExploreRank = (descriptors: EdwardBallDescriptor[]) => {
+  const ranked = descriptors.filter((d) => d.exploreRank >= 0)
+  if (!ranked.length) return
+  const packN = Math.min(ranked.length, 28)
+  for (let i = 0; i < packN; i++) {
+    const d = ranked[i]!
+    const b = identityToBall.get(d.identity)
+    if (!b) continue
+    const t = i / Math.max(1, packN - 1)
+    b.y = -6 + t * 14 + hash01(d.identity + ':pack') * 0.4
+    applyAffinityLayout(b, d)
+  }
 }
 
 const syncBallsFromStore = () => {
@@ -412,6 +440,9 @@ const syncBallsFromStore = () => {
   const descriptors = edward.visibleBalls.slice(0, MAX_BALLS)
   const keep = new Set(descriptors.map((d) => d.identity))
   const byId = new Map(descriptors.map((d) => [d.identity, d]))
+  const exploreKey = `${edward.exploreSort}|${edward.exploreQuery}|${descriptors.length}`
+  const resort = exploreKey !== lastExploreKey
+  lastExploreKey = exploreKey
 
   for (const [id, b] of [...identityToBall.entries()]) {
     if (!keep.has(id)) {
@@ -440,6 +471,8 @@ const syncBallsFromStore = () => {
       spawnI++
     }
   }
+
+  if (resort) packByExploreRank(descriptors)
 
   balls = [...identityToBall.values()]
   rebuildFilaments()
@@ -515,7 +548,22 @@ const focusNormRect = (): { x0: number; y0: number; x1: number; y1: number } | n
   const mode = edward.focusMode
   if (mode === 'off') return null
   if (mode === 'square') return { x0: 0.28, y0: 0.28, x1: 0.72, y1: 0.72 }
+  if (mode === 'circle') return { x0: 0.32, y0: 0.28, x1: 0.68, y1: 0.72 }
   return { x0: 0.08, y0: 0.38, x1: 0.92, y1: 0.62 }
+}
+
+/** Circle focus uses radial distance from viewport center */
+const inFocusZone = (nx: number, ny: number): boolean => {
+  const mode = edward.focusMode
+  if (mode === 'off') return false
+  if (mode === 'circle') {
+    const dx = nx - 0.5
+    const dy = ny - 0.5
+    return Math.hypot(dx, dy / 0.85) < 0.22
+  }
+  const r = focusNormRect()
+  if (!r) return false
+  return nx >= r.x0 && nx <= r.x1 && ny >= r.y0 && ny <= r.y1
 }
 
 const updateBalls = (t: number, dt: number) => {
@@ -564,15 +612,18 @@ const updateBalls = (t: number, dt: number) => {
     const nx = screen.x / Math.max(1, rect.width)
     const ny = screen.y / Math.max(1, rect.height)
 
-    if (focus && nx >= focus.x0 && nx <= focus.x1 && ny >= focus.y0 && ny <= focus.y1) {
-      const cx = (focus.x0 + focus.x1) / 2
-      const cy = (focus.y0 + focus.y1) / 2
-      const dist = Math.hypot(nx - cx, ny - cy)
+    // Scrubbed / pinned watch stays highlighted even outside the zone
+    const isWatched = edward.focusedIdentity === b.identity && edward.watchScrubbing
+
+    if (focus && inFocusZone(nx, ny)) {
+      const dist = Math.hypot(nx - 0.5, ny - 0.5)
       const score = 1 - dist + b.affinity * 0.35 + -b.z * 0.02
       if (!bestFocus || score > bestFocus.score) {
         bestFocus = { id: b.identity, score }
       }
       b.root.scale.setScalar(b.size * 1.14)
+    } else if (isWatched) {
+      b.root.scale.setScalar(b.size * 1.2)
     } else {
       b.root.scale.setScalar(b.size)
     }
@@ -767,16 +818,17 @@ const onVisibility = () => {
 
 const buildEnvMap = () => {
   if (!THREE || !renderer || !scene) return
-  const pmrem = new THREE.PMREMGenerator(renderer)
+  const T = THREE
+  const pmrem = new T.PMREMGenerator(renderer)
 
   // Punk candy studio — pink / cyan / yellow softboxes for glass reflections
-  const envScene = new THREE.Scene()
-  envScene.background = new THREE.Color(0x1a0e22)
+  const envScene = new T.Scene()
+  envScene.background = new T.Color(0x1a0e22)
 
   const softbox = (color: number, x: number, y: number, z: number, s: number) => {
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 20, 16),
-      new THREE.MeshBasicMaterial({ color }),
+    const mesh = new T.Mesh(
+      new T.SphereGeometry(1, 20, 16),
+      new T.MeshBasicMaterial({ color }),
     )
     mesh.position.set(x, y, z)
     mesh.scale.setScalar(s)
@@ -1183,6 +1235,17 @@ onUnmounted(() => {
     top: 28%;
     width: 44%;
     height: 44%;
+  }
+
+  &--circle {
+    left: 50%;
+    top: 50%;
+    width: min(42vmin, 380px);
+    height: min(42vmin, 380px);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border-style: solid;
+    border-width: 2px;
   }
 }
 

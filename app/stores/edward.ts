@@ -18,10 +18,11 @@ import {
   cycleEdwardSort,
   type EdwardSortMode,
 } from '~/utils/edwardExplore'
+import { dialectForHost, type EdwardServerDialect } from '~/utils/edwardServers'
 
 export const EDWARD_MAX_BALLS = 280
 
-export type EdwardFocusMode = 'off' | 'square' | 'bar'
+export type EdwardFocusMode = 'off' | 'square' | 'bar' | 'circle'
 
 interface EdwardState {
   active: boolean
@@ -35,6 +36,15 @@ interface EdwardState {
   /** Explore console query — search / filter grammar */
   exploreQuery: string
   exploreSort: EdwardSortMode
+  /**
+   * Recently focused identities (oldest → newest).
+   * Lets you scrub back when something cool just flew past.
+   */
+  watchHistory: string[]
+  /** When true, live focus updates pause — you're scrubbing history */
+  watchScrubbing: boolean
+  /** Index into watchHistory while scrubbing; -1 when live */
+  watchCursor: number
   loading: boolean
   error: string | null
   streamStartedAt: number | null
@@ -53,6 +63,9 @@ export const useEdwardStore = defineStore('edward', {
     focusMode: 'bar',
     exploreQuery: '',
     exploreSort: 'stream',
+    watchHistory: [],
+    watchScrubbing: false,
+    watchCursor: -1,
     loading: false,
     error: null,
     streamStartedAt: null,
@@ -94,8 +107,53 @@ export const useEdwardStore = defineStore('edward', {
       )
     },
 
+    /** Post currently in the watch deck (live focus or scrubbed) */
+    watchedStatus(state): ExtendedStatus | null {
+      if (!state.focusedIdentity) return null
+      return (
+        state.statuses.find((s) => statusIdentity(s) === state.focusedIdentity) || null
+      )
+    },
+
+    watchCanPrev(state): boolean {
+      if (!state.watchHistory.length) return false
+      if (!state.watchScrubbing) return state.watchHistory.length >= 1
+      return state.watchCursor > 0
+    },
+
+    watchCanNext(state): boolean {
+      return state.watchScrubbing
+    },
+
     ballCount(state): number {
       return state.statuses.length
+    },
+
+    /** Live server mix — for explore chips + HUD legend */
+    serverDialects(state): (EdwardServerDialect & { count: number })[] {
+      const counts = new Map<string, number>()
+      for (const s of state.statuses) {
+        const body = s.reblog || s
+        let host = ''
+        try {
+          host = s._instanceUrl ? new URL(s._instanceUrl).host : ''
+        } catch {
+          host = ''
+        }
+        if (!host) {
+          try {
+            host = body.url || body.uri ? new URL(body.url || body.uri || '').host : ''
+          } catch {
+            host = ''
+          }
+        }
+        const key = (host || 'unknown').toLowerCase().replace(/^www\./, '')
+        counts.set(key, (counts.get(key) || 0) + 1)
+      }
+      return [...counts.entries()]
+        .map(([host, count]) => ({ ...dialectForHost(host), count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8)
     },
   },
 
@@ -122,6 +180,9 @@ export const useEdwardStore = defineStore('edward', {
       this.focusedIdentity = null
       this.exploreQuery = ''
       this.exploreSort = 'stream'
+      this.watchHistory = []
+      this.watchScrubbing = false
+      this.watchCursor = -1
       this.loading = false
       this.error = null
       this.streamStartedAt = null
@@ -177,19 +238,70 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     setFocusedIdentity(id: string | null) {
+      // Live autofocus must not clobber a scrub session
+      if (this.watchScrubbing) return
+      if (id && id !== this.focusedIdentity) this.pushWatchHistory(id)
       this.focusedIdentity = id
     },
 
+    pushWatchHistory(id: string) {
+      if (!id) return
+      const last = this.watchHistory[this.watchHistory.length - 1]
+      if (last === id) return
+      this.watchHistory = [...this.watchHistory, id].slice(-48)
+    },
+
+    /** Step back — "oh wait that was cool" */
+    watchPrev() {
+      if (!this.watchHistory.length) return
+      if (!this.watchScrubbing) {
+        this.watchScrubbing = true
+        this.watchCursor = this.watchHistory.length - 1
+        // If live focus is already the latest, step back one more
+        if (
+          this.focusedIdentity === this.watchHistory[this.watchCursor] &&
+          this.watchCursor > 0
+        ) {
+          this.watchCursor -= 1
+        }
+      } else if (this.watchCursor > 0) {
+        this.watchCursor -= 1
+      }
+      this.focusedIdentity = this.watchHistory[this.watchCursor] || null
+    },
+
+    /** Step forward toward live; at end, resume autofocus */
+    watchNext() {
+      if (!this.watchScrubbing) return
+      if (this.watchCursor < this.watchHistory.length - 1) {
+        this.watchCursor += 1
+        this.focusedIdentity = this.watchHistory[this.watchCursor] || null
+        return
+      }
+      this.resumeWatchLive()
+    },
+
+    resumeWatchLive() {
+      this.watchScrubbing = false
+      this.watchCursor = -1
+    },
+
     cycleFocusMode() {
-      const order: EdwardFocusMode[] = ['bar', 'square', 'off']
+      const order: EdwardFocusMode[] = ['bar', 'square', 'circle', 'off']
       const i = order.indexOf(this.focusMode)
       this.focusMode = order[(i + 1) % order.length]!
-      if (this.focusMode === 'off') this.focusedIdentity = null
+      if (this.focusMode === 'off') {
+        this.focusedIdentity = null
+        this.resumeWatchLive()
+      }
     },
 
     setFocusMode(mode: EdwardFocusMode) {
       this.focusMode = mode
-      if (mode === 'off') this.focusedIdentity = null
+      if (mode === 'off') {
+        this.focusedIdentity = null
+        this.resumeWatchLive()
+      }
     },
 
     selectByIdentity(identity: string | null) {

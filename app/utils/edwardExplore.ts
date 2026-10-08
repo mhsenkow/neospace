@@ -16,6 +16,8 @@ export type EdwardExploreParsed = {
   badges: Set<EdwardBadge>
   tags: Set<string>
   authors: Set<string>
+  /** Server hosts (from srv:host chips) */
+  servers: Set<string>
   /** Affinity threshold — "you" / "related" */
   minAffinity: number
   /** Explicit sort from query, if any */
@@ -126,11 +128,11 @@ export const EDWARD_EXPLORE_CHIPS: {
 
 /** Rotating placeholders — teach the grammar by example */
 export const EDWARD_EXPLORE_PLACEHOLDERS = [
-  'try: anger · #art · @name · media · you · sort:near',
-  'filter moods · find people · pull related closer',
-  'mood:love  ·  kind:reply  ·  sort:loud',
-  'type a word, a #tag, or @someone — click a chip',
-  'drag orbit · focus zone · search the firehose',
+  'try: anger · #art · srv:host · you · sort:loud',
+  'tap a server chip · pull related closer · ←→ scrub',
+  'mood:love · kind:reply · sort:near · lens circle',
+  'type a word, #tag, @someone, or srv:instance',
+  'chaos below · filters above · dive when something hits',
 ]
 
 const emptyParsed = (raw: string): EdwardExploreParsed => ({
@@ -140,6 +142,7 @@ const emptyParsed = (raw: string): EdwardExploreParsed => ({
   badges: new Set(),
   tags: new Set(),
   authors: new Set(),
+  servers: new Set(),
   minAffinity: 0,
   sort: null,
   raw,
@@ -158,6 +161,12 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
 
     if (lower === 'you' || lower === 'related' || lower === 'mine') {
       out.minAffinity = Math.max(out.minAffinity, 0.28)
+      continue
+    }
+
+    if (lower.startsWith('srv:') || lower.startsWith('server:')) {
+      const host = lower.replace(/^srv:|^server:/, '').replace(/^www\./, '')
+      if (host) out.servers.add(host)
       continue
     }
 
@@ -259,6 +268,18 @@ export function ballMatchesExplore(
     if (!hit) return false
   }
 
+  if (q.servers.size) {
+    const host = (ball.instanceHost || '').toLowerCase().replace(/^www\./, '')
+    let hit = false
+    for (const s of q.servers) {
+      if (host === s || host.endsWith(`.${s}`) || host.includes(s)) {
+        hit = true
+        break
+      }
+    }
+    if (!hit) return false
+  }
+
   for (const t of q.text) {
     const hay = `${ball.preview} ${ball.label} ${ball.acct} ${ball.topTag || ''} ${ball.mood} ${ball.moodWhy}`.toLowerCase()
     if (!hay.includes(t)) return false
@@ -295,8 +316,16 @@ export function filterAndSortBalls(
   const parsed = parseEdwardExplore(query)
   const sort = parsed.sort || sortFallback
   const filtered = balls.filter((b) => ballMatchesExplore(b, parsed))
+  const sorted = sortEdwardBalls(filtered, sort)
+  const n = Math.max(1, sorted.length - 1)
+  // Stamp rank so the canvas can pull top results closer / bigger
+  const ranked = sorted.map((b, i) => ({
+    ...b,
+    exploreRank: sort === 'stream' ? -1 : i,
+    exploreRankNorm: sort === 'stream' ? 0 : 1 - i / n,
+  }))
   return {
-    balls: sortEdwardBalls(filtered, sort),
+    balls: ranked,
     parsed,
     sort,
   }
@@ -321,6 +350,7 @@ export function describeEdwardExplore(
   if (parsed.badges.size) bits.push([...parsed.badges].join('+'))
   if (parsed.tags.size) bits.push([...parsed.tags].map((t) => `#${t}`).join(' '))
   if (parsed.authors.size) bits.push([...parsed.authors].map((a) => `@${a}`).join(' '))
+  if (parsed.servers.size) bits.push([...parsed.servers].map((s) => `srv:${s}`).join(' '))
   if (parsed.minAffinity > 0) bits.push('you')
   if (parsed.text.length) bits.push(`“${parsed.text.join(' ')}”`)
   const filter = bits.length ? bits.join(' · ') : 'all'

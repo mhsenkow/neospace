@@ -6,7 +6,6 @@
 import { useEdwardStore } from '~/stores/edward'
 import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND } from '~/utils/edwardFaces'
-import { statusIdentity } from '~/utils/statusIdentity'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import {
   EDWARD_EXPLORE_CHIPS,
@@ -47,15 +46,49 @@ const exploreCrumb = computed(() => {
     exploreSummary.value.total,
   )
 })
-const focusedStatus = computed(() => {
-  const id = edward.focusedIdentity
-  if (!id || edward.focusMode === 'off') return null
-  return edward.statuses.find((s) => statusIdentity(s) === id) || null
+const watched = computed(() => {
+  if (edward.focusMode === 'off') return null
+  return edward.watchedStatus
 })
+const watchBody = computed(() => {
+  const s = watched.value
+  if (!s) return null
+  return s.reblog || s
+})
+const watchMedia = computed(() => {
+  const body = watchBody.value
+  if (!body || body.sensitive) return null
+  const m = body.mediaAttachments?.[0]
+  return m?.previewUrl || m?.url || null
+})
+const watchText = computed(() =>
+  stripHtml(watchBody.value?.content || '').slice(0, 160) || '···',
+)
+const watchName = computed(
+  () =>
+    watchBody.value?.account?.displayName ||
+    watchBody.value?.account?.acct ||
+    'someone',
+)
+const watchHost = computed(() => {
+  const s = watched.value
+  if (!s) return null
+  try {
+    if (s._instanceUrl) return new URL(s._instanceUrl).host
+  } catch {
+    /* */
+  }
+  return null
+})
+const watchScrubbing = computed(() => edward.watchScrubbing)
+const canPrev = computed(() => edward.watchCanPrev)
+const canNext = computed(() => edward.watchCanNext)
+const servers = computed(() => edward.serverDialects)
 const focusLabel = computed(() => {
-  if (focusMode.value === 'bar') return 'focus · bar'
-  if (focusMode.value === 'square') return 'focus · square'
-  return 'focus · off'
+  if (focusMode.value === 'bar') return 'lens · bar'
+  if (focusMode.value === 'square') return 'lens · square'
+  if (focusMode.value === 'circle') return 'lens · circle'
+  return 'lens · off'
 })
 const sortLabel = computed(
   () => `sort · ${EDWARD_SORT_LABELS[edward.exploreSort]}`,
@@ -100,6 +133,21 @@ const openFocused = () => {
   if (edward.focusedIdentity) {
     edward.selectByIdentity(edward.focusedIdentity)
   }
+}
+
+const watchPrev = (e?: Event) => {
+  e?.stopPropagation()
+  edward.watchPrev()
+}
+
+const watchNext = (e?: Event) => {
+  e?.stopPropagation()
+  edward.watchNext()
+}
+
+const resumeLive = (e?: Event) => {
+  e?.stopPropagation()
+  edward.resumeWatchLive()
 }
 
 const closeModal = () => {
@@ -155,11 +203,27 @@ const onKey = (e: KeyboardEvent) => {
     return
   }
 
+  // ← → scrub watch history when something cool just flew by
+  if (!typing && (e.key === 'ArrowLeft' || e.key === '[')) {
+    e.preventDefault()
+    edward.watchPrev()
+    return
+  }
+  if (!typing && (e.key === 'ArrowRight' || e.key === ']')) {
+    e.preventDefault()
+    edward.watchNext()
+    return
+  }
+
   if (e.key !== 'Escape') return
   e.preventDefault()
   e.stopPropagation()
   if (edward.selectedIdentity) {
     closeModal()
+    return
+  }
+  if (edward.watchScrubbing) {
+    edward.resumeWatchLive()
     return
   }
   if (edward.exploreQuery || edward.exploreSort !== 'stream') {
@@ -220,13 +284,22 @@ onUnmounted(() => {
 
       <div class="edward-mode__scan" aria-hidden="true" />
 
+      <button
+        type="button"
+        class="edward-mode__exit"
+        aria-label="Exit edward mode"
+        @click="exit"
+      >
+        ×
+      </button>
+
       <div class="edward-mode__hud" aria-live="polite">
         <div class="edward-mode__brand">
           <span class="edward-mode__session">
             SESSION<span :class="{ 'is-off': !blink }" class="edward-mode__cursor">_</span>
           </span>
           <span class="edward-mode__title">EDWARD!! · faces OS</span>
-          <span class="edward-mode__sub">soap bubbles · smileys · radical net</span>
+          <span class="edward-mode__sub">chaos with labels · dive anytime</span>
         </div>
 
         <div class="edward-mode__meta">
@@ -235,58 +308,98 @@ onUnmounted(() => {
             <template v-if="exploreSummary.active">
               {{ exploreSummary.matched }}/{{ exploreSummary.total }}
             </template>
-            <template v-else>{{ count }} emoticoins</template>
+            <template v-else>{{ count }} coins</template>
             <template v-if="sourceCount"> · {{ sourceCount }} srv</template>
           </span>
-          <ul class="edward-mode__legend" aria-label="Face legend">
-            <li v-for="item in EDWARD_FACE_LEGEND" :key="item.mood">
-              <span class="edward-mode__glyph" aria-hidden="true">{{ item.glyph }}</span>
-              {{ item.label }}
-            </li>
-          </ul>
-        </div>
-
-        <div class="edward-mode__actions">
           <button
             type="button"
             class="edward-mode__focus-btn"
-            :aria-label="`Cycle focus mode, currently ${focusLabel}`"
+            :aria-label="`Cycle focus lens, currently ${focusLabel}`"
             @click="cycleFocus"
           >
             {{ focusLabel }}
           </button>
-          <button
-            type="button"
-            class="edward-mode__exit"
-            aria-label="Exit edward mode"
-            @click="exit"
+          <ul class="edward-mode__legend" aria-label="Face legend">
+            <li v-for="item in EDWARD_FACE_LEGEND.slice(0, 8)" :key="item.mood">
+              <span class="edward-mode__glyph" aria-hidden="true">{{ item.glyph }}</span>
+              {{ item.label }}
+            </li>
+          </ul>
+          <ul
+            v-if="servers.length"
+            class="edward-mode__servers"
+            aria-label="Servers in stream"
           >
-            logout!!
-          </button>
+            <li v-for="srv in servers.slice(0, 5)" :key="srv.host">
+              <button
+                type="button"
+                class="edward-mode__srv-chip"
+                :class="{ 'is-on': chipActive(srv.token) }"
+                :style="{ '--srv': srv.accent }"
+                :title="`${srv.host} · ${srv.count}`"
+                @click="toggleChip(srv.token)"
+              >
+                <span class="edward-mode__srv-dot" aria-hidden="true" />
+                {{ srv.short }}
+                <span class="edward-mode__srv-n">{{ srv.count }}</span>
+              </button>
+            </li>
+          </ul>
         </div>
       </div>
 
-      <button
-        v-if="focusedStatus && !selected && !recessed"
-        type="button"
+      <div
+        v-if="watched && !selected && !recessed"
         class="edward-mode__watch"
-        @click="openFocused"
+        :class="{ 'is-scrubbing': watchScrubbing }"
       >
-        <span class="edward-mode__watch-label">watching</span>
-        <strong class="edward-mode__watch-name">
-          {{
-            (focusedStatus.reblog || focusedStatus).account?.displayName ||
-            (focusedStatus.reblog || focusedStatus).account?.acct ||
-            'someone'
-          }}
-        </strong>
-        <span class="edward-mode__watch-text">
-          {{
-            stripHtml((focusedStatus.reblog || focusedStatus).content || '').slice(0, 120) ||
-            '···'
-          }}
-        </span>
-      </button>
+        <div class="edward-mode__watch-nav">
+          <button
+            type="button"
+            class="edward-mode__watch-step"
+            :disabled="!canPrev"
+            aria-label="Previous watched post"
+            @click="watchPrev"
+          >
+            ←
+          </button>
+          <span class="edward-mode__watch-label">
+            {{ watchScrubbing ? 'paused · scrub' : 'watching · live' }}
+          </span>
+          <button
+            type="button"
+            class="edward-mode__watch-step"
+            :disabled="!canNext"
+            aria-label="Next watched post"
+            @click="watchNext"
+          >
+            →
+          </button>
+          <button
+            v-if="watchScrubbing"
+            type="button"
+            class="edward-mode__watch-live"
+            @click="resumeLive"
+          >
+            live
+          </button>
+        </div>
+        <button type="button" class="edward-mode__watch-body" @click="openFocused">
+          <img
+            v-if="watchMedia"
+            :src="watchMedia"
+            alt=""
+            class="edward-mode__watch-media"
+            loading="lazy"
+          />
+          <div class="edward-mode__watch-copy">
+            <strong class="edward-mode__watch-name">{{ watchName }}</strong>
+            <span v-if="watchHost" class="edward-mode__watch-host">{{ watchHost }}</span>
+            <span class="edward-mode__watch-text">{{ watchText }}</span>
+          </div>
+        </button>
+        <p class="edward-mode__watch-hint">← → scrub · click open · esc resume</p>
+      </div>
 
       <p v-if="error" class="edward-mode__error" role="alert">
         {{ error }}
@@ -342,10 +455,22 @@ onUnmounted(() => {
           >
             {{ chip.label }}
           </button>
+          <button
+            v-for="srv in servers.slice(0, 4)"
+            :key="srv.token"
+            type="button"
+            class="edward-mode__chip edward-mode__chip--srv"
+            :class="{ 'is-on': chipActive(srv.token) }"
+            :style="{ '--srv': srv.accent }"
+            :title="srv.host"
+            @click="toggleChip(srv.token)"
+          >
+            {{ srv.short }}
+          </button>
         </div>
         <p class="edward-mode__explore-crumb" aria-live="polite">
           {{ exploreCrumb }}
-          <span class="edward-mode__explore-hint"> · / to type · esc clears</span>
+          <span class="edward-mode__explore-hint"> · / search · ←→ scrub · esc clears</span>
         </p>
       </div>
 
@@ -466,6 +591,7 @@ onUnmounted(() => {
   align-items: flex-end;
   gap: 0.4rem;
   margin-left: auto;
+  margin-right: 2.75rem;
 }
 
 .edward-mode__count {
@@ -504,28 +630,23 @@ onUnmounted(() => {
   font-size: 0.7rem;
 }
 
-.edward-mode__actions {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.45rem;
-  flex-shrink: 0;
-}
-
-.edward-mode__focus-btn,
 .edward-mode__exit {
-  flex-shrink: 0;
-  padding: 0.45rem 0.85rem;
+  position: absolute;
+  top: max(0.65rem, env(safe-area-inset-top));
+  right: max(0.65rem, env(safe-area-inset-right));
+  z-index: 5;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
   border: 2px solid #ffe566;
   border-radius: 3px;
-  background: #1a1420;
+  background: color-mix(in srgb, #1a1420 88%, transparent);
   color: #ffe566;
   font-family: inherit;
-  font-size: 0.75rem;
-  letter-spacing: 0.1em;
-  text-transform: lowercase;
+  font-size: 1.35rem;
+  line-height: 1;
   cursor: pointer;
-  box-shadow: 3px 3px 0 #ff7eb3;
+  box-shadow: 2px 2px 0 #ff7eb3;
 
   &:hover,
   &:focus-visible {
@@ -540,9 +661,73 @@ onUnmounted(() => {
 }
 
 .edward-mode__focus-btn {
-  border-color: #59d1e0;
+  flex-shrink: 0;
+  align-self: flex-end;
+  padding: 0.35rem 0.65rem;
+  border: 2px solid #59d1e0;
+  border-radius: 3px;
+  background: #1a1420;
   color: #59d1e0;
-  box-shadow: 3px 3px 0 #59d1e0;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 #59d1e0;
+
+  &:hover,
+  &:focus-visible {
+    background: #59d1e0;
+    color: #1a1420;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #ffe566;
+    outline-offset: 2px;
+  }
+}
+
+.edward-mode__servers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: min(360px, 55vw);
+}
+
+.edward-mode__srv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--srv, #ffe566) 70%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, #1a1420 75%, transparent);
+  color: #fff8d6;
+  font-family: inherit;
+  font-size: 0.5625rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+
+  &.is-on {
+    background: color-mix(in srgb, var(--srv, #ff7eb3) 35%, transparent);
+    border-color: var(--srv, #ff7eb3);
+  }
+}
+
+.edward-mode__srv-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--srv, #ffe566);
+}
+
+.edward-mode__srv-n {
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
 }
 
 .edward-mode__watch {
@@ -550,21 +735,85 @@ onUnmounted(() => {
   left: max(1rem, env(safe-area-inset-left));
   bottom: max(7.5rem, calc(env(safe-area-inset-bottom) + 6.75rem));
   z-index: 3;
-  width: min(320px, calc(100vw - 2rem));
-  padding: 0.65rem 0.85rem;
+  width: min(340px, calc(100vw - 2rem));
+  padding: 0.5rem;
   text-align: left;
   border: 2px solid #ffe566;
   border-radius: 4px;
-  background: color-mix(in srgb, #12081c 92%, transparent);
+  background: color-mix(in srgb, #12081c 94%, transparent);
   color: #fff8d6;
   font-family: inherit;
-  cursor: pointer;
   box-shadow: 4px 4px 0 #ff7eb3;
+
+  &.is-scrubbing {
+    border-color: #ff7eb3;
+    box-shadow: 4px 4px 0 #59d1e0;
+  }
+}
+
+.edward-mode__watch-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+
+.edward-mode__watch-step,
+.edward-mode__watch-live {
+  flex-shrink: 0;
+  min-width: 1.75rem;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid #59d1e0;
+  border-radius: 2px;
+  background: #1a1420;
+  color: #59d1e0;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  &:not(:disabled):hover,
+  &:not(:disabled):focus-visible {
+    background: #59d1e0;
+    color: #1a1420;
+  }
+}
+
+.edward-mode__watch-live {
+  border-color: #ff7eb3;
+  color: #ff7eb3;
+  margin-left: auto;
 
   &:hover,
   &:focus-visible {
-    background: #1a1420;
+    background: #ff7eb3;
+    color: #1a1420;
   }
+}
+
+.edward-mode__watch-label {
+  flex: 1;
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ff7eb3;
+}
+
+.edward-mode__watch-body {
+  display: flex;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 
   &:focus-visible {
     outline: 2px solid #59d1e0;
@@ -572,20 +821,34 @@ onUnmounted(() => {
   }
 }
 
-.edward-mode__watch-label {
-  display: block;
-  font-size: 0.625rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #ff7eb3;
-  margin-bottom: 0.2rem;
+.edward-mode__watch-media {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 2px solid #ffe566;
+  border-radius: 3px;
+  background: #1a1420;
+}
+
+.edward-mode__watch-copy {
+  min-width: 0;
+  flex: 1;
 }
 
 .edward-mode__watch-name {
   display: block;
-  font-size: 0.875rem;
-  margin-bottom: 0.25rem;
+  font-size: 0.8125rem;
+  margin-bottom: 0.1rem;
   color: #ffe566;
+}
+
+.edward-mode__watch-host {
+  display: block;
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  color: #59d1e0;
+  margin-bottom: 0.2rem;
 }
 
 .edward-mode__watch-text {
@@ -593,9 +856,16 @@ onUnmounted(() => {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1.35;
   color: color-mix(in srgb, #fff8d6 85%, transparent);
+}
+
+.edward-mode__watch-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, #59d1e0 70%, transparent);
 }
 
 .edward-mode__error {
@@ -738,6 +1008,16 @@ onUnmounted(() => {
     border-color: #ff7eb3;
     background: color-mix(in srgb, #ff7eb3 22%, transparent);
     color: #ffe566;
+  }
+
+  &--srv {
+    border-color: color-mix(in srgb, var(--srv, #ffe566) 55%, transparent);
+    color: var(--srv, #ffe566);
+
+    &.is-on {
+      border-color: var(--srv, #ff7eb3);
+      background: color-mix(in srgb, var(--srv, #ff7eb3) 28%, transparent);
+    }
   }
 
   &:focus-visible {

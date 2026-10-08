@@ -45,6 +45,13 @@ export type EdwardBallDescriptor = {
   /** Short enough for a thought-bubble overlay */
   isShort: boolean
   shortText: string | null
+  /**
+   * Explore sort rank — -1 = stream order (no boost),
+   * 0 = top of current sort, higher = further down.
+   */
+  exploreRank: number
+  /** 1 = top of sort, 0 = bottom — drives spatial pull */
+  exploreRankNorm: number
 }
 
 /** Semantic palette — candy fills still come from face specs; this is fallback RGB */
@@ -218,6 +225,8 @@ export function statusToEdwardBall(
     affinity,
     isShort: preview.length > 0 && preview.length <= 72,
     shortText: preview.length > 0 && preview.length <= 72 ? preview : null,
+    exploreRank: -1,
+    exploreRankNorm: 0,
   }
 }
 
