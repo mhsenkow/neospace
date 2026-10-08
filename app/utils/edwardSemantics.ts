@@ -6,6 +6,10 @@
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { statusIdentity } from '~/utils/statusIdentity'
 import { faceMoodFor, faceSpecFor, type EdwardFaceMood } from '~/utils/edwardFaces'
+import {
+  affinityScore,
+  type EdwardAffinityContext,
+} from '~/utils/edwardAffinity'
 
 export type EdwardKind = 'original' | 'reply' | 'boost'
 
@@ -36,6 +40,11 @@ export type EdwardBallDescriptor = {
   hasCard: boolean
   isBot: boolean
   instanceHost: string | null
+  /** 0–1 how much this relates to you — drives size / proximity */
+  affinity: number
+  /** Short enough for a thought-bubble overlay */
+  isShort: boolean
+  shortText: string | null
 }
 
 /** Semantic palette — candy fills still come from face specs; this is fallback RGB */
@@ -64,7 +73,7 @@ export type EdwardStatusLike = {
   poll?: unknown
   card?: { url?: string | null; title?: string | null } | null
   mediaAttachments?: { previewUrl?: string | null; url?: string | null }[] | null
-  mentions?: unknown[] | null
+  mentions?: { acct?: string | null; username?: string | null }[] | null
   tags?: { name?: string | null }[] | null
   account?: {
     acct?: string | null
@@ -94,7 +103,10 @@ function hostOf(url?: string | null): string | null {
   }
 }
 
-export function statusToEdwardBall(status: EdwardStatusLike): EdwardBallDescriptor {
+export function statusToEdwardBall(
+  status: EdwardStatusLike,
+  affinityCtx?: EdwardAffinityContext | null,
+): EdwardBallDescriptor {
   const body = resolveBody(status)
   const kind = statusKind(status)
   const favourites = n(body.favouritesCount)
@@ -110,6 +122,8 @@ export function statusToEdwardBall(status: EdwardStatusLike): EdwardBallDescript
   if (body.account?.bot) badges.push('bot')
 
   const preview = stripHtml(body.content || '').slice(0, 160)
+  // Include spoiler text in spicy/mood sniff so CW'd spicy still maps
+  const moodText = `${body.spoilerText || ''} ${preview}`.trim()
   const displayName =
     (body.account?.displayName || body.account?.username || body.account?.acct || 'someone').trim()
   const label = displayName.slice(0, 48)
@@ -117,39 +131,58 @@ export function statusToEdwardBall(status: EdwardStatusLike): EdwardBallDescript
 
   const media = body.mediaAttachments?.[0]
   const mediaUrl = media?.previewUrl || media?.url || null
-  const topTag =
-    (body.tags || [])
-      .map((t) => (t?.name || '').replace(/^#/, '').trim())
-      .filter(Boolean)[0] || null
+  const tagNames = (body.tags || [])
+    .map((t) => (t?.name || '').replace(/^#/, '').trim())
+    .filter(Boolean)
+  const topTag = tagNames[0] || null
+  const mentionAccts = (body.mentions || [])
+    .map((m) => m?.acct || m?.username || '')
+    .filter(Boolean)
 
-  const size = 0.22 + Math.log1p(engagement) * 0.11
+  const affinity = affinityScore(
+    {
+      authorAcct: acct,
+      mentionAccts,
+      tagNames,
+      preview: moodText,
+      isBoost: kind === 'boost',
+    },
+    affinityCtx,
+  )
+
+  // Engagement + personal affinity → size
+  const size = Math.min(
+    1.55,
+    0.22 + Math.log1p(engagement) * 0.1 + affinity * 0.55,
+  )
 
   let opacity = kind === 'boost' ? 0.78 : 0.95
-  if (badges.includes('cw')) opacity *= 0.6
+  if (badges.includes('cw') && !['eggplant', 'peach', 'kitty', 'booby'].includes(
+    faceMoodFor({
+      kind,
+      badges,
+      engagement,
+      text: moodText,
+      hasCard: !!body.card?.url,
+      isBot: !!body.account?.bot,
+    }),
+  )) {
+    opacity *= 0.6
+  }
 
-  const spec = faceSpecFor({
+  const signals = {
     kind,
     badges,
     engagement,
-    text: preview,
+    text: moodText,
     hasCard: !!body.card?.url,
     isBot: !!body.account?.bot,
-    mentionCount: body.mentions?.length || 0,
-    tagCount: body.tags?.length || 0,
-  })
+    mentionCount: mentionAccts.length,
+    tagCount: tagNames.length,
+  }
+  const spec = faceSpecFor(signals)
+  const mood = faceMoodFor(signals)
 
-  const mood = faceMoodFor({
-    kind,
-    badges,
-    engagement,
-    text: preview,
-    hasCard: !!body.card?.url,
-    isBot: !!body.account?.bot,
-    mentionCount: body.mentions?.length || 0,
-    tagCount: body.tags?.length || 0,
-  })
-
-  // Tint ball color from face fill hex
   const hex = spec.fill.replace('#', '')
   const color: [number, number, number] = [
     parseInt(hex.slice(0, 2), 16) / 255,
@@ -165,11 +198,11 @@ export function statusToEdwardBall(status: EdwardStatusLike): EdwardBallDescript
     statusId: status.id,
     kind,
     color: Number.isFinite(color[0]) ? color : KIND_COLOR[kind],
-    size: Math.min(1.35, size),
+    size,
     opacity,
     badges,
     mood,
-    moodWhy: spec.why,
+    moodWhy: affinity > 0.35 ? `${spec.why} · you` : spec.why,
     label,
     preview,
     authorKey,
@@ -182,6 +215,9 @@ export function statusToEdwardBall(status: EdwardStatusLike): EdwardBallDescript
     hasCard: !!body.card?.url,
     isBot: !!body.account?.bot,
     instanceHost: hostOf(status._instanceUrl) || hostOf(body.url || body.uri),
+    affinity,
+    isShort: preview.length > 0 && preview.length <= 72,
+    shortText: preview.length > 0 && preview.length <= 72 ? preview : null,
   }
 }
 

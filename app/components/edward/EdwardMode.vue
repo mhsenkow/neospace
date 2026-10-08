@@ -6,6 +6,8 @@
 import { useEdwardStore } from '~/stores/edward'
 import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND } from '~/utils/edwardFaces'
+import { statusIdentity } from '~/utils/statusIdentity'
+import { stripHtml } from '~/utils/sanitizeHtml'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
 
@@ -21,12 +23,33 @@ const loading = computed(() => edward.loading)
 const error = computed(() => edward.error)
 const recessed = computed(() => edward.recessed)
 const sourceCount = computed(() => edward.sourceCount)
+const focusMode = computed(() => edward.focusMode)
+const focusedStatus = computed(() => {
+  const id = edward.focusedIdentity
+  if (!id || edward.focusMode === 'off') return null
+  return edward.statuses.find((s) => statusIdentity(s) === id) || null
+})
+const focusLabel = computed(() => {
+  if (focusMode.value === 'bar') return 'focus · bar'
+  if (focusMode.value === 'square') return 'focus · square'
+  return 'focus · off'
+})
 
 const blink = ref(true)
 let blinkTimer: ReturnType<typeof setInterval> | null = null
 
 const onPick = (identity: string) => {
   edward.selectByIdentity(identity)
+}
+
+const cycleFocus = () => {
+  edward.cycleFocusMode()
+}
+
+const openFocused = () => {
+  if (edward.focusedIdentity) {
+    edward.selectByIdentity(edward.focusedIdentity)
+  }
 }
 
 const closeModal = () => {
@@ -126,8 +149,8 @@ onUnmounted(() => {
           <span class="edward-mode__session">
             SESSION<span :class="{ 'is-off': !blink }" class="edward-mode__cursor">_</span>
           </span>
-          <span class="edward-mode__title">edward · faces OS</span>
-          <span class="edward-mode__sub">WOW!! net · thought stream · radical</span>
+          <span class="edward-mode__title">EDWARD!! · faces OS</span>
+          <span class="edward-mode__sub">soap bubbles · smileys · radical net</span>
         </div>
 
         <div class="edward-mode__meta">
@@ -144,22 +167,54 @@ onUnmounted(() => {
           </ul>
         </div>
 
-        <button
-          type="button"
-          class="edward-mode__exit"
-          aria-label="Exit edward mode"
-          @click="exit"
-        >
-          logout!!
-        </button>
+        <div class="edward-mode__actions">
+          <button
+            type="button"
+            class="edward-mode__focus-btn"
+            :aria-label="`Cycle focus mode, currently ${focusLabel}`"
+            @click="cycleFocus"
+          >
+            {{ focusLabel }}
+          </button>
+          <button
+            type="button"
+            class="edward-mode__exit"
+            aria-label="Exit edward mode"
+            @click="exit"
+          >
+            logout!!
+          </button>
+        </div>
       </div>
+
+      <button
+        v-if="focusedStatus && !selected && !recessed"
+        type="button"
+        class="edward-mode__watch"
+        @click="openFocused"
+      >
+        <span class="edward-mode__watch-label">watching</span>
+        <strong class="edward-mode__watch-name">
+          {{
+            (focusedStatus.reblog || focusedStatus).account?.displayName ||
+            (focusedStatus.reblog || focusedStatus).account?.acct ||
+            'someone'
+          }}
+        </strong>
+        <span class="edward-mode__watch-text">
+          {{
+            stripHtml((focusedStatus.reblog || focusedStatus).content || '').slice(0, 120) ||
+            '···'
+          }}
+        </span>
+      </button>
 
       <p v-if="error" class="edward-mode__error" role="alert">
         {{ error }}
       </p>
 
       <p class="edward-mode__hint">
-        ↑ rises · hover · click!! heart · reply · follow
+        ↑ glass bubbles rise · drag orbit · focus · click!!
       </p>
 
       <EdwardPostModal
@@ -317,6 +372,15 @@ onUnmounted(() => {
   font-size: 0.7rem;
 }
 
+.edward-mode__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.edward-mode__focus-btn,
 .edward-mode__exit {
   flex-shrink: 0;
   padding: 0.45rem 0.85rem;
@@ -341,6 +405,65 @@ onUnmounted(() => {
     outline: 2px solid #59d1e0;
     outline-offset: 2px;
   }
+}
+
+.edward-mode__focus-btn {
+  border-color: #59d1e0;
+  color: #59d1e0;
+  box-shadow: 3px 3px 0 #59d1e0;
+}
+
+.edward-mode__watch {
+  position: absolute;
+  left: max(1rem, env(safe-area-inset-left));
+  bottom: max(3.25rem, calc(env(safe-area-inset-bottom) + 2.5rem));
+  z-index: 3;
+  width: min(320px, calc(100vw - 2rem));
+  padding: 0.65rem 0.85rem;
+  text-align: left;
+  border: 2px solid #ffe566;
+  border-radius: 4px;
+  background: color-mix(in srgb, #12081c 92%, transparent);
+  color: #fff8d6;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 4px 4px 0 #ff7eb3;
+
+  &:hover,
+  &:focus-visible {
+    background: #1a1420;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #59d1e0;
+    outline-offset: 2px;
+  }
+}
+
+.edward-mode__watch-label {
+  display: block;
+  font-size: 0.625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ff7eb3;
+  margin-bottom: 0.2rem;
+}
+
+.edward-mode__watch-name {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 0.25rem;
+  color: #ffe566;
+}
+
+.edward-mode__watch-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, #fff8d6 85%, transparent);
 }
 
 .edward-mode__error {

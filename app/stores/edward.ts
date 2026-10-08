@@ -9,8 +9,14 @@ import {
   type EdwardBallDescriptor,
 } from '~/utils/edwardSemantics'
 import { statusIdentity } from '~/utils/statusIdentity'
+import {
+  emptyAffinityContext,
+  type EdwardAffinityContext,
+} from '~/utils/edwardAffinity'
 
 export const EDWARD_MAX_BALLS = 280
+
+export type EdwardFocusMode = 'off' | 'square' | 'bar'
 
 interface EdwardState {
   active: boolean
@@ -18,11 +24,15 @@ interface EdwardState {
   recessed: boolean
   statuses: ExtendedStatus[]
   selectedIdentity: string | null
+  /** Identity currently inside the watch focus zone */
+  focusedIdentity: string | null
+  focusMode: EdwardFocusMode
   loading: boolean
   error: string | null
   streamStartedAt: number | null
   /** How many servers the firehose is watching */
   sourceCount: number
+  affinity: EdwardAffinityContext
 }
 
 export const useEdwardStore = defineStore('edward', {
@@ -31,15 +41,18 @@ export const useEdwardStore = defineStore('edward', {
     recessed: false,
     statuses: [],
     selectedIdentity: null,
+    focusedIdentity: null,
+    focusMode: 'bar',
     loading: false,
     error: null,
     streamStartedAt: null,
     sourceCount: 0,
+    affinity: emptyAffinityContext(),
   }),
 
   getters: {
     balls(state): EdwardBallDescriptor[] {
-      return state.statuses.map(statusToEdwardBall)
+      return state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
     },
 
     selectedStatus(state): ExtendedStatus | null {
@@ -74,10 +87,12 @@ export const useEdwardStore = defineStore('edward', {
       this.active = false
       this.recessed = false
       this.selectedIdentity = null
+      this.focusedIdentity = null
       this.loading = false
       this.error = null
       this.streamStartedAt = null
       this.sourceCount = 0
+      this.affinity = emptyAffinityContext()
       if (typeof document !== 'undefined') {
         document.body.classList.remove('edward-active')
       }
@@ -89,6 +104,26 @@ export const useEdwardStore = defineStore('edward', {
 
     setSourceCount(n: number) {
       this.sourceCount = Math.max(0, n)
+    },
+
+    setAffinity(ctx: EdwardAffinityContext) {
+      this.affinity = ctx
+    },
+
+    setFocusedIdentity(id: string | null) {
+      this.focusedIdentity = id
+    },
+
+    cycleFocusMode() {
+      const order: EdwardFocusMode[] = ['bar', 'square', 'off']
+      const i = order.indexOf(this.focusMode)
+      this.focusMode = order[(i + 1) % order.length]!
+      if (this.focusMode === 'off') this.focusedIdentity = null
+    },
+
+    setFocusMode(mode: EdwardFocusMode) {
+      this.focusMode = mode
+      if (mode === 'off') this.focusedIdentity = null
     },
 
     selectByIdentity(identity: string | null) {

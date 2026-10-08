@@ -5,22 +5,32 @@
 
 import { useEdwardStore, EDWARD_MAX_BALLS } from '~/stores/edward'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
+import { useGroupsStore } from '~/stores/groups'
 import { statusIdentity, dedupeStatusesByIdentity } from '~/utils/statusIdentity'
 import { isAuthGatedPublicHost } from '~/utils/instances'
 import { publicClient } from '~/composables/useMasto'
+import {
+  emptyAffinityContext,
+  type EdwardAffinityContext,
+} from '~/utils/edwardAffinity'
 
 const POLL_MS = 6_000
 const SEED_LIMIT = 40
 const POLL_LIMIT = 25
+const FOLLOWING_PAGE = 80
+const FOLLOWING_MAX = 300
+const HOME_SAMPLE = 40
 
 export function useEdwardStream() {
   const edward = useEdwardStore()
   const instances = useInstancesStore()
+  const groups = useGroupsStore()
 
   let timer: ReturnType<typeof setInterval> | null = null
   let running = false
   /** Newest status id per instance for sinceId polls */
   let sinceCursors: Record<string, string> = {}
+  let affinityLoaded = false
 
   const firehoseTargets = () => {
     // Watch every connected server — denser than active-only publicTimelineTargets
@@ -106,10 +116,81 @@ export function useEdwardStream() {
     return dedupeStatusesByIdentity(all).slice(0, Math.max(limit, EDWARD_MAX_BALLS))
   }
 
+  const loadAffinity = async () => {
+    if (affinityLoaded) return
+    affinityLoaded = true
+    const ctx: EdwardAffinityContext = emptyAffinityContext()
+    const user = instances.currentUser
+    if (!user) {
+      edward.setAffinity(ctx)
+      return
+    }
+
+    ctx.selfAcct = (user.acct || '').replace(/^@/, '').toLowerCase() || null
+    ctx.selfUsername = (user.username || '').toLowerCase() || null
+
+    try {
+      if (!groups.followedTags.length) {
+        await groups.fetchFollowedTags().catch(() => {})
+      }
+      for (const t of groups.followedTags) {
+        const name = (t.name || '').replace(/^#/, '').toLowerCase()
+        if (name) ctx.tags.add(name)
+      }
+    } catch {
+      /* soft */
+    }
+
+    try {
+      const primary = instances.primaryInstance
+      if (primary?.accessToken) {
+        const client = instances.getClient(primary.id)
+        const userId = user.id
+        const collected: string[] = []
+        let maxId: string | undefined
+        while (collected.length < FOLLOWING_MAX) {
+          const batch = await client.v1.accounts.$select(userId).following.list({
+            limit: FOLLOWING_PAGE,
+            maxId,
+          })
+          const list = Array.isArray(batch) ? batch : []
+          if (!list.length) break
+          for (const a of list) {
+            const acct = (a.acct || '').replace(/^@/, '').toLowerCase()
+            if (acct) {
+              ctx.following.add(acct)
+              collected.push(acct)
+            }
+          }
+          if (list.length < FOLLOWING_PAGE) break
+          maxId = list[list.length - 1]?.id
+          if (!maxId) break
+        }
+
+        try {
+          const home = await client.v1.timelines.home.list({ limit: HOME_SAMPLE })
+          for (const s of home) {
+            const body = s.reblog || s
+            const acct = (body.account?.acct || '').replace(/^@/, '').toLowerCase()
+            if (acct) ctx.homeAuthors.add(acct)
+          }
+        } catch {
+          /* soft */
+        }
+      }
+    } catch {
+      /* guest / soft-fail */
+    }
+
+    if (!running) return
+    edward.setAffinity(ctx)
+  }
+
   const seed = async () => {
     edward.setLoading(true)
     edward.setError(null)
     try {
+      void loadAffinity()
       const page = await fetchFromTargets(SEED_LIMIT)
       edward.replaceStatuses(page)
       refreshSinceCursors()
@@ -161,7 +242,9 @@ export function useEdwardStream() {
   const start = async () => {
     if (running) return
     running = true
+    affinityLoaded = false
     edward.clearStatuses()
+    edward.setAffinity(emptyAffinityContext())
     await seed()
     if (!running) return
     timer = setInterval(() => {
@@ -174,6 +257,7 @@ export function useEdwardStream() {
 
   const stop = () => {
     running = false
+    affinityLoaded = false
     if (timer) {
       clearInterval(timer)
       timer = null

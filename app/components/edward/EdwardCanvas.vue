@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Edward Mode WebGL — Radical Edward faces-OS thought stream.
- * Emoticoin discs rise bottom→top; nearer = bigger. 90s Session energy.
+ * Edward Mode WebGL — grown-up Radical Edward Session OS.
+ * True 3D candy-glass emoticoin bubbles. Lexx / Tank Girl / faces-OS energy.
  * three.js is dynamically imported so the main bundle stays clean.
  */
 
@@ -28,27 +28,33 @@ const hoverCard = ref<{
   why: string
   glyph: string
   tag: string | null
+  affinity: number
   x: number
   y: number
 } | null>(null)
+
+const bubbles = ref<
+  { id: string; text: string; x: number; y: number; scale: number }[]
+>([])
+const focusFrame = computed(() => edward.focusMode)
 
 type ThreeMod = typeof import('three')
 
 type BallRuntime = {
   identity: string
-  mesh: InstanceType<ThreeMod['Mesh']>
+  root: InstanceType<ThreeMod['Group']>
+  face: InstanceType<ThreeMod['Mesh']>
+  shell: InstanceType<ThreeMod['Mesh']>
   halo: InstanceType<ThreeMod['Mesh']>
+  spark: InstanceType<ThreeMod['Mesh']>
   ring: InstanceType<ThreeMod['Mesh']> | null
   texture: InstanceType<ThreeMod['CanvasTexture']>
   phase: number
   speed: number
   size: number
   spin: number
-  /** Horizontal lane */
   x: number
-  /** Depth — smaller z = closer to camera */
   z: number
-  /** Vertical position along stream */
   y: number
   kind: EdwardBallDescriptor['kind']
   badges: EdwardBallDescriptor['badges']
@@ -61,12 +67,16 @@ type BallRuntime = {
   inReplyToId: string | null
   statusId: string
   color: [number, number, number]
+  affinity: number
+  isShort: boolean
+  shortText: string | null
+  mediaUrl: string | null
 }
 
 const STREAM_BOTTOM = -18
 const STREAM_TOP = 18
 const STREAM_SPAN = STREAM_TOP - STREAM_BOTTOM
-const MAX_BALLS = 140
+const MAX_BALLS = 96
 
 let disposed = false
 let raf = 0
@@ -77,23 +87,26 @@ let camera: InstanceType<ThreeMod['PerspectiveCamera']> | null = null
 let ballGroup: InstanceType<ThreeMod['Group']> | null = null
 let filamentLines: InstanceType<ThreeMod['LineSegments']> | null = null
 let stars: InstanceType<ThreeMod['Points']> | null = null
-let coinGeo: InstanceType<ThreeMod['CircleGeometry']> | null = null
+let sphereGeo: InstanceType<ThreeMod['SphereGeometry']> | null = null
+let faceGeo: InstanceType<ThreeMod['CircleGeometry']> | null = null
+let sparkGeo: InstanceType<ThreeMod['SphereGeometry']> | null = null
 let torusGeo: InstanceType<ThreeMod['TorusGeometry']> | null = null
 let raycaster: InstanceType<ThreeMod['Raycaster']> | null = null
+let envMap: InstanceType<ThreeMod['Texture']> | null = null
 let pointerNdc = { x: 0, y: 0 }
 let dragging = false
 let dragMoved = false
 let lastPtr = { x: 0, y: 0 }
-/** Camera orbit around the vertical stream */
-let camYaw = 0.12
-let camPitch = 0.06
-let camDist = 24
+let camYaw = 0.18
+let camPitch = 0.08
+let camDist = 26
 let reducedMotion = false
 let balls: BallRuntime[] = []
 let identityToBall = new Map<string, BallRuntime>()
 let clockStart = 0
 let hoverIdentity: string | null = null
 let sharedHaloMat: InstanceType<ThreeMod['MeshBasicMaterial']> | null = null
+let sharedSparkMat: InstanceType<ThreeMod['MeshBasicMaterial']> | null = null
 
 const hash01 = (s: string) => {
   let h = 2166136261
@@ -102,6 +115,55 @@ const hash01 = (s: string) => {
     h = Math.imul(h, 16777619)
   }
   return (h >>> 0) / 4294967295
+}
+
+const paintAuthorChip = (
+  ctx: CanvasRenderingContext2D,
+  d: EdwardBallDescriptor,
+) => {
+  ctx.fillStyle = 'rgba(26,20,32,0.82)'
+  ctx.beginPath()
+  roundChip(ctx, 256, 455, Math.min(200, 28 + d.label.length * 7), 28)
+  ctx.fill()
+  ctx.fillStyle = '#fff8d6'
+  ctx.font = '700 22px "Courier New", ui-monospace, monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const name = d.label.length > 16 ? d.label.slice(0, 14) + '…' : d.label
+  ctx.fillText(name, 256, 455)
+
+  if (d.affinity > 0.35) {
+    ctx.fillStyle = '#ff7eb3'
+    ctx.beginPath()
+    ctx.arc(420, 92, 18, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#1a1420'
+    ctx.font = '700 18px "Courier New", ui-monospace, monospace'
+    ctx.fillText('★', 420, 93)
+  }
+}
+
+const paintMediaPeek = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+) => {
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(340, 340, 110, 0, Math.PI * 2)
+  ctx.clip()
+  const aspect = img.naturalWidth / Math.max(1, img.naturalHeight)
+  let dw = 220
+  let dh = 220
+  if (aspect > 1) dh = 220 / aspect
+  else dw = 220 * aspect
+  ctx.globalAlpha = 0.88
+  ctx.drawImage(img, 340 - dw / 2, 340 - dh / 2, dw, dh)
+  ctx.restore()
+  ctx.strokeStyle = '#ffe566'
+  ctx.lineWidth = 6
+  ctx.beginPath()
+  ctx.arc(340, 340, 110, 0, Math.PI * 2)
+  ctx.stroke()
 }
 
 const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTexture']> => {
@@ -118,22 +180,26 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
     isBot: d.isBot,
   })
   drawEmoticoin(ctx, spec, hash01(d.identity))
-
-  // Tiny author sticker under the chin — still readable on hover-sized coins
-  ctx.fillStyle = 'rgba(26,20,32,0.82)'
-  ctx.beginPath()
-  roundChip(ctx, 256, 455, Math.min(200, 28 + d.label.length * 7), 28)
-  ctx.fill()
-  ctx.fillStyle = '#fff8d6'
-  ctx.font = '700 22px "Courier New", ui-monospace, monospace'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  const name = d.label.length > 16 ? d.label.slice(0, 14) + '…' : d.label
-  ctx.fillText(name, 256, 455)
+  paintAuthorChip(ctx, d)
 
   const tex = new THREE!.CanvasTexture(canvas)
   tex.colorSpace = THREE!.SRGBColorSpace
+  tex.anisotropy = 4
   tex.needsUpdate = true
+
+  if (d.mediaUrl && !d.badges.includes('cw')) {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      if (disposed) return
+      drawEmoticoin(ctx, spec, hash01(d.identity))
+      paintMediaPeek(ctx, img)
+      paintAuthorChip(ctx, d)
+      tex.needsUpdate = true
+    }
+    img.src = d.mediaUrl
+  }
+
   return tex
 }
 
@@ -155,21 +221,21 @@ const roundChip = (
   ctx.closePath()
 }
 
-const laneFor = (identity: string) => {
+const laneFor = (identity: string, affinity = 0) => {
   const a = hash01(identity)
   const b = hash01(identity + ':z')
-  // x: ±4 lane scatter; z: 4 (far) → -6 (near / bigger)
+  const pull = Math.min(1, Math.max(0, affinity))
+  const xScatter = 8 - pull * 4.5
   return {
-    x: (a - 0.5) * 8,
-    z: 4 - b * 10,
+    x: (a - 0.5) * xScatter,
+    z: 4 - b * 10 - pull * 3.2,
   }
 }
 
 const disposeBall = (b: BallRuntime) => {
-  ballGroup?.remove(b.mesh)
-  ballGroup?.remove(b.halo)
-  if (b.ring) ballGroup?.remove(b.ring)
-  ;(b.mesh.material as { dispose: () => void }).dispose()
+  ballGroup?.remove(b.root)
+  ;(b.face.material as { dispose: () => void }).dispose()
+  ;(b.shell.material as { dispose: () => void }).dispose()
   b.texture.dispose()
   if (b.ring) {
     ;(b.ring.material as { dispose: () => void }).dispose()
@@ -177,7 +243,18 @@ const disposeBall = (b: BallRuntime) => {
 }
 
 const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null => {
-  if (!THREE || !ballGroup || !coinGeo || !sharedHaloMat) return null
+  if (
+    !THREE ||
+    !ballGroup ||
+    !sphereGeo ||
+    !faceGeo ||
+    !sparkGeo ||
+    !sharedHaloMat ||
+    !sharedSparkMat
+  ) {
+    return null
+  }
+
   const texture = buildTexture(d)
   const spec = faceSpecFor({
     kind: d.kind,
@@ -187,52 +264,113 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     hasCard: d.hasCard,
     isBot: d.isBot,
   })
-  const mat = new THREE.MeshBasicMaterial({
+  const lane = laneFor(d.identity, d.affinity)
+  const nearBoost = 1 + Math.max(0, (-lane.z) / 10) * 1.1
+  const affBoost = 1 + d.affinity * 0.55
+  const size = (0.95 + d.size * 1.55) * nearBoost * affBoost
+  const tint = d.affinity > 0.45 ? '#ff7eb3' : spec.rim
+
+  const root = new THREE.Group()
+  root.userData.identity = d.identity
+
+  // Soap-bubble glass — transmission + clearcoat + iridescence
+  const shellMat = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(tint),
+    metalness: 0.02,
+    roughness: 0.08,
+    transmission: 0.78,
+    thickness: 0.9,
+    ior: 1.48,
+    transparent: true,
+    opacity: 1,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
+    iridescence: 1,
+    iridescenceIOR: 1.7,
+    iridescenceThicknessRange: [160, 640],
+    envMapIntensity: 1.5,
+    attenuationColor: new THREE.Color(spec.fill),
+    attenuationDistance: 1.6,
+    side: THREE.FrontSide,
+    depthWrite: false,
+  })
+  if (envMap) shellMat.envMap = envMap
+  const shell = new THREE.Mesh(sphereGeo, shellMat)
+  shell.userData.identity = d.identity
+
+  // Smiley face nestled inside — stays readable, billboards to camera
+  const faceMat = new THREE.MeshStandardMaterial({
     map: texture,
     transparent: true,
-    opacity: Math.max(0.75, d.opacity),
+    opacity: Math.max(0.9, d.opacity),
+    roughness: 0.32,
+    metalness: 0.05,
+    emissive: new THREE.Color(spec.fill),
+    emissiveIntensity: 0.22 + d.affinity * 0.25,
     side: THREE.DoubleSide,
     depthWrite: true,
   })
-  const mesh = new THREE.Mesh(coinGeo, mat)
-  // Bigger coins — nearer depth lanes read even larger
-  const nearBoost = 1 + Math.max(0, (-laneFor(d.identity).z) / 10) * 1.1
-  const size = (0.9 + d.size * 1.6) * nearBoost
-  mesh.scale.setScalar(size)
-  mesh.userData.identity = d.identity
+  const face = new THREE.Mesh(faceGeo, faceMat)
+  face.scale.setScalar(0.76)
+  face.position.z = 0.08
+  face.userData.identity = d.identity
 
-  const halo = new THREE.Mesh(coinGeo, sharedHaloMat)
-  halo.scale.setScalar(size * 1.28)
+  const halo = new THREE.Mesh(sphereGeo, sharedHaloMat)
+  halo.scale.setScalar(1.28)
   halo.raycast = () => {}
 
+  // Catch-light — that glossy tank-girl magazine shine
+  const spark = new THREE.Mesh(sparkGeo, sharedSparkMat)
+  spark.position.set(0.38, 0.44, 0.62)
+  spark.scale.setScalar(0.16)
+  spark.raycast = () => {}
+
   let ring: InstanceType<ThreeMod['Mesh']> | null = null
-  if (torusGeo && (d.badges.includes('poll') || d.kind === 'reply' || d.kind === 'boost')) {
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(spec.rim),
+  const wantRing =
+    torusGeo &&
+    (d.affinity > 0.4 ||
+      d.badges.includes('poll') ||
+      d.kind === 'reply' ||
+      d.kind === 'boost')
+  if (wantRing && torusGeo) {
+    const ringMat = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : tint),
+      metalness: 0.55,
+      roughness: 0.22,
+      clearcoat: 0.9,
       transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
+      opacity: 0.9,
+      emissive: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : tint),
+      emissiveIntensity: 0.4,
+      envMapIntensity: 1.2,
     })
+    if (envMap) ringMat.envMap = envMap
     ring = new THREE.Mesh(torusGeo, ringMat)
-    ring.scale.setScalar(size * 0.95)
+    ring.scale.setScalar(1.08)
     ring.raycast = () => {}
-    ballGroup.add(ring)
+    root.add(ring)
   }
 
-  ballGroup.add(mesh)
-  ballGroup.add(halo)
+  root.add(halo)
+  root.add(shell)
+  root.add(face)
+  root.add(spark)
+  root.scale.setScalar(size)
+  ballGroup.add(root)
 
-  const lane = laneFor(d.identity)
   return {
     identity: d.identity,
-    mesh,
+    root,
+    face,
+    shell,
     halo,
+    spark,
     ring,
     texture,
     phase: hash01(d.identity) * Math.PI * 2,
-    speed: 0.65 + hash01(d.identity + ':s') * 0.95,
+    speed: 0.65 + hash01(d.identity + ':s') * 0.95 - d.affinity * 0.12,
     size,
-    spin: (hash01(d.identity + ':spin') - 0.5) * 1.4,
+    spin: (hash01(d.identity + ':spin') - 0.5) * 1.6,
     x: lane.x,
     z: lane.z,
     y: ySeed,
@@ -247,15 +385,34 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     inReplyToId: d.inReplyToId,
     statusId: d.statusId,
     color: d.color,
+    affinity: d.affinity,
+    isShort: d.isShort,
+    shortText: d.shortText,
+    mediaUrl: d.mediaUrl,
   }
+}
+
+const applyAffinityLayout = (b: BallRuntime, d: EdwardBallDescriptor) => {
+  const lane = laneFor(d.identity, d.affinity)
+  b.x = lane.x
+  b.z = lane.z
+  b.affinity = d.affinity
+  b.isShort = d.isShort
+  b.shortText = d.shortText
+  b.moodWhy = d.moodWhy
+  const nearBoost = 1 + Math.max(0, (-lane.z) / 10) * 1.1
+  const affBoost = 1 + d.affinity * 0.55
+  const size = (0.95 + d.size * 1.55) * nearBoost * affBoost
+  b.size = size
+  b.root.scale.setScalar(size)
 }
 
 const syncBallsFromStore = () => {
   if (!THREE || !ballGroup) return
   const descriptors = edward.balls.slice(0, MAX_BALLS)
   const keep = new Set(descriptors.map((d) => d.identity))
+  const byId = new Map(descriptors.map((d) => [d.identity, d]))
 
-  // Remove gone
   for (const [id, b] of [...identityToBall.entries()]) {
     if (!keep.has(id)) {
       disposeBall(b)
@@ -263,13 +420,16 @@ const syncBallsFromStore = () => {
     }
   }
 
-  // Add new — spawn at bottom; existing keep their y
+  for (const [id, b] of identityToBall) {
+    const d = byId.get(id)
+    if (d) applyAffinityLayout(b, d)
+  }
+
   const existingCount = identityToBall.size
   let spawnI = 0
   for (let i = 0; i < descriptors.length; i++) {
     const d = descriptors[i]!
     if (identityToBall.has(d.identity)) continue
-    // Stagger new arrivals along the lower third so the stream fills
     const y =
       existingCount === 0
         ? STREAM_BOTTOM + (i / Math.max(1, descriptors.length - 1)) * STREAM_SPAN
@@ -286,10 +446,9 @@ const syncBallsFromStore = () => {
 }
 
 const ballWorldPos = (b: BallRuntime, t: number) => {
-  // Playful Edward bob — a little chaotic, not solemn
   const wobbleX = reducedMotion ? 0 : Math.sin(t * b.speed * 0.9 + b.phase) * 0.55
   const wobbleZ = reducedMotion ? 0 : Math.cos(t * b.speed * 0.7 + b.phase * 1.3) * 0.4
-  const hop = reducedMotion ? 0 : Math.abs(Math.sin(t * b.speed * 1.4 + b.phase)) * 0.2
+  const hop = reducedMotion ? 0 : Math.abs(Math.sin(t * b.speed * 1.4 + b.phase)) * 0.22
   return {
     x: b.x + wobbleX,
     y: b.y + hop,
@@ -335,8 +494,37 @@ const rebuildFilaments = () => {
   old.dispose()
 }
 
+const projectScreen = (
+  x: number,
+  y: number,
+  z: number,
+): { x: number; y: number; behind: boolean } | null => {
+  if (!camera || !hostEl.value || !THREE) return null
+  const v = new THREE.Vector3(x, y, z)
+  v.project(camera)
+  if (v.z > 1) return { x: 0, y: 0, behind: true }
+  const rect = hostEl.value.getBoundingClientRect()
+  return {
+    x: (v.x * 0.5 + 0.5) * rect.width,
+    y: (-v.y * 0.5 + 0.5) * rect.height,
+    behind: false,
+  }
+}
+
+const focusNormRect = (): { x0: number; y0: number; x1: number; y1: number } | null => {
+  const mode = edward.focusMode
+  if (mode === 'off') return null
+  if (mode === 'square') return { x0: 0.28, y0: 0.28, x1: 0.72, y1: 0.72 }
+  return { x0: 0.08, y0: 0.38, x1: 0.92, y1: 0.62 }
+}
+
 const updateBalls = (t: number, dt: number) => {
-  if (!camera || !THREE) return
+  if (!camera || !THREE || !hostEl.value) return
+  const rect = hostEl.value.getBoundingClientRect()
+  const focus = focusNormRect()
+  let bestFocus: { id: string; score: number } | null = null
+  const nextBubbles: { id: string; text: string; x: number; y: number; scale: number }[] = []
+
   for (const b of balls) {
     if (!reducedMotion) {
       b.y += b.speed * dt * 1.35
@@ -345,22 +533,75 @@ const updateBalls = (t: number, dt: number) => {
       }
     }
     const p = ballWorldPos(b, t)
-    b.mesh.position.set(p.x, p.y, p.z)
-    b.halo.position.set(p.x, p.y, p.z)
-    // Billboard face toward camera, with a little tumble for coin energy
-    b.mesh.quaternion.copy(camera.quaternion)
+    b.root.position.set(p.x, p.y, p.z)
+
+    // Shell tumbles in 3D so you feel the volume
+    if (!reducedMotion) {
+      b.shell.rotation.y = t * b.spin * 0.35 + b.phase
+      b.shell.rotation.x = Math.sin(t * 0.4 + b.phase) * 0.25
+      b.shell.rotation.z = Math.cos(t * 0.33 + b.phase) * 0.15
+    }
+
+    // Face stays readable — always toward camera, slight playful tilt
+    b.face.quaternion.copy(camera.quaternion)
     if (!reducedMotion) {
       const tumble = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, 0, Math.sin(t * b.spin + b.phase) * 0.18),
+        new THREE.Euler(0, 0, Math.sin(t * b.spin + b.phase) * 0.14),
       )
-      b.mesh.quaternion.multiply(tumble)
+      b.face.quaternion.multiply(tumble)
     }
-    b.halo.quaternion.copy(b.mesh.quaternion)
+
+    // Spark follows camera-facing highlight
+    b.spark.quaternion.copy(camera.quaternion)
+
     if (b.ring) {
-      b.ring.position.set(p.x, p.y, p.z)
-      b.ring.quaternion.copy(camera.quaternion)
-      b.ring.rotateZ(t * 1.2 + b.phase)
+      b.ring.rotation.x = Math.PI / 2.4 + Math.sin(t * 0.5 + b.phase) * 0.2
+      b.ring.rotation.z = t * 0.9 + b.phase
     }
+
+    const screen = projectScreen(p.x, p.y, p.z)
+    if (!screen || screen.behind) continue
+    const nx = screen.x / Math.max(1, rect.width)
+    const ny = screen.y / Math.max(1, rect.height)
+
+    if (focus && nx >= focus.x0 && nx <= focus.x1 && ny >= focus.y0 && ny <= focus.y1) {
+      const cx = (focus.x0 + focus.x1) / 2
+      const cy = (focus.y0 + focus.y1) / 2
+      const dist = Math.hypot(nx - cx, ny - cy)
+      const score = 1 - dist + b.affinity * 0.35 + -b.z * 0.02
+      if (!bestFocus || score > bestFocus.score) {
+        bestFocus = { id: b.identity, score }
+      }
+      b.root.scale.setScalar(b.size * 1.14)
+    } else {
+      b.root.scale.setScalar(b.size)
+    }
+
+    if (
+      b.isShort &&
+      b.shortText &&
+      !b.badges.includes('cw') &&
+      nextBubbles.length < 5 &&
+      nx > 0.05 &&
+      nx < 0.95 &&
+      ny > 0.08 &&
+      ny < 0.9
+    ) {
+      nextBubbles.push({
+        id: b.identity,
+        text: b.shortText,
+        x: screen.x,
+        y: screen.y - 36 - b.size * 10,
+        scale: 0.85 + Math.min(0.4, b.affinity * 0.3),
+      })
+    }
+  }
+
+  bubbles.value = nextBubbles
+
+  const focusedId = bestFocus?.id || null
+  if (focusedId !== edward.focusedIdentity) {
+    edward.setFocusedIdentity(focusedId)
   }
 }
 
@@ -392,6 +633,7 @@ const projectHover = (b: BallRuntime) => {
     why: b.moodWhy,
     glyph: MOOD_GLYPH[b.mood] || '◉‿◉',
     tag: b.topTag,
+    affinity: b.affinity,
     x: (v.x * 0.5 + 0.5) * rect.width,
     y: (-v.y * 0.5 + 0.5) * rect.height,
   }
@@ -400,7 +642,7 @@ const projectHover = (b: BallRuntime) => {
 const hitTest = (): BallRuntime | null => {
   if (!raycaster || !camera || !ballGroup || !THREE) return null
   raycaster.setFromCamera(new THREE.Vector2(pointerNdc.x, pointerNdc.y), camera)
-  const meshes = balls.map((b) => b.mesh)
+  const meshes = balls.flatMap((b) => [b.shell, b.face])
   const hits = raycaster.intersectObjects(meshes, false)
   if (!hits.length) return null
   const id = hits[0]!.object.userData.identity as string
@@ -491,7 +733,7 @@ const frame = () => {
   lastFrameT = now
 
   if (!reducedMotion) {
-    camYaw += 0.00012
+    camYaw += 0.00015
     applyCamera()
   }
   updateBalls(t, dt)
@@ -504,7 +746,7 @@ const frame = () => {
     else hoverCard.value = null
   }
 
-  if (stars) stars.rotation.y = reducedMotion ? 0 : t * 0.006
+  if (stars) stars.rotation.y = reducedMotion ? 0 : t * 0.008
 
   renderer.render(scene, camera)
   raf = requestAnimationFrame(frame)
@@ -521,6 +763,43 @@ const onVisibility = () => {
     lastFrameT = performance.now()
     raf = requestAnimationFrame(frame)
   }
+}
+
+const buildEnvMap = () => {
+  if (!THREE || !renderer || !scene) return
+  const pmrem = new THREE.PMREMGenerator(renderer)
+
+  // Punk candy studio — pink / cyan / yellow softboxes for glass reflections
+  const envScene = new THREE.Scene()
+  envScene.background = new THREE.Color(0x1a0e22)
+
+  const softbox = (color: number, x: number, y: number, z: number, s: number) => {
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 20, 16),
+      new THREE.MeshBasicMaterial({ color }),
+    )
+    mesh.position.set(x, y, z)
+    mesh.scale.setScalar(s)
+    envScene.add(mesh)
+    return mesh
+  }
+  softbox(0xff7eb3, 4, 5, 2, 3.2)
+  softbox(0x59d1e0, -5, 1, -3, 2.8)
+  softbox(0xffe566, 0, -4, 5, 2.4)
+  softbox(0xffffff, 2, 6, -2, 1.4)
+
+  const rt = pmrem.fromScene(envScene, 0.04)
+  envMap = rt.texture
+  scene.environment = envMap
+  pmrem.dispose()
+  envScene.traverse((obj) => {
+    const m = obj as {
+      geometry?: { dispose: () => void }
+      material?: { dispose: () => void }
+    }
+    m.geometry?.dispose()
+    m.material?.dispose()
+  })
 }
 
 const disposeScene = () => {
@@ -561,8 +840,13 @@ const disposeScene = () => {
     })
   }
 
+  envMap?.dispose()
+  envMap = null
   sharedHaloMat = null
-  coinGeo = null
+  sharedSparkMat = null
+  sphereGeo = null
+  faceGeo = null
+  sparkGeo = null
   torusGeo = null
   filamentLines = null
   stars = null
@@ -590,9 +874,8 @@ const init = async () => {
   const h = hostEl.value.clientHeight
 
   scene = new THREE.Scene()
-  // Deep CRT void with a hint of Session purple-teal — still candy, not brooding
-  scene.fog = new THREE.FogExp2(0x06040e, 0.02)
-  scene.background = new THREE.Color(0x06040e)
+  scene.fog = new THREE.FogExp2(0x0a0614, 0.018)
+  scene.background = new THREE.Color(0x0a0614)
 
   camera = new THREE.PerspectiveCamera(52, w / Math.max(1, h), 0.1, 200)
   applyCamera()
@@ -604,45 +887,72 @@ const init = async () => {
   })
   renderer.setSize(w, h, false)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.15
   renderer.domElement.style.display = 'block'
   renderer.domElement.style.width = '100%'
   renderer.domElement.style.height = '100%'
   hostEl.value.appendChild(renderer.domElement)
 
-  // Flat unlit coins — MeshBasic — but keep a soft ambient for any rings
-  scene.add(new THREE.AmbientLight(0xffffff, 0.9))
+  buildEnvMap()
+
+  // Tank Girl stage lights — magenta key, cyan fill, yellow rim
+  scene.add(new THREE.AmbientLight(0xffe8f4, 0.35))
+  const key = new THREE.DirectionalLight(0xff7eb3, 2.2)
+  key.position.set(6, 10, 4)
+  scene.add(key)
+  const fill = new THREE.DirectionalLight(0x59d1e0, 1.4)
+  fill.position.set(-8, 2, -4)
+  scene.add(fill)
+  const rim = new THREE.DirectionalLight(0xffe566, 1.1)
+  rim.position.set(0, -4, 8)
+  scene.add(rim)
+  const point = new THREE.PointLight(0xff9ad5, 18, 40, 2)
+  point.position.set(0, 4, 6)
+  scene.add(point)
 
   raycaster = new THREE.Raycaster()
-  coinGeo = new THREE.CircleGeometry(1, 48)
-  torusGeo = new THREE.TorusGeometry(1.12, 0.06, 8, 48)
+  // Dense enough to read as glass orbs; not so dense that transmission melts the GPU
+  sphereGeo = new THREE.SphereGeometry(1, 36, 28)
+  faceGeo = new THREE.CircleGeometry(1, 40)
+  sparkGeo = new THREE.SphereGeometry(1, 12, 10)
+  torusGeo = new THREE.TorusGeometry(1.05, 0.055, 8, 48)
+
   sharedHaloMat = new THREE.MeshBasicMaterial({
-    color: 0xffe566,
+    color: 0xff7eb3,
     transparent: true,
-    opacity: 0.14,
+    opacity: 0.12,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.BackSide,
+  })
+  sharedSparkMat = new THREE.MeshBasicMaterial({
+    color: 0xfff8e8,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
   })
 
   ballGroup = new THREE.Group()
   scene.add(ballGroup)
 
-  // Stars
-  const starCount = 700
+  // Glitter field
+  const starCount = 900
   const starPos = new Float32Array(starCount * 3)
   for (let i = 0; i < starCount; i++) {
-    starPos[i * 3] = (Math.random() - 0.5) * 80
-    starPos[i * 3 + 1] = (Math.random() - 0.5) * 80
-    starPos[i * 3 + 2] = (Math.random() - 0.5) * 80
+    starPos[i * 3] = (Math.random() - 0.5) * 90
+    starPos[i * 3 + 1] = (Math.random() - 0.5) * 90
+    starPos[i * 3 + 2] = (Math.random() - 0.5) * 90
   }
   const starGeo = new THREE.BufferGeometry()
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
   stars = new THREE.Points(
     starGeo,
     new THREE.PointsMaterial({
-      color: 0x7a90a8,
-      size: 0.1,
+      color: 0xffc8e8,
+      size: 0.12,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.7,
       depthWrite: false,
       sizeAttenuation: true,
     }),
@@ -654,20 +964,20 @@ const init = async () => {
   filamentLines = new THREE.LineSegments(
     filGeo,
     new THREE.LineBasicMaterial({
-      color: 0x3a5068,
+      color: 0xff7eb3,
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.22,
       depthWrite: false,
     }),
   )
   scene.add(filamentLines)
 
-  const nebGeo = new THREE.SphereGeometry(95, 24, 16)
+  // Deep void shell with a hint of CRT purple
   scene.add(
     new THREE.Mesh(
-      nebGeo,
+      new THREE.SphereGeometry(95, 24, 16),
       new THREE.MeshBasicMaterial({
-        color: 0x0a101c,
+        color: 0x080510,
         side: THREE.BackSide,
       }),
     ),
@@ -696,6 +1006,12 @@ watch(
   { deep: false },
 )
 
+watch(
+  () => edward.affinity,
+  () => syncBallsFromStore(),
+  { deep: false },
+)
+
 onMounted(() => {
   disposed = false
   void init()
@@ -709,6 +1025,24 @@ onUnmounted(() => {
 <template>
   <div ref="hostEl" class="edward-canvas" aria-hidden="true">
     <div
+      v-if="focusFrame !== 'off'"
+      class="edward-canvas__focus"
+      :class="`edward-canvas__focus--${focusFrame}`"
+      aria-hidden="true"
+    />
+
+    <div
+      v-for="b in bubbles"
+      :key="b.id"
+      class="edward-canvas__bubble"
+      :style="{
+        transform: `translate(${b.x}px, ${b.y}px) scale(${b.scale})`,
+      }"
+    >
+      {{ b.text }}
+    </div>
+
+    <div
       v-if="hoverCard"
       class="edward-canvas__hover"
       :style="{ transform: `translate(${hoverCard.x}px, ${hoverCard.y}px)` }"
@@ -720,6 +1054,7 @@ onUnmounted(() => {
       <strong class="edward-canvas__hover-name">{{ hoverCard.name }}</strong>
       <p class="edward-canvas__hover-preview">{{ hoverCard.preview }}</p>
       <span v-if="hoverCard.tag" class="edward-canvas__hover-tag">#{{ hoverCard.tag }}</span>
+      <span v-if="hoverCard.affinity > 0.35" class="edward-canvas__hover-you">related to you</span>
       <span class="edward-canvas__hover-go">click!! heart · reply · follow · thread</span>
     </div>
   </div>
@@ -732,7 +1067,7 @@ onUnmounted(() => {
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  background: #06040e;
+  background: #0a0614;
 
   &:active {
     cursor: grabbing;
@@ -806,10 +1141,67 @@ onUnmounted(() => {
   color: #ffe566;
 }
 
+.edward-canvas__hover-you {
+  display: inline-block;
+  margin: 0 0.4rem 4px 0;
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  color: #ff7eb3;
+}
+
 .edward-canvas__hover-go {
   display: block;
   font-size: 0.625rem;
   letter-spacing: 0.08em;
   color: #59d1e0;
+}
+
+.edward-canvas__focus {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border: 2px dashed color-mix(in srgb, #ffe566 55%, transparent);
+  box-shadow:
+    0 0 0 9999px color-mix(in srgb, #0a0614 55%, transparent),
+    inset 0 0 40px color-mix(in srgb, #ff7eb3 12%, transparent);
+  border-radius: 4px;
+
+  &--bar {
+    left: 8%;
+    right: 8%;
+    top: 38%;
+    height: 24%;
+  }
+
+  &--square {
+    left: 28%;
+    top: 28%;
+    width: 44%;
+    height: 44%;
+  }
+}
+
+.edward-canvas__bubble {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  max-width: min(200px, 42vw);
+  padding: 6px 10px;
+  margin-left: -8px;
+  pointer-events: none;
+  font-family: 'Courier New', ui-monospace, monospace;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: #1a1420;
+  background: #fff8d6;
+  border: 2px solid #1a1420;
+  border-radius: 12px 12px 12px 4px;
+  box-shadow: 3px 3px 0 #ff7eb3;
+  transform-origin: bottom left;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>
