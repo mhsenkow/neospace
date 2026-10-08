@@ -90,23 +90,24 @@ export function useLoomHandoff() {
     }
   }
 
-  /** bruh → compose: text-only (page excerpt + share link). */
+  /** bruh → compose: text-only (page excerpt + share link). Always ack; upgrade draft if fuller text arrives. */
   const onBruhMessage = (e: MessageEvent) => {
     if (!BRUH_ORIGINS.has(e.origin) || !isBruhShare(e.data)) return
     ackBruh(e.origin)
-    if (loomShareAccepted) return
     const text = bruhShareText(e.data)
     if (!text) return
+    const already = loomShareAccepted
     loomShareAccepted = true
     void (async () => {
       const share = { story: '', text, source: 'bruh' as const }
       persistLoomShare(share)
       if (!instancesStore.isAuthenticated) {
         await router.replace('/login')
-      } else {
-        await composeHandoff.ingestStored(share)
-        await openLoomCompose()
+        return
       }
+      await composeHandoff.ingestStored(share)
+      // First delivery opens compose; later postMessage upgrades the pending draft quietly.
+      if (!already) await openLoomCompose()
     })()
   }
 
@@ -166,7 +167,6 @@ export function useLoomHandoff() {
     const composeFrom = String(route.query.compose || '')
     const fromQuery = composeFrom === 'loom' || composeFrom === 'bruh'
     if (fromQuery) {
-      if (composeFrom === 'bruh') loomShareAccepted = true
       const share = {
         story: typeof route.query.story === 'string' ? route.query.story : '',
         text: typeof route.query.text === 'string' ? route.query.text : '',
@@ -175,14 +175,21 @@ export function useLoomHandoff() {
       persistLoomShare(share)
       await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })
 
-      // Story URL is authoritative (KV-backed .img). Don't wait on postMessage.
+      // Story URL is authoritative for Loom. For bruh, keep the door open for a
+      // postMessage upgrade (full caption + share link) — query text is deliberately short.
       if (!instancesStore.isAuthenticated) {
         persistLoomShare(share)
         if (route.path !== '/login') await router.replace('/login')
       } else {
         await composeHandoff.ingestStored(share)
-        loomShareAccepted = composeHandoff.hasPending
+        if (composeFrom === 'loom') loomShareAccepted = composeHandoff.hasPending
         await openLoomCompose()
+        // bruh: mark accepted after a beat so an early postMessage can still upgrade text
+        if (composeFrom === 'bruh') {
+          window.setTimeout(() => {
+            loomShareAccepted = true
+          }, 2500)
+        }
       }
     } else {
       // Give optional postMessage a short window when we weren't opened via query
