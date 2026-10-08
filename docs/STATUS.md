@@ -59,6 +59,19 @@ The audit pass closed trust/safety bugs (CW/sensitive media, sanitizer holes, DM
 
 What **didn't** fit a sweep-sized fix is tracked as epics below.
 
+### Holistic pass (Oct 8 2026)
+
+Second sweep — perf / architecture / a11y / responsive audits, live-verified at 1440, 1024, 768 and 375px.
+
+- **Boot:** static boot JS 176.7 → 156.3 KB gz; Settings / Compose / Algorithm / Accounts overlays mount on first open (~22 KB gz deferred); only the active breakpoint's nav renders; Edward helpers off the boot path (`utils/edwardShell.ts`).
+- **Feeds:** `shallowRef` timelines (cards read through `reactive()` for optimistic likes); no per-card TransitionGroup measuring, ResizeObserver or matchMedia; NeoMenu global listeners only while open; jittered polling; hidden/focus-mode columns pause; 400-post cap; cached Intl formatters + plain-text fast paths; `content-visibility` on page lists.
+- **Correctness:** stale-response guards (timeline polls, profile, notifications, groups, conversations, `useRace.abort()`), DM poll backoff + account scoping, balanced DM poll ref-counting, Link-header pagination for followers / mutes / blocks / followed tags, board column clipping + 1120px phone viewport bug.
+- **A11y:** Enter inside feed cards runs the control (not "open thread"); visible menu focus rings; toolbar/combobox/menu semantics; toasts with actions pause on hover/focus; focus trap waits for lazily-mounted dialogs; 3:1 input borders; reduced motion honored in JS scrolling + Edward.
+- **Design system:** z-index scale tokens (`--neo-z-sheet`, `--neo-z-dialog-top`, `--neo-z-edward*`, `--neo-z-sticky-bar`; toasts at 1100), `@include hover` mixin for touch-safe hovers, `--neo-bottom-chrome-h`, dense mode no longer overrides Large/XL text.
+- **Tooling:** `@types/node` → full `nuxt typecheck` is clean and now part of `npm run check` / CI.
+
+Follow-ups: ~200 component-level `:hover` rules still unguarded (global buttons + post actions done); breakpoint overlaps at 480 / 600 / 720px; FeedbackNotes panel could lazy-load; EdwardPostModal toolbar roving tabindex.
+
 ---
 
 ## Deferred roadmap
