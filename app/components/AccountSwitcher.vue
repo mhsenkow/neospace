@@ -37,8 +37,10 @@ const peekAccounts = computed(() => {
   return accounts.value.filter((a) => a.id !== activeId).slice(0, 2)
 })
 
+const { openFeedOrRoute } = useBoardNav()
+
 const goProfile = () => {
-  router.push('/profile')
+  void openFeedOrRoute('profile', '/profile')
 }
 
 const cycleAccount = async () => {

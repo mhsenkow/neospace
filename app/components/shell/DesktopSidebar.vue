@@ -27,6 +27,7 @@ const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
 const router = useRouter()
 const route = useRoute()
+const { openFeedOrRoute, openBoardFeed, openGroup, boardColumnIs } = useBoardNav()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 const isHome = computed(() => path.value === '/' && !columnsStore.focusedColumnId)
 const { isActivity, isMentions } = useActivityNav()
@@ -129,12 +130,12 @@ const boardFeedActive = (feedType: ColumnFeedType, feedParam?: string) => {
   return true
 }
 
-const openBoardFeed = (feedType: ColumnFeedType, feedParam?: string) => {
-  columnsStore.ensureFocusedView(feedType, feedParam)
-  if (path.value !== '/') void router.push('/')
-}
 const inboxActive = computed(
-  () => path.value === '/messages' || path.value === '/notifications',
+  () =>
+    path.value === '/messages' ||
+    path.value === '/notifications' ||
+    boardColumnIs('messages') ||
+    boardColumnIs('notifications'),
 )
 const inboxBadge = computed(() => messagesBadge.value || notifBadge.value || '')
 
@@ -149,17 +150,32 @@ const closeInboxMenu = () => {
 
 const openDirectMessages = () => {
   closeInboxMenu()
-  router.push('/messages')
+  void openFeedOrRoute('messages', '/messages')
 }
 
 const openMentions = () => {
   closeInboxMenu()
   notificationsStore.setFilter('mention')
-  router.push({ path: '/notifications', query: { filter: 'mention' } })
+  void openFeedOrRoute('notifications', {
+    path: '/notifications',
+    query: { filter: 'mention' },
+  })
+}
+
+const openActivity = () => {
+  void openFeedOrRoute('notifications', '/notifications')
+}
+
+const openSearch = () => {
+  void openFeedOrRoute('search', '/explore')
+}
+
+const openProfile = () => {
+  void openFeedOrRoute('profile', '/profile')
 }
 
 const openDesktopGroup = (tag: string) => {
-  router.push(`/groups/${tag}`)
+  void openGroup(tag)
 }
 
 const openCompose = () => {
@@ -207,22 +223,25 @@ watch(
       <NeoMark :active="isHome" />
     </NuxtLink>
     <div class="sidebar__top-actions">
-      <NuxtLink
+      <button
         v-if="instancesStore.hasAuthenticatedInstance"
-        to="/notifications"
+        type="button"
         class="sidebar__icon-btn"
-        :class="{ 'sidebar__icon-btn--active': isActivity }"
+        :class="{
+          'sidebar__icon-btn--active': isActivity || boardColumnIs('notifications'),
+        }"
         :aria-label="notifBadge ? `Activity, ${notifBadge} unread` : 'Activity'"
         :aria-current="isActivity ? 'page' : undefined"
+        @click="openActivity"
       >
         <NeoIcon
           name="heart"
           :size="20"
-          :stroke="isActivity ? 2 : 1.75"
-          :filled="isActivity"
+          :stroke="isActivity || boardColumnIs('notifications') ? 2 : 1.75"
+          :filled="isActivity || boardColumnIs('notifications')"
         />
         <span v-if="notifBadge" class="nav-badge nav-badge--corner" aria-hidden="true">{{ notifBadge }}</span>
-      </NuxtLink>
+      </button>
       <button
         type="button"
         class="sidebar__icon-btn"
@@ -267,16 +286,23 @@ watch(
         </button>
       </div>
 
-      <NuxtLink
-        to="/explore"
+      <button
+        type="button"
         class="sidebar__link"
-        :class="{ active: route.path === '/explore' }"
+        :class="{
+          active: route.path === '/explore' || boardColumnIs('search'),
+        }"
         title="Search servers and people"
         :aria-current="route.path === '/explore' ? 'page' : undefined"
+        @click="openSearch"
       >
-        <NeoIcon name="search" :size="22" :stroke="route.path === '/explore' ? 2 : 1.5" />
+        <NeoIcon
+          name="search"
+          :size="22"
+          :stroke="route.path === '/explore' || boardColumnIs('search') ? 2 : 1.5"
+        />
         <span class="sidebar__label">Search</span>
-      </NuxtLink>
+      </button>
 
       <NeoMenu
         v-if="instancesStore.hasAuthenticatedInstance"
@@ -324,16 +350,23 @@ watch(
         </template>
       </NeoMenu>
 
-      <NuxtLink
-        to="/profile"
+      <button
+        type="button"
         class="sidebar__link"
-        :class="{ active: route.path === '/profile' }"
+        :class="{
+          active: route.path === '/profile' || boardColumnIs('profile'),
+        }"
         title="Profile"
         :aria-current="route.path === '/profile' ? 'page' : undefined"
+        @click="openProfile"
       >
-        <NeoIcon name="user" :size="22" :stroke="route.path === '/profile' ? 2 : 1.5" />
+        <NeoIcon
+          name="user"
+          :size="22"
+          :stroke="route.path === '/profile' || boardColumnIs('profile') ? 2 : 1.5"
+        />
         <span class="sidebar__label">Profile</span>
-      </NuxtLink>
+      </button>
     </nav>
 
     <section class="sidebar__section" aria-label="Algorithms">
@@ -356,7 +389,7 @@ watch(
             :class="{ 'sidebar__row--on': boardFeedActive(item.feedType, item.feedParam) }"
             :aria-current="boardFeedActive(item.feedType, item.feedParam) ? 'true' : undefined"
             :title="item.key === 'local' ? `Local (${localHostLabel})` : item.label"
-            @click="openBoardFeed(item.feedType, item.feedParam)"
+            @click="void openBoardFeed(item.feedType, item.feedParam)"
           >
             <span class="sidebar__row-glyph" aria-hidden="true">
               <NeoIcon :name="item.icon" :size="18" :stroke="1.75" />

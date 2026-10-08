@@ -36,6 +36,8 @@ const settingsStore = useSettingsStore()
 const conversationsStore = useConversationsStore()
 const notificationsStore = useNotificationsStore()
 const { setBoardPortal } = useBoardPortal()
+const pendingColumnJump = usePendingColumnJump()
+const activeBoardColumnId = useActiveBoardColumnId()
 const router = useRouter()
 const reducedMotion = usePrefersReducedMotion()
 /** JS smooth scrolling ignores the CSS reduced-motion rule — downgrade it here */
@@ -48,6 +50,20 @@ const addGroupsExpanded = ref(true)
 const addGroupQuery = ref('')
 const columnsContainer = ref<HTMLElement | null>(null)
 const activeColumnIndex = ref(0)
+watch(
+  activeColumnIndex,
+  (idx) => {
+    activeBoardColumnId.value = columnsStore.columns[idx]?.id ?? null
+  },
+  { immediate: true },
+)
+watch(
+  () => columnsStore.columns.map((c) => c.id).join(','),
+  () => {
+    activeBoardColumnId.value =
+      columnsStore.columns[activeColumnIndex.value]?.id ?? null
+  },
+)
 const draggingColumnId = ref<string | null>(null)
 const dropTargetColumnId = ref<string | null>(null)
 
@@ -356,23 +372,25 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   settleTimer = window.setTimeout(done, 380)
 }
 
+/** Outer overflow scroller for the mobile feed-tab strip (not nested neo-tabs__list). */
+const feedTabScrollRoot = (): HTMLElement | null => {
+  const root = feedTabsScroller.value
+  if (!root) return null
+  if (root.scrollWidth > root.clientWidth + 2) return root
+  const inner = root.querySelector('.neo-tabs__list') as HTMLElement | null
+  if (inner && inner.scrollWidth > inner.clientWidth + 2) return inner
+  return root
+}
+
 /** Scroll the feed-tab strip so the active column’s tab is visible. */
 const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth') => {
   nextTick(() => {
-    const root = feedTabsScroller.value
-    if (!root) return
-    const tabs = root.querySelectorAll<HTMLElement>('[role="tab"]')
+    const list = feedTabScrollRoot()
+    if (!list) return
+    const tabs = list.querySelectorAll<HTMLElement>('[role="tab"]')
     const tab = tabs[columnIndex]
     if (!tab) return
-    // Nested overflow (scroller + neo-tabs__list) is common — Android only
-    // moves the ancestor that actually overflows. Prefer that one; never use
-    // document scrollIntoView (it yanks the page vertically on Chrome Android).
-    const inner = tab.closest('.neo-tabs__list') as HTMLElement | null
-    const list =
-      (inner && inner.scrollWidth > inner.clientWidth + 2 ? inner : null) ||
-      (root.scrollWidth > root.clientWidth + 2 ? root : null) ||
-      inner ||
-      root
+    // Never use document scrollIntoView — it yanks the page vertically on Chrome Android.
     const listRect = list.getBoundingClientRect()
     const tabRect = tab.getBoundingClientRect()
     const delta =
@@ -385,6 +403,54 @@ const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth
       list.scrollLeft = nextLeft
     }
   })
+}
+
+/**
+ * While the board pans, keep the top feed strip locked to the same fractional
+ * progress — tabs slide with your finger instead of jumping after settle.
+ */
+const syncTabsWithPanProgress = () => {
+  if (!isMobileUi.value) return
+  const el = columnsContainer.value
+  const list = feedTabScrollRoot()
+  if (!el || !list) return
+  const feeds = columnsStore.columns.length
+  if (feeds < 1) return
+
+  const slides = getSlideEls()
+  const first = slides[EDGE_LEFT]
+  const last = slides[EDGE_LEFT + feeds - 1]
+  if (!first || !last) return
+
+  const start = slideScrollLeft(el, first)
+  const end = slideScrollLeft(el, last)
+  const range = end - start
+  const fractional =
+    feeds === 1 || range <= 1
+      ? 0
+      : clamp((el.scrollLeft - start) / range, 0, 1) * (feeds - 1)
+
+  const tabs = list.querySelectorAll<HTMLElement>('[role="tab"]')
+  if (!tabs.length) return
+  const i0 = clamp(Math.floor(fractional), 0, tabs.length - 1)
+  const i1 = clamp(Math.ceil(fractional), 0, tabs.length - 1)
+  const tab0 = tabs[i0]
+  const tab1 = tabs[i1] || tab0
+  if (!tab0 || !tab1) return
+
+  const t = fractional - i0
+  const listRect = list.getBoundingClientRect()
+  // Document-space centers (survive nested offsetParents on Android WebView)
+  const centerDoc = (tab: HTMLElement) => {
+    const r = tab.getBoundingClientRect()
+    return r.left + r.width / 2 - listRect.left + list.scrollLeft
+  }
+  const targetCenter = centerDoc(tab0) + (centerDoc(tab1) - centerDoc(tab0)) * t
+  const maxLeft = Math.max(0, list.scrollWidth - list.clientWidth)
+  const nextLeft = clamp(targetCenter - list.clientWidth / 2, 0, maxLeft)
+  if (Math.abs(list.scrollLeft - nextLeft) > 0.5) {
+    list.scrollLeft = nextLeft
+  }
 }
 
 const scrollToColumn = (index: number, behavior: ScrollBehavior = 'smooth') => {
@@ -645,17 +711,15 @@ const syncFromColumnsScroll = () => {
     syncBoardPortalFromSlide(index)
   }
   const feeds = columnsStore.columns.length
-  // Only remap tab highlight while parked on a real feed
+  // Remap tab highlight while nearest a real feed
   if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
     const next = index - EDGE_LEFT
     if (activeColumnIndex.value !== next) {
       activeColumnIndex.value = next
-      // Keep the top strip glued while swiping — highlight alone isn't enough
-      // when many feeds push the active pill off-screen (Chrome Android).
-      // Only on change: it measures the tab strip every call.
-      syncTabIntoView(next, 'auto')
     }
   }
+  // Continuous: tab strip tracks finger/momentum during the pan, not only on settle
+  syncTabsWithPanProgress()
 }
 
 /** Wait until scrollLeft stops changing before parking (Android momentum). */
@@ -843,6 +907,8 @@ const onCarouselTouchMove = (e: TouchEvent) => {
   g.lastT = now
   const max = Math.max(0, el.scrollWidth - el.clientWidth)
   el.scrollLeft = Math.max(0, Math.min(max, g.startScroll - dx))
+  // scroll events can coalesce under preventDefault — keep tabs glued every move
+  onColumnsScroll()
 }
 
 const scheduleNativePark = () => {
@@ -1007,11 +1073,20 @@ watch(
 
 /**
  * After returning from a subview / portal route, Android often leaves the board
- * mid-slide or at Settings (slide 0). Always re-park on the active feed.
+ * mid-slide or at Settings (slide 0). Prefer a pending/focused column jump.
  */
 const restoreFeedPark = () => {
   nextTick(() => {
     requestAnimationFrame(() => {
+      const jumpId = pendingColumnJump.value || columnsStore.focusedColumnId
+      if (jumpId) {
+        const idx = columnsStore.columns.findIndex((c) => c.id === jumpId)
+        if (idx >= 0) {
+          pendingColumnJump.value = null
+          scrollToColumn(idx, 'auto')
+          return
+        }
+      }
       scrollToColumn(activeColumnIndex.value, 'auto')
     })
   })
@@ -1019,6 +1094,28 @@ const restoreFeedPark = () => {
 
 /** Set on unmount so work queued behind onMounted's await doesn't bind listeners afterwards */
 let disposed = false
+
+/** Side nav / tab bar asked to park on a board column (may already be on `/`). */
+watch(
+  pendingColumnJump,
+  (id) => {
+    if (!id || disposed) return
+    const idx = columnsStore.columns.findIndex((c) => c.id === id)
+    if (idx < 0) {
+      pendingColumnJump.value = null
+      return
+    }
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        if (disposed || pendingColumnJump.value !== id) return
+        pendingColumnJump.value = null
+        activeColumnIndex.value = idx
+        scrollToColumn(idx, isMobileUi.value ? 'auto' : 'smooth')
+      })
+    })
+  },
+  { flush: 'post' },
+)
 
 onMounted(async () => {
   await instancesStore.initialize()
@@ -1051,6 +1148,7 @@ onActivated(() => {
 
 onDeactivated(() => {
   setBoardPortal(null)
+  activeBoardColumnId.value = null
 })
 
 onUnmounted(() => {
@@ -2512,10 +2610,14 @@ useHead({ title: 'Home | NeoSpace' })
   gap: 0.35rem;
   padding: 0.35rem 0.35rem 0.35rem 0.55rem;
   border-bottom: 1px solid var(--neo-border-color);
-  background: var(--neo-bg-primary);
+  background: color-mix(in srgb, var(--neo-bg-primary) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--neo-z-sticky-bar, 20);
+  // Keep the strip glued under Android URL-bar / keyboard resizes
+  padding-top: max(0.35rem, env(safe-area-inset-top, 0px) * 0);
 
   @media (max-width: 1023px) {
     display: flex;
@@ -2529,6 +2631,9 @@ useHead({ title: 'Home | NeoSpace' })
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    scroll-behavior: auto;
 
     &::-webkit-scrollbar {
       display: none;
@@ -2562,12 +2667,21 @@ useHead({ title: 'Home | NeoSpace' })
       box-shadow: none;
       // Column switcher is primary nav on phones — quaternary read ~2:1
       color: var(--neo-text-tertiary);
+      transition:
+        color 0.16s ease,
+        background-color 0.16s ease,
+        box-shadow 0.16s ease,
+        transform 0.12s ease;
 
       &[aria-selected='true'] {
         color: var(--neo-text-primary);
         background: var(--neo-bg-tertiary);
         // Android touch often never shows :focus-visible — make selection unmistakable
         box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--neo-accent) 70%, transparent);
+      }
+
+      &:active {
+        transform: scale(0.97);
       }
 
       &:focus-visible {

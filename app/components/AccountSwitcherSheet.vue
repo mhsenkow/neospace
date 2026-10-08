@@ -62,9 +62,11 @@ const selectAccount = async (id: string) => {
   }
 }
 
+const { openFeedOrRoute } = useBoardNav()
+
 const goProfile = () => {
   closeMenu()
-  router.push('/profile')
+  void openFeedOrRoute('profile', '/profile')
 }
 
 const manage = () => {

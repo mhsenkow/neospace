@@ -92,10 +92,16 @@ const drawerAlgorithmItems = computed(() => {
   return items
 })
 
+const { openBoardFeed, openFeedOrRoute } = useBoardNav()
+
 const openBoardFeedFromDrawer = (feedType: ColumnFeedType, feedParam?: string) => {
   closeMobileMenu()
-  columnsStore.ensureFocusedView(feedType, feedParam)
-  void router.push('/')
+  void openBoardFeed(feedType, feedParam)
+}
+
+const openDrawerFeedOrRoute = (feedType: ColumnFeedType, fallback: string) => {
+  closeMobileMenu()
+  void openFeedOrRoute(feedType, fallback)
 }
 
 const openNewAlgorithmFromDrawer = () => {
@@ -169,42 +175,42 @@ useFocusTrap(mobileSidebarRef, open, {
     <div class="mobile-sidebar__scroll">
       <nav class="mobile-sidebar__nav" aria-label="Main menu">
         <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
-        <NuxtLink
-          to="/explore"
+        <button
+          type="button"
           class="mobile-sidebar__link"
           :class="{ 'chrome-hint': boardPortal === 'search' }"
-          @click="closeMobileMenu"
-        >Search</NuxtLink>
+          @click="openDrawerFeedOrRoute('search', '/explore')"
+        >Search</button>
         <NuxtLink
           to="/groups"
           class="mobile-sidebar__link"
           :class="{ 'chrome-hint': boardPortal === 'communities' }"
           @click="closeMobileMenu"
         >Groups</NuxtLink>
-        <NuxtLink
+        <button
           v-if="instancesStore.hasAuthenticatedInstance"
-          to="/messages"
+          type="button"
           class="mobile-sidebar__link"
           :class="{ 'chrome-hint': boardPortal === 'inbox' }"
-          @click="closeMobileMenu"
+          @click="openDrawerFeedOrRoute('messages', '/messages')"
         >
           Messages
           <span v-if="messagesBadge" class="nav-badge nav-badge--inline">
             {{ messagesBadge }}<span class="sr-only"> unread</span>
           </span>
-        </NuxtLink>
-        <NuxtLink
+        </button>
+        <button
           v-if="instancesStore.hasAuthenticatedInstance"
-          to="/notifications"
+          type="button"
           class="mobile-sidebar__link"
           :class="{ 'chrome-hint': boardPortal === 'activity' }"
-          @click="closeMobileMenu"
+          @click="openDrawerFeedOrRoute('notifications', '/notifications')"
         >
           Activity
           <span v-if="notifBadge" class="nav-badge nav-badge--inline">
             {{ notifBadge }}<span class="sr-only"> unread</span>
           </span>
-        </NuxtLink>
+        </button>
       </nav>
 
       <div
@@ -473,12 +479,18 @@ useFocusTrap(mobileSidebarRef, open, {
   &__link {
     display: flex;
     align-items: center;
+    width: 100%;
     padding: 0.75rem 1rem;
     color: var(--neo-text-secondary);
     text-decoration: none;
     border-radius: var(--neo-radius-sm, 4px);
+    font: inherit;
     font-size: 0.9375rem;
     font-weight: 500;
+    text-align: left;
+    background: transparent;
+    border: none;
+    cursor: pointer;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
     @media (hover: hover) {

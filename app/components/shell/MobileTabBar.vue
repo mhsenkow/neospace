@@ -11,12 +11,29 @@ const conversationsStore = useConversationsStore()
 const composeSheet = useComposeSheetStore()
 const columnsStore = useColumnsStore()
 const { boardPortal } = useBoardPortal()
+const { openFeedOrRoute, boardColumnIs } = useBoardNav()
 const router = useRouter()
 const route = useRoute()
 const { path, isActivity } = useActivityNav()
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
 const messagesBadge = computed(() => conversationsStore.badgeLabel)
+
+const messagesActive = computed(
+  () => path.value === '/messages' || boardColumnIs('messages'),
+)
+
+const activityActive = computed(
+  () => isActivity.value || boardColumnIs('notifications'),
+)
+
+const openMessages = () => {
+  void openFeedOrRoute('messages', '/messages')
+}
+
+const openActivity = () => {
+  void openFeedOrRoute('notifications', '/notifications')
+}
 
 const openCompose = () => {
   if (!instancesStore.isAuthenticated) {
@@ -48,25 +65,26 @@ const openCompose = () => {
     <NeoIcon name="home" :size="22" :stroke="route.path === '/' ? 2 : 1.5" :filled="route.path === '/'" />
   </NuxtLink>
 
-  <NuxtLink
+  <button
     v-if="instancesStore.hasAuthenticatedInstance"
-    to="/messages"
+    type="button"
     class="mobile-nav__item mobile-nav__item--badge"
     :class="{
-      active: path === '/messages',
+      active: messagesActive,
       'chrome-hint': boardPortal === 'inbox',
     }"
     :aria-label="messagesBadge ? `Messages, ${messagesBadge} unread` : 'Messages'"
-    :aria-current="path === '/messages' ? 'page' : undefined"
+    :aria-current="messagesActive ? 'page' : undefined"
+    @click="openMessages"
   >
     <NeoIcon
       name="message"
       :size="22"
-      :stroke="path === '/messages' || boardPortal === 'inbox' ? 2 : 1.5"
-      :filled="path === '/messages'"
+      :stroke="messagesActive || boardPortal === 'inbox' ? 2 : 1.5"
+      :filled="messagesActive"
     />
     <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
-  </NuxtLink>
+  </button>
   <NuxtLink
     v-else
     to="/login"
@@ -91,25 +109,26 @@ const openCompose = () => {
     </span>
   </button>
 
-  <NuxtLink
+  <button
     v-if="instancesStore.hasAuthenticatedInstance"
-    to="/notifications"
+    type="button"
     class="mobile-nav__item mobile-nav__item--badge"
     :class="{
-      active: isActivity,
+      active: activityActive,
       'chrome-hint': boardPortal === 'activity',
     }"
     :aria-label="notifBadge ? `Activity, ${notifBadge} unread` : 'Activity'"
-    :aria-current="isActivity ? 'page' : undefined"
+    :aria-current="activityActive ? 'page' : undefined"
+    @click="openActivity"
   >
     <NeoIcon
       name="heart"
       :size="22"
-      :stroke="isActivity || boardPortal === 'activity' ? 2 : 1.5"
-      :filled="isActivity"
+      :stroke="activityActive || boardPortal === 'activity' ? 2 : 1.5"
+      :filled="activityActive"
     />
     <span v-if="notifBadge" class="nav-badge" aria-hidden="true">{{ notifBadge }}</span>
-  </NuxtLink>
+  </button>
   <NuxtLink
     v-else
     to="/groups"
@@ -163,10 +182,15 @@ const openCompose = () => {
   justify-content: space-around;
   padding: 0.2rem 0.35rem;
   padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
-  background: var(--neo-bg-primary);
+  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-top: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-header, 90);
   box-sizing: border-box;
+  // Android Chrome paints sticky bars over the gesture bar without this
+  padding-left: max(0.35rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.35rem, env(safe-area-inset-right, 0px));
 
   @media (min-width: 1024px) {
     display: none;

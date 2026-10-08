@@ -395,6 +395,32 @@ export const useColumnsStore = defineStore('columns', {
       this.saveDeskLayout()
     },
 
+    /**
+     * Locate an existing board column. Profile matches the own-profile
+     * singleton only (peeks with profileAcct are ignored).
+     */
+    findColumn(feedType: ColumnFeedType, feedParam?: string): ColumnConfig | undefined {
+      return this.columns.find((c) => {
+        if (feedType === 'group') return c.feedType === 'group' && c.groupTag === feedParam
+        if (feedType === 'algorithm') {
+          return c.feedType === 'algorithm' && c.algorithmId === feedParam
+        }
+        if (feedType === 'profile') return c.feedType === 'profile' && !c.profileAcct
+        return c.feedType === feedType
+      })
+    },
+
+    /**
+     * Focus a column that is already on the board. Returns its id, or null
+     * when the view isn't in the user's column set (caller should route away).
+     */
+    focusExistingColumn(feedType: ColumnFeedType, feedParam?: string): string | null {
+      const match = this.findColumn(feedType, feedParam)
+      if (!match) return null
+      this.setFocusedColumn(match.id)
+      return match.id
+    },
+
     toggleColumnFocus(columnId: string) {
       if (this.deskDensity === 'tabs') {
         // Tabs mode: pin switches feeds; pressing again on the active tab exits to Roomy
