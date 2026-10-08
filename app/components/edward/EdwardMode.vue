@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * Edward Mode — fullscreen fediverse thought stream overlay.
+ * Edward Mode — Radical Edward Session OS thought stream.
  */
 
 import { useEdwardStore } from '~/stores/edward'
 import { useEdwardStream } from '~/composables/useEdwardStream'
-import { EDWARD_LEGEND } from '~/utils/edwardSemantics'
+import { EDWARD_FACE_LEGEND } from '~/utils/edwardFaces'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
 
@@ -19,6 +19,9 @@ const selected = computed(() => edward.selectedStatus)
 const count = computed(() => edward.ballCount)
 const loading = computed(() => edward.loading)
 const error = computed(() => edward.error)
+
+const blink = ref(true)
+let blinkTimer: ReturnType<typeof setInterval> | null = null
 
 const onPick = (identity: string) => {
   edward.selectByIdentity(identity)
@@ -44,7 +47,6 @@ const openThread = () => {
 
 const exit = () => {
   visible.value = false
-  // brief fade then tear down
   window.setTimeout(() => {
     stream.stop()
     edward.exit()
@@ -72,12 +74,16 @@ onMounted(() => {
   document.addEventListener('keydown', onKey, true)
   prevOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
+  blinkTimer = setInterval(() => {
+    blink.value = !blink.value
+  }, 530)
   void stream.start()
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKey, true)
   document.body.style.overflow = prevOverflow
+  if (blinkTimer) clearInterval(blinkTimer)
   stream.stop()
   document.body.classList.remove('edward-active')
 })
@@ -91,29 +97,30 @@ onUnmounted(() => {
       :class="{ 'is-visible': visible }"
       role="dialog"
       aria-modal="true"
-      aria-label="Edward mode thought stream"
+      aria-label="Edward mode session"
     >
       <ClientOnly>
         <EdwardCanvas @pick="onPick" />
       </ClientOnly>
 
+      <div class="edward-mode__scan" aria-hidden="true" />
+
       <div class="edward-mode__hud" aria-live="polite">
         <div class="edward-mode__brand">
-          <span class="edward-mode__title">edward mode</span>
-          <span class="edward-mode__sub">thought stream</span>
+          <span class="edward-mode__session">
+            SESSION<span :class="{ 'is-off': !blink }" class="edward-mode__cursor">_</span>
+          </span>
+          <span class="edward-mode__title">edward · faces OS</span>
+          <span class="edward-mode__sub">WOW!! net · thought stream · radical</span>
         </div>
 
         <div class="edward-mode__meta">
-          <span v-if="loading && !count" class="edward-mode__count">seeding…</span>
-          <span v-else class="edward-mode__count">{{ count }} thoughts</span>
-          <ul class="edward-mode__legend" aria-label="Legend">
-            <li v-for="item in EDWARD_LEGEND" :key="item.kind">
-              <i :style="{ background: item.swatch }" />
+          <span v-if="loading && !count" class="edward-mode__count">hacking feed…</span>
+          <span v-else class="edward-mode__count">{{ count }} emoticoins online</span>
+          <ul class="edward-mode__legend" aria-label="Face legend">
+            <li v-for="item in EDWARD_FACE_LEGEND" :key="item.mood">
+              <span class="edward-mode__glyph" aria-hidden="true">{{ item.glyph }}</span>
               {{ item.label }}
-            </li>
-            <li>
-              <i class="edward-mode__legend-ring" />
-              poll / reply
             </li>
           </ul>
         </div>
@@ -124,7 +131,7 @@ onUnmounted(() => {
           aria-label="Exit edward mode"
           @click="exit"
         >
-          exit
+          logout!!
         </button>
       </div>
 
@@ -133,7 +140,7 @@ onUnmounted(() => {
       </p>
 
       <p class="edward-mode__hint">
-        rises from below · hover for info · click to open
+        ↑ rises · hover face · click!! open
       </p>
 
       <EdwardPostModal
@@ -153,13 +160,28 @@ onUnmounted(() => {
   z-index: calc(var(--neo-z-modal, 1050) + 40);
   opacity: 0;
   transition: opacity 0.22s ease;
-  font-family: var(--neo-font-family-ui, var(--neo-font-family), system-ui, sans-serif);
-  color: #d8e4f0;
+  font-family: 'Courier New', ui-monospace, monospace;
+  color: #fff8d6;
   pointer-events: auto;
 
   &.is-visible {
     opacity: 1;
   }
+}
+
+.edward-mode__scan {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    color-mix(in srgb, #000 18%, transparent) 3px
+  );
+  mix-blend-mode: multiply;
+  opacity: 0.35;
 }
 
 .edward-mode__hud {
@@ -177,7 +199,7 @@ onUnmounted(() => {
     0.75rem max(1rem, env(safe-area-inset-left));
   background: linear-gradient(
     to bottom,
-    color-mix(in srgb, #05060a 82%, transparent),
+    color-mix(in srgb, #12081c 88%, transparent),
     transparent
   );
   pointer-events: none;
@@ -190,21 +212,38 @@ onUnmounted(() => {
 .edward-mode__brand {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.12rem;
+}
+
+.edward-mode__session {
+  font-size: 0.6875rem;
+  letter-spacing: 0.22em;
+  color: #ff7eb3;
+  text-transform: uppercase;
+}
+
+.edward-mode__cursor {
+  display: inline-block;
+  color: #ffe566;
+
+  &.is-off {
+    opacity: 0;
+  }
 }
 
 .edward-mode__title {
-  font-size: 0.8125rem;
-  letter-spacing: 0.14em;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
   text-transform: lowercase;
-  color: #e8f2fa;
+  color: #ffe566;
+  text-shadow: 2px 2px 0 #1a1420;
 }
 
 .edward-mode__sub {
   font-size: 0.625rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, #8aa0b8 90%, transparent);
+  letter-spacing: 0.1em;
+  text-transform: lowercase;
+  color: #59d1e0;
 }
 
 .edward-mode__meta {
@@ -217,60 +256,58 @@ onUnmounted(() => {
 
 .edward-mode__count {
   font-size: 0.6875rem;
-  letter-spacing: 0.06em;
-  color: color-mix(in srgb, #d8e4f0 70%, transparent);
+  letter-spacing: 0.08em;
+  color: #fff8d6;
   font-variant-numeric: tabular-nums;
+  border: 1px solid color-mix(in srgb, #ffe566 55%, transparent);
+  padding: 0.2rem 0.45rem;
+  background: color-mix(in srgb, #1a1420 70%, transparent);
 }
 
 .edward-mode__legend {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.55rem 0.85rem;
+  gap: 0.4rem 0.75rem;
   margin: 0;
   padding: 0;
   list-style: none;
   font-size: 0.625rem;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: lowercase;
-  color: color-mix(in srgb, #d8e4f0 55%, transparent);
+  color: color-mix(in srgb, #fff8d6 70%, transparent);
+  max-width: min(420px, 70vw);
 
   li {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-  }
-
-  i {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
+    gap: 0.25rem;
   }
 }
 
-.edward-mode__legend-ring {
-  box-sizing: border-box;
-  border: 1.5px solid #f2ad52 !important;
-  background: transparent !important;
+.edward-mode__glyph {
+  color: #ffe566;
+  font-size: 0.7rem;
 }
 
 .edward-mode__exit {
   flex-shrink: 0;
-  padding: 0.4rem 0.85rem;
-  border: 1px solid color-mix(in srgb, #6a90b0 50%, transparent);
-  border-radius: 2px;
-  background: color-mix(in srgb, #0a1018 70%, transparent);
-  color: #e2ebf4;
+  padding: 0.45rem 0.85rem;
+  border: 2px solid #ffe566;
+  border-radius: 3px;
+  background: #1a1420;
+  color: #ffe566;
+  font-family: inherit;
   font-size: 0.75rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: lowercase;
   cursor: pointer;
+  box-shadow: 3px 3px 0 #ff7eb3;
 
   &:hover,
   &:focus-visible {
-    border-color: #59d1e0;
-    color: #fff;
+    background: #ffe566;
+    color: #1a1420;
   }
 
   &:focus-visible {
@@ -291,10 +328,11 @@ onUnmounted(() => {
   text-align: center;
   font-size: 0.8125rem;
   line-height: 1.4;
-  color: #f2ad52;
-  background: color-mix(in srgb, #0a1018 88%, transparent);
-  border: 1px solid color-mix(in srgb, #f2ad52 40%, transparent);
-  border-radius: 2px;
+  color: #ffe566;
+  background: #1a1420;
+  border: 2px solid #ff7eb3;
+  border-radius: 3px;
+  box-shadow: 4px 4px 0 #ff7eb3;
 }
 
 .edward-mode__hint {
@@ -306,10 +344,12 @@ onUnmounted(() => {
   margin: 0;
   padding: 0.35rem 0.75rem;
   font-size: 0.625rem;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: lowercase;
-  color: color-mix(in srgb, #8aa0b8 75%, transparent);
+  color: #59d1e0;
   pointer-events: none;
   white-space: nowrap;
+  border: 1px dashed color-mix(in srgb, #59d1e0 50%, transparent);
+  background: color-mix(in srgb, #12081c 75%, transparent);
 }
 </style>

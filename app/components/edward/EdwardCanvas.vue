@@ -1,12 +1,17 @@
 <script setup lang="ts">
 /**
- * Edward Mode WebGL — vertical bottom→top thought stream.
- * Each ball carries a canvas texture (author + snippet); nearer = bigger.
+ * Edward Mode WebGL — Radical Edward faces-OS thought stream.
+ * Emoticoin discs rise bottom→top; nearer = bigger. 90s Session energy.
  * three.js is dynamically imported so the main bundle stays clean.
  */
 
 import { useEdwardStore } from '~/stores/edward'
 import type { EdwardBallDescriptor } from '~/utils/edwardSemantics'
+import {
+  drawEmoticoin,
+  faceSpecFor,
+  type EdwardFaceMood,
+} from '~/utils/edwardFaces'
 
 const emit = defineEmits<{
   pick: [identity: string]
@@ -18,6 +23,8 @@ const hoverCard = ref<{
   name: string
   preview: string
   kind: string
+  mood: EdwardFaceMood
+  glyph: string
   x: number
   y: number
 } | null>(null)
@@ -33,6 +40,7 @@ type BallRuntime = {
   phase: number
   speed: number
   size: number
+  spin: number
   /** Horizontal lane */
   x: number
   /** Depth — smaller z = closer to camera */
@@ -41,12 +49,23 @@ type BallRuntime = {
   y: number
   kind: EdwardBallDescriptor['kind']
   badges: EdwardBallDescriptor['badges']
+  mood: EdwardFaceMood
   label: string
   preview: string
   authorKey: string
   inReplyToId: string | null
   statusId: string
   color: [number, number, number]
+}
+
+const MOOD_GLYPH: Record<EdwardFaceMood, string> = {
+  curious: '◉‿◉',
+  yapping: 'ᕕ(ᐛ)',
+  starry: '★◇★',
+  sparkle: '♥‿♥',
+  hmm: '·_·?',
+  shy: '(⁄⁄)',
+  manic: '✧ヮ✧',
 }
 
 const STREAM_BOTTOM = -18
@@ -63,7 +82,7 @@ let camera: InstanceType<ThreeMod['PerspectiveCamera']> | null = null
 let ballGroup: InstanceType<ThreeMod['Group']> | null = null
 let filamentLines: InstanceType<ThreeMod['LineSegments']> | null = null
 let stars: InstanceType<ThreeMod['Points']> | null = null
-let sphereGeo: InstanceType<ThreeMod['SphereGeometry']> | null = null
+let coinGeo: InstanceType<ThreeMod['CircleGeometry']> | null = null
 let torusGeo: InstanceType<ThreeMod['TorusGeometry']> | null = null
 let raycaster: InstanceType<ThreeMod['Raycaster']> | null = null
 let pointerNdc = { x: 0, y: 0 }
@@ -71,9 +90,9 @@ let dragging = false
 let dragMoved = false
 let lastPtr = { x: 0, y: 0 }
 /** Camera orbit around the vertical stream */
-let camYaw = 0.15
-let camPitch = 0.08
-let camDist = 26
+let camYaw = 0.12
+let camPitch = 0.06
+let camDist = 24
 let reducedMotion = false
 let balls: BallRuntime[] = []
 let identityToBall = new Map<string, BallRuntime>()
@@ -90,91 +109,52 @@ const hash01 = (s: string) => {
   return (h >>> 0) / 4294967295
 }
 
-const wrapText = (
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-  maxLines: number,
-) => {
-  const words = text.split(/\s+/).filter(Boolean)
-  let line = ''
-  let ly = y
-  let lines = 0
-  for (let n = 0; n < words.length; n++) {
-    const test = line ? `${line} ${words[n]}` : words[n]!
-    if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, ly)
-      line = words[n]!
-      ly += lineHeight
-      lines++
-      if (lines >= maxLines - 1) {
-        let rest = words.slice(n).join(' ')
-        while (ctx.measureText(rest + '…').width > maxWidth && rest.length > 1) {
-          rest = rest.slice(0, -1)
-        }
-        ctx.fillText(rest + (rest.length < words.slice(n).join(' ').length ? '…' : ''), x, ly)
-        return
-      }
-    } else {
-      line = test
-    }
-  }
-  if (line) ctx.fillText(line, x, ly)
-}
-
 const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTexture']> => {
   const canvas = document.createElement('canvas')
   canvas.width = 512
   canvas.height = 512
   const ctx = canvas.getContext('2d')!
-  const [r, g, b] = d.color
-  const R = Math.round(r * 255)
-  const G = Math.round(g * 255)
-  const B = Math.round(b * 255)
+  const spec = faceSpecFor({
+    kind: d.kind,
+    badges: d.badges,
+    engagement: d.engagement,
+  })
+  drawEmoticoin(ctx, spec, hash01(d.identity))
 
-  // Sphere-facing disc: dark rim → kind wash → readable text band
-  const grad = ctx.createRadialGradient(256, 220, 40, 256, 256, 250)
-  grad.addColorStop(0, `rgba(${Math.min(255, R + 40)},${Math.min(255, G + 40)},${Math.min(255, B + 40)},1)`)
-  grad.addColorStop(0.45, `rgb(${R},${G},${B})`)
-  grad.addColorStop(1, `rgb(${Math.round(R * 0.25)},${Math.round(G * 0.25)},${Math.round(B * 0.3)})`)
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 512, 512)
-
-  // Soft vignette for CW
-  if (d.badges.includes('cw')) {
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'
-    ctx.fillRect(0, 0, 512, 512)
-  }
-
+  // Tiny author sticker under the chin — still readable on hover-sized coins
+  ctx.fillStyle = 'rgba(26,20,32,0.82)'
+  ctx.beginPath()
+  roundChip(ctx, 256, 455, Math.min(200, 28 + d.label.length * 7), 28)
+  ctx.fill()
+  ctx.fillStyle = '#fff8d6'
+  ctx.font = '700 22px "Courier New", ui-monospace, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = 'rgba(255,255,255,0.95)'
-  ctx.font = '600 36px ui-sans-serif, system-ui, sans-serif'
-  const name = d.label.length > 22 ? d.label.slice(0, 20) + '…' : d.label
-  ctx.fillText(name, 256, 168)
-
-  ctx.fillStyle = 'rgba(255,255,255,0.88)'
-  ctx.font = '400 28px ui-sans-serif, system-ui, sans-serif'
-  const preview = d.badges.includes('cw')
-    ? (d.preview ? '···· ····' : 'content warning')
-    : d.preview || '…'
-  wrapText(ctx, preview, 256, 230, 360, 34, 5)
-
-  // Kind / badge chips at bottom of disc
-  ctx.font = '600 22px ui-sans-serif, system-ui, sans-serif'
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'
-  const chips: string[] = [d.kind]
-  if (d.badges.includes('media')) chips.push('media')
-  if (d.badges.includes('poll')) chips.push('poll')
-  ctx.fillText(chips.join(' · '), 256, 420)
+  const name = d.label.length > 16 ? d.label.slice(0, 14) + '…' : d.label
+  ctx.fillText(name, 256, 455)
 
   const tex = new THREE!.CanvasTexture(canvas)
   tex.colorSpace = THREE!.SRGBColorSpace
   tex.needsUpdate = true
   return tex
+}
+
+const roundChip = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+) => {
+  const x = cx - w / 2
+  const y = cy - h / 2
+  const r = 8
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
 }
 
 const laneFor = (identity: string) => {
@@ -199,37 +179,41 @@ const disposeBall = (b: BallRuntime) => {
 }
 
 const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null => {
-  if (!THREE || !ballGroup || !sphereGeo || !sharedHaloMat) return null
+  if (!THREE || !ballGroup || !coinGeo || !sharedHaloMat) return null
   const texture = buildTexture(d)
-  const mat = new THREE.MeshStandardMaterial({
-    map: texture,
-    roughness: 0.45,
-    metalness: 0.08,
-    transparent: true,
-    opacity: d.opacity,
+  const spec = faceSpecFor({
+    kind: d.kind,
+    badges: d.badges,
+    engagement: d.engagement,
   })
-  const mesh = new THREE.Mesh(sphereGeo, mat)
-  // Scale by engagement size AND proximity (closer z → larger)
-  const nearBoost = 1 + Math.max(0, (-laneFor(d.identity).z) / 10) * 0.85
-  const size = d.size * 1.35 * nearBoost
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: Math.max(0.75, d.opacity),
+    side: THREE.DoubleSide,
+    depthWrite: true,
+  })
+  const mesh = new THREE.Mesh(coinGeo, mat)
+  // Bigger coins — nearer depth lanes read even larger
+  const nearBoost = 1 + Math.max(0, (-laneFor(d.identity).z) / 10) * 1.1
+  const size = (0.9 + d.size * 1.6) * nearBoost
   mesh.scale.setScalar(size)
   mesh.userData.identity = d.identity
 
-  const halo = new THREE.Mesh(sphereGeo, sharedHaloMat)
-  halo.scale.setScalar(size * (d.kind === 'boost' ? 1.7 : 1.4))
+  const halo = new THREE.Mesh(coinGeo, sharedHaloMat)
+  halo.scale.setScalar(size * 1.28)
   halo.raycast = () => {}
 
   let ring: InstanceType<ThreeMod['Mesh']> | null = null
-  if (torusGeo && (d.badges.includes('poll') || d.kind === 'reply')) {
+  if (torusGeo && (d.badges.includes('poll') || d.kind === 'reply' || d.kind === 'boost')) {
     const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(d.color[0], d.color[1], d.color[2]),
+      color: new THREE.Color(spec.rim),
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.55,
       depthWrite: false,
     })
     ring = new THREE.Mesh(torusGeo, ringMat)
-    ring.scale.setScalar(size * 1.35)
-    ring.rotation.x = Math.PI / 2
+    ring.scale.setScalar(size * 0.95)
     ring.raycast = () => {}
     ballGroup.add(ring)
   }
@@ -245,13 +229,15 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     ring,
     texture,
     phase: hash01(d.identity) * Math.PI * 2,
-    speed: 0.55 + hash01(d.identity + ':s') * 0.75,
+    speed: 0.65 + hash01(d.identity + ':s') * 0.95,
     size,
+    spin: (hash01(d.identity + ':spin') - 0.5) * 1.4,
     x: lane.x,
     z: lane.z,
     y: ySeed,
     kind: d.kind,
     badges: d.badges,
+    mood: spec.mood,
     label: d.label,
     preview: d.preview,
     authorKey: d.authorKey,
@@ -297,11 +283,13 @@ const syncBallsFromStore = () => {
 }
 
 const ballWorldPos = (b: BallRuntime, t: number) => {
-  const wobbleX = reducedMotion ? 0 : Math.sin(t * b.speed * 0.6 + b.phase) * 0.35
-  const wobbleZ = reducedMotion ? 0 : Math.cos(t * b.speed * 0.5 + b.phase) * 0.25
+  // Playful Edward bob — a little chaotic, not solemn
+  const wobbleX = reducedMotion ? 0 : Math.sin(t * b.speed * 0.9 + b.phase) * 0.55
+  const wobbleZ = reducedMotion ? 0 : Math.cos(t * b.speed * 0.7 + b.phase * 1.3) * 0.4
+  const hop = reducedMotion ? 0 : Math.abs(Math.sin(t * b.speed * 1.4 + b.phase)) * 0.2
   return {
     x: b.x + wobbleX,
-    y: b.y,
+    y: b.y + hop,
     z: b.z + wobbleZ,
   }
 }
@@ -345,10 +333,10 @@ const rebuildFilaments = () => {
 }
 
 const updateBalls = (t: number, dt: number) => {
-  if (!camera) return
+  if (!camera || !THREE) return
   for (const b of balls) {
     if (!reducedMotion) {
-      b.y += b.speed * dt * 1.15
+      b.y += b.speed * dt * 1.35
       if (b.y > STREAM_TOP + 2) {
         b.y = STREAM_BOTTOM - hash01(b.identity + String(Math.floor(t))) * 2
       }
@@ -356,11 +344,19 @@ const updateBalls = (t: number, dt: number) => {
     const p = ballWorldPos(b, t)
     b.mesh.position.set(p.x, p.y, p.z)
     b.halo.position.set(p.x, p.y, p.z)
-    // Billboard-ish: face camera so text stays readable
+    // Billboard face toward camera, with a little tumble for coin energy
     b.mesh.quaternion.copy(camera.quaternion)
+    if (!reducedMotion) {
+      const tumble = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(0, 0, Math.sin(t * b.spin + b.phase) * 0.18),
+      )
+      b.mesh.quaternion.multiply(tumble)
+    }
+    b.halo.quaternion.copy(b.mesh.quaternion)
     if (b.ring) {
       b.ring.position.set(p.x, p.y, p.z)
-      b.ring.rotation.z = t * 0.4 + b.phase
+      b.ring.quaternion.copy(camera.quaternion)
+      b.ring.rotateZ(t * 1.2 + b.phase)
     }
   }
 }
@@ -387,8 +383,10 @@ const projectHover = (b: BallRuntime) => {
   const rect = hostEl.value.getBoundingClientRect()
   hoverCard.value = {
     name: b.label,
-    preview: b.badges.includes('cw') ? 'content warning' : b.preview || '…',
+    preview: b.badges.includes('cw') ? '··· content warning ···' : b.preview || '…',
     kind: b.kind,
+    mood: b.mood,
+    glyph: MOOD_GLYPH[b.mood],
     x: (v.x * 0.5 + 0.5) * rect.width,
     y: (-v.y * 0.5 + 0.5) * rect.height,
   }
@@ -559,7 +557,7 @@ const disposeScene = () => {
   }
 
   sharedHaloMat = null
-  sphereGeo = null
+  coinGeo = null
   torusGeo = null
   filamentLines = null
   stars = null
@@ -587,11 +585,11 @@ const init = async () => {
   const h = hostEl.value.clientHeight
 
   scene = new THREE.Scene()
-  scene.fog = new THREE.FogExp2(0x05060a, 0.022)
-  scene.background = new THREE.Color(0x05060a)
+  // Deep CRT void with a hint of Session purple-teal — still candy, not brooding
+  scene.fog = new THREE.FogExp2(0x06040e, 0.02)
+  scene.background = new THREE.Color(0x06040e)
 
-  camera = new THREE.PerspectiveCamera(50, w / Math.max(1, h), 0.1, 200)
-  // Stronger perspective feel — closer near plane, FOV that exaggerates size
+  camera = new THREE.PerspectiveCamera(52, w / Math.max(1, h), 0.1, 200)
   applyCamera()
 
   renderer = new THREE.WebGLRenderer({
@@ -606,22 +604,18 @@ const init = async () => {
   renderer.domElement.style.height = '100%'
   hostEl.value.appendChild(renderer.domElement)
 
-  scene.add(new THREE.AmbientLight(0x8899aa, 0.7))
-  const key = new THREE.DirectionalLight(0xffffff, 0.95)
-  key.position.set(4, 8, 12)
-  scene.add(key)
-  const fill = new THREE.DirectionalLight(0x88aacc, 0.35)
-  fill.position.set(-6, -2, 4)
-  scene.add(fill)
+  // Flat unlit coins — MeshBasic — but keep a soft ambient for any rings
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9))
 
   raycaster = new THREE.Raycaster()
-  sphereGeo = new THREE.SphereGeometry(1, 32, 24)
-  torusGeo = new THREE.TorusGeometry(1.05, 0.05, 8, 48)
+  coinGeo = new THREE.CircleGeometry(1, 48)
+  torusGeo = new THREE.TorusGeometry(1.12, 0.06, 8, 48)
   sharedHaloMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: 0xffe566,
     transparent: true,
-    opacity: 0.1,
+    opacity: 0.14,
     depthWrite: false,
+    side: THREE.DoubleSide,
   })
 
   ballGroup = new THREE.Group()
@@ -714,9 +708,13 @@ onUnmounted(() => {
       class="edward-canvas__hover"
       :style="{ transform: `translate(${hoverCard.x}px, ${hoverCard.y}px)` }"
     >
-      <span class="edward-canvas__hover-kind">{{ hoverCard.kind }}</span>
+      <div class="edward-canvas__hover-top">
+        <span class="edward-canvas__hover-glyph" aria-hidden="true">{{ hoverCard.glyph }}</span>
+        <span class="edward-canvas__hover-kind">{{ hoverCard.mood }} · {{ hoverCard.kind }}</span>
+      </div>
       <strong class="edward-canvas__hover-name">{{ hoverCard.name }}</strong>
       <p class="edward-canvas__hover-preview">{{ hoverCard.preview }}</p>
+      <span class="edward-canvas__hover-go">click!! open thread ≫</span>
     </div>
   </div>
 </template>
@@ -728,7 +726,7 @@ onUnmounted(() => {
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  background: #05060a;
+  background: #06040e;
 
   &:active {
     cursor: grabbing;
@@ -740,44 +738,63 @@ onUnmounted(() => {
   top: 0;
   left: 0;
   z-index: 2;
-  width: min(280px, 72vw);
-  padding: 10px 12px;
+  width: min(290px, 74vw);
+  padding: 10px 12px 12px;
   margin-top: -12px;
   margin-left: 18px;
   pointer-events: none;
-  color: #e8f0f8;
-  background: color-mix(in srgb, #070c14 92%, transparent);
-  border: 1px solid color-mix(in srgb, #6a90b0 50%, transparent);
-  border-radius: 2px;
-  box-shadow: 0 10px 28px color-mix(in srgb, #000 45%, transparent);
-  backdrop-filter: blur(8px);
+  color: #fff8d6;
+  font-family: 'Courier New', ui-monospace, monospace;
+  background: color-mix(in srgb, #12081c 94%, #ffe566 6%);
+  border: 2px solid #ffe566;
+  border-radius: 4px;
+  box-shadow:
+    4px 4px 0 #1a1420,
+    0 0 24px color-mix(in srgb, #ff7eb3 35%, transparent);
+}
+
+.edward-canvas__hover-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 4px;
+}
+
+.edward-canvas__hover-glyph {
+  font-size: 0.95rem;
+  color: #ffe566;
 }
 
 .edward-canvas__hover-kind {
-  display: block;
-  margin-bottom: 4px;
   font-size: 0.625rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #59d1e0;
+  color: #ff7eb3;
 }
 
 .edward-canvas__hover-name {
   display: block;
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   margin-bottom: 4px;
+  color: #fff;
 }
 
 .edward-canvas__hover-preview {
-  margin: 0;
+  margin: 0 0 6px;
   font-size: 0.75rem;
   line-height: 1.4;
-  color: color-mix(in srgb, #e8f0f8 78%, transparent);
+  color: color-mix(in srgb, #fff8d6 82%, transparent);
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.edward-canvas__hover-go {
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  color: #59d1e0;
 }
 </style>
