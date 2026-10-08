@@ -115,7 +115,9 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
     }
 
     abortActive()
-    const gen = generation
+    // Bump generation so an aborted prior loadMore's finally can't clear
+    // this request's loading flags / controller (same pattern as loadInitial).
+    const gen = ++generation
     controller = new AbortController()
     const { signal } = controller
 

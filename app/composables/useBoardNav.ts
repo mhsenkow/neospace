@@ -39,10 +39,20 @@ export function useBoardNav() {
     return true
   }
 
+  /**
+   * Park on a column without shelf-focus (packed/roomy keep siblings visible).
+   * Tabs density still pins the focused feed — that's how the mode works.
+   */
+  const parkOnColumn = (columnId: string) => {
+    if (columnsStore.deskDensity === 'tabs') {
+      columnsStore.setFocusedColumn(columnId)
+    }
+    requestColumnJump(columnId)
+  }
+
   /** Focus + request park on home for a column id that already exists. */
   const jumpToColumnId = async (columnId: string) => {
-    columnsStore.setFocusedColumn(columnId)
-    requestColumnJump(columnId)
+    parkOnColumn(columnId)
     if (route.path !== '/') await router.push('/')
   }
 
@@ -55,12 +65,12 @@ export function useBoardNav() {
     fallback: RouteLocationRaw,
     feedParam?: string,
   ): Promise<boolean> => {
-    const id = columnsStore.focusExistingColumn(feedType, feedParam)
-    if (!id) {
+    const match = columnsStore.findColumn(feedType, feedParam)
+    if (!match) {
       await router.push(fallback)
       return false
     }
-    requestColumnJump(id)
+    parkOnColumn(match.id)
     if (route.path !== '/') await router.push('/')
     return true
   }
@@ -69,6 +79,16 @@ export function useBoardNav() {
   const openBoardFeed = async (feedType: ColumnFeedType, feedParam?: string) => {
     const id = columnsStore.ensureFocusedView(feedType, feedParam)
     if (id) requestColumnJump(id)
+    if (route.path !== '/') await router.push('/')
+  }
+
+  /** Home chrome: leave shelf-focus and park on the primary feed. */
+  const goHome = async () => {
+    columnsStore.clearColumnFocus()
+    const home =
+      columnsStore.findColumn('home') ||
+      columnsStore.columns[0]
+    if (home) requestColumnJump(home.id)
     if (route.path !== '/') await router.push('/')
   }
 
@@ -87,5 +107,6 @@ export function useBoardNav() {
     openFeedOrRoute,
     openBoardFeed,
     openGroup,
+    goHome,
   }
 }

@@ -27,7 +27,7 @@ const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
 const router = useRouter()
 const route = useRoute()
-const { openFeedOrRoute, openBoardFeed, openGroup, boardColumnIs } = useBoardNav()
+const { openFeedOrRoute, openBoardFeed, openGroup, boardColumnIs, goHome } = useBoardNav()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 const isHome = computed(() => path.value === '/' && !columnsStore.focusedColumnId)
 const { isActivity, isMentions } = useActivityNav()
@@ -120,15 +120,8 @@ const visibleAlgorithmItems = computed(() =>
 )
 const algorithmsCanToggle = computed(() => sidebarAlgorithmItems.value.length > 5)
 
-const boardFeedActive = (feedType: ColumnFeedType, feedParam?: string) => {
-  if (path.value !== '/') return false
-  const col =
-    columnsStore.focusedColumn ||
-    (columnsStore.columns.length === 1 ? columnsStore.columns[0] : null)
-  if (!col || col.feedType !== feedType) return false
-  if (feedType === 'algorithm') return col.algorithmId === feedParam
-  return true
-}
+const boardFeedActive = (feedType: ColumnFeedType, feedParam?: string) =>
+  boardColumnIs(feedType, feedParam)
 
 const inboxActive = computed(
   () =>
@@ -196,7 +189,7 @@ const openCompose = () => {
 }
 
 const onHomeClick = () => {
-  columnsStore.clearColumnFocus()
+  void goHome()
 }
 
 watch(
@@ -231,7 +224,7 @@ watch(
           'sidebar__icon-btn--active': isActivity || boardColumnIs('notifications'),
         }"
         :aria-label="notifBadge ? `Activity, ${notifBadge} unread` : 'Activity'"
-        :aria-current="isActivity ? 'page' : undefined"
+        :aria-current="isActivity || boardColumnIs('notifications') ? 'page' : undefined"
         @click="openActivity"
       >
         <NeoIcon
@@ -293,7 +286,7 @@ watch(
           active: route.path === '/explore' || boardColumnIs('search'),
         }"
         title="Search servers and people"
-        :aria-current="route.path === '/explore' ? 'page' : undefined"
+        :aria-current="route.path === '/explore' || boardColumnIs('search') ? 'page' : undefined"
         @click="openSearch"
       >
         <NeoIcon
@@ -332,7 +325,7 @@ watch(
           <button
             type="button"
             role="menuitem"
-            :aria-current="route.path === '/messages' ? 'page' : undefined"
+            :aria-current="route.path === '/messages' || boardColumnIs('messages') ? 'page' : undefined"
             @click="openDirectMessages"
           >
             <NeoIcon name="message" :size="16" :stroke="1.75" />
@@ -357,7 +350,7 @@ watch(
           active: route.path === '/profile' || boardColumnIs('profile'),
         }"
         title="Profile"
-        :aria-current="route.path === '/profile' ? 'page' : undefined"
+        :aria-current="route.path === '/profile' || boardColumnIs('profile') ? 'page' : undefined"
         @click="openProfile"
       >
         <NeoIcon
@@ -427,7 +420,9 @@ watch(
           <button
             type="button"
             class="sidebar__row"
+            :class="{ 'sidebar__row--on': boardColumnIs('group', group.tag) }"
             :title="group.name"
+            :aria-current="boardColumnIs('group', group.tag) ? 'true' : undefined"
             @click="openDesktopGroup(group.tag)"
           >
             <span
@@ -448,7 +443,9 @@ watch(
           <button
             type="button"
             class="sidebar__row"
+            :class="{ 'sidebar__row--on': boardColumnIs('group', group.tag) }"
             :title="group.name"
+            :aria-current="boardColumnIs('group', group.tag) ? 'true' : undefined"
             @click="openDesktopGroup(group.tag)"
           >
             <span

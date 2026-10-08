@@ -272,10 +272,17 @@ const getSlideEls = (): HTMLElement[] => {
 }
 
 /**
- * Slide position inside the scroller — getBoundingClientRect survives Android
- * subpixel / transform quirks better than offsetLeft alone.
+ * Slide position inside the scroller.
+ * Mobile pages are full-bleed — index × width avoids layout thrash every frame.
+ * Desktop still uses getBoundingClientRect (padding / unequal widths).
  */
 const slideScrollLeft = (el: HTMLElement, child: HTMLElement) => {
+  if (isMobileUi.value) {
+    const slides = getSlideEls()
+    const idx = slides.indexOf(child)
+    const w = el.clientWidth
+    if (idx >= 0 && w > 0) return idx * w
+  }
   return child.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft
 }
 
@@ -285,6 +292,11 @@ const nearestSlideIndex = (scrollLeft?: number) => {
   const slides = getSlideEls()
   if (!el || !slides.length) return 0
   const x = scrollLeft ?? el.scrollLeft
+  if (isMobileUi.value) {
+    const w = el.clientWidth
+    if (w <= 0) return 0
+    return clamp(Math.round(x / w), 0, slides.length - 1)
+  }
   let best = 0
   let bestDist = Infinity
   for (let i = 0; i < slides.length; i++) {
@@ -303,6 +315,7 @@ let carouselSettling = false
 /** Ignore scrollend parks right after we snap — prevents bounce loops */
 let parkCooldownUntil = 0
 let nativeParkTimer = 0
+let parkAnimRaf = 0
 /** Finger lost cancelable touchmove — native scrolling; park when it ends */
 let nativeTookOver = false
 
@@ -310,7 +323,22 @@ const armParkCooldown = (ms = 320) => {
   parkCooldownUntil = performance.now() + ms
 }
 
+const cancelParkAnim = () => {
+  if (parkAnimRaf) cancelAnimationFrame(parkAnimRaf)
+  parkAnimRaf = 0
+}
+
+const syncParkedFeedTabs = (slideIndex: number) => {
+  const feeds = columnsStore.columns.length
+  if (slideIndex >= EDGE_LEFT && slideIndex < EDGE_LEFT + feeds) {
+    const colIdx = slideIndex - EDGE_LEFT
+    if (activeColumnIndex.value !== colIdx) activeColumnIndex.value = colIdx
+    syncTabIntoView(colIdx, 'auto')
+  }
+}
+
 const parkSlideNow = (el: HTMLElement, slideIndex: number) => {
+  cancelParkAnim()
   const slides = getSlideEls()
   const child = slides[clamp(slideIndex, 0, Math.max(0, slides.length - 1))]
   if (!child) return
@@ -318,14 +346,54 @@ const parkSlideNow = (el: HTMLElement, slideIndex: number) => {
   el.style.scrollSnapType = 'none'
   el.style.touchAction = ''
   el.classList.remove('columns-container--settling', 'columns-container--swiping')
+  carouselSettling = false
   armParkCooldown()
-  // Keep the top feed strip glued to the parked column (Android swipe path)
-  const feeds = columnsStore.columns.length
-  if (slideIndex >= EDGE_LEFT && slideIndex < EDGE_LEFT + feeds) {
-    const colIdx = slideIndex - EDGE_LEFT
-    if (activeColumnIndex.value !== colIdx) activeColumnIndex.value = colIdx
-    syncTabIntoView(colIdx, 'auto')
+  syncParkedFeedTabs(slideIndex)
+}
+
+/** Short ease-out park for finger flicks — feels glued without bounce loops. */
+const parkSlideAnimated = (el: HTMLElement, slideIndex: number) => {
+  const slides = getSlideEls()
+  const idx = clamp(slideIndex, 0, Math.max(0, slides.length - 1))
+  const child = slides[idx]
+  if (!child) return
+  const target = slideScrollLeft(el, child)
+  const dist = target - el.scrollLeft
+  if (reducedMotion.value || Math.abs(dist) < 3) {
+    parkSlideNow(el, idx)
+    return
   }
+
+  cancelParkAnim()
+  el.style.scrollSnapType = 'none'
+  el.style.touchAction = ''
+  el.classList.remove('columns-container--swiping')
+  el.classList.add('columns-container--settling')
+  carouselSettling = true
+  carouselSlideIndex.value = idx
+  syncBoardPortalFromSlide(idx)
+
+  const start = el.scrollLeft
+  const duration = clamp(150 + Math.abs(dist) * 0.12, 140, 240)
+  const t0 = performance.now()
+  const easeOutCubic = (t: number) => 1 - (1 - t) ** 3
+
+  const step = (now: number) => {
+    const t = Math.min(1, (now - t0) / duration)
+    el.scrollLeft = start + dist * easeOutCubic(t)
+    onColumnsScroll()
+    if (t < 1) {
+      parkAnimRaf = requestAnimationFrame(step)
+      return
+    }
+    parkAnimRaf = 0
+    el.scrollLeft = target
+    el.classList.remove('columns-container--settling')
+    carouselSettling = false
+    armParkCooldown()
+    syncParkedFeedTabs(idx)
+  }
+  parkAnimRaf = requestAnimationFrame(step)
 }
 
 const finishCarouselSettle = (gen: number, finalIndex: number) => {
@@ -346,10 +414,20 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   if (!child) return
   carouselSlideIndex.value = idx
   syncBoardPortalFromSlide(idx)
+  window.clearTimeout(settleTimer)
 
-  // Mobile parks instantly — smooth + residual momentum bounced back and forth
-  if (motionBehavior(behavior) === 'auto' || isMobileUi.value) {
-    window.clearTimeout(settleTimer)
+  if (isMobileUi.value) {
+    // Instant for restores / tab taps; short ease for flick settle
+    if (motionBehavior(behavior) === 'smooth') {
+      parkSlideAnimated(el, idx)
+    } else {
+      carouselSettling = false
+      parkSlideNow(el, idx)
+    }
+    return
+  }
+
+  if (motionBehavior(behavior) === 'auto') {
     carouselSettling = false
     parkSlideNow(el, idx)
     return
@@ -359,7 +437,6 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   carouselSettling = true
   el.style.scrollSnapType = 'none'
   el.classList.add('columns-container--settling')
-  window.clearTimeout(settleTimer)
   el.scrollTo({ left: slideScrollLeft(el, child), behavior: 'smooth' })
 
   const done = () => {
@@ -406,7 +483,7 @@ const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth
 }
 
 /**
- * While the board pans, keep the top feed strip locked to the same fractional
+ * While the board pans, keep the feed strip locked to the same fractional
  * progress — tabs slide with your finger instead of jumping after settle.
  */
 const syncTabsWithPanProgress = () => {
@@ -417,18 +494,10 @@ const syncTabsWithPanProgress = () => {
   const feeds = columnsStore.columns.length
   if (feeds < 1) return
 
-  const slides = getSlideEls()
-  const first = slides[EDGE_LEFT]
-  const last = slides[EDGE_LEFT + feeds - 1]
-  if (!first || !last) return
-
-  const start = slideScrollLeft(el, first)
-  const end = slideScrollLeft(el, last)
-  const range = end - start
-  const fractional =
-    feeds === 1 || range <= 1
-      ? 0
-      : clamp((el.scrollLeft - start) / range, 0, 1) * (feeds - 1)
+  const w = el.clientWidth
+  if (w <= 0) return
+  // Full-bleed slides: one division, no per-slide layout reads
+  const fractional = clamp(el.scrollLeft / w - EDGE_LEFT, 0, Math.max(0, feeds - 1))
 
   const tabs = list.querySelectorAll<HTMLElement>('[role="tab"]')
   if (!tabs.length) return
@@ -440,7 +509,6 @@ const syncTabsWithPanProgress = () => {
 
   const t = fractional - i0
   const listRect = list.getBoundingClientRect()
-  // Document-space centers (survive nested offsetParents on Android WebView)
   const centerDoc = (tab: HTMLElement) => {
     const r = tab.getBoundingClientRect()
     return r.left + r.width / 2 - listRect.left + list.scrollLeft
@@ -943,13 +1011,13 @@ const finishCarouselGesture = (e: TouchEvent) => {
   el.style.touchAction = ''
   el.classList.remove('columns-container--swiping')
 
-  // Mobile — instant park on a full-width slide (±1 on a clear flick)
+  // Mobile — eased park on a full-width slide (±1 on a clear flick)
   if (isMobileUi.value) {
     let index = nearestSlideIndex()
     if (vx < -FLICK_VX) index += 1
     else if (vx > FLICK_VX) index -= 1
     index = clamp(index, 0, Math.max(0, slideCount.value - 1))
-    settleCarousel(index, 'auto')
+    settleCarousel(index, 'smooth')
     return
   }
 
@@ -1073,16 +1141,23 @@ watch(
 
 /**
  * After returning from a subview / portal route, Android often leaves the board
- * mid-slide or at Settings (slide 0). Prefer a pending/focused column jump.
+ * mid-slide or at Settings (slide 0). Prefer an explicit pending jump, then the
+ * last visible feed — not a stale shelf-focus from an earlier nav jump.
  */
 const restoreFeedPark = () => {
   nextTick(() => {
     requestAnimationFrame(() => {
-      const jumpId = pendingColumnJump.value || columnsStore.focusedColumnId
-      if (jumpId) {
-        const idx = columnsStore.columns.findIndex((c) => c.id === jumpId)
+      if (pendingColumnJump.value) {
+        const idx = columnsStore.columns.findIndex((c) => c.id === pendingColumnJump.value)
+        pendingColumnJump.value = null
         if (idx >= 0) {
-          pendingColumnJump.value = null
+          scrollToColumn(idx, 'auto')
+          return
+        }
+      }
+      if (!isMobileUi.value && columnsStore.focusedColumnId) {
+        const idx = columnsStore.columns.findIndex((c) => c.id === columnsStore.focusedColumnId)
+        if (idx >= 0) {
           scrollToColumn(idx, 'auto')
           return
         }
@@ -1143,16 +1218,20 @@ onMounted(async () => {
 
 onActivated(() => {
   // keepalive: onMounted won't re-run; subview back can leave scroll at Settings (slide 0)
+  activeBoardColumnId.value =
+    columnsStore.columns[activeColumnIndex.value]?.id ?? null
   restoreFeedPark()
 })
 
 onDeactivated(() => {
   setBoardPortal(null)
   activeBoardColumnId.value = null
+  cancelParkAnim()
 })
 
 onUnmounted(() => {
   disposed = true
+  cancelParkAnim()
   if (columnsScrollRaf) cancelAnimationFrame(columnsScrollRaf)
   columnsScrollRaf = 0
   setBoardPortal(null)
@@ -1251,207 +1330,6 @@ useHead({ title: 'Home | NeoSpace' })
             </template>
           </template>
         </NeoMenu>
-      </div>
-    </nav>
-
-    <!-- Mobile: feed strip + thumb-zone prev/next + add -->
-    <nav class="mobile-feed-tabs" aria-label="Feeds">
-      <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
-        <NeoTabs
-          class="mobile-feed-tabs__neo"
-          :tabs="feedTabs"
-          controls-id="feed-columns"
-          aria-label="Feeds"
-          :model-value="activeFeedTabId"
-          :panels="false"
-          @update:model-value="(id) => (activeFeedTabId = id)"
-        />
-      </div>
-
-      <div class="mobile-feed-tabs__thumb">
-        <!-- Quiet Flow ↔ Flip for the active feed -->
-        <button
-          type="button"
-          class="mobile-feed-tabs__mode"
-          :class="{ 'mobile-feed-tabs__mode--flip': activeViewMode === 'flip' }"
-          aria-label="Flip view"
-          :aria-pressed="activeViewMode === 'flip'"
-          :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
-          @click="toggleActiveViewMode"
-        >
-          <span class="mode-glyph" aria-hidden="true">
-            <span class="mode-glyph__flow">
-              <i /><i /><i />
-            </span>
-            <span class="mode-glyph__flip" />
-          </span>
-        </button>
-
-        <!-- Jump arrows when multi-feed or edge portals exist -->
-        <button
-          v-if="columnsStore.columnCount >= 2"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Previous feed"
-          :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
-          @click="goPrevFeed"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-        <button
-          v-if="columnsStore.columnCount >= 2"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Next feed"
-          :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
-          @click="goNextFeed"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
-
-        <button
-          v-if="columnsStore.canRemoveColumn"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Remove this feed"
-          title="Remove this feed"
-          @click="removeActiveColumn"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-
-        <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
-          <NeoMenu
-            v-model:open="addMenuOpen"
-            class="add-column-neo add-column-neo--mobile"
-            align="end"
-            teleport
-            panel-class="add-column-menu-panel"
-            :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <template #items>
-              <span class="add-column-menu__title">Add Feed</span>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-                <span>Algorithms</span>
-                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="addAlgorithmsExpanded">
-                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-                  Local ({{ localHostLabel }})
-                </button>
-                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
-                <button
-                  v-if="instancesStore.hasAuthenticatedInstance"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('favourites')"
-                >Liked</button>
-                <button
-                  v-if="instancesStore.hasAuthenticatedInstance"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('bookmarks')"
-                >Saved</button>
-                <button
-                  v-for="recipe in algorithmsStore.allRecipes"
-                  :key="`m-${recipe.id}`"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('algorithm', recipe.id)"
-                >{{ recipe.name }}</button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="algorithmsStore.openEditor(); addMenuOpen = false"
-                >Create algorithm…</button>
-              </template>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('notifications')"
-              >Notifications</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('messages')"
-              >Messages</button>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
-                <span>Groups</span>
-                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="addGroupsExpanded">
-                <div class="add-column-menu__filter" @click.stop>
-                  <input
-                    v-model="addGroupQuery"
-                    type="search"
-                    class="add-column-menu__filter-input"
-                    placeholder="Find News, Dogs…"
-                    aria-label="Filter groups"
-                    @keydown.enter.prevent="addGroupCustomTag ? addGroupAsColumn(addGroupCustomTag) : addableGroups[0] && addGroupAsColumn(addableGroups[0].tag)"
-                  >
-                </div>
-                <div class="add-column-menu__groups">
-                  <button
-                    v-for="group in addableGroups"
-                    :key="group.tag"
-                    type="button"
-                    role="menuitem"
-                    class="add-column-menu__item add-column-menu__item--group"
-                    @click="addGroupAsColumn(group.tag)"
-                  >
-                    <span class="add-column-menu__group-icon" aria-hidden="true">{{ group.icon }}</span>
-                    {{ group.name }}
-                  </button>
-                  <button
-                    v-if="addGroupCustomTag"
-                    type="button"
-                    role="menuitem"
-                    class="add-column-menu__item add-column-menu__item--group"
-                    @click="addGroupAsColumn(addGroupCustomTag)"
-                  >
-                    <span class="add-column-menu__group-icon" aria-hidden="true">🏷️</span>
-                    Add #{{ addGroupCustomTag }}
-                  </button>
-                  <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
-                    No matching groups
-                  </p>
-                </div>
-              </template>
-              <span class="add-column-menu__hint">
-                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} feeds on this device
-              </span>
-            </template>
-          </NeoMenu>
-        </div>
       </div>
     </nav>
 
@@ -1769,6 +1647,207 @@ useHead({ title: 'Home | NeoSpace' })
 
     </div>
 
+    <!-- Mobile: feed strip + thumb-zone prev/next + add -->
+    <nav class="mobile-feed-tabs" aria-label="Feeds">
+      <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
+        <NeoTabs
+          class="mobile-feed-tabs__neo"
+          :tabs="feedTabs"
+          controls-id="feed-columns"
+          aria-label="Feeds"
+          :model-value="activeFeedTabId"
+          :panels="false"
+          @update:model-value="(id) => (activeFeedTabId = id)"
+        />
+      </div>
+
+      <div class="mobile-feed-tabs__thumb">
+        <!-- Quiet Flow ↔ Flip for the active feed -->
+        <button
+          type="button"
+          class="mobile-feed-tabs__mode"
+          :class="{ 'mobile-feed-tabs__mode--flip': activeViewMode === 'flip' }"
+          aria-label="Flip view"
+          :aria-pressed="activeViewMode === 'flip'"
+          :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
+          @click="toggleActiveViewMode"
+        >
+          <span class="mode-glyph" aria-hidden="true">
+            <span class="mode-glyph__flow">
+              <i /><i /><i />
+            </span>
+            <span class="mode-glyph__flip" />
+          </span>
+        </button>
+
+        <!-- Jump arrows when multi-feed or edge portals exist -->
+        <button
+          v-if="columnsStore.columnCount >= 2"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
+          aria-label="Previous feed"
+          :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
+          @click="goPrevFeed"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <button
+          v-if="columnsStore.columnCount >= 2"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
+          aria-label="Next feed"
+          :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
+          @click="goNextFeed"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+
+        <button
+          v-if="columnsStore.canRemoveColumn"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
+          aria-label="Remove this feed"
+          title="Remove this feed"
+          @click="removeActiveColumn"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+
+        <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
+          <NeoMenu
+            v-model:open="addMenuOpen"
+            class="add-column-neo add-column-neo--mobile"
+            align="end"
+            teleport
+            panel-class="add-column-menu-panel"
+            :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <template #items>
+              <span class="add-column-menu__title">Add Feed</span>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+                <span>Algorithms</span>
+                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addAlgorithmsExpanded">
+                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
+                  Local ({{ localHostLabel }})
+                </button>
+                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+                <button
+                  v-if="instancesStore.hasAuthenticatedInstance"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('favourites')"
+                >Liked</button>
+                <button
+                  v-if="instancesStore.hasAuthenticatedInstance"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('bookmarks')"
+                >Saved</button>
+                <button
+                  v-for="recipe in algorithmsStore.allRecipes"
+                  :key="`m-${recipe.id}`"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('algorithm', recipe.id)"
+                >{{ recipe.name }}</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="algorithmsStore.openEditor(); addMenuOpen = false"
+                >Create algorithm…</button>
+              </template>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('notifications')"
+              >Notifications</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('messages')"
+              >Messages</button>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+                <span>Groups</span>
+                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addGroupsExpanded">
+                <div class="add-column-menu__filter" @click.stop>
+                  <input
+                    v-model="addGroupQuery"
+                    type="search"
+                    class="add-column-menu__filter-input"
+                    placeholder="Find News, Dogs…"
+                    aria-label="Filter groups"
+                    @keydown.enter.prevent="addGroupCustomTag ? addGroupAsColumn(addGroupCustomTag) : addableGroups[0] && addGroupAsColumn(addableGroups[0].tag)"
+                  >
+                </div>
+                <div class="add-column-menu__groups">
+                  <button
+                    v-for="group in addableGroups"
+                    :key="group.tag"
+                    type="button"
+                    role="menuitem"
+                    class="add-column-menu__item add-column-menu__item--group"
+                    @click="addGroupAsColumn(group.tag)"
+                  >
+                    <span class="add-column-menu__group-icon" aria-hidden="true">{{ group.icon }}</span>
+                    {{ group.name }}
+                  </button>
+                  <button
+                    v-if="addGroupCustomTag"
+                    type="button"
+                    role="menuitem"
+                    class="add-column-menu__item add-column-menu__item--group"
+                    @click="addGroupAsColumn(addGroupCustomTag)"
+                  >
+                    <span class="add-column-menu__group-icon" aria-hidden="true">🏷️</span>
+                    Add #{{ addGroupCustomTag }}
+                  </button>
+                  <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
+                    No matching groups
+                  </p>
+                </div>
+              </template>
+              <span class="add-column-menu__hint">
+                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} feeds on this device
+              </span>
+            </template>
+          </NeoMenu>
+        </div>
+      </div>
+    </nav>
+
     <!-- Desktop Add Column Panel -->
     <div
       v-if="columnsStore.canAddColumn && !isDeskTabs"
@@ -1980,6 +2059,8 @@ useHead({ title: 'Home | NeoSpace' })
     width: 100%;
     max-width: 100%;
     margin-inline: 0;
+    // Publish for layout dock / FAB (inherits up through main → layout)
+    --neo-feed-tabs-h: 52px;
   }
 
   // Single column / focused tab: center the content
@@ -2054,6 +2135,15 @@ useHead({ title: 'Home | NeoSpace' })
     user-select: none;
   }
 
+  // During a horizontal flick, don't let nested feeds capture hit-testing
+  &--swiping {
+    :deep(.timeline-column),
+    :deep(.panel-column),
+    .feed-portal {
+      pointer-events: none;
+    }
+  }
+
   // Single column: cap width for readability
   .columns-page:not(.columns-page--multi):not(.columns-page--tabs) & {
     @media (min-width: 1024px) {
@@ -2117,6 +2207,10 @@ useHead({ title: 'Home | NeoSpace' })
       max-width: 100%;
       border-right: none;
       box-sizing: border-box;
+      // Skip paint/layout for off-screen carousel pages while swiping
+      contain: layout style paint;
+      content-visibility: auto;
+      contain-intrinsic-size: 100vw 70vh;
     }
   }
 
@@ -2608,16 +2702,15 @@ useHead({ title: 'Home | NeoSpace' })
   flex-shrink: 0;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.35rem 0.35rem 0.35rem 0.55rem;
-  border-bottom: 1px solid var(--neo-border-color);
-  background: color-mix(in srgb, var(--neo-bg-primary) 92%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  position: sticky;
-  top: 0;
+  padding: 0.3rem 0.35rem 0.35rem 0.55rem;
+  border-top: 1px solid var(--neo-border-color);
+  border-bottom: none;
+  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  // Sit just above the bottom tab bar (in-flow flex child of .columns-page)
+  position: relative;
   z-index: var(--neo-z-sticky-bar, 20);
-  // Keep the strip glued under Android URL-bar / keyboard resizes
-  padding-top: max(0.35rem, env(safe-area-inset-top, 0px) * 0);
 
   @media (max-width: 1023px) {
     display: flex;

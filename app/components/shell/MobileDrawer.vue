@@ -50,9 +50,11 @@ const closeMobileMenu = () => {
   open.value = false
 }
 
+const { openBoardFeed, openFeedOrRoute, openGroup, boardColumnIs } = useBoardNav()
+
 const openGroupFromMenu = (tag: string) => {
   closeMobileMenu()
-  router.push(`/groups/${tag}`)
+  void openGroup(tag)
 }
 
 const localHostLabel = computed(() => {
@@ -92,8 +94,6 @@ const drawerAlgorithmItems = computed(() => {
   return items
 })
 
-const { openBoardFeed, openFeedOrRoute } = useBoardNav()
-
 const openBoardFeedFromDrawer = (feedType: ColumnFeedType, feedParam?: string) => {
   closeMobileMenu()
   void openBoardFeed(feedType, feedParam)
@@ -131,9 +131,7 @@ const handleLogout = async () => {
 }
 
 watch(open, async (isOpen) => {
-  if (typeof document !== 'undefined') {
-    document.documentElement.classList.toggle('neo-dialog-open', isOpen)
-  }
+  // neo-dialog-open is owned by useFocusTrap — don't toggle it here
   if (!isOpen) return
   if (groupsStore.groups.length === 0) {
     await groupsStore.initializeGroups()
@@ -278,6 +276,8 @@ useFocusTrap(mobileSidebarRef, open, {
               <button
                 type="button"
                 class="mobile-sidebar__group-chip"
+                :class="{ 'mobile-sidebar__group-chip--on': boardColumnIs('group', group.tag) }"
+                :aria-current="boardColumnIs('group', group.tag) ? 'true' : undefined"
                 @click="openGroupFromMenu(group.tag)"
               >
                 <span
@@ -617,6 +617,11 @@ useFocusTrap(mobileSidebarRef, open, {
     background: transparent;
     cursor: pointer;
     color: inherit;
+
+    &--on {
+      background: var(--neo-accent-soft);
+      color: var(--neo-accent);
+    }
     -webkit-tap-highlight-color: transparent;
 
     &:active {

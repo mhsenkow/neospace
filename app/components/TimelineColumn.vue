@@ -1207,7 +1207,8 @@ onMounted(() => {
 
 onActivated(() => {
   isActive = true
-  startPolling()
+  // Catch-up poll — startPolling alone waits a full interval after keepalive return
+  resumePolling()
 })
 
 onDeactivated(() => {

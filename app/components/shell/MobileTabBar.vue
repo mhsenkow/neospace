@@ -11,7 +11,7 @@ const conversationsStore = useConversationsStore()
 const composeSheet = useComposeSheetStore()
 const columnsStore = useColumnsStore()
 const { boardPortal } = useBoardPortal()
-const { openFeedOrRoute, boardColumnIs } = useBoardNav()
+const { openFeedOrRoute, boardColumnIs, goHome } = useBoardNav()
 const router = useRouter()
 const route = useRoute()
 const { path, isActivity } = useActivityNav()
@@ -26,6 +26,21 @@ const messagesActive = computed(
 const activityActive = computed(
   () => isActivity.value || boardColumnIs('notifications'),
 )
+
+/** Home owns aria-current only when another tab isn't claiming the board column. */
+const homeActive = computed(() => {
+  if (route.path !== '/') return false
+  return !(
+    boardColumnIs('messages') ||
+    boardColumnIs('notifications') ||
+    boardColumnIs('profile') ||
+    boardColumnIs('search')
+  )
+})
+
+const openHome = () => {
+  void goHome()
+}
 
 const openMessages = () => {
   void openFeedOrRoute('messages', '/messages')
@@ -55,15 +70,16 @@ const openCompose = () => {
 
 <template>
 <nav class="mobile-nav" aria-label="Tabs">
-  <NuxtLink
-    to="/"
+  <button
+    type="button"
     class="mobile-nav__item"
-    :class="{ active: route.path === '/' }"
+    :class="{ active: homeActive }"
     aria-label="Home"
-    :aria-current="route.path === '/' ? 'page' : undefined"
+    :aria-current="homeActive ? 'page' : undefined"
+    @click="openHome"
   >
-    <NeoIcon name="home" :size="22" :stroke="route.path === '/' ? 2 : 1.5" :filled="route.path === '/'" />
-  </NuxtLink>
+    <NeoIcon name="home" :size="22" :stroke="homeActive ? 2 : 1.5" :filled="homeActive" />
+  </button>
 
   <button
     v-if="instancesStore.hasAuthenticatedInstance"

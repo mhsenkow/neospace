@@ -487,13 +487,8 @@ export const useColumnsStore = defineStore('columns', {
      * `feedParam` is groupTag for groups, algorithmId for algorithms.
      */
     ensureFocusedView(feedType: ColumnFeedType, feedParam?: string) {
-      const match = this.columns.find((c) => {
-        if (feedType === 'group') return c.feedType === 'group' && c.groupTag === feedParam
-        if (feedType === 'algorithm') {
-          return c.feedType === 'algorithm' && c.algorithmId === feedParam
-        }
-        return c.feedType === feedType
-      })
+      // Use findColumn so profile peeks (profileAcct set) aren't treated as own-profile
+      const match = this.findColumn(feedType, feedParam)
       if (match) {
         if (this.focusedColumnId !== match.id) {
           this.focusedColumnId = match.id

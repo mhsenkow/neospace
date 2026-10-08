@@ -288,12 +288,19 @@ watch(
 
 .neo-layout {
   --neo-sidebar-width: 248px;
+  --neo-feed-tabs-h: 0px;
   display: flex;
   min-height: 100vh;
   min-height: 100dvh;
   max-width: 100%;
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
+
+  &--board {
+    @media (max-width: 1023px) {
+      --neo-feed-tabs-h: 52px;
+    }
+  }
 
   // Mobile: column shell with in-flow header/tabs.
   // Avoid position:fixed chrome inside overflow:hidden — iOS Safari clips it
@@ -337,6 +344,14 @@ watch(
   gap: 0.5rem;
   pointer-events: none;
   max-width: min(22rem, calc(100vw - 20px));
+
+  // Home board: feed strip sits above the tab bar
+  .neo-layout.neo-layout--board & {
+    bottom: calc(
+      var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 52px) + env(safe-area-inset-bottom, 0px) +
+        0.65rem
+    );
+  }
 
   &--subview {
     /* Tab bar hidden on focused mobile screens */

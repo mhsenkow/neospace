@@ -474,7 +474,10 @@ onUnmounted(() => {
 .notes-fab {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
-  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
+  bottom: calc(
+    var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 0px) + env(safe-area-inset-bottom, 0px) +
+      0.65rem
+  );
   z-index: var(--neo-z-shell-header, 90);
   display: grid;
   place-items: center;

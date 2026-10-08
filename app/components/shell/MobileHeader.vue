@@ -2,10 +2,19 @@
 const open = defineModel<boolean>('open', { default: false })
 
 const { boardPortal } = useBoardPortal()
+const { openFeedOrRoute, boardColumnIs, goHome } = useBoardNav()
 const route = useRoute()
 
 const toggleMenu = () => {
   open.value = !open.value
+}
+
+const searchActive = computed(
+  () => route.path === '/explore' || boardColumnIs('search'),
+)
+
+const openSearch = () => {
+  void openFeedOrRoute('search', '/explore')
 }
 </script>
 
@@ -23,20 +32,22 @@ const toggleMenu = () => {
     >
       <NeoIcon name="menu" :size="22" :stroke="1.75" />
     </button>
-    <NuxtLink to="/" class="mobile-header__logo">neospace</NuxtLink>
+    <NuxtLink to="/" class="mobile-header__logo" @click="void goHome()">neospace</NuxtLink>
   </div>
   <div class="mobile-header__actions">
-    <NuxtLink
-      to="/explore"
+    <button
+      type="button"
       class="mobile-header__btn"
       :class="{
-        'mobile-header__btn--active': route.path === '/explore',
+        'mobile-header__btn--active': searchActive,
         'chrome-hint': boardPortal === 'search',
       }"
       aria-label="Search"
+      :aria-current="searchActive ? 'page' : undefined"
+      @click="openSearch"
     >
-      <NeoIcon name="search" :size="20" :stroke="route.path === '/explore' || boardPortal === 'search' ? 2 : 1.75" />
-    </NuxtLink>
+      <NeoIcon name="search" :size="20" :stroke="searchActive || boardPortal === 'search' ? 2 : 1.75" />
+    </button>
   </div>
 </header>
 </template>
@@ -118,38 +129,6 @@ const toggleMenu = () => {
       radial-gradient(circle at 30% 30%, var(--neo-accent) 0 35%, transparent 36%),
       linear-gradient(135deg, var(--neo-bg-card) 45%, var(--neo-text-primary) 46%);
     border: 1.5px solid var(--neo-border-color-dark);
-  }
-}
-
-/* Edge-portal cue: pulse the matching chrome control */
-.chrome-hint {
-  color: var(--neo-accent) !important;
-  background: var(--neo-accent-soft) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
-  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-}
-
-:deep(.acct-switch.chrome-hint .acct-switch__trigger) {
-  color: var(--neo-accent);
-  background: var(--neo-accent-soft);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
-  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-  border-radius: var(--neo-radius-sm, 4px);
-}
-
-@keyframes chrome-hint-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 35%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--neo-accent) 22%, transparent);
-  }
-}
-
-.mobile-header {
-  :global(.chaos-active) & {
-    border-bottom-color: var(--neo-accent);
   }
 }
 </style>
