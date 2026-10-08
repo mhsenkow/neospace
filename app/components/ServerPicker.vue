@@ -148,7 +148,10 @@ defineExpose({
 })
 
 onMounted(() => {
-  nextTick(() => inputRef.value?.focus())
+  // Desktop only — autofocus on phones pops the keyboard over the server list
+  if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    nextTick(() => inputRef.value?.focus({ preventScroll: true }))
+  }
   if (query.value.trim()) schedulePeek()
 })
 
@@ -172,11 +175,11 @@ onUnmounted(() => {
           class="server-picker__input"
           placeholder="@you@example.social or example.social"
           inputmode="url"
+          enterkeyhint="go"
           autocomplete="username"
           autocapitalize="none"
           autocorrect="off"
           spellcheck="false"
-          autofocus
           :disabled="disabled"
           :aria-invalid="!!localError"
           :aria-describedby="localError ? inputErrorId : undefined"

@@ -730,6 +730,7 @@ useHead({
       <div
         v-if="focusStatus && canReply"
         class="thread-reply-dock"
+        data-keyboard-fixed
         :class="{ 'thread-reply-dock--pending': replyResolving || !publicReplyId }"
         :style="replyDockStyle"
         :aria-busy="replyResolving || !publicReplyId || undefined"

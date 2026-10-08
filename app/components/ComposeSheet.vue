@@ -14,7 +14,7 @@ const overlayStore = useOverlayStore()
 const panelRef = ref<HTMLElement | null>(null)
 const sheetOpen = computed(() => sheet.open)
 
-const { viewportStyle, onFocusField } = useKeyboardViewport(sheetOpen, {
+const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(sheetOpen, {
   lockScroll: true,
 })
 
@@ -82,13 +82,14 @@ const onPick = async (account: mastodon.v1.Account) => {
   <NeoSheet
     :open="sheet.open"
     :z-index="200"
+    max-height="100%"
     :viewport-style="viewportStyle"
     @close="requestClose"
   >
     <div
       ref="panelRef"
       class="compose-sheet__inner"
-      :style="viewportStyle"
+      :class="{ 'compose-sheet__inner--keyboard': keyboardOpen }"
       role="dialog"
       aria-modal="true"
       :aria-labelledby="sheet.pickRecipient ? 'recipient-picker-title' : sheetTitleId"
@@ -104,7 +105,11 @@ const onPick = async (account: mastodon.v1.Account) => {
               :title-id="sheetTitleId"
               @cancel="requestClose"
             />
-            <div class="compose-sheet__body" @focusin="onFocusField">
+            <div
+              class="compose-sheet__body"
+              data-keyboard-scroll
+              @focusin="onFocusField"
+            >
               <article v-if="sheet.contextPost" class="compose-sheet__context">
                 <img
                   v-if="sheet.contextPost.avatar"
@@ -191,10 +196,19 @@ const onPick = async (account: mastodon.v1.Account) => {
   width: 4.5rem;
 }
 
+.compose-sheet__inner--keyboard {
+  // Soft keyboard up — hug the visual viewport, keep Post glued to the bottom
+  :deep(.compose-input-wrap) {
+    min-height: 6.5rem;
+  }
+}
+
 .compose-sheet__body {
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.85rem 0.85rem 0.65rem;
   padding-bottom: max(0.85rem, env(safe-area-inset-bottom, 0px));
   -webkit-overflow-scrolling: touch;
@@ -202,9 +216,11 @@ const onPick = async (account: mastodon.v1.Account) => {
   min-height: 0;
 
   :deep(.compose) {
+    display: flex;
+    flex-direction: column;
     flex: 1;
     min-height: 0;
-    height: 100%;
+    height: auto;
     border: none;
     box-shadow: none;
     background: transparent;
@@ -212,21 +228,31 @@ const onPick = async (account: mastodon.v1.Account) => {
   }
 
   :deep(.compose-input-wrap) {
-    flex: 1;
-    min-height: 10rem;
+    flex: 1 1 auto;
+    min-height: 8rem;
   }
 
   :deep(.compose-input) {
     flex: 1;
-    min-height: 10rem;
+    min-height: 8rem;
     max-height: none;
-    /* ≥16px avoids iOS auto-zoom on focus */
-    font-size: 1rem;
+    /* Absolute 16px — root rem is 15px; iOS zooms anything smaller */
+    font-size: max(16px, 1rem);
     line-height: 1.45;
   }
 
   :deep(.compose-footer) {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
     margin-top: auto;
+    margin-inline: -0.85rem;
+    padding: 0.65rem 0.85rem;
+    padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+    background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid var(--neo-border-color);
   }
 }
 

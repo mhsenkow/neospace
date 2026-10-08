@@ -28,8 +28,13 @@ const emit = defineEmits<{
   close: []
 }>()
 
+/** When pinned to visualViewport, cap with % of that box — not layout dvh. */
+const pinnedToViewport = computed(
+  () => !!(props.viewportStyle && (props.viewportStyle.height || props.viewportStyle.top)),
+)
+
 const panelStyle = computed(() => ({
-  maxHeight: props.maxHeight,
+  maxHeight: pinnedToViewport.value ? '100%' : props.maxHeight,
   zIndex: props.zIndex + 1,
 }))
 
@@ -45,7 +50,10 @@ const rootStyle = computed(() => ({
       <div
         v-if="open"
         class="neo-sheet"
-        :class="{ 'neo-sheet--compact': desktopWidth === 'compact' }"
+        :class="{
+          'neo-sheet--compact': desktopWidth === 'compact',
+          'neo-sheet--vv': pinnedToViewport,
+        }"
         :style="rootStyle"
         role="presentation"
       >
@@ -93,6 +101,7 @@ const rootStyle = computed(() => ({
   display: flex;
   flex-direction: column;
   width: 100%;
+  // Cap with 100% so a vv-pinned parent can't overflow under the keyboard
   min-height: min(56dvh, 420px, 100%);
   background: var(--neo-bg-primary);
   border-radius: 16px 16px 0 0;
@@ -102,9 +111,23 @@ const rootStyle = computed(() => ({
   padding-bottom: env(safe-area-inset-bottom, 0);
   overflow: hidden;
 
+  .neo-sheet--vv & {
+    // Fill the visual viewport box; shrink gracefully as the keyboard rises
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
+    height: 100%;
+    border-radius: 12px 12px 0 0;
+  }
+
   .neo-sheet--compact & {
     min-height: 0;
     max-height: min(78dvh, 560px);
+  }
+
+  .neo-sheet--compact.neo-sheet--vv & {
+    max-height: 100%;
+    height: auto;
   }
 
   @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {

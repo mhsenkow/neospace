@@ -208,7 +208,7 @@ const toggle = () => {
       <div
         ref="sheetRef"
         class="group-pick-sheet__inner"
-        :style="viewportStyle"
+        data-keyboard-scroll
         role="dialog"
         aria-modal="true"
         aria-labelledby="group-pick-title"

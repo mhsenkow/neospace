@@ -106,12 +106,15 @@ const reduceMotion = usePrefersReducedMotion()
 /** Smooth scroll unless the user asked for less motion */
 const scrollBehavior = (): ScrollBehavior => (reduceMotion.value ? 'auto' : 'smooth')
 
-/** Keep the field above the soft keyboard (inline reply / thread dock on Android). */
+/** Keep the field above the soft keyboard — sheets own their scrollport. */
 const onComposeFocus = () => {
   composeFocused.value = true
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined' || !textareaRef.value) return
+  // Compose sheet / fixed docks: parent keyboard helpers already pin + inset
+  if (textareaRef.value.closest('.compose-sheet, .chat-composer, [data-keyboard-fixed]')) return
   window.setTimeout(() => {
-    textareaRef.value?.scrollIntoView({ block: 'center', behavior: scrollBehavior() })
+    if (!textareaRef.value) return
+    scrollFieldIntoKeyboardView(textareaRef.value, { behavior: scrollBehavior() })
   }, 280)
 }
 const selectedGroupTag = ref<string | null>(
@@ -651,15 +654,20 @@ const applyHandoff = async () => {
   await nextTick()
   const ta = textareaRef.value
   if (ta) {
-    ta.focus()
+    // preventScroll: browser default scroll fights the sheet's visualViewport pin (bruh/loom)
+    if (document.activeElement !== ta) ta.focus({ preventScroll: true })
     const len = content.value.length
     ta.setSelectionRange(len, len)
-    ta.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })
+    window.setTimeout(() => {
+      scrollFieldIntoKeyboardView(ta, { behavior: scrollBehavior() })
+    }, 320)
   }
   // After media attaches, keep chart + caption in view above the keyboard / Post bar
   if (draft.files.length) {
     await nextTick()
-    composeMediaRef.value?.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })
+    if (composeMediaRef.value) {
+      scrollFieldIntoKeyboardView(composeMediaRef.value, { behavior: scrollBehavior() })
+    }
   }
 }
 
@@ -687,9 +695,14 @@ onMounted(() => {
   applyDraft()
   if (props.inReplyToId && props.initialText) {
     nextTick(() => {
-      textareaRef.value?.focus()
+      const ta = textareaRef.value
+      if (!ta) return
+      ta.focus({ preventScroll: true })
       const len = content.value.length
-      textareaRef.value?.setSelectionRange(len, len)
+      ta.setSelectionRange(len, len)
+      window.setTimeout(() => {
+        scrollFieldIntoKeyboardView(ta, { behavior: scrollBehavior() })
+      }, 320)
     })
   }
   void applyHandoff()
@@ -738,6 +751,8 @@ onUnmounted(() => {
           class="compose-input neo-input"
           :placeholder="placeholder"
           rows="1"
+          enterkeyhint="enter"
+          autocapitalize="sentences"
           :readonly="inputLocked"
           :aria-busy="isPosting || isUploading || props.disabled || undefined"
           role="combobox"
@@ -821,6 +836,8 @@ onUnmounted(() => {
           class="compose-input neo-input"
           :placeholder="placeholder"
           :rows="3"
+          enterkeyhint="enter"
+          autocapitalize="sentences"
           :readonly="inputLocked"
           :aria-busy="isPosting || isUploading || props.disabled || undefined"
           role="combobox"

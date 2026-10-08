@@ -13,7 +13,6 @@ import { isImeEvent } from '~/composables/useComposerCore'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
 import { mapComposeError } from '~/utils/friendlyError'
 import { mastodonLength } from '~/utils/mastodonLength'
-import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const props = defineProps<{
   /** Latest status in the thread to reply to */
@@ -132,16 +131,14 @@ const {
   onDrop,
 } = useComposeMedia()
 
-const { insetStyle: barStyle, keyboardOpen } = useKeyboardBottomInset()
-const reduceMotion = usePrefersReducedMotion()
+const { insetStyle: barStyle } = useKeyboardBottomInset()
 
-/** Keep the focused field visible above the soft keyboard on Android overlay keyboards. */
-const onComposerFocus = (e: FocusEvent) => {
-  const el = e.target as HTMLElement | null
-  if (!el || (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT')) return
-  window.setTimeout(() => {
-    el.scrollIntoView({ block: 'center', behavior: reduceMotion.value ? 'auto' : 'smooth' })
-  }, keyboardOpen.value ? 50 : 280)
+/**
+ * Fixed bar already lifts with --neo-keyboard-inset. Document scrollIntoView
+ * yanks the thread under the bar on Android — leave scrolling to the parent.
+ */
+const onComposerFocus = (_e: FocusEvent) => {
+  /* intentional no-op: inset + parent keyboardOpen watcher handle visibility */
 }
 
 const maxChars = computed(() => instancesStore.statusMaxCharacters || 500)
@@ -315,6 +312,7 @@ onMounted(() => {
   <div
     class="chat-composer"
     :class="{ 'chat-composer--dragging': isDragging }"
+    data-keyboard-fixed
     :style="barStyle"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"

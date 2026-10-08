@@ -132,10 +132,12 @@ const reduceMotion = usePrefersReducedMotion()
 const onFocusField = (e: FocusEvent) => {
   const el = e.target as HTMLElement | null
   if (!el || !panelRef.value) return
-  // After keyboard animates, scroll the focused field into the panel's visible area
+  // After keyboard animates, scroll within the panel — not the document
   window.setTimeout(() => {
     syncViewport()
-    el.scrollIntoView({ block: 'center', behavior: reduceMotion.value ? 'auto' : 'smooth' })
+    scrollFieldIntoKeyboardView(el, {
+      behavior: reduceMotion.value ? 'auto' : 'smooth',
+    })
   }, 300)
 }
 
@@ -324,7 +326,7 @@ onUnmounted(() => {
         @click.self="tryClose"
         @keydown="onFormKeydown"
       >
-        <div ref="panelRef" class="notes-panel">
+        <div ref="panelRef" class="notes-panel" data-keyboard-scroll>
           <header class="notes-panel__header">
             <h2 id="neospace-notes-title">Leave a note</h2>
             <button
@@ -762,9 +764,16 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 0.5rem;
   flex-shrink: 0;
-  padding-top: 0.35rem;
-  /* Keep actions reachable above home indicator when keyboard is closed */
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 0.55rem;
+  /* Keep Submit reachable above keyboard + home indicator */
+  padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0));
+  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .notes-cancel {

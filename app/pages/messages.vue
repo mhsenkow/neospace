@@ -293,7 +293,7 @@ useHead(() => ({ title: pageTitle.value }))
           placeholder="Search chats…"
           autocomplete="off"
           enterkeyhint="search"
-          @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })"
+          @focus="scrollFieldIntoKeyboardView($event.target as HTMLElement, { behavior: scrollBehavior() })"
         />
       </label>
     </div>

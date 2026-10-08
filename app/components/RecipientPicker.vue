@@ -146,6 +146,7 @@ onUnmounted(() => clear())
         type="search"
         class="neo-input recipient-picker__input"
         placeholder="Search name or @handle"
+        enterkeyhint="search"
         autocomplete="off"
         autocorrect="off"
         autocapitalize="off"

@@ -6,6 +6,49 @@
 import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useScrollLock } from '~/composables/useScrollLock'
 
+const KEYBOARD_SCROLL_SEL =
+  '[data-keyboard-scroll], .compose-sheet__body, .group-pick-sheet__inner, .notes-panel, .notes-sheet__panel, .neo-sheet__panel, .recipient-picker'
+
+const KEYBOARD_FIXED_SEL =
+  '.chat-composer, [data-keyboard-fixed], .reply-dock, .thread-reply-dock'
+
+/**
+ * Scroll a focused field into its sheet/panel scrollport — never yank the
+ * document under a fixed composer (Android overlay keyboards).
+ */
+export function scrollFieldIntoKeyboardView(
+  el: HTMLElement,
+  opts?: { behavior?: ScrollBehavior },
+) {
+  if (typeof window === 'undefined') return
+  const behavior = opts?.behavior ?? 'smooth'
+
+  // Fixed bars already lift with --neo-keyboard-inset
+  if (el.closest(KEYBOARD_FIXED_SEL)) return
+
+  const parent = el.closest(KEYBOARD_SCROLL_SEL) as HTMLElement | null
+  if (parent && parent !== el && parent.scrollHeight > parent.clientHeight + 2) {
+    const pRect = parent.getBoundingClientRect()
+    const eRect = el.getBoundingClientRect()
+    const pad = 16
+    const footer = parent.querySelector(
+      '.compose-footer, .notes-actions, .compose-sheet__footer',
+    ) as HTMLElement | null
+    const footerH = footer?.offsetHeight ?? 0
+    const topLimit = pRect.top + pad
+    const bottomLimit = pRect.bottom - pad - footerH
+    if (eRect.top < topLimit) {
+      parent.scrollBy({ top: eRect.top - topLimit, behavior })
+    } else if (eRect.bottom > bottomLimit) {
+      parent.scrollBy({ top: eRect.bottom - bottomLimit, behavior })
+    }
+    return
+  }
+
+  // Page-level fields: nearest keeps sticky search bars from jumping
+  el.scrollIntoView({ block: 'nearest', behavior })
+}
+
 export function useKeyboardViewport(
   active: Ref<boolean> | { value: boolean },
   opts?: {
@@ -14,6 +57,7 @@ export function useKeyboardViewport(
   },
 ) {
   const viewportStyle = ref<Record<string, string>>({})
+  const keyboardOpen = ref(false)
   const scrollLock = useScrollLock()
   let scrollHeld = false
   let scrollY = 0
@@ -29,6 +73,7 @@ export function useKeyboardViewport(
         width: '100%',
         height: '100%',
       }
+      keyboardOpen.value = false
       return
     }
     viewportStyle.value = {
@@ -37,6 +82,13 @@ export function useKeyboardViewport(
       width: `${vv.width}px`,
       height: `${vv.height}px`,
     }
+    // Layout vs visual gap — soft keyboard (not URL-bar jitter)
+    const inset = Math.max(
+      0,
+      Math.round(window.innerHeight - vv.height - vv.offsetTop),
+      Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop),
+    )
+    keyboardOpen.value = inset >= 100
   }
 
   const scheduleSync = () => {
@@ -77,6 +129,7 @@ export function useKeyboardViewport(
       rafPending = 0
     }
     viewportStyle.value = {}
+    keyboardOpen.value = false
   }
 
   let focusTimer: ReturnType<typeof setTimeout> | null = null
@@ -93,14 +146,15 @@ export function useKeyboardViewport(
       }
     }
     if (focusTimer) clearTimeout(focusTimer)
+    // Wait for soft keyboard animation, then re-pin + scroll the sheet body
     focusTimer = setTimeout(() => {
       focusTimer = null
       scheduleSync()
       const reduced =
         document.documentElement.classList.contains('reduce-motion') ||
         window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      el.scrollIntoView({ block: 'center', behavior: reduced ? 'instant' : 'smooth' })
-    }, 300)
+      scrollFieldIntoKeyboardView(el, { behavior: reduced ? 'auto' : 'smooth' })
+    }, keyboardOpen.value ? 80 : 300)
   }
 
   watch(
@@ -118,7 +172,7 @@ export function useKeyboardViewport(
     if (active.value) detach()
   })
 
-  return { viewportStyle, syncViewport, onFocusField }
+  return { viewportStyle, keyboardOpen, syncViewport, onFocusField }
 }
 
 /**
