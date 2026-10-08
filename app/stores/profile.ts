@@ -16,6 +16,16 @@ import {
   dedupeStatusPage,
 } from '~/composables/useAccountPager'
 
+/**
+ * Per-operation request sequences. A slow response for an older profile (A→B
+ * navigation) or an older tab's status list must not overwrite newer state.
+ */
+let profileSeq = 0
+let statusesSeq = 0
+let pinnedSeq = 0
+
+type StatusListOpts = { excludeReplies?: boolean; onlyMedia?: boolean }
+
 interface ProfileState {
   // Viewed profile (can be self or other user)
   viewedProfile: mastodon.v1.Account | null
@@ -121,20 +131,19 @@ export const useProfileStore = defineStore('profile', {
      * Fetch a profile by ID or username
      */
     async fetchProfile(accountId?: string) {
-      const instancesStore = useInstancesStore()
-      
+      const seq = ++profileSeq
       this.isLoading = true
       this.error = null
 
       try {
         const client = this.getClient()
-        
-        if (accountId) {
-          this.viewedProfile = await client.v1.accounts.$select(accountId).fetch()
-        } else {
-          this.viewedProfile = await client.v1.accounts.verifyCredentials()
-        }
 
+        const account = accountId
+          ? await client.v1.accounts.$select(accountId).fetch()
+          : await client.v1.accounts.verifyCredentials()
+        if (seq !== profileSeq) return
+
+        this.viewedProfile = account
         this.initEditForm()
 
         await Promise.all([
@@ -143,10 +152,11 @@ export const useProfileStore = defineStore('profile', {
         ])
 
       } catch (e: any) {
+        if (seq !== profileSeq) return
         this.error = e.message || 'Failed to fetch profile'
         console.error('Profile fetch error:', e)
       } finally {
-        this.isLoading = false
+        if (seq === profileSeq) this.isLoading = false
       }
     },
 
@@ -154,6 +164,7 @@ export const useProfileStore = defineStore('profile', {
      * Fetch profile by username (handle lookup)
      */
     async fetchProfileByUsername(username: string) {
+      const seq = ++profileSeq
       this.isLoading = true
       this.error = null
 
@@ -172,6 +183,7 @@ export const useProfileStore = defineStore('profile', {
           })
           account = res.accounts?.[0] || null
         }
+        if (seq !== profileSeq) return
 
         if (account) {
           this.viewedProfile = account
@@ -184,18 +196,21 @@ export const useProfileStore = defineStore('profile', {
           this.error = 'User not found'
         }
       } catch (e: any) {
+        if (seq !== profileSeq) return
         this.error = e.message || 'Failed to find user'
         console.error('Profile lookup error:', e)
       } finally {
-        this.isLoading = false
+        if (seq === profileSeq) this.isLoading = false
       }
     },
 
     /**
      * Fetch user's statuses
      */
-    async fetchStatuses(refresh = false, opts?: { excludeReplies?: boolean; onlyMedia?: boolean }) {
+    async fetchStatuses(refresh = false, opts?: StatusListOpts) {
       if (!this.viewedProfile) return
+      const seq = ++statusesSeq
+      const profileId = this.viewedProfile.id
 
       if (refresh) {
         this.statuses = []
@@ -208,13 +223,15 @@ export const useProfileStore = defineStore('profile', {
       try {
         const client = this.getClient()
         
-        const statuses = await client.v1.accounts.$select(this.viewedProfile.id).statuses.list({
+        const statuses = await client.v1.accounts.$select(profileId).statuses.list({
           limit: ACCOUNT_STATUS_PAGE_SIZE,
           maxId: this.maxStatusId || undefined,
           excludeReplies: opts?.excludeReplies ?? false,
           excludeReblogs: false,
           onlyMedia: opts?.onlyMedia ?? false,
-        } as any)
+        })
+        // Newer fetch (tab switch / other profile) owns the list now
+        if (seq !== statusesSeq || this.viewedProfile?.id !== profileId) return
 
         this.statuses = dedupeStatusPage(this.statuses, statuses, refresh)
 
@@ -225,9 +242,10 @@ export const useProfileStore = defineStore('profile', {
         this.hasMoreStatuses = accountStatusHasMore(statuses.length)
 
       } catch (e: any) {
+        if (seq !== statusesSeq) return
         console.error('Failed to fetch statuses:', e)
       } finally {
-        this.isLoadingStatuses = false
+        if (seq === statusesSeq) this.isLoadingStatuses = false
       }
     },
 
@@ -236,13 +254,17 @@ export const useProfileStore = defineStore('profile', {
      */
     async fetchPinnedStatuses() {
       if (!this.viewedProfile) return
+      const seq = ++pinnedSeq
+      const profileId = this.viewedProfile.id
 
       try {
         const client = this.getClient()
-        
-        this.pinnedStatuses = await client.v1.accounts.$select(this.viewedProfile.id).statuses.list({
+
+        const pinned = await client.v1.accounts.$select(profileId).statuses.list({
           pinned: true,
         })
+        if (seq !== pinnedSeq || this.viewedProfile?.id !== profileId) return
+        this.pinnedStatuses = pinned
       } catch (e: any) {
         console.error('Failed to fetch pinned statuses:', e)
       }
@@ -303,31 +325,24 @@ export const useProfileStore = defineStore('profile', {
       try {
         const client = this.getClient()
 
+        // Always send 4 slots (padded empty) so cleared fields actually delete on the server
+        const slots = [...this.editForm.fields]
+        while (slots.length < 4) slots.push({ name: '', value: '' })
+
         // Build the update payload
-        const updateData: any = {
+        const updateData: mastodon.rest.v1.UpdateCredentialsParams = {
           displayName: this.editForm.displayName,
           note: this.editForm.note,
           locked: this.editForm.locked,
           bot: this.editForm.bot,
           discoverable: this.editForm.discoverable,
-        }
-
-        // Always send 4 slots (padded empty) so cleared fields actually delete on the server
-        const slots = [...this.editForm.fields]
-        while (slots.length < 4) slots.push({ name: '', value: '' })
-        updateData.fieldsAttributes = slots.slice(0, 4).map((f) => ({
-          name: f.name,
-          value: f.value,
-        }))
-
-        // Handle avatar upload
-        if (this.editForm.avatar) {
-          updateData.avatar = this.editForm.avatar
-        }
-
-        // Handle header upload
-        if (this.editForm.header) {
-          updateData.header = this.editForm.header
+          fieldsAttributes: slots.slice(0, 4).map((f) => ({
+            name: f.name,
+            value: f.value,
+          })),
+          // Only send images that changed
+          ...(this.editForm.avatar ? { avatar: this.editForm.avatar } : {}),
+          ...(this.editForm.header ? { header: this.editForm.header } : {}),
         }
 
         // Update the profile
@@ -444,6 +459,10 @@ export const useProfileStore = defineStore('profile', {
      * Clear profile state
      */
     clear() {
+      // Drop any in-flight responses for the profile being left
+      profileSeq += 1
+      statusesSeq += 1
+      pinnedSeq += 1
       this.viewedProfile = null
       this.statuses = []
       this.pinnedStatuses = []

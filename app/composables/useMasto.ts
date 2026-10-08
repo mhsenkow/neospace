@@ -31,21 +31,28 @@ export function clearClientCache(url?: string) {
   }
 }
 
+/** Small LRU bound — several accounts on one host each keep their own client. */
+const CLIENT_CACHE_MAX = 16
+
 function cachedClient(url: string, accessToken?: string | null): mastodon.rest.Client {
   const normalized = normalizeUrl(url)
   const key = cacheKey(normalized, accessToken)
-  // Token change for this host — drop stale entries
-  const prefix = `${normalized}\0`
-  for (const existing of [...clientCache.keys()]) {
-    if (existing.startsWith(prefix) && existing !== key) clientCache.delete(existing)
-  }
   let client = clientCache.get(key)
-  if (!client) {
-    client = createRestAPIClient({
-      url: normalized,
-      accessToken: accessToken || undefined,
-    })
+  if (client) {
+    // Refresh recency (Map preserves insertion order)
+    clientCache.delete(key)
     clientCache.set(key, client)
+    return client
+  }
+  client = createRestAPIClient({
+    url: normalized,
+    accessToken: accessToken || undefined,
+  })
+  clientCache.set(key, client)
+  while (clientCache.size > CLIENT_CACHE_MAX) {
+    const oldest = clientCache.keys().next().value
+    if (oldest === undefined) break
+    clientCache.delete(oldest)
   }
   return client
 }
@@ -63,26 +70,48 @@ export function clientFor(instanceId: string): mastodon.rest.Client {
  * without switching the global active account (and re-initing every column).
  */
 let readAccountOverrideId: string | null = null
+let readAccountOverrideOwner = 0
 
-export function setReadAccountOverride(instanceId: string | null) {
+/**
+ * Set the read override. Returns an ownership token; pass it to
+ * clearReadAccountOverride so an outgoing page's unmount can't clear the
+ * override the incoming page just set.
+ */
+export function setReadAccountOverride(instanceId: string | null): number {
   readAccountOverrideId = instanceId
+  return ++readAccountOverrideOwner
 }
 
-/** Authenticated client for the active account */
-export function activeClient(): mastodon.rest.Client {
+/** Clear the override only if `owner` still holds it. */
+export function clearReadAccountOverride(owner: number) {
+  if (owner !== readAccountOverrideOwner) return
+  readAccountOverrideId = null
+}
+
+/**
+ * URL + token of the account activeClient() acts as (read override first,
+ * then the active account). For raw-fetch endpoints that must stay on the same
+ * account as client calls (media upload, delete).
+ */
+export function activeCredentials(): { url: string; accessToken: string } {
+  const store = useInstancesStore()
   if (readAccountOverrideId) {
-    try {
-      return clientFor(readAccountOverrideId)
-    } catch {
-      /* fall through to active */
+    const instance = store.instances.find((i) => i.id === readAccountOverrideId)
+    if (instance?.url && instance.accessToken) {
+      return { url: normalizeUrl(instance.url), accessToken: instance.accessToken }
     }
   }
-  const store = useInstancesStore()
   const account = store.activeAccount
   if (!account?.url || !account.accessToken) {
     throw new Error('Not authenticated')
   }
-  return cachedClient(account.url, account.accessToken)
+  return { url: normalizeUrl(account.url), accessToken: account.accessToken }
+}
+
+/** Authenticated client for the active account */
+export function activeClient(): mastodon.rest.Client {
+  const { url, accessToken } = activeCredentials()
+  return cachedClient(url, accessToken)
 }
 
 /**
@@ -109,5 +138,5 @@ export function publicClient(url?: string | null): mastodon.rest.Client {
 
 /** Composable wrapper for Nuxt auto-import convenience */
 export function useMasto() {
-  return { clientFor, activeClient, publicClient, clearClientCache }
+  return { clientFor, activeClient, activeCredentials, publicClient, clearClientCache }
 }

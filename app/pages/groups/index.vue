@@ -8,6 +8,7 @@ import { useGroupsStore, GROUP_CATEGORIES } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { categoryTint } from '~/composables/useShellAppearance'
 import { useHorizontalRail } from '~/composables/useHorizontalRail'
+import { useGroupSearch } from '~/composables/useGroupSearch'
 
 const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
@@ -21,8 +22,8 @@ const dismissKeyboardOnTouch = (e: KeyboardEvent) => {
   if (window.matchMedia('(pointer: fine)').matches) return
   ;(e.target as HTMLInputElement | null)?.blur()
 }
-const searchResults = ref<any[]>([])
-const isSearching = ref(false)
+// Debounced + race-guarded; pending timer cleared on unmount
+const { results: searchResults, isSearching } = useGroupSearch(searchQuery, { delayMs: 300 })
 
 onMounted(async () => {
   await groupsStore.initializeGroups()
@@ -48,30 +49,6 @@ const trendingServerLabel = computed(() => {
   }
 })
 
-const handleSearch = async () => {
-  if (!searchQuery.value.trim()) {
-    searchResults.value = []
-    return
-  }
-
-  isSearching.value = true
-  try {
-    searchResults.value = await groupsStore.searchGroups(searchQuery.value)
-  } finally {
-    isSearching.value = false
-  }
-}
-
-let searchTimeout: ReturnType<typeof setTimeout>
-watch(searchQuery, (val) => {
-  clearTimeout(searchTimeout)
-  if (val.trim()) {
-    searchTimeout = setTimeout(handleSearch, 300)
-  } else {
-    searchResults.value = []
-  }
-})
-
 const viewGroup = (tag: string) => {
   router.push(`/groups/${tag}`)
 }
@@ -82,8 +59,7 @@ const suggestedRail = useHorizontalRail(suggestedRailRef)
 const trendingRail = useHorizontalRail(trendingRailRef)
 
 useHead({
-  title: 'Groups',
-  titleTemplate: '%s | NeoSpace',
+  title: 'Groups | NeoSpace',
   meta: [
     { name: 'description', content: 'Join communities and discover groups on NeoSpace.' },
   ],
@@ -102,7 +78,7 @@ useHead({
       <div class="notice-content">
         <span class="notice-icon"><NeoIcon name="lock" :size="22" :stroke="1.75" /></span>
         <div>
-          <h3>Log in to join groups</h3>
+          <h2>Log in to join groups</h2>
           <p>
             Browse freely — sign in to join and see group posts in your home feed.
           </p>
@@ -179,23 +155,28 @@ useHead({
             <span class="section-count">{{ joinedGroups.length }}</span>
           </div>
           <div class="groups-jump" role="list">
-            <button
+            <div
               v-for="group in joinedGroups"
               :key="group.tag"
-              type="button"
-              class="jump-chip"
+              class="jump-chip-item"
               role="listitem"
-              :title="`Open ${group.name}`"
-              @click="viewGroup(group.tag)"
             >
-              <span
-                class="jump-chip__icon"
-                :style="{ backgroundColor: categoryTint(group.category) }"
+              <button
+                type="button"
+                class="jump-chip"
+                :title="`Open ${group.name}`"
+                @click="viewGroup(group.tag)"
               >
-                {{ group.icon }}
-              </span>
-              <span class="jump-chip__name">{{ group.name }}</span>
-            </button>
+                <span
+                  class="jump-chip__icon"
+                  :style="{ backgroundColor: categoryTint(group.category) }"
+                  aria-hidden="true"
+                >
+                  {{ group.icon }}
+                </span>
+                <span class="jump-chip__name">{{ group.name }}</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -304,7 +285,7 @@ useHead({
           </div>
 
           <div v-else-if="filteredGroups.length === 0" class="empty-state">
-            <span class="empty-emoji">😕</span>
+            <span class="empty-emoji" aria-hidden="true">😕</span>
             <p>No groups found in this category.</p>
           </div>
 
@@ -553,6 +534,13 @@ useHead({
   }
 }
 
+/* listitem wrapper — the button inside stays a plain button */
+.jump-chip-item {
+  display: flex;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
 .jump-chip {
   display: flex;
   flex-direction: column;
@@ -754,7 +742,7 @@ useHead({
   flex-shrink: 0;
 }
 
-.notice-content h3 {
+.notice-content h2 {
   margin: 0 0 0.125rem;
   font-size: 0.9375rem;
   color: var(--neo-text-primary);

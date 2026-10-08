@@ -28,11 +28,17 @@ interface ConversationsState {
 
 type LiveRefreshStop = () => void
 
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollTimer: ReturnType<typeof setTimeout> | null = null
 let focusHandler: (() => void) | null = null
 let pollConsumers = 0
 let fetchSeq = 0
 let pollIntervalMs = POLL_MS
+
+/** Account the cached list belongs to — switching accounts must not mix inboxes */
+let listAccountId: string | null = null
+
+/** previewFor runs per row per render — memoize by status (objects are replaced on update) */
+const previewCache = new WeakMap<object, string>()
 
 /** Strip leading @mentions from DM preview text */
 function previewText(html: string, participantAccts: string[]): string {
@@ -80,6 +86,12 @@ export const useConversationsStore = defineStore('conversations', {
       }
       if ((this.isLoading || this.isRefreshing) && !force) return
 
+      const accountId = instancesStore.activeAccountId
+      if (accountId !== listAccountId) {
+        this.conversations = []
+        this.hasMore = true
+        listAccountId = accountId
+      }
       const seq = ++fetchSeq
       if (!quiet) {
         if (this.conversations.length) this.isRefreshing = true
@@ -130,12 +142,15 @@ export const useConversationsStore = defineStore('conversations', {
       }
       this.isLoadingMore = true
       this.loadMoreError = null
+      const seq = fetchSeq
       try {
         const client = activeClient()
         const items = await client.v1.conversations.list({
           limit: PAGE_LIMIT,
           maxId: last.id,
         })
+        // A refresh / account switch landed meanwhile — this page is stale
+        if (seq !== fetchSeq) return
         const batch = Array.isArray(items) ? items : []
         const seen = new Set(this.conversations.map((c) => c.id))
         const fresh = batch.filter((c) => !seen.has(c.id))
@@ -219,9 +234,12 @@ export const useConversationsStore = defineStore('conversations', {
     previewFor(c: mastodon.v1.Conversation, myId?: string | null, myAcct?: string | null): string {
       const status = c.lastStatus
       if (!status?.content) return 'No messages yet'
-      const participantAccts = (c.accounts || []).map((a) => a.acct).filter(Boolean)
-      const text = previewText(status.content, participantAccts)
-      const clipped = clipGraphemes(text, 120)
+      let clipped = previewCache.get(status)
+      if (clipped === undefined) {
+        const participantAccts = (c.accounts || []).map((a) => a.acct).filter(Boolean)
+        clipped = clipGraphemes(previewText(status.content, participantAccts), 120)
+        previewCache.set(status, clipped)
+      }
       const mine =
         (!!myId && status.account.id === myId) ||
         (!!myAcct && status.account.acct?.toLowerCase() === myAcct.toLowerCase())
@@ -246,7 +264,14 @@ export const useConversationsStore = defineStore('conversations', {
         void this.fetchConversations({ quiet: true, force: true })
       }
 
-      pollTimer = setInterval(tick, pollIntervalMs)
+      // Self-rescheduling so failure backoff (pollIntervalMs) actually applies
+      const schedule = () => {
+        pollTimer = setTimeout(() => {
+          tick()
+          if (pollTimer) schedule()
+        }, pollIntervalMs)
+      }
+      schedule()
       focusHandler = () => {
         if (typeof document !== 'undefined' && !document.hidden) tick()
       }
@@ -263,7 +288,7 @@ export const useConversationsStore = defineStore('conversations', {
       pollConsumers = Math.max(0, pollConsumers - 1)
       if (pollConsumers > 0) return
       if (pollTimer) {
-        clearInterval(pollTimer)
+        clearTimeout(pollTimer)
         pollTimer = null
       }
       if (focusHandler) {

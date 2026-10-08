@@ -23,6 +23,8 @@ import type { NeoIconName } from '~/utils/neoIcons'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
 import EdwardWatchActions from '~/components/edward/EdwardWatchActions.vue'
+import { useFocusTrap } from '~/composables/useFocusTrap'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const CHIP_ICONS: Record<string, NeoIconName> = {
   'no bots': 'ban',
@@ -223,6 +225,8 @@ watch(
 
 const blink = ref(true)
 const placeholderIdx = ref(0)
+/** Blinking cursor + rotating placeholder hold still under reduced motion */
+const reduceMotion = usePrefersReducedMotion()
 let blinkTimer: ReturnType<typeof setInterval> | null = null
 let placeholderTimer: ReturnType<typeof setInterval> | null = null
 
@@ -323,13 +327,27 @@ const exit = () => {
   }, 220)
 }
 
+/**
+ * Widgets that own arrow keys — never steal them for scrubbing. Plain buttons
+ * don't use arrows (focus lands on Exit when the session opens), so they're
+ * left out; buttons inside toolbars/menus/radiogroups are covered by the roles.
+ */
+const ARROW_OWNERS =
+  'select, input, textarea, [contenteditable="true"], [role="toolbar"], [role="radiogroup"], [role="menu"], [role="listbox"], [role="slider"]'
+/** Widgets that consume typed characters (typeahead) — no single-key shortcuts */
+const CHAR_OWNERS =
+  'select, input, textarea, [contenteditable="true"], [role="toolbar"], [role="radiogroup"], [role="menu"], [role="listbox"]'
+
+/**
+ * Shortcuts run in the bubble phase so focused widgets (menus, toolbars,
+ * inputs) handle their own keys first; anything they preventDefault is left alone.
+ */
 const onKey = (e: KeyboardEvent) => {
   if (e.defaultPrevented) return
+  if (e.key === 'Escape') return
   const target = e.target as HTMLElement | null
-  const typing =
-    target?.tagName === 'INPUT' ||
-    target?.tagName === 'TEXTAREA' ||
-    target?.isContentEditable
+  const typing = !!target?.closest?.(CHAR_OWNERS)
+  const arrowOwned = !!target?.closest?.(ARROW_OWNERS)
 
   // / focuses explore console (Session OS muscle memory)
   if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -361,18 +379,27 @@ const onKey = (e: KeyboardEvent) => {
   }
 
   // ← → scrub watch history when something cool just flew by
-  if (!typing && (e.key === 'ArrowLeft' || e.key === '[')) {
+  if ((e.key === 'ArrowLeft' && !arrowOwned) || (e.key === '[' && !typing)) {
     e.preventDefault()
     edward.watchPrev()
     return
   }
-  if (!typing && (e.key === 'ArrowRight' || e.key === ']')) {
+  if ((e.key === 'ArrowRight' && !arrowOwned) || (e.key === ']' && !typing)) {
     e.preventDefault()
     edward.watchNext()
     return
   }
+}
 
-  if (e.key !== 'Escape') return
+/**
+ * Escape stays in the capture phase: it steps back one layer at a time
+ * (peek → scrub → filters → input → exit) ahead of the peek's own handlers.
+ * Open menus/listboxes keep their own Escape.
+ */
+const onEscapeKey = (e: KeyboardEvent) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest?.('[role="menu"], [role="listbox"]')) return
   e.preventDefault()
   e.stopPropagation()
   if (edward.selectedIdentity) {
@@ -396,17 +423,22 @@ const onKey = (e: KeyboardEvent) => {
 
 let prevOverflow = ''
 
+// Keep Tab inside the session; Escape is owned by onEscapeKey (layered), so no onEscape here
+useFocusTrap(rootEl, visible, { initialFocus: '.edward-mode__exit' })
+
 onMounted(() => {
   requestAnimationFrame(() => {
     visible.value = true
   })
-  document.addEventListener('keydown', onKey, true)
+  document.addEventListener('keydown', onKey)
+  document.addEventListener('keydown', onEscapeKey, true)
   prevOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   blinkTimer = setInterval(() => {
-    blink.value = !blink.value
+    blink.value = reduceMotion.value ? true : !blink.value
   }, 530)
   placeholderTimer = setInterval(() => {
+    if (reduceMotion.value) return
     placeholderIdx.value = (placeholderIdx.value + 1) % EDWARD_EXPLORE_PLACEHOLDERS.length
   }, 4200)
   sessionTimer = setInterval(() => {
@@ -419,7 +451,8 @@ onUnmounted(() => {
   if (announceTimer) clearTimeout(announceTimer)
   exploreRo?.disconnect()
   if (holdReleaseTimer) clearTimeout(holdReleaseTimer)
-  document.removeEventListener('keydown', onKey, true)
+  document.removeEventListener('keydown', onKey)
+  document.removeEventListener('keydown', onEscapeKey, true)
   document.body.style.overflow = prevOverflow
   if (blinkTimer) clearInterval(blinkTimer)
   if (placeholderTimer) clearInterval(placeholderTimer)
@@ -517,6 +550,7 @@ onUnmounted(() => {
                 type="button"
                 class="edward-mode__srv-chip"
                 :class="{ 'is-on': chipActive(srv.token) }"
+                :aria-pressed="chipActive(srv.token)"
                 :style="{ '--srv': srv.accent }"
                 :title="`${srv.host} · ${srv.count}`"
                 @click="toggleChip(srv.token)"
@@ -578,7 +612,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="edward-mode__watch-film" aria-label="Watch filmstrip">
+        <div class="edward-mode__watch-film" role="group" aria-label="Watch filmstrip">
           <button
             v-for="card in watchTrail"
             :key="`t-${card.identity}`"
@@ -733,6 +767,7 @@ onUnmounted(() => {
             type="button"
             class="edward-mode__chip"
             :class="{ 'is-on': chipActive(chip.query) }"
+            :aria-pressed="chipActive(chip.query)"
             :title="chip.hint"
             @click="toggleChip(chip.query)"
           >
@@ -753,6 +788,7 @@ onUnmounted(() => {
             type="button"
             class="edward-mode__chip edward-mode__chip--srv"
             :class="{ 'is-on': chipActive(srv.token) }"
+            :aria-pressed="chipActive(srv.token)"
             :style="{ '--srv': srv.accent }"
             :title="srv.host"
             @click="toggleChip(srv.token)"
@@ -783,7 +819,7 @@ onUnmounted(() => {
 .edward-mode {
   position: fixed;
   inset: 0;
-  z-index: calc(var(--neo-z-modal, 1050) + 40);
+  z-index: var(--neo-z-edward, 1090);
   opacity: 0;
   transition: opacity 0.22s ease;
   font-family: 'Courier New', ui-monospace, monospace;
@@ -796,7 +832,7 @@ onUnmounted(() => {
 
   /* Drop under compose sheet for quick reply */
   &.is-recessed {
-    z-index: calc(var(--neo-z-modal, 1050) - 20);
+    z-index: var(--neo-z-edward-recessed, 150);
     pointer-events: none;
     opacity: 0.35;
   }
@@ -1018,7 +1054,10 @@ onUnmounted(() => {
 .edward-mode__srv-chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
+  min-height: 24px;
+  min-width: 24px;
   padding: 0.15rem 0.4rem;
   border: 1px solid color-mix(in srgb, var(--srv, #ffe566) 70%, transparent);
   border-radius: 2px;
@@ -1343,6 +1382,12 @@ onUnmounted(() => {
     4px 4px 0 #ff7eb3,
     0 0 28px color-mix(in srgb, #59d1e0 18%, transparent);
   pointer-events: auto;
+
+  /* The input drops its own outline — ring the console instead */
+  &:has(.edward-mode__explore-input:focus-visible) {
+    outline: 2px solid #59d1e0;
+    outline-offset: 2px;
+  }
 }
 
 .edward-mode__explore-row {
@@ -1432,7 +1477,10 @@ onUnmounted(() => {
 .edward-mode__chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.28rem;
+  min-height: 24px;
+  min-width: 24px;
   padding: 0.18rem 0.45rem;
   border: 1px dashed color-mix(in srgb, #ffe566 45%, transparent);
   border-radius: 2px;

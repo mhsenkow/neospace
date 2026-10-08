@@ -16,8 +16,9 @@ import {
   sanitizeDisplayName,
   sanitizeFieldHtml,
   sanitizeStatusHtml,
-  stripHtml,
 } from '~/utils/sanitizeHtml'
+import { plainTextOf } from '~/utils/plainText'
+import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import {
   buildPresenceLinks,
@@ -32,7 +33,7 @@ import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { formatCompact } from '~/utils/insights'
 import { useToastStore } from '~/stores/toast'
-import { setReadAccountOverride } from '~/composables/useMasto'
+import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
 
 const INTERNAL_FIELD_NAMES = new Set([
   'neospace_columns',
@@ -54,13 +55,15 @@ const router = useRouter()
 const profileRace = createRaceGuard()
 const statusesRace = createRaceGuard()
 
+let readOverrideOwner = 0
 const syncReadAccountOverride = () => {
   const account = route.query.account
-  setReadAccountOverride(typeof account === 'string' ? account : null)
+  readOverrideOwner = setReadAccountOverride(typeof account === 'string' ? account : null)
 }
 syncReadAccountOverride()
 watch(() => route.query.account, syncReadAccountOverride)
-onBeforeUnmount(() => setReadAccountOverride(null))
+// Only clears if this page still owns the override (the next page may have set it already)
+onBeforeUnmount(() => clearReadAccountOverride(readOverrideOwner))
 
 const canSwitchAccounts = computed(
   () =>
@@ -244,13 +247,22 @@ const followersModalRef = ref<{ open: (tab?: 'followers' | 'following') => void 
 // Relationship state
 const relationship = ref<mastodon.v1.Relationship | null>(null)
 const isFollowLoading = ref(false)
-const profileTab = ref<'posts' | 'replies' | 'media' | 'reposts' | 'insights'>('posts')
-const profileTabDefs = [
+const profileTab = ref<'posts' | 'replies' | 'media' | 'reposts' | 'human' | 'insights'>(
+  'posts',
+)
+const BASE_PROFILE_TABS = [
   { id: 'posts', label: 'Posts' },
   { id: 'replies', label: 'Replies' },
   { id: 'media', label: 'Media' },
   { id: 'reposts', label: 'Reposts' },
+  { id: 'human', label: 'Human' },
 ]
+// Insights is a real tab on your own profile so the tablist/panel reflect it
+const profileTabDefs = computed(() =>
+  profileStore.isOwnProfile
+    ? [...BASE_PROFILE_TABS, { id: 'insights', label: 'Insights' }]
+    : BASE_PROFILE_TABS,
+)
 
 // File input refs
 const avatarInput = ref<HTMLInputElement | null>(null)
@@ -286,6 +298,8 @@ const tabFetchOpts = computed(() => {
 })
 
 const postsQuery = ref('')
+/** Debounced find-in-feed query — filtering parses every loaded post */
+const postsFindQuery = useDebouncedValue(postsQuery, 150)
 
 const visibleStatuses = computed(() => {
   const list = profileStore.statuses
@@ -298,12 +312,12 @@ const visibleStatuses = computed(() => {
           ? list.filter((s) => !s.inReplyToId && !s.reblog)
           : list.filter((s) => !s.reblog)
 
-  const q = postsQuery.value.trim().toLowerCase()
+  const q = postsFindQuery.value.trim().toLowerCase()
   if (!q) return filtered
   return filtered.filter((s) => {
     const src = s.reblog || s
     const hay = [
-      stripHtml(src.content || ''),
+      plainTextOf(src),
       src.spoilerText || '',
       src.account?.displayName || '',
       src.account?.username || '',
@@ -328,12 +342,12 @@ const fetchStatusesGuarded = async (refresh: boolean, opts: { excludeReplies?: b
 }
 
 const setProfileTab = async (
-  tab: 'posts' | 'replies' | 'media' | 'reposts' | 'insights',
+  tab: 'posts' | 'replies' | 'media' | 'reposts' | 'human' | 'insights',
 ) => {
   if (profileTab.value === tab) return
   profileTab.value = tab
   postsQuery.value = ''
-  if (tab === 'insights') return
+  if (tab === 'insights' || tab === 'human') return
   await fetchStatusesGuarded(true, optsForTab(tab))
 }
 
@@ -644,7 +658,7 @@ useHead({
         <div class="profile-head">
           <div class="profile-head__text">
             <template v-if="profileStore.isEditing">
-              <label class="sr-only" for="profile-display-name">Display name</label>
+              <label class="profile-edit-label" for="profile-display-name">Display name</label>
               <input
                 id="profile-display-name"
                 v-model="profileStore.editForm.displayName"
@@ -722,7 +736,7 @@ useHead({
         </div>
 
         <template v-if="profileStore.isEditing">
-          <label class="sr-only" for="profile-bio">Bio</label>
+          <label class="profile-edit-label profile-edit-label--spaced" for="profile-bio">Bio</label>
           <textarea
             id="profile-bio"
             v-model="profileStore.editForm.note"
@@ -1002,14 +1016,16 @@ useHead({
         <NeoTabs
           class="profile-tabs"
           :tabs="profileTabDefs"
-          :model-value="profileTab === 'insights' ? 'posts' : profileTab"
+          :model-value="profileTab"
           :panels="false"
           controls-id="profile-tab-panel"
           id-prefix="profile-tabs"
           aria-label="Profile sections"
-          @update:model-value="setProfileTab($event as 'posts' | 'replies' | 'media' | 'reposts')"
+          @update:model-value="
+            setProfileTab($event as 'posts' | 'replies' | 'media' | 'reposts' | 'human' | 'insights')
+          "
         />
-        <label v-if="profileTab !== 'insights'" class="profile-search">
+        <label v-if="profileTab !== 'insights' && profileTab !== 'human'" class="profile-search">
           <span class="sr-only">Search posts</span>
           <NeoIcon name="search" :size="16" :stroke="1.75" class="profile-search__icon" aria-hidden="true" />
           <input
@@ -1026,11 +1042,17 @@ useHead({
       <div
         id="profile-tab-panel"
         role="tabpanel"
-        :aria-labelledby="`profile-tabs-tab-${profileTab === 'insights' ? 'posts' : profileTab}`"
+        :aria-labelledby="`profile-tabs-tab-${profileTab}`"
       >
         <ProfileInsights
           v-if="profileTab === 'insights' && profileStore.isOwnProfile && profileStore.viewedProfile"
           :account="profileStore.viewedProfile"
+        />
+
+        <ProfileHumanBadges
+          v-else-if="profileTab === 'human' && profileStore.viewedProfile"
+          :account="profileStore.viewedProfile"
+          :is-own="profileStore.isOwnProfile"
         />
 
         <template v-else>
@@ -1075,8 +1097,8 @@ useHead({
             <div v-else class="profile-posts-empty">
               <p>
                 {{
-                  postsQuery.trim()
-                    ? `No loaded posts match “${postsQuery.trim()}”.`
+                  postsFindQuery.trim()
+                    ? `No loaded posts match “${postsFindQuery.trim()}”.`
                     : profileTab === 'media'
                       ? 'No media yet.'
                       : profileTab === 'replies'
@@ -1380,6 +1402,19 @@ useHead({
   flex-shrink: 0;
   color: var(--neo-text-muted);
   transition: color 0.15s ease, transform 0.15s ease;
+}
+
+/* Small visible labels for edit inputs (placeholders vanish once you type) */
+.profile-edit-label {
+  display: block;
+  margin: 0 0 0.2rem;
+  font-size: var(--neo-font-size-xs, 0.75rem);
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+
+  &--spaced {
+    margin-top: 0.6rem;
+  }
 }
 
 .profile-name-input {

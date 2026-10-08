@@ -4,6 +4,7 @@
  */
 
 import type { mastodon } from 'masto'
+import { formatCompactRelativeTime } from '~/utils/relativeTime'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore, type ExtendedNotification } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
@@ -127,19 +128,8 @@ const panelNotifications = computed(() => {
   })
 })
 
-const formatTime = (dateString?: string | null) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  const diff = Date.now() - date.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d`
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
+const formatTime = (dateString?: string | null) =>
+  dateString ? formatCompactRelativeTime(dateString) : ''
 
 const me = computed(() => instancesStore.activeAccount?.user || null)
 
@@ -479,6 +469,19 @@ const archiveConversation = async (c: mastodon.v1.Conversation, e: Event) => {
   }
 }
 
+/** DM polling is ref-counted and shared with the shell — only release what we took */
+let dmRefreshHeld = false
+const startDmRefresh = () => {
+  if (dmRefreshHeld) return
+  conversationsStore.startLiveRefresh()
+  dmRefreshHeld = true
+}
+const stopDmRefresh = () => {
+  if (!dmRefreshHeld) return
+  conversationsStore.stopLiveRefresh()
+  dmRefreshHeld = false
+}
+
 onMounted(() => {
   if (props.column.feedType === 'profile' && instancesStore.hasAuthenticatedInstance) {
     if (props.column.profileAcct) void loadRemoteProfile()
@@ -489,7 +492,7 @@ onMounted(() => {
   }
   if (props.column.feedType === 'messages' && instancesStore.hasAuthenticatedInstance) {
     conversationsStore.fetchConversations(true)
-    conversationsStore.startLiveRefresh()
+    startDmRefresh()
   }
 })
 
@@ -505,9 +508,9 @@ watch(
     }
     if (type === 'messages' && instancesStore.hasAuthenticatedInstance) {
       conversationsStore.fetchConversations(true)
-      conversationsStore.startLiveRefresh()
+      startDmRefresh()
     } else if (type !== 'messages') {
-      conversationsStore.stopLiveRefresh()
+      stopDmRefresh()
     }
   },
 )
@@ -515,7 +518,7 @@ watch(
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
   searchRace.next()
-  conversationsStore.stopLiveRefresh()
+  stopDmRefresh()
 })
 </script>
 

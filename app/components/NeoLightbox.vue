@@ -6,6 +6,10 @@ const overlay = useOverlayStore()
 const rootRef = ref<HTMLElement | null>(null)
 const isOpen = computed(() => overlay.lightbox.open)
 const hasGallery = computed(() => overlay.lightbox.items.length > 1)
+/** Author-written alt text only — generated fallbacks stay screen-reader-only */
+const caption = computed(
+  () => overlay.lightbox.items[overlay.lightbox.index]?.caption?.trim() || '',
+)
 const positionLabel = computed(() => {
   if (!hasGallery.value) return ''
   return `${overlay.lightbox.index + 1} of ${overlay.lightbox.items.length}`
@@ -27,7 +31,11 @@ useFocusTrap(rootRef, isOpen, {
   initialFocus: '.neo-lightbox__close',
 })
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+// Always mounted via NeoOverlayHost — only listen while a lightbox is open
+watch(isOpen, (open) => {
+  if (open) window.addEventListener('keydown', onKeydown)
+  else window.removeEventListener('keydown', onKeydown)
+})
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 /**
@@ -134,8 +142,8 @@ const imgStyle = computed(() => {
           draggable="false"
         />
         <!-- Alt text is for everyone, not just screen readers -->
-        <figcaption v-if="overlay.lightbox.alt" class="neo-lightbox__alt">
-          {{ overlay.lightbox.alt }}
+        <figcaption v-if="caption" class="neo-lightbox__alt">
+          {{ caption }}
         </figcaption>
       </figure>
       <button
@@ -156,7 +164,7 @@ const imgStyle = computed(() => {
 .neo-lightbox {
   position: fixed;
   inset: 0;
-  z-index: var(--neo-z-modal);
+  z-index: var(--neo-z-dialog-top, 1065);
   display: flex;
   align-items: center;
   justify-content: center;

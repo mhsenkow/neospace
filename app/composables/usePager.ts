@@ -1,15 +1,25 @@
 /**
  * Generic max_id pager with dedupe, generation token, and AbortController.
+ *
+ * fetchPage may return a plain array (cursor = last item id — statuses) or a
+ * CursorPage with an explicit `nextMaxId` from the Link header (account lists,
+ * whose ids are not valid max_id cursors).
  */
 
 import { ref, type Ref } from 'vue'
+import type { CursorPage } from '~/utils/linkHeader'
 
 export type PagerItem = { id: string }
 
 export type FetchPageFn<T extends PagerItem> = (opts: {
   maxId?: string
   signal: AbortSignal
-}) => Promise<T[]>
+}) => Promise<T[] | CursorPage<T>>
+
+function normalizePage<T>(page: T[] | CursorPage<T>, lastId: (items: T[]) => string | null) {
+  if (Array.isArray(page)) return { items: page, nextMaxId: lastId(page), explicit: false }
+  return { items: page.items, nextMaxId: page.nextMaxId, explicit: true }
+}
 
 export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
   const items = ref<T[]>([]) as Ref<T[]>
@@ -20,6 +30,10 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
 
   let generation = 0
   let controller: AbortController | null = null
+  /** Cursor for the next page (Link-header max_id, or last item id) */
+  let nextMaxId: string | null = null
+
+  const lastIdOf = (page: T[]) => page[page.length - 1]?.id ?? null
 
   const abortActive = () => {
     controller?.abort()
@@ -29,6 +43,7 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
   const reset = () => {
     abortActive()
     generation += 1
+    nextMaxId = null
     items.value = []
     hasMore.value = true
     isLoading.value = false
@@ -70,10 +85,11 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
     hasMore.value = true
 
     try {
-      const page = await fetchPage({ signal })
+      const page = normalizePage(await fetchPage({ signal }), lastIdOf)
       if (gen !== generation) return
-      dedupeAppend(page, true)
-      hasMore.value = page.length > 0
+      dedupeAppend(page.items, true)
+      nextMaxId = page.nextMaxId
+      hasMore.value = page.items.length > 0 && (!page.explicit || !!page.nextMaxId)
     } catch (e) {
       if (gen !== generation) return
       if ((e as { name?: string })?.name === 'AbortError') return
@@ -88,9 +104,13 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
 
   const loadMore = async () => {
     if (!hasMore.value || isLoading.value || isLoadingMore.value) return
-    const last = items.value[items.value.length - 1]
-    if (!last) {
+    if (!items.value.length) {
       await loadInitial()
+      return
+    }
+    const cursor = nextMaxId ?? lastIdOf(items.value)
+    if (!cursor) {
+      hasMore.value = false
       return
     }
 
@@ -103,15 +123,16 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
     error.value = null
 
     try {
-      const page = await fetchPage({ maxId: last.id, signal })
+      const page = normalizePage(await fetchPage({ maxId: cursor, signal }), lastIdOf)
       if (gen !== generation) return
-      if (!page.length) {
+      if (!page.items.length) {
         hasMore.value = false
         return
       }
       const before = items.value.length
-      dedupeAppend(page, false)
-      if (items.value.length === before) hasMore.value = false
+      dedupeAppend(page.items, false)
+      nextMaxId = page.nextMaxId
+      if (items.value.length === before || (page.explicit && !page.nextMaxId)) hasMore.value = false
     } catch (e) {
       if (gen !== generation) return
       if ((e as { name?: string })?.name === 'AbortError') return

@@ -17,6 +17,8 @@ definePageMeta({
   layout: 'default',
 })
 
+useHead({ title: 'Import algorithm | NeoSpace' })
+
 const route = useRoute()
 const router = useRouter()
 const algorithms = useAlgorithmsStore()

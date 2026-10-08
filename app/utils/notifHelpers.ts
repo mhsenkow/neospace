@@ -22,11 +22,6 @@ export function notifIconName(type: string): NeoIconName {
   }
 }
 
-/** @deprecated Use notifIconName + NeoIcon — kept for any leftover string uses */
-export function notifIcon(type: string): string {
-  return notifIconName(type)
-}
-
 export function notifLabel(type: string): string {
   switch (type) {
     case 'mention': return 'mentioned you'

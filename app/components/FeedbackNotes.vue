@@ -14,6 +14,7 @@ import {
   type FeedbackKind,
 } from '~/utils/feedback'
 import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 declare global {
   interface Window {
@@ -126,13 +127,15 @@ const unlockScroll = () => {
   window.scrollTo(0, scrollLockY)
 }
 
+const reduceMotion = usePrefersReducedMotion()
+
 const onFocusField = (e: FocusEvent) => {
   const el = e.target as HTMLElement | null
   if (!el || !panelRef.value) return
   // After keyboard animates, scroll the focused field into the panel's visible area
   window.setTimeout(() => {
     syncViewport()
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.scrollIntoView({ block: 'center', behavior: reduceMotion.value ? 'auto' : 'smooth' })
   }, 300)
 }
 
@@ -471,12 +474,13 @@ onUnmounted(() => {
 .notes-fab {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
-  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
+  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
   z-index: var(--neo-z-shell-header, 90);
   display: grid;
   place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  // 44px touch target
+  width: 2.75rem;
+  height: 2.75rem;
   color: var(--neo-text-muted);
   background: var(--neo-bg-card);
   border: 1px solid var(--neo-border-color);
@@ -566,7 +570,7 @@ onUnmounted(() => {
 .notes-counter {
   margin: -0.25rem 0 0.5rem;
   font-size: 0.6875rem;
-  color: var(--neo-text-disabled);
+  color: var(--neo-text-secondary);
   text-align: right;
 }
 
@@ -674,7 +678,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 
   &::placeholder {
-    color: var(--neo-text-disabled);
+    color: var(--neo-text-secondary);
   }
 }
 

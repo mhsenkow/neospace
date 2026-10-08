@@ -48,11 +48,9 @@ const query = ref('')
 const tab = ref<ExploreTab>('all')
 const customError = ref<string | null>(null)
 const customBusy = ref(false)
-const watchToast = ref<string | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-let toastTimer: ReturnType<typeof setTimeout> | null = null
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 const isSignedIn = computed(() => instancesStore.hasAuthenticatedInstance)
 
@@ -203,12 +201,9 @@ const handleVisit = (domain: string) => {
   instancesStore.openPreview(domain)
 }
 
+/** Shared toast host — one polite live region, sits above the tab bar */
 const showToast = (msg: string) => {
-  watchToast.value = msg
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    watchToast.value = null
-  }, 3200)
+  toastStore.show({ message: msg, duration: 3200 })
 }
 
 const onWatched = (domain: string) => {
@@ -357,7 +352,6 @@ useHead({
 })
 
 onUnmounted(() => {
-  if (toastTimer) clearTimeout(toastTimer)
   if (searchTimer) clearTimeout(searchTimer)
   loadMoreObserver?.disconnect()
 })
@@ -371,21 +365,24 @@ onUnmounted(() => {
 
     <div class="explore-search-block neo-sticky-bar">
       <div class="explore-search-row">
-        <label class="explore-search">
-          <NeoIcon name="search" :size="20" :stroke="1.75" class="explore-search__icon" />
-          <span class="sr-only">Search</span>
-          <input
-            ref="searchInputRef"
-            v-model="query"
-            type="search"
-            :placeholder="searchPlaceholder"
-            autocapitalize="none"
-            autocorrect="off"
-            spellcheck="false"
-            autocomplete="off"
-            enterkeyhint="search"
-            @keydown.enter.prevent="onSearchEnter"
-          />
+        <!-- Button sits outside the <label> (a label may only label its one control) -->
+        <div class="explore-search">
+          <label class="explore-search__field">
+            <NeoIcon name="search" :size="20" :stroke="1.75" class="explore-search__icon" />
+            <span class="sr-only">Search</span>
+            <input
+              ref="searchInputRef"
+              v-model="query"
+              type="search"
+              :placeholder="searchPlaceholder"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              autocomplete="off"
+              enterkeyhint="search"
+              @keydown.enter.prevent="onSearchEnter"
+            />
+          </label>
           <button
             v-if="tab === 'servers' || looksLikeHostname(query)"
             type="button"
@@ -395,7 +392,7 @@ onUnmounted(() => {
           >
             {{ customBusy ? '…' : 'Look up' }}
           </button>
-        </label>
+        </div>
 
         <NeoTabs
           :model-value="tab"
@@ -411,15 +408,6 @@ onUnmounted(() => {
 
       <p v-if="customError" class="explore-error" role="alert">{{ customError }}</p>
       <p v-else-if="searchError" class="explore-error" role="alert">{{ searchError }}</p>
-      <p
-        v-if="searchStatusText && !customError && !searchError"
-        class="explore-hint explore-hint--status"
-        role="status"
-        aria-live="polite"
-        :aria-busy="searchBusy"
-      >
-        {{ searchStatusText }}
-      </p>
     </div>
 
     <div
@@ -428,6 +416,16 @@ onUnmounted(() => {
       :aria-labelledby="`explore-tabs-tab-${tab}`"
       :aria-busy="searchBusy"
     >
+    <!-- Result count reads at the top; it doesn't need to ride in the sticky bar -->
+    <p
+      v-if="searchStatusText && !customError && !searchError"
+      class="explore-hint explore-hint--status"
+      role="status"
+      aria-live="polite"
+      :aria-busy="searchBusy"
+    >
+      {{ searchStatusText }}
+    </p>
     <div v-if="!isSignedIn" class="explore-cta-row">
       <a
         href="https://joinmastodon.org/servers"
@@ -516,6 +514,7 @@ onUnmounted(() => {
             :key="cat.id"
             type="button"
             :class="['explore-cat', { active: selectedCategory === cat.id }]"
+            :aria-pressed="selectedCategory === cat.id"
             @click="selectedCategory = cat.id"
           >
             {{ cat.label }}
@@ -739,12 +738,6 @@ onUnmounted(() => {
     </div>
 
     <InstancePreview @watched="onWatched" />
-
-    <Teleport to="body">
-      <Transition name="toast-fade">
-        <div v-if="watchToast" class="explore-toast" role="status">{{ watchToast }}</div>
-      </Transition>
-    </Teleport>
   </div>
 </template>
 
@@ -843,6 +836,11 @@ onUnmounted(() => {
     border-color: var(--neo-accent);
   }
 
+  // Layout-neutral: icon + input stay flex children of .explore-search
+  &__field {
+    display: contents;
+  }
+
   &__icon {
     flex-shrink: 0;
     color: var(--neo-text-muted);
@@ -900,7 +898,7 @@ onUnmounted(() => {
   padding: 0 1rem;
   font-weight: 600;
   font-size: 0.875rem;
-  color: var(--neo-text-inverse, #fafaf8);
+  color: var(--neo-text-on-accent, #fafaf8);
   background: var(--neo-accent);
   border: none;
   border-radius: 10px;
@@ -1000,7 +998,7 @@ onUnmounted(() => {
   border: 1px solid transparent;
 
   &--primary {
-    color: var(--neo-text-inverse, #fafaf8);
+    color: var(--neo-text-on-accent, #fafaf8);
     background: var(--neo-accent);
     border-color: var(--neo-accent);
 
@@ -1090,7 +1088,7 @@ onUnmounted(() => {
   }
 
   &.active {
-    color: var(--neo-text-inverse, #fafaf8);
+    color: var(--neo-text-on-accent, #fafaf8);
     background: var(--neo-accent);
     border-color: var(--neo-accent);
   }
@@ -1098,7 +1096,7 @@ onUnmounted(() => {
 
 .explore-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 0.875rem;
   margin-bottom: 1.25rem;
 
@@ -1123,9 +1121,9 @@ onUnmounted(() => {
   font-size: 0.875rem;
   color: var(--neo-text-muted);
 
-  // Result count sits under the mode tabs — give it the same gap as errors
+  // Result count opens the results (the sticky block above supplies the gap)
   &--status {
-    margin-top: 0.5rem;
+    margin-top: 0;
   }
 }
 
@@ -1341,38 +1339,6 @@ onUnmounted(() => {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
-}
-
-.explore-toast {
-  position: fixed;
-  // Clear the in-flow tab bar + home indicator
-  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.75rem);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 9999;
-  padding: 0.65rem 1rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--neo-text-primary);
-  background: var(--neo-bg-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-
-  @media (min-width: 1024px) {
-    bottom: 2rem;
-  }
-}
-
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
 }
 
 @media (min-width: 1024px) {

@@ -14,6 +14,7 @@ import { activeClient, publicClient } from '~/composables/useMasto'
 import { guessCategory as guessCategoryUtil } from '~/utils/guessCategory'
 import { isValidHashtag, normalizeHashtagInput } from '~/utils/hashtag'
 import { logWarn, logError } from '~/utils/log'
+import { cursorPage } from '~/utils/linkHeader'
 
 /** Prevent concurrent initializeGroups races that double-push trending tags */
 let groupsInitPromise: Promise<void> | null = null
@@ -80,6 +81,8 @@ interface GroupsState {
       maxId: string | null
       hasMore: boolean
       scrollY: number
+      /** LRU recency tick */
+      cachedAt: number
     }
   >
 }
@@ -432,6 +435,9 @@ export const GROUP_CATEGORIES = [
 /** Rough bucket for live tags so they land somewhere useful */
 /** Bumps on each timeline fetch so a slow prior tag cannot overwrite the current one */
 let timelineRequestId = 0
+/** Back/forward restore cache is LRU-bounded so browsing many tags doesn't grow forever */
+const TIMELINE_CACHE_MAX = 12
+let timelineCacheClock = 0
 
 export const useGroupsStore = defineStore('groups', {
   state: (): GroupsState => ({
@@ -728,15 +734,18 @@ export const useGroupsStore = defineStore('groups', {
         const client = this.getClient()
         const tags: mastodon.v1.Tag[] = []
         let maxId: string | undefined
+        // Followed tags paginate by follow-row id from the Link header (not tag name)
         for (;;) {
-          const batch = await client.v1.followedTags.list({
-            limit: 100,
-            ...(maxId ? { maxId } : {}),
-          })
-          if (!batch.length) break
-          tags.push(...batch)
-          if (batch.length < 100) break
-          maxId = batch[batch.length - 1]!.name
+          const page = await cursorPage(
+            client.v1.followedTags.list.$raw({
+              limit: 100,
+              ...(maxId ? { maxId } : {}),
+            }),
+          )
+          if (!page.items.length) break
+          tags.push(...page.items)
+          if (!page.nextMaxId || page.nextMaxId === maxId) break
+          maxId = page.nextMaxId
         }
         this.followedTags = tags
 
@@ -955,7 +964,8 @@ export const useGroupsStore = defineStore('groups', {
         logError('Load more error:', e)
         throw e
       } finally {
-        if (requestId === timelineRequestId) this.isLoadingMore = false
+        // Always release — a stale request must not leave load-more stuck
+        this.isLoadingMore = false
       }
     },
 
@@ -1034,18 +1044,31 @@ export const useGroupsStore = defineStore('groups', {
 
     cacheTimeline(tag: string, scrollY = 0) {
       const key = tag.toLowerCase()
-      this.timelineCache[key] = {
+      const next = { ...this.timelineCache }
+      // Re-insert to mark most recent; evict least-recent beyond the cap
+      delete next[key]
+      next[key] = {
         timeline: [...this.groupTimeline],
         maxId: this.maxId,
         hasMore: this.hasMore,
         scrollY,
+        cachedAt: ++timelineCacheClock,
       }
+      const keys = Object.keys(next)
+      if (keys.length > TIMELINE_CACHE_MAX) {
+        keys
+          .sort((a, b) => next[a]!.cachedAt - next[b]!.cachedAt)
+          .slice(0, keys.length - TIMELINE_CACHE_MAX)
+          .forEach((k) => delete next[k])
+      }
+      this.timelineCache = next
     },
 
     restoreTimeline(tag: string): number | null {
       const key = tag.toLowerCase()
       const cached = this.timelineCache[key]
       if (!cached) return null
+      cached.cachedAt = ++timelineCacheClock
       this.groupTimeline = [...cached.timeline]
       this.maxId = cached.maxId
       this.hasMore = cached.hasMore

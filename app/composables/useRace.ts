@@ -13,13 +13,19 @@ export function createRaceGuard() {
   let seq = 0
   let controller: AbortController | null = null
 
-  const abort = () => {
+  const cancel = () => {
     controller?.abort()
     controller = null
   }
 
+  /** Abort in flight and make every outstanding ticket stale (isCurrent → false) */
+  const abort = () => {
+    seq++
+    cancel()
+  }
+
   const next = (): RaceTicket => {
-    abort()
+    cancel()
     const current = ++seq
     controller = new AbortController()
     const { signal } = controller
@@ -28,7 +34,7 @@ export function createRaceGuard() {
       signal,
       isCurrent: () => current === seq,
       abort: () => {
-        if (current === seq) abort()
+        if (current === seq) cancel()
       },
     }
   }

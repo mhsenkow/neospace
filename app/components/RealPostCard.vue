@@ -1,3 +1,27 @@
+<script lang="ts">
+/** Shared across every card — one ResizeObserver instead of one per post. */
+const contentSizeCallbacks = new WeakMap<Element, () => void>()
+let contentSizeObserver: ResizeObserver | null = null
+
+/** Returns false when ResizeObserver is unavailable (caller measures itself). */
+function observeContentSize(el: Element, cb: () => void): boolean {
+  if (typeof ResizeObserver === 'undefined') return false
+  contentSizeObserver ??= new ResizeObserver((entries) => {
+    for (const entry of entries) contentSizeCallbacks.get(entry.target)?.()
+  })
+  const known = contentSizeCallbacks.has(el)
+  contentSizeCallbacks.set(el, cb)
+  // Re-observing would queue a second initial measure — mount already got one
+  if (!known) contentSizeObserver.observe(el)
+  return true
+}
+
+function unobserveContentSize(el: Element) {
+  contentSizeCallbacks.delete(el)
+  contentSizeObserver?.unobserve(el)
+}
+</script>
+
 <script setup lang="ts">
 import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
@@ -10,6 +34,7 @@ import { sanitizeDisplayName, sanitizeStatusHtml, stripHtml } from '~/utils/sani
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { usePostActions } from '~/composables/usePostActions'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
 
 interface Props {
@@ -35,7 +60,6 @@ const composeSheet = useComposeSheetStore()
 const toastStore = useToastStore()
 const overlayStore = useOverlayStore()
 const router = useRouter()
-const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
 
 /** Profiles always open the full /profile page — not a column peek. */
 const openProfile = (acct: string | undefined | null, e?: Event) => {
@@ -49,10 +73,11 @@ const onHeaderProfileClick = (acct: string, e: MouseEvent) => {
   openProfile(acct || displayStatus.value.account?.acct, e)
 }
 
-// Feeds hold statuses in shallowRefs (plain objects). Optimistic like / boost /
-// bookmark mutate the status in place, so read it through a reactive proxy —
-// reactive() caches per object, and is a no-op for already-reactive statuses.
-const displayStatus = computed(() => reactive(props.status.reblog || props.status))
+// reactive(): timelines hold statuses in a shallowRef, so wrap here (no-op for
+// already-reactive objects) — optimistic like/boost/bookmark mutate in place.
+const displayStatus = computed(
+  () => reactive(props.status.reblog || props.status) as mastodon.v1.Status,
+)
 const accountEmojis = computed(() => displayStatus.value.account?.emojis || [])
 const statusEmojis = computed(() => displayStatus.value.emojis || [])
 const nameEmojiUrls = computed(() => emojiUrlSet(accountEmojis.value))
@@ -115,27 +140,8 @@ const isOpeningReply = ref(false)
 const shareOpen = ref(false)
 const boostOpen = ref(false)
 
-function readReducedMotion() {
-  if (typeof window === 'undefined') return false
-  return (
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
-    document.documentElement.classList.contains('reduce-motion')
-  )
-}
-const prefersReducedMotion = ref(readReducedMotion())
+const prefersReducedMotion = usePrefersReducedMotion()
 const isMobileViewport = useMobileViewport()
-
-onMounted(() => {
-  if (typeof window === 'undefined') return
-  const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-  const sync = () => {
-    prefersReducedMotion.value =
-      mq.matches || document.documentElement.classList.contains('reduce-motion')
-  }
-  sync()
-  mq.addEventListener?.('change', sync)
-  onUnmounted(() => mq.removeEventListener?.('change', sync))
-})
 
 /** Long-post collapse — overflow-based toggle (not char-count only) */
 const contentExpanded = ref(false)
@@ -167,8 +173,7 @@ const revealMedia = () => {
 watch(
   () => props.status.uri || props.status.id,
   () => {
-    // Resolved id/client belong to the previous status — actions must re-resolve
-    clearActionCache()
+    // (usePostActions drops its resolved id/client on its own)
     mediaRevealed.value = false
     cwOpen.value = false
     contentExpanded.value = false
@@ -194,30 +199,28 @@ const measureContentOverflow = () => {
 
 const showSeeMore = computed(() => contentOverflows.value || contentExpanded.value)
 
-let contentResizeObserver: ResizeObserver | null = null
+// One app-wide observer; its initial callback on observe() is the mount-time
+// measure, and later callbacks cover width changes (viewport, column resize)
+// and expand/collapse. Without ResizeObserver, fall back to a manual measure.
+const observeContent = (el: HTMLElement) => {
+  if (!observeContentSize(el, measureContentOverflow)) nextTick(measureContentOverflow)
+}
 
 onMounted(() => {
-  if (typeof ResizeObserver !== 'undefined') {
-    contentResizeObserver = new ResizeObserver(() => measureContentOverflow())
-    if (contentEl.value) contentResizeObserver.observe(contentEl.value)
-  }
-  nextTick(measureContentOverflow)
+  if (contentEl.value) observeContent(contentEl.value)
 })
 
 watch(contentEl, (el, prev) => {
-  if (prev) contentResizeObserver?.unobserve(prev)
-  if (el) contentResizeObserver?.observe(el)
-  nextTick(measureContentOverflow)
+  if (prev) unobserveContentSize(prev)
+  if (el) observeContent(el)
+  else contentOverflows.value = false
 })
 
-watch(
-  [safeContent, () => isMobileViewport.value, contentExpanded],
-  () => nextTick(measureContentOverflow),
-)
+// New HTML can change scrollHeight without resizing the clamped box
+watch(safeContent, () => nextTick(measureContentOverflow))
 
 onUnmounted(() => {
-  contentResizeObserver?.disconnect()
-  contentResizeObserver = null
+  if (contentEl.value) unobserveContentSize(contentEl.value)
 })
 
 const pollDenominator = computed(() => {
@@ -234,12 +237,16 @@ const pollOptionPercent = (votes: number | null | undefined) => {
   return Math.round(((votes || 0) / total) * 100)
 }
 
+type MediaSize = { width?: number | null; height?: number | null }
+/** Reserve the box before the image loads: original → small → 16:9 default. */
 const mediaAspectRatio = (media: mastodon.v1.MediaAttachment) => {
-  const meta = media.meta as { original?: { width?: number; height?: number } } | undefined
-  const w = meta?.original?.width
-  const h = meta?.original?.height
-  if (w && h && w > 0 && h > 0) return `${w} / ${h}`
-  return undefined
+  const meta = media.meta as { original?: MediaSize; small?: MediaSize } | null | undefined
+  for (const size of [meta?.original, meta?.small]) {
+    const w = size?.width
+    const h = size?.height
+    if (w && h && w > 0 && h > 0) return `${w} / ${h}`
+  }
+  return '16 / 9'
 }
 
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
@@ -300,7 +307,6 @@ const {
   toggleBoost,
   handleBookmark: bookmarkAction,
   getActionContext,
-  clearActionCache,
 } = usePostActions({
   displayStatus,
   statusUrl,
@@ -654,10 +660,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       if (!src) return null
       return {
         src,
-        alt: m.description || `Image ${i + 1} of ${images.length}`,
+        alt:
+          m.description ||
+          (images.length > 1 ? `Image ${i + 1} of ${images.length}` : 'Image without description'),
+        caption: m.description?.trim() || undefined,
       }
     })
-    .filter((item): item is { src: string; alt: string } => !!item)
+    .filter((item): item is { src: string; alt: string; caption: string | undefined } => !!item)
   const current = items[index]
   if (!current) return
   overlayStore.openLightbox({ ...current, items, index })
@@ -751,7 +760,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
             label="More options"
           >
             <span class="status-more" aria-hidden="true">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
               </svg>
             </span>
@@ -764,20 +773,20 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                 :disabled="isBookmarking"
                 @click="handleBookmark"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5">
+                <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                   <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
                 </svg>
                 <span>{{ displayStatus.bookmarked ? 'Unsave' : 'Save' }}</span>
               </button>
               <button type="button" role="menuitem" class="status-dropdown-item" @click="handleCopyLink">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                   <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
                   <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
                 </svg>
                 <span>Copy link</span>
               </button>
               <button type="button" role="menuitem" class="status-dropdown-item" @click="handleOpenOriginal">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
                   <polyline points="15 3 21 3 21 9" />
                   <line x1="10" y1="14" x2="21" y2="3" />
@@ -793,7 +802,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                   :disabled="isMuting"
                   @click="handleMute"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                     <path d="M11 5L6 9H2v6h4l5 4V5z" />
                     <line x1="23" y1="9" x2="17" y2="15" />
                     <line x1="17" y1="9" x2="23" y2="15" />
@@ -807,7 +816,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                   :disabled="isBlocking"
                   @click="handleBlock"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                     <circle cx="12" cy="12" r="10" />
                     <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
                   </svg>
@@ -819,7 +828,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                   class="status-dropdown-item status-dropdown-item--danger"
                   @click="handleReport"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                     <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                     <line x1="12" y1="9" x2="12" y2="13" />
                     <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -887,15 +896,16 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                 v-if="media.type === 'image'"
                 type="button"
                 class="status-media-hit"
-                :aria-label="media.description || `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}`"
+                :aria-label="media.description || (displayStatus.mediaAttachments.length > 1 ? `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}` : 'View image')"
                 @click.stop="openLightbox(media, mediaIdx)"
               >
                 <img
                   :src="media.previewUrl ?? media.url ?? undefined"
                   :alt="media.description || ''"
                   class="status-media-image"
-                  :style="mediaAspectRatio(media) ? { aspectRatio: mediaAspectRatio(media) } : undefined"
+                  :style="{ aspectRatio: mediaAspectRatio(media) }"
                   loading="lazy"
+                  decoding="async"
                 />
                 <span
                   v-if="media.description?.trim()"
@@ -964,7 +974,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         <footer class="status-actions">
           <button
             class="status-action status-action--reply"
-            aria-label="Reply"
+            :aria-label="(displayStatus.repliesCount ?? 0) > 0 ? `Reply, ${formatNumber(displayStatus.repliesCount)}` : 'Reply'"
             :disabled="isOpeningReply"
             @click.stop="handleReply"
           >
@@ -976,7 +986,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
             class="status-action status-action--boost"
             :class="{ 'status-action--boosted': displayStatus.reblogged }"
             :aria-disabled="isBoosting || undefined"
-            aria-label="Repost"
+            :aria-label="(displayStatus.reblogsCount ?? 0) > 0 ? `Repost, ${formatNumber(displayStatus.reblogsCount)}` : 'Repost'"
+            :aria-haspopup="canInteract && !displayStatus.reblogged ? 'dialog' : undefined"
             :aria-pressed="!!displayStatus.reblogged"
             @click.stop="!isBoosting && handleBoost()"
           >
@@ -987,6 +998,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
           <button
             class="status-action status-action--share"
             aria-label="Share"
+            aria-haspopup="dialog"
             @click.stop="handleShare"
           >
             <NeoIcon name="share" :size="20" :stroke="1.5" />
@@ -1012,7 +1024,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
               'status-action--pop': likePop,
             }"
             :aria-disabled="isFavouriting || undefined"
-            aria-label="Like"
+            :aria-label="(displayStatus.favouritesCount ?? 0) > 0 ? `Like, ${formatNumber(displayStatus.favouritesCount)}` : 'Like'"
             :aria-pressed="!!displayStatus.favourited"
             @click.stop="!isFavouriting && handleFavourite()"
           >
@@ -1030,7 +1042,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
             <span class="thread-preview-text">
               View {{ displayStatus.repliesCount === 1 ? 'reply' : `${formatNumber(displayStatus.repliesCount)} replies` }}
             </span>
-            <svg class="thread-preview-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="thread-preview-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </button>
@@ -1944,7 +1956,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
     flex-shrink: 0;
   }
 
-  &:hover:not(:disabled) {
+  @include hover(':not(:disabled)') {
     background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
   }
@@ -1967,7 +1979,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       fill: var(--neo-accent);
     }
 
-    &:hover:not(:disabled) {
+    @include hover(':not(:disabled)') {
       background: var(--neo-accent-soft);
       color: var(--neo-accent);
     }
@@ -2030,7 +2042,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       stroke: var(--neo-success);
     }
 
-    &:hover:not(:disabled) {
+    @include hover(':not(:disabled)') {
       background: var(--neo-success-soft);
       color: var(--neo-success);
     }
@@ -2044,7 +2056,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
       stroke: var(--neo-accent);
     }
 
-    &:hover:not(:disabled) {
+    @include hover(':not(:disabled)') {
       background: var(--neo-accent-soft);
       color: var(--neo-accent);
     }

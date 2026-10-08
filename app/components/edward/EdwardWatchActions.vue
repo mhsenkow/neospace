@@ -47,7 +47,6 @@ const {
   handleFavourite,
   toggleBoost,
   handleBookmark,
-  clearActionCache,
 } = usePostActions({
   displayStatus: body,
   statusUrl,
@@ -62,12 +61,11 @@ const beamed = ref(false)
 const ghosted = ref(false)
 const shaped = ref(false)
 
-// The live deck swaps posts constantly — drop the resolved id/client the
-// actions cached for the previous one, or ♥ lands on the wrong post.
+// The live deck swaps posts constantly — reset per-post flags (usePostActions
+// drops its own resolved id/client when the post changes).
 watch(
   () => props.status.id,
   () => {
-    clearActionCache()
     beamed.value = false
     ghosted.value = false
     shaped.value = false
@@ -203,15 +201,63 @@ watch(
     if (!open && edward.recessed) edward.setRecessed(false)
   },
 )
+
+// ── Toolbar roving tabindex: one Tab stop, arrows move between actions ──
+const toolbarEl = ref<HTMLElement | null>(null)
+let rovingBtn: HTMLButtonElement | null = null
+
+const toolbarButtons = () =>
+  Array.from(toolbarEl.value?.querySelectorAll<HTMLButtonElement>('.edward-watch-actions__btn') ?? [])
+
+const setRoving = (btn: HTMLButtonElement | null) => {
+  rovingBtn = btn
+  for (const b of toolbarButtons()) b.tabIndex = b === btn ? 0 : -1
+}
+
+/** Keep exactly one enabled button tabbable (actions disable themselves, e.g. ghosted) */
+const syncRoving = () => {
+  const enabled = toolbarButtons().filter((b) => !b.disabled)
+  setRoving(rovingBtn && enabled.includes(rovingBtn) ? rovingBtn : enabled[0] ?? null)
+}
+
+onMounted(syncRoving)
+onUpdated(syncRoving)
+
+const onToolbarFocusin = (e: FocusEvent) => {
+  const btn = (e.target as HTMLElement | null)?.closest?.('.edward-watch-actions__btn')
+  if (btn instanceof HTMLButtonElement) setRoving(btn)
+}
+
+const onToolbarKeydown = (e: KeyboardEvent) => {
+  const vertical = props.variant === 'rail'
+  const nextKey = vertical ? 'ArrowDown' : 'ArrowRight'
+  const prevKey = vertical ? 'ArrowUp' : 'ArrowLeft'
+  if (e.key !== nextKey && e.key !== prevKey && e.key !== 'Home' && e.key !== 'End') return
+  const enabled = toolbarButtons().filter((b) => !b.disabled)
+  if (!enabled.length) return
+  const cur = enabled.indexOf(document.activeElement as HTMLButtonElement)
+  let i: number
+  if (e.key === 'Home') i = 0
+  else if (e.key === 'End') i = enabled.length - 1
+  else if (e.key === nextKey) i = (cur + 1) % enabled.length
+  else i = (cur - 1 + enabled.length) % enabled.length
+  e.preventDefault()
+  const target = enabled[i]!
+  setRoving(target)
+  target.focus()
+}
 </script>
 
 <template>
   <div
     class="edward-watch-actions"
     :class="{ 'edward-watch-actions--rail': variant === 'rail' }"
+    ref="toolbarEl"
     role="toolbar"
     :aria-orientation="variant === 'rail' ? 'vertical' : 'horizontal'"
     aria-label="Actions on watched post"
+    @keydown="onToolbarKeydown"
+    @focusin="onToolbarFocusin"
     @click.stop
     @pointerdown.stop
   >
@@ -286,7 +332,7 @@ watch(
       class="edward-watch-actions__btn edward-watch-actions__btn--ghost"
       :class="{ 'is-on': ghosted }"
       :disabled="ghostBusy || ghosted || !acct"
-      aria-label="Ghost mute"
+      :aria-label="ghosted ? 'Ghosted (muted)' : 'Ghost (mute)'"
       title="ghost · mute"
       @click="handleGhost()"
     >
@@ -299,7 +345,7 @@ watch(
       class="edward-watch-actions__btn edward-watch-actions__btn--shape"
       :class="{ 'is-on': shaped }"
       :disabled="shapeBusy || shaped || !acct"
-      aria-label="Shape block"
+      :aria-label="shaped ? 'Shaped (blocked)' : 'Shape (block)'"
       title="shape · block"
       @click="handleShape()"
     >

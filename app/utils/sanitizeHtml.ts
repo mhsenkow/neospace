@@ -67,6 +67,8 @@ function purifyWithSafeClasses(dirty: string, tags: string[], attr: string[]): s
  */
 function filterEmojiImgs(html: string, allowedUrls?: Iterable<string> | null): string {
   if (!html) return ''
+  // Most display names have no images — skip the DOM parse
+  if (!/<img\b/i.test(html)) return html
   const allow = allowedUrls ? new Set(allowedUrls) : null
   if (typeof window === 'undefined') {
     if (!allow?.size) return html.replace(/<img\b[^>]*>/gi, '')
@@ -115,15 +117,4 @@ export function sanitizeFieldHtml(html: string): string {
 }
 
 /** Strip all tags → plain text (no innerHTML assignment) */
-export function stripHtml(html: string): string {
-  if (!html) return ''
-  if (typeof window === 'undefined') {
-    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-  }
-  try {
-    const doc = new DOMParser().parseFromString(html, 'text/html')
-    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim()
-  } catch {
-    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-  }
-}
+export { stripHtml } from './stripHtml'

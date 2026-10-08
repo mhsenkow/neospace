@@ -6,11 +6,14 @@
 
 import { useThemeStore } from '~/stores/theme'
 import { useSettingsStore } from '~/stores/settings'
-import { useEdwardStore } from '~/stores/edward'
+import { edwardActive } from '~/utils/edwardShell'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
+import { useComposeSheetStore } from '~/stores/composeSheet'
+import { useAlgorithmsStore } from '~/stores/algorithms'
+import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useShellAppearance } from '~/composables/useShellAppearance'
 import { useLoomHandoff } from '~/composables/useLoomHandoff'
 import { useDeskViewport } from '~/composables/useBreakpoint'
@@ -25,7 +28,6 @@ const LazyEdwardMode = defineAsyncComponent(
 
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
-const edwardStore = useEdwardStore()
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
 const conversationsStore = useConversationsStore()
@@ -36,6 +38,18 @@ const route = useRoute()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 
 const mobileMenuOpen = ref(false)
+
+/** Overlays mount on first open only (keeps their chunks + setup off the boot path). */
+const composeSheet = useComposeSheetStore()
+const algorithmsStore = useAlgorithmsStore()
+const { isOpen: accountsManagerOpen } = useAccountsManager()
+const mounted = reactive({ compose: false, algorithm: false, accounts: false, settings: false })
+watchEffect(() => {
+  if (composeSheet.open) mounted.compose = true
+  if (algorithmsStore.editorOpen) mounted.algorithm = true
+  if (accountsManagerOpen.value) mounted.accounts = true
+  if (settingsStore.isOpen) mounted.settings = true
+})
 
 const { sidebarRail, loadSidebarRail, applyTheme } = useShellAppearance()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
@@ -88,6 +102,14 @@ watch(isDesk, (desk) => {
   if (desk) closeMobileMenu()
 })
 
+// Fixed bottom UI (toasts, docks) reads this — the tab bar is gone on subviews
+watchEffect(() => {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement.style
+  if (showMobileNav.value) root.removeProperty('--neo-bottom-chrome-h')
+  else root.setProperty('--neo-bottom-chrome-h', '0px')
+})
+
 onMounted(async () => {
   // Loom handoff listener MUST register before initialize() — Loom may postMessage
   // while auth/storage is still loading, and those messages are otherwise lost.
@@ -129,7 +151,8 @@ onMounted(async () => {
 
   if (instancesStore.hasAuthenticatedInstance) {
     notificationsStore.refreshUnreadBadge()
-    conversationsStore.refreshUnreadBadge()
+    // The isAuthenticated watcher may already have started + fetched during initialize()
+    if (!shellLiveRefresh) void conversationsStore.refreshUnreadBadge()
     startShellLiveRefresh()
   }
 
@@ -148,8 +171,8 @@ watch(
   () => instancesStore.isAuthenticated,
   (ok) => {
     if (ok) {
+      if (!shellLiveRefresh) void conversationsStore.refreshUnreadBadge()
       startShellLiveRefresh()
-      void conversationsStore.refreshUnreadBadge()
     } else {
       stopShellLiveRefresh()
     }
@@ -184,11 +207,12 @@ watch(
   >
     <a href="#main-content" class="skip-link">Skip to content</a>
 
-    <DesktopSidebar />
+    <!-- Only the active breakpoint's navigation is rendered (each is large + reactive) -->
+    <DesktopSidebar v-if="isDesk" />
 
     <MobileHeader v-if="showMobileHeader" v-model:open="mobileMenuOpen" />
 
-    <MobileDrawer v-model:open="mobileMenuOpen" />
+    <MobileDrawer v-if="!isDesk" v-model:open="mobileMenuOpen" />
 
     <div
       v-if="instancesStore.authNotice"
@@ -207,12 +231,13 @@ watch(
 
     <MobileTabBar v-if="showMobileNav" />
 
-    <LazyComposeSheet />
-    <LazyAlgorithmSheet />
-    <LazyInstanceManager />
+    <!-- Sticky v-if: fetch each sheet's chunk on first open, keep it for close transitions -->
+    <LazyComposeSheet v-if="mounted.compose" />
+    <LazyAlgorithmSheet v-if="mounted.algorithm" />
+    <LazyInstanceManager v-if="mounted.accounts" />
     <AccountSwitcherSheet v-if="instancesStore.hasAuthenticatedInstance" />
     <FeedbackNotes v-if="!isMobileSubview" />
-    <LazySettingsModal />
+    <LazySettingsModal v-if="mounted.settings" />
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
     <div
       class="neo-bottom-dock"
@@ -225,7 +250,7 @@ watch(
       <SuiteMenu />
     </div>
     <NeoOverlayHost />
-    <LazyEdwardMode v-if="edwardStore.active" />
+    <LazyEdwardMode v-if="edwardActive" />
   </div>
 </template>
 
@@ -381,7 +406,9 @@ watch(
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
-    padding: 0.5rem 0.5rem 0;
+    // Sticky bars pin to the content edge — they offset by this to sit flush
+    --neo-main-pad-top: 0.5rem;
+    padding: var(--neo-main-pad-top) 0.5rem 0;
 
     // Flex items default to min-width:auto and won't shrink below content
     // (a wide post laid group detail out at 670px inside a 375px viewport).
@@ -419,6 +446,7 @@ watch(
   .neo-layout--profile &,
   .neo-layout--subview & {
     /* Nested mobile screens: own top bar, no global header/tabs */
+    --neo-main-pad-top: 0px;
     padding-top: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
 

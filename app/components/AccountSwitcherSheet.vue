@@ -267,7 +267,7 @@ onUnmounted(() => {
   left: 50%;
   bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
-  z-index: 320;
+  z-index: var(--neo-z-toast, 1100);
   pointer-events: none;
   // No chrome when empty — an always-painted pill was showing as a blank bubble
 
@@ -279,6 +279,10 @@ onUnmounted(() => {
 .acct-switch__toast-msg {
   display: block;
   white-space: nowrap;
+  // Long @user@instance handles must not run off a 320px screen
+  max-width: calc(100vw - 2rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 0.55rem 0.9rem;
   border-radius: 999px;
   background: var(--neo-bg-card);

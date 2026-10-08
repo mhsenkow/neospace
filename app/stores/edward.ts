@@ -20,6 +20,7 @@ import {
   type EdwardSortMode,
 } from '~/utils/edwardExplore'
 import { dialectForHost, type EdwardServerDialect } from '~/utils/edwardServers'
+import { edwardActive } from '~/utils/edwardShell'
 
 export const EDWARD_MAX_BALLS = 280
 
@@ -240,6 +241,7 @@ export const useEdwardStore = defineStore('edward', {
 
     enter() {
       this.active = true
+      edwardActive.value = true
       this.recessed = false
       this.streamStartedAt = Date.now()
       this.error = null
@@ -250,6 +252,7 @@ export const useEdwardStore = defineStore('edward', {
 
     exit() {
       this.active = false
+      edwardActive.value = false
       this.recessed = false
       this.selectedIdentity = null
       this.focusedIdentity = null

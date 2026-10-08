@@ -24,6 +24,21 @@ function getRtf(locale?: string) {
   return rtf
 }
 
+/** Intl constructors are costly — every card formats on each minute tick */
+const fmtCache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>()
+
+function cachedFormat<T extends Intl.NumberFormat | Intl.DateTimeFormat>(
+  key: string,
+  make: () => T,
+): T {
+  let f = fmtCache.get(key) as T | undefined
+  if (!f) {
+    f = make()
+    fmtCache.set(key, f)
+  }
+  return f
+}
+
 function toDate(input: Date | string | number): Date {
   return input instanceof Date ? input : new Date(input)
 }
@@ -74,21 +89,25 @@ export function formatCompactRelativeTime(
   if (elapsed < 7 * 86_400) {
     for (const { seconds, unit } of COMPACT_UNITS) {
       if (elapsed >= seconds) {
-        return new Intl.NumberFormat(loc, {
-          style: 'unit',
-          unit,
-          unitDisplay: 'narrow',
-        }).format(Math.round(elapsed / seconds))
+        return cachedFormat(
+          `n|${loc}|${unit}`,
+          () => new Intl.NumberFormat(loc, { style: 'unit', unit, unitDisplay: 'narrow' }),
+        ).format(Math.round(elapsed / seconds))
       }
     }
     return getRtf(loc).format(0, 'second')
   }
 
-  return new Intl.DateTimeFormat(loc, {
-    month: 'short',
-    day: 'numeric',
-    ...(then.getFullYear() !== base.getFullYear() ? { year: 'numeric' as const } : {}),
-  }).format(then)
+  const withYear = then.getFullYear() !== base.getFullYear()
+  return cachedFormat(
+    `d|${loc}|${withYear ? 'y' : ''}`,
+    () =>
+      new Intl.DateTimeFormat(loc, {
+        month: 'short',
+        day: 'numeric',
+        ...(withYear ? { year: 'numeric' as const } : {}),
+      }),
+  ).format(then)
 }
 
 /** Full localized date/time for `<time title>` / tooltips. */
@@ -99,8 +118,8 @@ export function formatAbsoluteTime(
   const d = toDate(date)
   if (!Number.isFinite(d.getTime())) return ''
   const loc = locale || (typeof navigator !== 'undefined' ? navigator.language : 'en')
-  return new Intl.DateTimeFormat(loc, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(d)
+  return cachedFormat(
+    `a|${loc}`,
+    () => new Intl.DateTimeFormat(loc, { dateStyle: 'medium', timeStyle: 'short' }),
+  ).format(d)
 }

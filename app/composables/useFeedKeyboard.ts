@@ -37,7 +37,7 @@ export function useFeedKeyboard(root: Ref<HTMLElement | null | undefined>) {
           : Math.max(idx <= 0 ? 0 : idx - 1, 0)
       const card = cards[next]
       if (!card) return
-      card.focus()
+      card.focus({ preventScroll: true })
       card.scrollIntoView({ block: 'nearest' })
       return
     }
@@ -45,6 +45,9 @@ export function useFeedKeyboard(root: Ref<HTMLElement | null | undefined>) {
     if (e.key === 'Enter' || e.key === 'o') {
       if (idx < 0) return
       const card = cards[idx]
+      // Enter only from the card itself — Enter on Like / Reply / links / CW
+      // summary inside the card must run that control, not open the thread.
+      if (e.key === 'Enter' && active !== card) return
       const link =
         card?.querySelector<HTMLAnchorElement>('a[href*="/status/"]') ||
         card?.querySelector<HTMLAnchorElement>('a.status-time, a[href^="/status/"]')

@@ -354,6 +354,7 @@ watch(
             type="button"
             class="sidebar__row"
             :class="{ 'sidebar__row--on': boardFeedActive(item.feedType, item.feedParam) }"
+            :aria-current="boardFeedActive(item.feedType, item.feedParam) ? 'true' : undefined"
             :title="item.key === 'local' ? `Local (${localHostLabel})` : item.label"
             @click="openBoardFeed(item.feedType, item.feedParam)"
           >
@@ -498,7 +499,7 @@ watch(
           type="button"
           class="sidebar__row"
           :title="`Chrome: ${currentUiLabel}`"
-          aria-label="Chrome"
+          :aria-label="`Chrome: ${currentUiLabel}. Click to cycle.`"
           @click="cycleUi"
         >
           <span class="sidebar__chrome-mark" aria-hidden="true">Aa</span>
@@ -508,7 +509,7 @@ watch(
           type="button"
           class="sidebar__row"
           :title="`Corners: ${currentRadiusLabel}`"
-          aria-label="Corners"
+          :aria-label="`Corners: ${currentRadiusLabel}. Click to cycle.`"
           @click="cycleRadius"
         >
           <span class="sidebar__radius-mark" aria-hidden="true" />
@@ -518,7 +519,7 @@ watch(
           type="button"
           class="sidebar__row"
           :title="`Density: ${currentDensityLabel}`"
-          aria-label="Density"
+          :aria-label="`Density: ${currentDensityLabel}. Click to cycle.`"
           @click="cycleDensity"
         >
           <span class="sidebar__spacing-mark" aria-hidden="true"><i /><i /><i /></span>
@@ -528,7 +529,7 @@ watch(
           type="button"
           class="sidebar__row"
           :title="`Lines: ${currentLineLabel}`"
-          aria-label="Lines"
+          :aria-label="`Lines: ${currentLineLabel}. Click to cycle.`"
           @click="cycleLine"
         >
           <span class="sidebar__line-mark" aria-hidden="true" />
@@ -595,6 +596,9 @@ watch(
   flex-direction: column;
   align-items: stretch;
   padding: 0.85rem 0.65rem 0.85rem;
+  // Landscape notches / home indicator on iPad-class devices
+  padding-bottom: max(0.85rem, env(safe-area-inset-bottom));
+  padding-left: max(0.65rem, env(safe-area-inset-left));
   background: var(--neo-bg-secondary);
   border-right: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-nav, 100);
@@ -605,17 +609,15 @@ watch(
   }
 
   &--rail {
-    padding-left: 0.45rem;
+    padding-left: max(0.45rem, env(safe-area-inset-left));
     padding-right: 0.45rem;
     align-items: center;
 
     .sidebar__brand,
     .sidebar__label,
     .sidebar__section-title,
-    .sidebar__section-action,
     .sidebar__section-hint,
-    .sidebar__look-desc,
-    .sidebar__more {
+    .sidebar__look-desc {
       position: absolute !important;
       width: 1px !important;
       height: 1px !important;
@@ -625,6 +627,12 @@ watch(
       clip: rect(0, 0, 0, 0) !important;
       white-space: nowrap !important;
       border: 0 !important;
+    }
+
+    // Controls, not just text: clipping left them as invisible Tab stops
+    .sidebar__section-action,
+    .sidebar__more {
+      display: none !important;
     }
 
     .sidebar__top {
@@ -732,7 +740,7 @@ watch(
     font-size: 0.625rem;
     font-weight: 700;
     letter-spacing: 0.08em;
-    color: var(--neo-text-inverse);
+    color: var(--neo-text-on-accent);
     background: var(--neo-accent);
     border-radius: var(--neo-radius-sm, 4px);
   }

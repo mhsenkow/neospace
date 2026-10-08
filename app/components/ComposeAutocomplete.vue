@@ -5,7 +5,7 @@
 import type { mastodon } from 'masto'
 import { accountHandle } from '~/composables/useAccountSearch'
 
-defineProps<{
+const props = defineProps<{
   id: string
   results: mastodon.v1.Account[]
   searching?: boolean
@@ -17,6 +17,14 @@ defineProps<{
 const emit = defineEmits<{
   select: [account: mastodon.v1.Account]
 }>()
+
+/** Polite announcement — focus stays in the textarea, so say what appeared */
+const statusText = computed(() => {
+  if (props.searching && !props.results.length) return 'Looking up…'
+  const n = props.results.length
+  if (!n) return ''
+  return `${n} ${n === 1 ? 'suggestion' : 'suggestions'}`
+})
 </script>
 
 <template>
@@ -28,7 +36,11 @@ const emit = defineEmits<{
     role="listbox"
     aria-label="Mention suggestions"
   >
-    <p v-if="searching && !results.length" class="compose-autocomplete__status">
+    <p
+      v-if="searching && !results.length"
+      class="compose-autocomplete__status"
+      aria-hidden="true"
+    >
       Looking up…
     </p>
     <button
@@ -36,6 +48,7 @@ const emit = defineEmits<{
       :id="`${id}-${account.id}`"
       :key="account.id"
       type="button"
+      tabindex="-1"
       class="compose-autocomplete__item"
       :class="{ 'compose-autocomplete__item--active': idx === activeIndex }"
       role="option"
@@ -49,6 +62,7 @@ const emit = defineEmits<{
       </span>
     </button>
   </div>
+  <p class="sr-only" role="status" aria-live="polite">{{ statusText }}</p>
 </template>
 
 <style lang="scss" scoped>

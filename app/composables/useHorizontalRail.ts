@@ -3,10 +3,12 @@
  */
 
 import { ref, watch, onUnmounted, type Ref } from 'vue'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
   const canScrollBack = ref(false)
   const canScrollForward = ref(false)
+  const reduceMotion = usePrefersReducedMotion()
 
   const update = () => {
     const el = elRef.value
@@ -21,7 +23,7 @@ export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
   }
 
   const scrollBy = (delta: number) => {
-    elRef.value?.scrollBy({ left: delta, behavior: 'smooth' })
+    elRef.value?.scrollBy({ left: delta, behavior: reduceMotion.value ? 'auto' : 'smooth' })
   }
 
   let ro: ResizeObserver | null = null

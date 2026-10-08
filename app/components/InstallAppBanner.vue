@@ -45,7 +45,12 @@ const subtitle = computed(() => {
         <span>{{ subtitle }}</span>
       </div>
       <div class="install-banner__actions">
-        <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="onInstallClick">
+        <button
+          type="button"
+          class="neo-btn neo-btn--primary neo-btn--sm"
+          :aria-expanded="canNativeInstall ? undefined : showHowTo"
+          @click="onInstallClick"
+        >
           {{ canNativeInstall ? 'Install' : showHowTo ? 'Hide steps' : 'How to install' }}
         </button>
         <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="dismissPromo">

@@ -7,11 +7,13 @@
 import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
-import { COMPOSE_MEDIA_ACCEPT, useComposeMedia } from '~/composables/useComposeMedia'
+import { useComposeMedia } from '~/composables/useComposeMedia'
+import { COMPOSE_MEDIA_ACCEPT } from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
 import { mapComposeError } from '~/utils/friendlyError'
 import { mastodonLength } from '~/utils/mastodonLength'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const props = defineProps<{
   /** Latest status in the thread to reply to */
@@ -131,13 +133,14 @@ const {
 } = useComposeMedia()
 
 const { insetStyle: barStyle, keyboardOpen } = useKeyboardBottomInset()
+const reduceMotion = usePrefersReducedMotion()
 
 /** Keep the focused field visible above the soft keyboard on Android overlay keyboards. */
 const onComposerFocus = (e: FocusEvent) => {
   const el = e.target as HTMLElement | null
   if (!el || (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT')) return
   window.setTimeout(() => {
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.scrollIntoView({ block: 'center', behavior: reduceMotion.value ? 'auto' : 'smooth' })
   }, keyboardOpen.value ? 50 : 280)
 }
 
@@ -375,7 +378,9 @@ onMounted(() => {
             </button>
           </div>
           <label class="chat-composer__alt">
-            <span class="sr-only">Alt text for attachment {{ idx + 1 }}</span>
+            <span class="chat-composer__alt-label">
+              Alt text<span class="sr-only"> for attachment {{ idx + 1 }}</span>
+            </span>
             <input
               type="text"
               class="chat-composer__alt-input"
@@ -555,7 +560,7 @@ onMounted(() => {
 
   &--error {
     background: color-mix(in srgb, var(--neo-danger, #c44) 78%, transparent);
-    color: #fff;
+    color: var(--neo-text-on-accent, #fff);
     cursor: pointer;
   }
 }
@@ -575,6 +580,16 @@ onMounted(() => {
   color: var(--neo-bg-primary);
   cursor: pointer;
   z-index: 1;
+}
+
+/* Visible label — placeholder alone disappears once typing starts */
+.chat-composer__alt-label {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--neo-text-secondary);
 }
 
 .chat-composer__alt-input {
@@ -657,7 +672,8 @@ onMounted(() => {
 
   &:focus-within {
     border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
-    box-shadow: 0 0 0 3px var(--neo-accent-soft);
+    outline: 2px solid var(--neo-focus);
+    outline-offset: 1px;
   }
 }
 
@@ -714,7 +730,7 @@ onMounted(() => {
   border: none;
   border-radius: 50%;
   background: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-bg-tertiary));
-  color: var(--neo-text-inverse, #fff);
+  color: var(--neo-text-on-accent, #fff);
   cursor: pointer;
   transition: background 0.15s ease, transform 0.12s ease, opacity 0.12s ease;
 

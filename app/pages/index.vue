@@ -26,6 +26,7 @@ import { THEME_OPTIONS, UI_OPTIONS, resolveTheme } from '~/utils/appearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { BOARD_RIGHT_PORTALS, type BoardPortal } from '~/composables/useBoardPortal'
 import { participantLabel } from '~/utils/dmHelpers'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
@@ -36,6 +37,10 @@ const conversationsStore = useConversationsStore()
 const notificationsStore = useNotificationsStore()
 const { setBoardPortal } = useBoardPortal()
 const router = useRouter()
+const reducedMotion = usePrefersReducedMotion()
+/** JS smooth scrolling ignores the CSS reduced-motion rule — downgrade it here */
+const motionBehavior = (behavior: ScrollBehavior): ScrollBehavior =>
+  reducedMotion.value && behavior === 'smooth' ? 'auto' : behavior
 
 const addMenuOpen = ref(false)
 const addAlgorithmsExpanded = ref(true)
@@ -239,6 +244,10 @@ const getColumnEls = (): HTMLElement[] => {
   )
 }
 
+/** Desktop focus mode: other columns stay mounted (scroll survives) but hidden. */
+const isColumnHidden = (columnId: string) =>
+  !!columnsStore.focusedColumnId && columnsStore.focusedColumnId !== columnId && !isMobileUi.value
+
 /** Every full-width carousel page (edge portals + feed columns). */
 const getSlideEls = (): HTMLElement[] => {
   const el = columnsContainer.value
@@ -323,7 +332,7 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   syncBoardPortalFromSlide(idx)
 
   // Mobile parks instantly — smooth + residual momentum bounced back and forth
-  if (behavior === 'auto' || isMobileUi.value) {
+  if (motionBehavior(behavior) === 'auto' || isMobileUi.value) {
     window.clearTimeout(settleTimer)
     carouselSettling = false
     parkSlideNow(el, idx)
@@ -371,7 +380,7 @@ const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth
     if (Math.abs(delta) < 2) return
     const nextLeft = list.scrollLeft + delta
     if (typeof list.scrollTo === 'function') {
-      list.scrollTo({ left: nextLeft, behavior: isMobileUi.value ? 'auto' : behavior })
+      list.scrollTo({ left: nextLeft, behavior: isMobileUi.value ? 'auto' : motionBehavior(behavior) })
     } else {
       list.scrollLeft = nextLeft
     }
@@ -386,7 +395,12 @@ const scrollToColumn = (index: number, behavior: ScrollBehavior = 'smooth') => {
   } else {
     const el = columnsContainer.value
     const col = getColumnEls()[colIdx]
-    if (el && col) el.scrollTo({ left: col.offsetLeft, behavior })
+    // Measure against the scroller (not offsetLeft, which depends on the
+    // offsetParent chain) and honour its start padding so column 1 isn't clipped.
+    if (el && col) {
+      const pad = parseFloat(getComputedStyle(el).scrollPaddingInlineStart) || 0
+      el.scrollTo({ left: Math.max(0, slideScrollLeft(el, col) - pad), behavior: motionBehavior(behavior) })
+    }
   }
   syncTabIntoView(colIdx, behavior)
 }
@@ -604,7 +618,18 @@ const toggleActiveViewMode = () => {
   columnsStore.toggleColumnViewMode(col.id)
 }
 
+/** Scroll fires many times per frame — measure slides at most once per frame. */
+let columnsScrollRaf = 0
+
 const onColumnsScroll = () => {
+  if (columnsScrollRaf) return
+  columnsScrollRaf = requestAnimationFrame(() => {
+    columnsScrollRaf = 0
+    syncFromColumnsScroll()
+  })
+}
+
+const syncFromColumnsScroll = () => {
   const el = columnsContainer.value
   if (!el || el.clientWidth <= 0) return
 
@@ -625,10 +650,11 @@ const onColumnsScroll = () => {
     const next = index - EDGE_LEFT
     if (activeColumnIndex.value !== next) {
       activeColumnIndex.value = next
+      // Keep the top strip glued while swiping — highlight alone isn't enough
+      // when many feeds push the active pill off-screen (Chrome Android).
+      // Only on change: it measures the tab strip every call.
+      syncTabIntoView(next, 'auto')
     }
-    // Keep the top strip glued while swiping — highlight alone isn't enough
-    // when many feeds push the active pill off-screen (Chrome Android).
-    syncTabIntoView(next, 'auto')
   }
 }
 
@@ -866,7 +892,7 @@ const finishCarouselGesture = (e: TouchEvent) => {
   if (Math.abs(vx) > 0.08) {
     const max = Math.max(0, el.scrollWidth - el.clientWidth)
     const coast = Math.max(0, Math.min(max, el.scrollLeft - vx * 180))
-    el.scrollTo({ left: coast, behavior: 'smooth' })
+    el.scrollTo({ left: coast, behavior: motionBehavior('smooth') })
   }
   syncActiveColumnFromScroll()
 }
@@ -884,9 +910,14 @@ const reparkCarouselAfterResize = () => {
   }, 80)
 }
 
+/** Element the carousel listeners were bound to — the template ref is null by unmount */
+let carouselBoundEl: HTMLElement | null = null
+
 const bindCarouselGestures = () => {
   const el = columnsContainer.value
   if (!el) return
+  if (carouselBoundEl) unbindCarouselGestures()
+  carouselBoundEl = el
   el.addEventListener('touchstart', onCarouselTouchStart, { passive: true, capture: true })
   el.addEventListener('touchmove', onCarouselTouchMove, { passive: false, capture: true })
   el.addEventListener('touchend', finishCarouselGesture, { passive: true, capture: true })
@@ -906,8 +937,9 @@ const bindCarouselGestures = () => {
 }
 
 const unbindCarouselGestures = () => {
-  const el = columnsContainer.value
+  const el = carouselBoundEl
   if (!el) return
+  carouselBoundEl = null
   el.removeEventListener('touchstart', onCarouselTouchStart, true)
   el.removeEventListener('touchmove', onCarouselTouchMove, true)
   el.removeEventListener('touchend', finishCarouselGesture, true)
@@ -985,8 +1017,12 @@ const restoreFeedPark = () => {
   })
 }
 
+/** Set on unmount so work queued behind onMounted's await doesn't bind listeners afterwards */
+let disposed = false
+
 onMounted(async () => {
   await instancesStore.initialize()
+  if (disposed) return
   columnsStore.initialize()
 
   // Discover groups for everyone (menu Suggested + /groups hub)
@@ -1001,6 +1037,7 @@ onMounted(async () => {
   mobileMq.addEventListener('change', syncMobileUi)
 
   nextTick(() => {
+    if (disposed) return
     bindCarouselGestures()
     // Edge slides sit left of feeds — jump to first feed without animating through Settings
     scrollToColumn(activeColumnIndex.value, 'auto')
@@ -1017,6 +1054,9 @@ onDeactivated(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  if (columnsScrollRaf) cancelAnimationFrame(columnsScrollRaf)
+  columnsScrollRaf = 0
   setBoardPortal(null)
   unbindCarouselGestures()
   mobileMq?.removeEventListener('change', syncMobileUi)
@@ -1071,9 +1111,9 @@ useHead({ title: 'Home | NeoSpace' })
             <span class="add-column-menu__title">Add feed</span>
             <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
             <div class="add-column-menu__divider" role="separator" />
-            <button type="button" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+            <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
               <span>Algorithms</span>
-              <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
@@ -1136,7 +1176,7 @@ useHead({ title: 'Home | NeoSpace' })
           type="button"
           class="mobile-feed-tabs__mode"
           :class="{ 'mobile-feed-tabs__mode--flip': activeViewMode === 'flip' }"
-          :aria-label="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
+          aria-label="Flip view"
           :aria-pressed="activeViewMode === 'flip'"
           :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
           @click="toggleActiveViewMode"
@@ -1158,7 +1198,7 @@ useHead({ title: 'Home | NeoSpace' })
           :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
           @click="goPrevFeed"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
@@ -1170,7 +1210,7 @@ useHead({ title: 'Home | NeoSpace' })
           :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
           @click="goNextFeed"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <polyline points="9 18 15 12 9 6" />
           </svg>
         </button>
@@ -1183,7 +1223,7 @@ useHead({ title: 'Home | NeoSpace' })
           title="Remove this feed"
           @click="removeActiveColumn"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -1206,9 +1246,9 @@ useHead({ title: 'Home | NeoSpace' })
               <span class="add-column-menu__title">Add Feed</span>
               <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
               <div class="add-column-menu__divider" role="separator" />
-              <button type="button" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+              <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
                 <span>Algorithms</span>
-                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
@@ -1264,9 +1304,9 @@ useHead({ title: 'Home | NeoSpace' })
                 @click="addColumn('messages')"
               >Messages</button>
               <div class="add-column-menu__divider" role="separator" />
-              <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+              <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
                 <span>Groups</span>
-                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
@@ -1290,7 +1330,7 @@ useHead({ title: 'Home | NeoSpace' })
                     class="add-column-menu__item add-column-menu__item--group"
                     @click="addGroupAsColumn(group.tag)"
                   >
-                    <span class="add-column-menu__group-icon">{{ group.icon }}</span>
+                    <span class="add-column-menu__group-icon" aria-hidden="true">{{ group.icon }}</span>
                     {{ group.name }}
                   </button>
                   <button
@@ -1300,7 +1340,7 @@ useHead({ title: 'Home | NeoSpace' })
                     class="add-column-menu__item add-column-menu__item--group"
                     @click="addGroupAsColumn(addGroupCustomTag)"
                   >
-                    <span class="add-column-menu__group-icon">🏷️</span>
+                    <span class="add-column-menu__group-icon" aria-hidden="true">🏷️</span>
                     Add #{{ addGroupCustomTag }}
                   </button>
                   <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
@@ -1401,7 +1441,8 @@ useHead({ title: 'Home | NeoSpace' })
       <template v-for="(column, idx) in columnsStore.columns" :key="column.id">
         <TimelineColumn
           v-if="isTimelineFeed(column.feedType)"
-          :class="{ 'board-col--hidden': !!columnsStore.focusedColumnId && columnsStore.focusedColumnId !== column.id && !isMobileUi }"
+          :class="{ 'board-col--hidden': isColumnHidden(column.id) }"
+          :paused="isColumnHidden(column.id)"
           :column="column"
           :is-first="idx === 0"
           :is-last="idx === columnsStore.columns.length - 1"
@@ -1423,7 +1464,7 @@ useHead({ title: 'Home | NeoSpace' })
         />
         <PanelColumn
           v-else
-          :class="{ 'board-col--hidden': !!columnsStore.focusedColumnId && columnsStore.focusedColumnId !== column.id && !isMobileUi }"
+          :class="{ 'board-col--hidden': isColumnHidden(column.id) }"
           :column="column"
           :is-first="idx === 0"
           :is-last="idx === columnsStore.columns.length - 1"
@@ -1464,7 +1505,7 @@ useHead({ title: 'Home | NeoSpace' })
             placeholder="Search…"
             autocomplete="off"
             enterkeyhint="search"
-            @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' })"
+            @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: motionBehavior('smooth') })"
             @blur="reparkCarouselAfterResize"
             @keydown.enter.prevent="openPortal('search')"
           />
@@ -1524,11 +1565,15 @@ useHead({ title: 'Home | NeoSpace' })
             :class="{ 'feed-portal__list-row--unread': row.unread }"
             @click="openInboxRow(row.statusId)"
           >
-            <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" />
+            <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" loading="lazy" decoding="async" />
             <span v-else class="feed-portal__list-avatar feed-portal__list-avatar--empty" />
             <span class="feed-portal__row-text">
               <strong>{{ row.label }}</strong>
               <span>{{ row.preview }}</span>
+            </span>
+            <!-- Unread isn't color-only: visible dot + text for screen readers -->
+            <span v-if="row.unread" class="feed-portal__unread-dot">
+              <span class="sr-only">Unread</span>
             </span>
           </button>
         </div>
@@ -1578,7 +1623,7 @@ useHead({ title: 'Home | NeoSpace' })
             class="feed-portal__list-row"
             @click="openPortal('activity')"
           >
-            <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" />
+            <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" loading="lazy" decoding="async" />
             <span v-else class="feed-portal__list-avatar feed-portal__list-avatar--empty" />
             <span class="feed-portal__row-text">
               <strong>{{ row.label }}</strong>
@@ -1646,21 +1691,21 @@ useHead({ title: 'Home | NeoSpace' })
         <template #items>
           <span class="add-column-menu__title">Add Column</span>
           <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
             </svg>
             For You
           </button>
           <div class="add-column-menu__divider" role="separator" />
-          <button type="button" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+          <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
             <span>Algorithms</span>
-            <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
           <template v-if="addAlgorithmsExpanded">
             <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="2" y1="12" x2="22" y2="12" />
                 <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
@@ -1668,7 +1713,7 @@ useHead({ title: 'Home | NeoSpace' })
               Local ({{ localHostLabel }})
             </button>
             <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M2 12h20" />
                 <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
@@ -1718,14 +1763,14 @@ useHead({ title: 'Home | NeoSpace' })
           </template>
           <div class="add-column-menu__divider" role="separator" />
           <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <circle cx="11" cy="11" r="8" />
               <path d="M21 21l-4.35-4.35" />
             </svg>
             Search
           </button>
           <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
               <circle cx="12" cy="7" r="4" />
             </svg>
@@ -1738,7 +1783,7 @@ useHead({ title: 'Home | NeoSpace' })
             class="add-column-menu__item"
             @click="addColumn('notifications')"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
               <path d="M13.73 21a2 2 0 01-3.46 0" />
             </svg>
@@ -1751,15 +1796,15 @@ useHead({ title: 'Home | NeoSpace' })
             class="add-column-menu__item"
             @click="addColumn('messages')"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
             </svg>
             Messages
           </button>
           <div class="add-column-menu__divider" role="separator" />
-          <button type="button" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+          <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
             <span>Groups</span>
-            <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
@@ -1783,7 +1828,7 @@ useHead({ title: 'Home | NeoSpace' })
                 class="add-column-menu__item add-column-menu__item--group"
                 @click="addGroupAsColumn(group.tag)"
               >
-                <span class="add-column-menu__group-icon">{{ group.icon }}</span>
+                <span class="add-column-menu__group-icon" aria-hidden="true">{{ group.icon }}</span>
                 {{ group.name }}
               </button>
               <button
@@ -1793,7 +1838,7 @@ useHead({ title: 'Home | NeoSpace' })
                 class="add-column-menu__item add-column-menu__item--group"
                 @click="addGroupAsColumn(addGroupCustomTag)"
               >
-                <span class="add-column-menu__group-icon">🏷️</span>
+                <span class="add-column-menu__group-icon" aria-hidden="true">🏷️</span>
                 Add #{{ addGroupCustomTag }}
               </button>
               <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
@@ -1876,6 +1921,10 @@ useHead({ title: 'Home | NeoSpace' })
 }
 
 .columns-container {
+  // Positioned so absolutely-placed descendants (e.g. .sr-only labels in
+  // off-screen carousel slides) are clipped by the scroller instead of
+  // widening the phone layout viewport.
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   height: 100%;
@@ -2184,6 +2233,14 @@ useHead({ title: 'Home | NeoSpace' })
       overflow: hidden;
       text-overflow: ellipsis;
     }
+  }
+
+  &__unread-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--neo-accent);
   }
 
   &__row-action {

@@ -6,7 +6,10 @@ import { defineStore } from 'pinia'
 
 export type LightboxItem = {
   src: string
+  /** Accessible name — may be a fallback like "Image 1 of 2" */
   alt: string
+  /** The author's own description, shown as a visible caption when present */
+  caption?: string
 }
 
 export type LightboxState = {

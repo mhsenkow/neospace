@@ -12,9 +12,10 @@ import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel } from '~/utils/dmHelpers'
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
-import { setReadAccountOverride } from '~/composables/useMasto'
+import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { plainTextOf } from '~/utils/plainText'
+import { useDebouncedValue } from '~/composables/useDebouncedValue'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,13 +26,15 @@ const loadRace = createRaceGuard()
 let skipNextRouteWatch = false
 let dmRefreshActive = false
 
+let readOverrideOwner = 0
 const syncReadAccountOverride = () => {
   const account = route.query.account
-  setReadAccountOverride(typeof account === 'string' ? account : null)
+  readOverrideOwner = setReadAccountOverride(typeof account === 'string' ? account : null)
 }
 syncReadAccountOverride()
 watch(() => route.query.account, syncReadAccountOverride)
-onBeforeUnmount(() => setReadAccountOverride(null))
+// Only clears if this page still owns the override (the next page may have set it already)
+onBeforeUnmount(() => clearReadAccountOverride(readOverrideOwner))
 
 const isLoading = ref(true)
 const isRefreshing = ref(false)
@@ -60,11 +63,13 @@ const chatMessages = computed(() => {
 })
 
 const threadQuery = ref('')
+/** Debounced find-in-thread query — filtering parses every message */
+const threadFindQuery = useDebouncedValue(threadQuery, 150)
 
 const statusMatchesQuery = (s: mastodon.v1.Status, q: string) => {
   if (!q) return true
   const hay = [
-    stripHtml(s.content || ''),
+    plainTextOf(s),
     s.spoilerText || '',
     s.account?.displayName || '',
     s.account?.username || '',
@@ -77,7 +82,7 @@ const statusMatchesQuery = (s: mastodon.v1.Status, q: string) => {
 
 /** Filtered chat stream (client-side find-in-conversation) */
 const visibleChatMessages = computed(() => {
-  const q = threadQuery.value.trim().toLowerCase()
+  const q = threadFindQuery.value.trim().toLowerCase()
   if (!q) return chatMessages.value
   return chatMessages.value.filter((s) => statusMatchesQuery(s, q))
 })
@@ -260,25 +265,40 @@ const replyTree = computed((): ReplyNode[] => {
 })
 
 const visibleAncestors = computed(() => {
-  const q = threadQuery.value.trim().toLowerCase()
+  const q = threadFindQuery.value.trim().toLowerCase()
   if (!q) return ancestors.value
   return ancestors.value.filter((s) => statusMatchesQuery(s, q))
 })
 
+const threadStatusById = computed(() => {
+  const map = new Map<string, mastodon.v1.Status>()
+  for (const s of [...ancestors.value, ...descendants.value]) map.set(s.id, s)
+  if (focusStatus.value) map.set(focusStatus.value.id, focusStatus.value)
+  return map
+})
+
+/** Screen-reader context for nested replies: who it answers + nesting level */
+const replyContextLabel = (node: ReplyNode) => {
+  const parentId = node.status.inReplyToId
+  const parent = parentId ? threadStatusById.value.get(parentId) : undefined
+  const who = parent?.account?.acct ? ` to @${parent.account.acct}` : ''
+  return `Reply${who}, level ${node.depth + 1}`
+}
+
 const visibleReplyTree = computed(() => {
-  const q = threadQuery.value.trim().toLowerCase()
+  const q = threadFindQuery.value.trim().toLowerCase()
   if (!q) return replyTree.value
   return replyTree.value.filter((n) => statusMatchesQuery(n.status, q))
 })
 
 const showFocusInSearch = computed(() => {
-  const q = threadQuery.value.trim().toLowerCase()
+  const q = threadFindQuery.value.trim().toLowerCase()
   if (!q || !focusStatus.value) return true
   return statusMatchesQuery(focusStatus.value, q)
 })
 
 const threadSearchStatus = computed(() => {
-  const q = threadQuery.value.trim()
+  const q = threadFindQuery.value.trim()
   if (!q) return ''
   const n = isDirectThread.value
     ? visibleChatMessages.value.length
@@ -359,7 +379,11 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
       skipNextRouteWatch = true
       await router.replace({
         path: `/status/${resolvedId}`,
-        query: queryUrl.value ? { url: queryUrl.value } : undefined,
+        // Keep the read-account override (notification from another account)
+        query: {
+          ...(queryUrl.value ? { url: queryUrl.value } : {}),
+          ...(typeof route.query.account === 'string' ? { account: route.query.account } : {}),
+        },
       })
       if (!ticket.isCurrent()) return
     }
@@ -423,7 +447,7 @@ const onReplyPosted = async (status: mastodon.v1.Status) => {
   if (isDirectThread.value) await scrollChatToEnd()
   else {
     await nextTick()
-    chatEndEl.value?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+    chatEndEl.value?.scrollIntoView({ block: 'end', behavior: preferReducedMotion() ? 'auto' : 'smooth' })
   }
 }
 
@@ -540,7 +564,8 @@ useHead({
           <NeoIcon v-else name="refresh" :size="16" :stroke="2" />
         </button>
         <span class="chat-header__lock" title="Private message">
-          <NeoIcon name="lock" :size="16" :stroke="2" />
+          <NeoIcon name="lock" :size="16" :stroke="2" aria-hidden="true" />
+          <span class="sr-only">Private message</span>
         </span>
       </template>
     </SubviewChrome>
@@ -601,18 +626,18 @@ useHead({
       <div
         class="chat-stream"
         role="log"
-        aria-live="polite"
+        :aria-live="threadFindQuery.trim() ? 'off' : 'polite'"
         aria-relevant="additions"
         aria-label="Conversation messages"
       >
-        <p v-if="!threadQuery.trim() && chatMessages.length <= 1" class="chat-empty">
+        <p v-if="!threadFindQuery.trim() && chatMessages.length <= 1" class="chat-empty">
           Private conversation — everyone mentioned can see these messages.
         </p>
-        <p v-else-if="!threadQuery.trim() && chatMessages.length >= 40" class="chat-empty chat-empty--soft">
+        <p v-else-if="!threadFindQuery.trim() && chatMessages.length >= 40" class="chat-empty chat-empty--soft">
           Older messages may be truncated by your server’s context limit.
         </p>
-        <p v-else-if="threadQuery.trim() && !visibleChatMessages.length" class="chat-empty">
-          No messages match “{{ threadQuery.trim() }}”.
+        <p v-else-if="threadFindQuery.trim() && !visibleChatMessages.length" class="chat-empty">
+          No messages match “{{ threadFindQuery.trim() }}”.
         </p>
 
         <template v-for="(status, index) in visibleChatMessages" :key="status.id">
@@ -675,24 +700,26 @@ useHead({
           />
         </div>
 
-        <RealPostCard
-          v-for="node in visibleReplyTree"
-          :key="node.status.id"
-          :status="node.status"
-          hide-inline-reply
-          class="thread-post thread-post--reply"
-          :class="{ 'thread-post--nested': node.depth > 0 }"
-          :style="{ '--thread-depth': String(node.depth) }"
-          @replied="onReplyPosted"
-        />
+        <template v-for="node in visibleReplyTree" :key="node.status.id">
+          <!-- Nesting is otherwise only visual (indent) -->
+          <p v-if="node.depth > 0" class="sr-only">{{ replyContextLabel(node) }}</p>
+          <RealPostCard
+            :status="node.status"
+            hide-inline-reply
+            class="thread-post thread-post--reply"
+            :class="{ 'thread-post--nested': node.depth > 0 }"
+            :style="{ '--thread-depth': String(node.depth) }"
+            @replied="onReplyPosted"
+          />
+        </template>
 
         <p
-          v-if="threadQuery.trim() && !showFocusInSearch && !visibleAncestors.length && !visibleReplyTree.length"
+          v-if="threadFindQuery.trim() && !showFocusInSearch && !visibleAncestors.length && !visibleReplyTree.length"
           class="thread-lonely"
         >
-          No posts match “{{ threadQuery.trim() }}”.
+          No posts match “{{ threadFindQuery.trim() }}”.
         </p>
-        <p v-else-if="!threadQuery.trim() && !descendants.length && !ancestors.length" class="thread-lonely">
+        <p v-else-if="!threadFindQuery.trim() && !descendants.length && !ancestors.length" class="thread-lonely">
           No replies yet — be the first.
         </p>
 

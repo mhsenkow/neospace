@@ -7,7 +7,8 @@ import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
-import { COMPOSE_MEDIA_ACCEPT, useComposeMedia } from '~/composables/useComposeMedia'
+import { useComposeMedia } from '~/composables/useComposeMedia'
+import { COMPOSE_MEDIA_ACCEPT } from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
@@ -15,6 +16,7 @@ import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 import { useOverlayStore } from '~/stores/overlay'
 import { mapComposeError } from '~/utils/friendlyError'
 import type { mastodon } from 'masto'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const isApplePlatform = (() => {
   if (typeof navigator === 'undefined') return false
@@ -100,13 +102,16 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const composeMediaRef = ref<HTMLElement | null>(null)
 const composeFocused = ref(false)
+const reduceMotion = usePrefersReducedMotion()
+/** Smooth scroll unless the user asked for less motion */
+const scrollBehavior = (): ScrollBehavior => (reduceMotion.value ? 'auto' : 'smooth')
 
 /** Keep the field above the soft keyboard (inline reply / thread dock on Android). */
 const onComposeFocus = () => {
   composeFocused.value = true
   if (typeof window === 'undefined') return
   window.setTimeout(() => {
-    textareaRef.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    textareaRef.value?.scrollIntoView({ block: 'center', behavior: scrollBehavior() })
   }, 280)
 }
 const selectedGroupTag = ref<string | null>(
@@ -649,12 +654,12 @@ const applyHandoff = async () => {
     ta.focus()
     const len = content.value.length
     ta.setSelectionRange(len, len)
-    ta.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    ta.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })
   }
   // After media attaches, keep chart + caption in view above the keyboard / Post bar
   if (draft.files.length) {
     await nextTick()
-    composeMediaRef.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    composeMediaRef.value?.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })
   }
 }
 
@@ -893,7 +898,7 @@ onUnmounted(() => {
           class="compose-media__thumb"
         />
         <div v-else class="compose-media__video">
-          <span>🎬</span>
+          <span aria-hidden="true">🎬</span>
           <span class="compose-media__video-name">{{ item.file.name }}</span>
         </div>
         <div v-if="item.uploading" class="compose-media__overlay">Uploading…</div>
@@ -957,6 +962,8 @@ onUnmounted(() => {
           ref="fileInputRef"
           type="file"
           class="compose-file"
+          tabindex="-1"
+          aria-hidden="true"
           :accept="COMPOSE_MEDIA_ACCEPT"
           multiple
           @change="onFilePicked"
@@ -975,7 +982,7 @@ onUnmounted(() => {
           type="button"
           class="compose-tool"
           :class="{ 'compose-tool--active': showCW }"
-          aria-label="Content warning"
+          aria-label="CW: content warning"
           title="Content warning"
           :aria-pressed="showCW"
           :disabled="isPosting"
@@ -1340,7 +1347,7 @@ onUnmounted(() => {
   }
 
   &::placeholder {
-    color: var(--neo-text-disabled);
+    color: var(--neo-text-secondary);
   }
 }
 
@@ -1352,7 +1359,7 @@ onUnmounted(() => {
 
 .compose-media__item {
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: 96px minmax(0, 1fr);
   gap: 0.65rem;
   align-items: start;
   position: relative;
@@ -1510,7 +1517,7 @@ onUnmounted(() => {
   }
 
   &::placeholder {
-    color: var(--neo-text-disabled);
+    color: var(--neo-text-secondary);
   }
 }
 

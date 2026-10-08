@@ -277,6 +277,7 @@ useFocusTrap(mobileSidebarRef, open, {
                 <span
                   class="mobile-sidebar__group-icon"
                   :style="{ backgroundColor: categoryTint(group.category) }"
+                  aria-hidden="true"
                 >
                   {{ group.icon }}
                 </span>
@@ -300,6 +301,7 @@ useFocusTrap(mobileSidebarRef, open, {
                 <span
                   class="mobile-sidebar__suggest-icon"
                   :style="{ backgroundColor: categoryTint(group.category) }"
+                  aria-hidden="true"
                 >
                   {{ group.icon }}
                 </span>
@@ -437,7 +439,7 @@ useFocusTrap(mobileSidebarRef, open, {
     font-size: 0.625rem;
     font-weight: 700;
     letter-spacing: 0.06em;
-    color: var(--neo-text-inverse);
+    color: var(--neo-text-on-accent);
     background: var(--neo-accent);
     border-radius: var(--neo-radius-sm, 2px);
   }
@@ -454,9 +456,11 @@ useFocusTrap(mobileSidebarRef, open, {
     cursor: pointer;
     border-radius: var(--neo-radius-sm, 4px);
 
-    &:hover {
-      background: var(--neo-bg-hover);
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-hover);
+        color: var(--neo-text-primary);
+      }
     }
   }
 
@@ -477,9 +481,11 @@ useFocusTrap(mobileSidebarRef, open, {
     font-weight: 500;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
-    &:hover {
-      background: var(--neo-bg-hover);
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-hover);
+        color: var(--neo-text-primary);
+      }
     }
 
     &.router-link-active {
@@ -518,7 +524,7 @@ useFocusTrap(mobileSidebarRef, open, {
     padding: 0.4rem 0.9rem;
     border-radius: var(--neo-radius-full, 999px);
     background: var(--neo-accent);
-    color: var(--neo-text-inverse);
+    color: var(--neo-text-on-accent);
     font-size: 0.8125rem;
     font-weight: 600;
     text-decoration: none;
@@ -557,8 +563,10 @@ useFocusTrap(mobileSidebarRef, open, {
     color: var(--neo-text-link);
     text-decoration: none;
 
-    &:hover {
-      color: var(--neo-text-link-hover);
+    @media (hover: hover) {
+      &:hover {
+        color: var(--neo-text-link-hover);
+      }
     }
   }
 
@@ -656,9 +664,14 @@ useFocusTrap(mobileSidebarRef, open, {
     cursor: pointer;
     color: inherit;
 
-    &:hover,
     &:active {
       background: var(--neo-bg-hover);
+    }
+
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-hover);
+      }
     }
   }
 
@@ -729,14 +742,16 @@ useFocusTrap(mobileSidebarRef, open, {
     cursor: pointer;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
-    &:hover {
-      background: var(--neo-bg-hover);
-      color: var(--neo-text-primary);
-    }
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-hover);
+        color: var(--neo-text-primary);
+      }
 
-    &--danger:hover {
-      background: var(--neo-danger-soft);
-      color: var(--neo-danger);
+      &--danger:hover {
+        background: var(--neo-danger-soft);
+        color: var(--neo-danger);
+      }
     }
 
     &--theme {
@@ -784,15 +799,17 @@ useFocusTrap(mobileSidebarRef, open, {
     width: 100%;
     padding: 0.75rem;
     background: var(--neo-accent);
-    color: var(--neo-text-inverse);
+    color: var(--neo-text-on-accent);
     text-decoration: none;
     border-radius: var(--neo-radius-sm, 2px);
     font-size: 0.875rem;
     font-weight: 600;
     letter-spacing: 0.01em;
 
-    &:hover {
-      background: var(--neo-accent-hover);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-accent-hover);
+      }
     }
   }
 

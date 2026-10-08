@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { mastodon } from 'masto'
+import { formatAbsoluteTime } from '~/utils/relativeTime'
 
 const props = defineProps<{
   account: mastodon.v1.Account
@@ -15,8 +16,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   profileClick: [acct: string, event: MouseEvent]
 }>()
-
-const { formatAbsoluteTime } = useRelativeTime()
 </script>
 
 <template>

@@ -34,11 +34,33 @@ const router = useRouter()
 
 const isPending = computed(() => groupsStore.isTagPending(props.group.tag))
 
+/**
+ * Join ↔ Leave swap (and the pending `disabled`) destroys / blurs the focused
+ * button — hand focus to whichever button is rendered once things settle.
+ */
+const actionBtnRef = ref<HTMLButtonElement | null>(null)
+let refocusAction = false
+const noteActionFocus = () => {
+  if (typeof document !== 'undefined' && document.activeElement === actionBtnRef.value) {
+    refocusAction = true
+  }
+}
+watch(
+  [() => props.group.isMember, isPending],
+  () => {
+    if (!refocusAction || isPending.value) return
+    refocusAction = false
+    nextTick(() => actionBtnRef.value?.focus())
+  },
+  { flush: 'post' },
+)
+
 const handleJoin = async () => {
   if (!instancesStore.isAuthenticated) {
     router.push('/login')
     return
   }
+  noteActionFocus()
 
   try {
     await groupsStore.joinGroup(props.group.tag)
@@ -54,6 +76,7 @@ const handleJoin = async () => {
 
 const handleLeave = async () => {
   const leftTag = props.group.tag
+  noteActionFocus()
   try {
     await groupsStore.leaveGroup(leftTag)
     toastStore.show({
@@ -125,6 +148,7 @@ const catTint = computed(() =>
     <div class="group-card__actions" @click.stop>
       <button
         v-if="group.isMember"
+        ref="actionBtnRef"
         type="button"
         class="group-card__btn group-card__btn--leave"
         :disabled="isPending"
@@ -140,6 +164,7 @@ const catTint = computed(() =>
       </button>
       <button
         v-else
+        ref="actionBtnRef"
         type="button"
         class="group-card__btn group-card__btn--join"
         :disabled="isPending"

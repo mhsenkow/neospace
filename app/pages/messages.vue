@@ -14,6 +14,7 @@ import {
   participantLabel,
 } from '~/utils/dmHelpers'
 import { getPageScrollTop } from '~/utils/pageScroll'
+import { formatAbsoluteTime, formatCompactRelativeTime } from '~/utils/relativeTime'
 import type { mastodon } from 'masto'
 
 const conversationsStore = useConversationsStore()
@@ -47,31 +48,20 @@ const filteredConversations = computed(() => {
   })
 })
 
-const formatTime = (dateString?: string | null) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d`
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
+// Shared helpers cache their Intl formatters (vs. toLocale* per row)
+const formatTime = (dateString?: string | null) =>
+  dateString ? formatCompactRelativeTime(dateString) : ''
 
-const formatTimeLong = (dateString?: string | null) => {
-  if (!dateString) return ''
-  try {
-    return new Date(dateString).toLocaleString(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    })
-  } catch {
-    return dateString
-  }
+const formatTimeLong = (dateString?: string | null) =>
+  dateString ? formatAbsoluteTime(dateString) : ''
+
+/** Honor OS + in-app reduced motion for JS-driven scrolling */
+const scrollBehavior = (): ScrollBehavior => {
+  if (typeof window === 'undefined') return 'auto'
+  const reduce =
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ||
+    document.documentElement.classList.contains('reduce-motion')
+  return reduce ? 'auto' : 'smooth'
 }
 
 const suggestedPeople = computed(() => {
@@ -303,7 +293,7 @@ useHead(() => ({ title: pageTitle.value }))
           placeholder="Search chats…"
           autocomplete="off"
           enterkeyhint="search"
-          @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' })"
+          @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })"
         />
       </label>
     </div>
@@ -323,7 +313,11 @@ useHead(() => ({ title: pageTitle.value }))
       <FunLoader variant="region" label="Loading messages" />
     </div>
 
-    <div v-else-if="conversationsStore.error && !conversationsStore.conversations.length" class="messages-state">
+    <div
+      v-else-if="conversationsStore.error && !conversationsStore.conversations.length"
+      class="messages-state"
+      role="alert"
+    >
       <p class="messages-state__title">Couldn't load messages</p>
       <p>{{ conversationsStore.error }}</p>
       <button type="button" class="neo-btn neo-btn--secondary neo-btn--sm" @click="refreshInbox">
@@ -356,7 +350,7 @@ useHead(() => ({ title: pageTitle.value }))
             class="messages-suggest__card"
             @click="messageAccount(account)"
           >
-            <img :src="account.avatar" alt="" class="messages-suggest__avatar" />
+            <img :src="account.avatar" alt="" class="messages-suggest__avatar" loading="lazy" decoding="async" />
             <span class="messages-suggest__name">{{ account.displayName || account.username }}</span>
             <span class="messages-suggest__acct">@{{ account.acct }}</span>
             <span class="messages-suggest__cta">Message</span>
@@ -405,6 +399,8 @@ useHead(() => ({ title: pageTitle.value }))
                     :key="acct.id"
                     :src="acct.avatar"
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     class="messages-row__avatar"
                     :class="{ 'messages-row__avatar--stack': i > 0 }"
                   />
@@ -494,7 +490,7 @@ useHead(() => ({ title: pageTitle.value }))
               class="messages-suggest__chip"
               @click="messageAccount(account)"
             >
-              <img :src="account.avatar" alt="" />
+              <img :src="account.avatar" alt="" loading="lazy" decoding="async" />
               <span>{{ account.displayName || account.username }}</span>
             </button>
             <button type="button" class="messages-suggest__chip messages-suggest__chip--more" @click="startNewMessage">

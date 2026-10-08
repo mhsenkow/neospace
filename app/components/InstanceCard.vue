@@ -64,8 +64,13 @@ onMounted(() => {
 
 const handleVisit = () => emit('visit', props.instance.domain)
 
+/** Watch → "Watching" badge swap destroys the focused button; keep focus nearby */
+const watchBtnRef = ref<HTMLButtonElement | null>(null)
+const watchingBadgeRef = ref<HTMLElement | null>(null)
+
 const handleWatch = async () => {
   if (isWatching.value || isAdding.value) return
+  const hadFocus = typeof document !== 'undefined' && document.activeElement === watchBtnRef.value
   isAdding.value = true
   actionError.value = null
   try {
@@ -75,6 +80,10 @@ const handleWatch = async () => {
     actionError.value = friendlyServerError(e)
   } finally {
     isAdding.value = false
+  }
+  if (hadFocus) {
+    await nextTick()
+    ;(watchingBadgeRef.value || watchBtnRef.value)?.focus()
   }
 }
 
@@ -117,7 +126,7 @@ const handleSignIn = async () => {
       Checking server…
     </div>
 
-    <p v-if="actionError" class="instance-card__error">{{ actionError }}</p>
+    <p v-if="actionError" class="instance-card__error" role="alert">{{ actionError }}</p>
 
     <footer class="instance-card__actions">
       <button
@@ -136,6 +145,7 @@ const handleSignIn = async () => {
 
       <button
         v-if="!isWatching"
+        ref="watchBtnRef"
         type="button"
         class="instance-card__btn"
         :disabled="isAdding"
@@ -147,7 +157,12 @@ const handleSignIn = async () => {
         <span v-if="isAdding" class="sr-only">Adding…</span>
         <span v-else>Watch</span>
       </button>
-      <span v-else class="instance-card__badge instance-card__badge--soft">Watching</span>
+      <span
+        v-else
+        ref="watchingBadgeRef"
+        class="instance-card__badge instance-card__badge--soft"
+        tabindex="-1"
+      >Watching</span>
 
       <button type="button" class="instance-card__btn instance-card__btn--ghost" @click="handleVisit">
         Preview
@@ -293,13 +308,13 @@ const handleSignIn = async () => {
   }
 
   &--primary {
-    color: var(--neo-text-inverse, #fafaf8);
+    color: var(--neo-text-on-accent, #fafaf8);
     background: var(--neo-accent);
     border-color: var(--neo-accent);
 
     &:hover:not(:disabled) {
       background: var(--neo-accent-hover);
-      color: var(--neo-text-inverse, #fafaf8);
+      color: var(--neo-text-on-accent, #fafaf8);
     }
   }
 

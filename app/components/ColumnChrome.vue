@@ -71,7 +71,7 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
         @pointerdown.stop
         @click.stop="emit('move-left')"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
           <polyline points="15 18 9 12 15 6" />
         </svg>
       </button>
@@ -84,7 +84,7 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
         @pointerdown.stop
         @click.stop="emit('move-right')"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
           <polyline points="9 18 15 12 9 6" />
         </svg>
       </button>

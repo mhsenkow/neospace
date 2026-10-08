@@ -74,6 +74,22 @@ export type CollapsedReblogStatus = {
   _collapsedRebloggers?: Array<{ displayName?: string | null; username?: string | null; acct?: string | null }>
 }
 
+/**
+ * Collapsed-row wrappers keyed by the first reblog in the run, so a recompute
+ * with the same run hands cards the same object (no prop churn every poll).
+ * Reused only while the source's `reblog` and the reblogger list are unchanged.
+ */
+const collapsedWrapperCache = new WeakMap<
+  object,
+  { reblog: unknown; rebloggers: readonly unknown[]; wrapper: object }
+>()
+
+function sameItems(a: readonly unknown[], b: readonly unknown[]) {
+  if (a.length !== b.length) return false
+  for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
+  return true
+}
+
 /** Collapse consecutive reblogs of the same original into one row ("A and N others reposted"). */
 export function collapseDuplicateReblogs<T extends CollapsedReblogStatus>(statuses: T[]): T[] {
   const out: T[] = []
@@ -98,7 +114,18 @@ export function collapseDuplicateReblogs<T extends CollapsedReblogStatus>(status
     if (rebloggers.length <= 1) {
       out.push(current)
     } else {
-      out.push({ ...current, _collapsedRebloggers: rebloggers })
+      const cached = collapsedWrapperCache.get(current)
+      if (
+        cached &&
+        cached.reblog === current.reblog &&
+        sameItems(cached.rebloggers, rebloggers)
+      ) {
+        out.push(cached.wrapper as T)
+      } else {
+        const wrapper = { ...current, _collapsedRebloggers: rebloggers }
+        collapsedWrapperCache.set(current, { reblog: current.reblog, rebloggers, wrapper })
+        out.push(wrapper)
+      }
     }
     i = j
   }

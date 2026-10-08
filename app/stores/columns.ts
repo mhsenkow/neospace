@@ -38,17 +38,6 @@ function normalizeDeskDensity(value: unknown): DeskDensity {
 /** Mobile reading mode — flow = Threads list, flip = full-bleed snap */
 export type ColumnViewMode = 'flow' | 'flip'
 
-export const TIMELINE_FEED_TYPES: ColumnFeedType[] = [
-  'home',
-  'local',
-  'federated',
-  'group',
-  'favourites',
-  'bookmarks',
-  'algorithm',
-]
-export const PANEL_FEED_TYPES: ColumnFeedType[] = ['profile', 'search', 'notifications', 'messages']
-
 /** Single source for feed labels (board menus, tabs, TimelineColumn). */
 export const FEED_CATALOG: { type: ColumnFeedType; label: string }[] = [
   { type: 'home', label: 'For You' },
@@ -119,8 +108,6 @@ interface ColumnsState {
   /** True when local edits haven't been reconciled with profile field */
   layoutDirty: boolean
   layoutUpdatedAt: number
-  syncing: boolean
-  lastSyncError: string | null
   /** Device-local: packed / roomy strip, or tabs = one focused feed */
   deskDensity: DeskDensity
   /** Device-local: when set, only this column is shown (desktop); required in tabs mode */
@@ -175,28 +162,6 @@ function normalizeFieldName(name: string) {
 
 function stripHtml(value: string) {
   return value.replace(/<[^>]*>/g, '').trim()
-}
-
-/** Compact wire format: home|local|federated|group:tag|algo:id — peeks encode their return feed */
-export function encodeColumns(columns: ColumnConfig[]): string {
-  return columns
-    .map((c) => {
-      const feed =
-        c.feedType === 'profile' && c.profileAcct && c.returnFeed
-          ? c.returnFeed
-          : c
-      if (feed.feedType === 'group' && feed.groupTag) {
-        return `group:${feed.groupTag.replace(/[|:]/g, '')}`
-      }
-      if (feed.feedType === 'algorithm' && feed.algorithmId) {
-        return `algo:${feed.algorithmId.replace(/[|:]/g, '')}`
-      }
-      if (feed.feedType === 'profile' && (feed as ColumnConfig).profileAcct) {
-        return 'home'
-      }
-      return feed.feedType
-    })
-    .join('|')
 }
 
 export function decodeColumns(raw: string): ColumnConfig[] | null {
@@ -286,16 +251,12 @@ function parseStoredLayout(raw: unknown): StoredLayoutMeta | null {
   return null
 }
 
-let profileSyncTimer: ReturnType<typeof setTimeout> | null = null
-
 export const useColumnsStore = defineStore('columns', {
   state: (): ColumnsState => ({
     columns: defaultColumns(false),
     accountKey: 'guest',
     layoutDirty: false,
     layoutUpdatedAt: 0,
-    syncing: false,
-    lastSyncError: null,
     ...readDeskLayout(),
   }),
 
@@ -386,17 +347,6 @@ export const useColumnsStore = defineStore('columns', {
       this.saveToStorage({ markDirty: true })
       // Profile-field sync disabled: it federated followed tags, corrupted other
       // metadata fields, and fired an Update on every reorder. Layout stays local.
-    },
-
-    scheduleProfileSync() {
-      /* no-op — see persist() */
-    },
-
-    /**
-     * @deprecated Column layout is device-local only (see persist).
-     */
-    async syncToProfile() {
-      return
     },
 
     saveDeskLayout() {
@@ -729,13 +679,11 @@ export const useColumnsStore = defineStore('columns', {
         this.columns = fromLocal.columns
         this.layoutDirty = fromLocal.dirty
         this.layoutUpdatedAt = fromLocal.updatedAt
-        this.scheduleProfileSync()
       } else {
         this.columns = defaultColumns(preferHome)
         this.layoutDirty = false
         this.layoutUpdatedAt = Date.now()
         this.saveToStorage({ markDirty: false })
-        this.scheduleProfileSync()
       }
 
       // Profile decode regenerates column ids — rematch focus by feed, don't drop it

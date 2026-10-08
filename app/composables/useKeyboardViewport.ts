@@ -109,7 +109,8 @@ export function useKeyboardViewport(
       if (isActive) attach()
       else detach()
     },
-    { flush: 'post' },
+    // immediate: sheets may mount already open (layout lazy-mounts them)
+    { flush: 'post', immediate: true },
   )
 
   onUnmounted(() => {
@@ -155,24 +156,44 @@ const syncKeyboardInset = () => {
   // keep threshold below that. With interactive-widget=resizes-content, inset≈0
   // and the layout shell already shrinks — composers sit at bottom:0.
   const kb = inset >= 100 ? inset : 0
+  // visualViewport scroll fires constantly — only touch reactive state / CSS on change
+  if (kb === lastInset) return
+  lastInset = kb
   sharedInsetStyle.value = { bottom: `${kb}px` }
   sharedKeyboardOpen.value = kb > 0
   document.documentElement.style.setProperty('--neo-keyboard-inset', `${kb}px`)
 }
 
+let lastInset = -1
+let insetRaf = 0
+/** One measurement per frame (vv resize + scroll + window resize can all fire together) */
+const scheduleKeyboardInset = () => {
+  if (insetRaf) return
+  insetRaf = requestAnimationFrame(() => {
+    insetRaf = 0
+    syncKeyboardInset()
+  })
+}
+
 const attachKeyboardInset = () => {
   if (typeof window === 'undefined') return
+  lastInset = -1
   syncKeyboardInset()
-  window.visualViewport?.addEventListener('resize', syncKeyboardInset)
-  window.visualViewport?.addEventListener('scroll', syncKeyboardInset)
-  window.addEventListener('resize', syncKeyboardInset)
+  window.visualViewport?.addEventListener('resize', scheduleKeyboardInset)
+  window.visualViewport?.addEventListener('scroll', scheduleKeyboardInset)
+  window.addEventListener('resize', scheduleKeyboardInset)
 }
 
 const detachKeyboardInset = () => {
   if (typeof window === 'undefined') return
-  window.visualViewport?.removeEventListener('resize', syncKeyboardInset)
-  window.visualViewport?.removeEventListener('scroll', syncKeyboardInset)
-  window.removeEventListener('resize', syncKeyboardInset)
+  window.visualViewport?.removeEventListener('resize', scheduleKeyboardInset)
+  window.visualViewport?.removeEventListener('scroll', scheduleKeyboardInset)
+  window.removeEventListener('resize', scheduleKeyboardInset)
+  if (insetRaf) {
+    cancelAnimationFrame(insetRaf)
+    insetRaf = 0
+  }
+  lastInset = 0
   document.documentElement.style.setProperty('--neo-keyboard-inset', '0px')
   sharedInsetStyle.value = { bottom: '0px' }
   sharedKeyboardOpen.value = false

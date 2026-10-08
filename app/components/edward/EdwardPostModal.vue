@@ -113,7 +113,6 @@ const {
   handleFavourite,
   toggleBoost,
   handleBookmark,
-  clearActionCache,
 } = usePostActions({
   displayStatus: body,
   statusUrl,
@@ -276,7 +275,6 @@ onMounted(() => {
 watch(
   () => props.status.id,
   () => {
-    clearActionCache()
     revealed.value = false
     following.value = false
     followRequested.value = false
@@ -381,7 +379,7 @@ watch(
           }"
           :disabled="isFavouriting"
           :aria-pressed="!!body.favourited"
-          aria-label="Heart"
+          :aria-label="`Heart, ${body.favouritesCount ?? 0}`"
           @click="handleFavourite()"
         >
           <NeoIcon name="heart" :size="15" :stroke="1.85" :filled="!!body.favourited" />
@@ -393,7 +391,7 @@ watch(
           :class="{ 'is-on': body.reblogged }"
           :disabled="isBoosting"
           :aria-pressed="!!body.reblogged"
-          aria-label="Boost"
+          :aria-label="`Boost, ${body.reblogsCount ?? 0}`"
           @click="toggleBoost(!body.reblogged)"
         >
           <NeoIcon name="reblog" :size="15" :stroke="1.85" />
@@ -403,7 +401,7 @@ watch(
           type="button"
           class="edward-modal__react-btn"
           :disabled="replyBusy"
-          aria-label="Reply"
+          :aria-label="`Reply, ${body.repliesCount ?? 0}`"
           @click="handleReply()"
         >
           <NeoIcon name="message" :size="15" :stroke="1.85" />

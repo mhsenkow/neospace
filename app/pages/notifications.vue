@@ -4,7 +4,8 @@ import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { clientFor } from '~/composables/useMasto'
 import type { mastodon } from 'masto'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { plainTextLowerOf, plainTextOf } from '~/utils/plainText'
+import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { groupActorLabel } from '~/utils/notifGroup'
 import { getMainScroller } from '~/utils/pageScroll'
@@ -22,8 +23,19 @@ const loadTrigger = ref<HTMLElement | null>(null)
 const sortMenuOpen = ref(false)
 const actionsMenuOpen = ref(false)
 const searchQuery = ref('')
+/** Filtering does per-row work — debounce keystrokes */
+const findQuery = useDebouncedValue(searchQuery, 150)
 let observer: IntersectionObserver | null = null
+/** Set on unmount so an observer bound after onMounted's awaits doesn't leak */
+let disposed = false
 const overlayStore = useOverlayStore()
+
+useHead({
+  title: computed(() => {
+    const n = notificationsStore.unreadCount
+    return n > 0 ? `(${n > 99 ? '99+' : n}) Activity | NeoSpace` : 'Activity | NeoSpace'
+  }),
+})
 
 const canView = computed(() =>
   instancesStore.hasAuthenticatedInstance
@@ -76,20 +88,15 @@ const notifMatchesQuery = (notif: {
   account?: { displayName?: string | null; username?: string; acct?: string } | null
   status?: mastodon.v1.Status | null
 }) => {
-  const q = searchQuery.value.trim().toLowerCase()
+  const q = findQuery.value.trim().toLowerCase()
   if (!q) return true
   const name = `${notif.account?.displayName || ''} ${notif.account?.username || ''} ${notif.account?.acct || ''}`.toLowerCase()
   const action = notifLabel(notif.type).toLowerCase()
-  const preview = (() => {
-    const status = notif.status
-    if (!status?.content) return ''
-    return stripHtml(status.content).replace(/\s+/g, ' ').trim().toLowerCase()
-  })()
-  return name.includes(q) || action.includes(q) || preview.includes(q)
+  return name.includes(q) || action.includes(q) || plainTextLowerOf(notif.status).includes(q)
 }
 
 const filteredGrouped = computed(() => {
-  const q = searchQuery.value.trim()
+  const q = findQuery.value.trim()
   if (!q) return grouped.value
   const out: typeof grouped.value = {}
   for (const label of groupOrder) {
@@ -110,7 +117,7 @@ const filteredNotifCount = computed(() =>
 )
 
 const searchStatusText = computed(() => {
-  const q = searchQuery.value.trim()
+  const q = findQuery.value.trim()
   if (!q) return ''
   const n = filteredNotifCount.value
   if (!n) return `No activity matches “${q}”.`
@@ -278,8 +285,8 @@ const openNotification = (notif: ExtendedNotification) => {
 }
 
 const previewText = (status?: mastodon.v1.Status | null) => {
-  if (!status?.content) return ''
-  const text = stripHtml(status.content).replace(/\s+/g, ' ').trim()
+  // Memoized per status — called several times per row per render
+  const text = plainTextOf(status)
   if (!text) return ''
   return text.length > 160 ? `${text.slice(0, 160)}…` : text
 }
@@ -287,7 +294,7 @@ const previewText = (status?: mastodon.v1.Status | null) => {
 const bindLoadObserver = (el: Element | null) => {
   observer?.disconnect()
   observer = null
-  if (!el) return
+  if (!el || disposed) return
   observer = new IntersectionObserver(
     ([entry]) => {
       if (entry?.isIntersecting && !notificationsStore.isLoadingMore) {
@@ -329,7 +336,9 @@ watch(canView, async (ok) => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   observer?.disconnect()
+  observer = null
   if (canView.value) {
     void notificationsStore.markAllRead()
   }
@@ -382,7 +391,8 @@ const chromeTitle = computed(() => {
               v-for="opt in sortOptions"
               :key="opt.key"
               type="button"
-              role="menuitem"
+              role="menuitemradio"
+              :aria-checked="notificationsStore.sortOrder === opt.key"
               class="sort-menu__item"
               :class="{ active: notificationsStore.sortOrder === opt.key }"
               @click="selectSort(opt.key)"
@@ -461,7 +471,12 @@ const chromeTitle = computed(() => {
         <button type="button" class="notif-partial__retry" @click="handleRefresh">Retry</button>
       </div>
       <!-- Loading skeleton -->
-      <div v-if="notificationsStore.isLoading && notificationsStore.isEmpty" class="notif-skeleton">
+      <div
+        v-if="notificationsStore.isLoading && notificationsStore.isEmpty"
+        class="notif-skeleton"
+        aria-busy="true"
+      >
+        <span class="sr-only" role="status">Loading…</span>
         <div v-for="i in 8" :key="i" class="notif-skeleton__item">
           <div class="notif-skeleton__avatar" />
           <div class="notif-skeleton__body">
@@ -472,7 +487,7 @@ const chromeTitle = computed(() => {
       </div>
 
       <!-- Error -->
-      <div v-else-if="notificationsStore.error" class="notif-error">
+      <div v-else-if="notificationsStore.error" class="notif-error" role="alert">
         <div class="notif-error__icon"><NeoIcon name="alert" :size="28" :stroke="1.75" /></div>
         <p>{{ notificationsStore.error }}</p>
         <button class="notif-error__retry" @click="handleRefresh">Try again</button>
@@ -495,10 +510,10 @@ const chromeTitle = computed(() => {
       </div>
 
       <!-- Search miss (loaded items exist, query matched none) -->
-      <div v-else-if="searchQuery.trim() && !filteredNotifCount" class="notif-empty">
+      <div v-else-if="findQuery.trim() && !filteredNotifCount" class="notif-empty">
         <div class="notif-empty__icon"><NeoIcon name="search" :size="32" :stroke="1.5" /></div>
         <h2 class="notif-empty__title">No matches</h2>
-        <p class="notif-empty__desc">Nothing in loaded activity matches “{{ searchQuery.trim() }}”.</p>
+        <p class="notif-empty__desc">Nothing in loaded activity matches “{{ findQuery.trim() }}”.</p>
       </div>
 
       <!-- Notification list, grouped by time -->
@@ -526,6 +541,7 @@ const chromeTitle = computed(() => {
                   :src="notif.account.avatar"
                   alt=""
                   loading="lazy"
+                  decoding="async"
                 />
               </div>
 
@@ -537,6 +553,9 @@ const chromeTitle = computed(() => {
                     class="notif-item__open-headline"
                     @click="openNotification(notif)"
                   >
+                    <span v-if="notificationsStore.isUnread(notif)" class="notif-item__unread-dot">
+                      <span class="sr-only">Unread</span>
+                    </span>
                     <span v-if="notif.account" class="notif-item__name">{{ actorLabel(notif) }}</span>
                     <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
                     <span
@@ -557,7 +576,7 @@ const chromeTitle = computed(() => {
                   v-if="previewText(notif.status) || notif.status?.mediaAttachments?.length"
                   type="button"
                   class="notif-item__open"
-                  :aria-label="`Open post: ${notifLabel(notif.type)}`"
+                  :aria-label="previewText(notif.status) ? undefined : `Open post: ${notifLabel(notif.type)} (media)`"
                   @click="openNotification(notif)"
                 >
                   <p v-if="previewText(notif.status)" class="notif-item__preview">
@@ -572,6 +591,7 @@ const chromeTitle = computed(() => {
                       class="notif-item__media-thumb"
                       alt=""
                       loading="lazy"
+                      decoding="async"
                     />
                     <span v-if="(notif.status.mediaAttachments?.length ?? 0) > 3" class="notif-item__media-more">
                       +{{ (notif.status.mediaAttachments?.length ?? 0) - 3 }}
@@ -1056,6 +1076,18 @@ const chromeTitle = computed(() => {
   &--unread {
     border-left-color: var(--neo-accent);
     background: color-mix(in srgb, var(--neo-accent) 6%, transparent);
+  }
+
+  /* Non-color unread cue (border/tint alone isn't enough) */
+  &__unread-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    margin-right: 0.35rem;
+    border-radius: 50%;
+    background: var(--neo-accent);
+    vertical-align: middle;
   }
 
   &:hover {

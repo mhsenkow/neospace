@@ -4,7 +4,7 @@
  * Optional teleport + placement for clipped parents (e.g. sidebar).
  */
 
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onUnmounted, ref, watch } from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -29,7 +29,12 @@ const panelStyle = ref<Record<string, string>>({})
 const menuId = `neo-menu-${Math.random().toString(36).slice(2, 9)}`
 
 const ITEM_SEL =
-  '[role="menuitem"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled]), [role="menuitemradio"]:not([disabled]), button:not([disabled])'
+  '[role="menuitem"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled]), [role="menuitemradio"]:not([disabled]), button:not([disabled]), input:not([disabled]):not([type="hidden"])'
+
+/** Filter fields inside a menu keep their own caret keys (Home/End/arrows within text) */
+function isTextField(el: EventTarget | null): el is HTMLInputElement {
+  return el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit'].includes(el.type)
+}
 
 function items(): HTMLElement[] {
   const menu = menuRef.value
@@ -169,6 +174,7 @@ function onMenuKeydown(e: KeyboardEvent) {
     prev?.focus()
     return
   }
+  if (isTextField(e.target)) return
   if (e.key === 'Home') {
     e.preventDefault()
     list[0]?.focus()
@@ -193,16 +199,27 @@ function onScrollOrResize() {
   if (open.value && props.teleport) updatePanelPos()
 }
 
-onMounted(() => {
-  document.addEventListener('pointerdown', onDocPointer, true)
-  window.addEventListener('scroll', onScrollOrResize, true)
-  window.addEventListener('resize', onScrollOrResize)
-})
-onUnmounted(() => {
-  document.removeEventListener('pointerdown', onDocPointer, true)
-  window.removeEventListener('scroll', onScrollOrResize, true)
-  window.removeEventListener('resize', onScrollOrResize)
-})
+// Global listeners only while open — every post card has a menu, so binding
+// them at mount meant thousands of capture handlers on each scroll / tap.
+let listening = false
+function listen(on: boolean) {
+  if (on === listening) return
+  listening = on
+  if (on) {
+    document.addEventListener('pointerdown', onDocPointer, true)
+    if (props.teleport) {
+      window.addEventListener('scroll', onScrollOrResize, true)
+      window.addEventListener('resize', onScrollOrResize)
+    }
+  } else {
+    document.removeEventListener('pointerdown', onDocPointer, true)
+    window.removeEventListener('scroll', onScrollOrResize, true)
+    window.removeEventListener('resize', onScrollOrResize)
+  }
+}
+
+watch(open, (v) => listen(v), { immediate: true })
+onUnmounted(() => listen(false))
 
 defineExpose({ open, close, toggle })
 </script>
@@ -313,10 +330,17 @@ defineExpose({ open, close, toggle })
   text-align: left;
   cursor: pointer;
 
-  &:hover,
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
+  }
+
+  // Background tint alone is ~1.2:1 — keep a real ring for keyboard users
   &:focus-visible {
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));
-    outline: none;
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: -2px;
   }
 }
 </style>

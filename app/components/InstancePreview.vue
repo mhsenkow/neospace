@@ -114,7 +114,7 @@ const formatDate = (dateStr: string) => {
           <!-- Header -->
           <header class="preview-header">
             <div class="header-content">
-              <span class="emoji">{{ curatedInfo?.emoji || '🌐' }}</span>
+              <span class="emoji" aria-hidden="true">{{ curatedInfo?.emoji || '🌐' }}</span>
               <div>
                 <h2 id="instance-preview-title">{{ instanceInfo?.title || domain }}</h2>
                 <a
@@ -124,7 +124,7 @@ const formatDate = (dateStr: string) => {
                   class="domain-link"
                 >
                   {{ domain }}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
                   </svg>
                 </a>
@@ -172,7 +172,7 @@ const formatDate = (dateStr: string) => {
 
             <!-- Rules -->
             <div class="rules" v-if="instanceInfo.rules?.length">
-              <h4>Community Rules</h4>
+              <h3>Community Rules</h3>
               <ol>
                 <li v-for="rule in instanceInfo.rules.slice(0, 5)" :key="rule.id">
                   {{ rule.text }}
@@ -184,7 +184,7 @@ const formatDate = (dateStr: string) => {
           <!-- Timeline Preview -->
           <div class="timeline-section">
             <h3>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/>
                 <path d="M12 6v6l4 2"/>
               </svg>
@@ -196,7 +196,7 @@ const formatDate = (dateStr: string) => {
               <span>Loading timeline...</span>
             </div>
 
-            <div v-else-if="instancesStore.previewError" class="error">
+            <div v-else-if="instancesStore.previewError" class="error" role="alert">
               {{ instancesStore.previewError }}
             </div>
 
@@ -242,7 +242,7 @@ const formatDate = (dateStr: string) => {
             </div>
           </div>
 
-          <div v-if="addError" class="preview-error">
+          <div v-if="addError" class="preview-error" role="alert">
             {{ addError }}
           </div>
 
@@ -295,7 +295,7 @@ const formatDate = (dateStr: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: var(--neo-z-modal, 1000);
+  z-index: var(--neo-z-modal, 1050);
   padding: 2rem;
 }
 
@@ -307,6 +307,7 @@ const formatDate = (dateStr: string) => {
   width: 100%;
   max-width: 640px;
   max-height: 85vh;
+  max-height: 85dvh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -384,7 +385,7 @@ const formatDate = (dateStr: string) => {
 
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
@@ -413,7 +414,7 @@ const formatDate = (dateStr: string) => {
   padding: 1rem 1.25rem;
   border: 1px solid var(--neo-border-color);
 
-  h4 {
+  h3 {
     margin: 0 0 0.75rem;
     font-size: 0.85rem;
     text-transform: uppercase;
@@ -627,7 +628,7 @@ const formatDate = (dateStr: string) => {
   color: var(--neo-preview-accent);
 
   &:hover {
-    background: rgba(99, 100, 255, 0.1);
+    background: color-mix(in srgb, var(--neo-preview-accent) 10%, transparent);
   }
 }
 

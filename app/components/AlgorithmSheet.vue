@@ -158,12 +158,17 @@ function resetFromRecipe() {
   sentence.value = r.description || r.name
 }
 
-watch(open, (isOpen) => {
-  if (isOpen) {
-    algorithms.hydrate()
-    resetFromRecipe()
-  }
-})
+watch(
+  open,
+  (isOpen) => {
+    if (isOpen) {
+      algorithms.hydrate()
+      resetFromRecipe()
+    }
+  },
+  // Layout mounts this sheet on first open — open is already true then
+  { immediate: true },
+)
 
 watch(
   () => algorithms.editingId,
@@ -321,7 +326,7 @@ function removeRecipe() {
                 rows="3"
                 maxlength="240"
                 placeholder="e.g. Cat photos on local, no boosts…"
-                @focus="onFocusField(); sentenceDrivesForm = true"
+                @focus="onFocusField($event); sentenceDrivesForm = true"
               />
             </label>
 
@@ -398,6 +403,13 @@ function removeRecipe() {
                     class="sr-only"
                     @change="onRulesManualEdit"
                   >
+                  <NeoIcon
+                    v-if="source === opt.value"
+                    name="check"
+                    :size="14"
+                    :stroke="2.25"
+                    class="algo-sheet__check"
+                  />
                   {{ opt.label.replace(' (home)', '') }}
                 </label>
               </div>
@@ -408,16 +420,19 @@ function removeRecipe() {
                 <input v-model="mediaOnly" type="checkbox" @change="onRulesManualEdit">
                 <NeoIcon name="image" :size="16" :stroke="1.75" />
                 Media only
+                <NeoIcon v-if="mediaOnly" name="check" :size="14" :stroke="2.25" class="algo-sheet__check" />
               </label>
               <label class="algo-sheet__toggle" :class="{ 'algo-sheet__toggle--on': noReblogs }">
                 <input v-model="noReblogs" type="checkbox" @change="onRulesManualEdit">
                 <NeoIcon name="reblog" :size="16" :stroke="1.75" />
                 Hide boosts
+                <NeoIcon v-if="noReblogs" name="check" :size="14" :stroke="2.25" class="algo-sheet__check" />
               </label>
               <label class="algo-sheet__toggle" :class="{ 'algo-sheet__toggle--on': noReplies }">
                 <input v-model="noReplies" type="checkbox" @change="onRulesManualEdit">
                 <NeoIcon name="message" :size="16" :stroke="1.75" />
                 Hide replies
+                <NeoIcon v-if="noReplies" name="check" :size="14" :stroke="2.25" class="algo-sheet__check" />
               </label>
             </div>
 
@@ -633,9 +648,9 @@ function removeRecipe() {
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
     &:focus {
-      outline: none;
+      outline: 2px solid var(--neo-focus);
+      outline-offset: 1px;
       border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--neo-accent) 18%, transparent);
     }
   }
 }
@@ -764,11 +779,25 @@ function removeRecipe() {
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
+  // Not color alone: on also gets a ✓ glyph and a heavier border
   &--on {
+    gap: 0.3rem;
+    padding-left: 0.6rem;
     color: var(--neo-text-primary);
     background: color-mix(in srgb, var(--neo-accent) 16%, var(--neo-bg-secondary));
-    border-color: color-mix(in srgb, var(--neo-accent) 45%, var(--neo-border-color));
+    border-color: var(--neo-accent);
+    box-shadow: inset 0 0 0 1px var(--neo-accent);
   }
+
+  // Visually-hidden radio — show its keyboard focus on the pill
+  &:has(input:focus-visible) {
+    outline: 2px solid var(--neo-focus);
+    outline-offset: 2px;
+  }
+}
+
+.algo-sheet__check {
+  flex-shrink: 0;
 }
 
 .algo-sheet__toggles {
@@ -797,10 +826,18 @@ function removeRecipe() {
     pointer-events: none;
   }
 
+  // Not color alone: on also gets a ✓ glyph and a heavier border
   &--on {
     color: var(--neo-text-primary);
     background: color-mix(in srgb, var(--neo-accent) 16%, var(--neo-bg-secondary));
-    border-color: color-mix(in srgb, var(--neo-accent) 45%, var(--neo-border-color));
+    border-color: var(--neo-accent);
+    box-shadow: inset 0 0 0 1px var(--neo-accent);
+  }
+
+  // opacity:0 checkbox — show its keyboard focus on the label
+  &:has(input:focus-visible) {
+    outline: 2px solid var(--neo-focus);
+    outline-offset: 2px;
   }
 }
 

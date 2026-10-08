@@ -157,6 +157,8 @@ function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
 }
 
 let storageListenerBound = false
+/** Coalesces concurrent initialize() callers (layout + notifications cold load, etc.) */
+let initPromise: Promise<void> | null = null
 let storageReloadTimer: ReturnType<typeof setTimeout> | null = null
 
 const INSTANCE_INFO_TTL_MS = 10 * 60_000
@@ -465,8 +467,10 @@ export const useInstancesStore = defineStore('instances', {
             (!!inst.user && !prev.user)
           ) {
             const idx = remoteKept.indexOf(prev)
-            if (idx !== -1) remoteKept[idx] = { ...prev, ...inst, url: prev.url, id: prev.id }
-            seen.set(key, remoteKept[idx]!)
+            if (idx !== -1) {
+              remoteKept[idx] = { ...prev, ...inst, url: prev.url, id: prev.id }
+              seen.set(key, remoteKept[idx]!)
+            }
           }
         }
 
@@ -505,13 +509,13 @@ export const useInstancesStore = defineStore('instances', {
           this.activeInstanceFilter = null
         }
 
-        if (remoteActive && this.instances.some((i) => i.id === remoteActive)) {
-          this.activeAccountId = remoteActive
-        } else if (
-          this.activeAccountId &&
-          !this.instances.some((i) => i.id === this.activeAccountId)
-        ) {
-          this.activeAccountId = null
+        // Active account is per-tab: another tab switching accounts must not
+        // yank this tab's columns over. Only adopt the remote one if ours is gone.
+        const localActiveKept =
+          !!this.activeAccountId && this.instances.some((i) => i.id === this.activeAccountId)
+        if (!localActiveKept) {
+          this.activeAccountId =
+            remoteActive && this.instances.some((i) => i.id === remoteActive) ? remoteActive : null
         }
 
         if (remotePrimary && this.instances.some((i) => i.id === remotePrimary)) {
@@ -1006,37 +1010,44 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
+    /** Refresh cached server limits/branding for one account (non-fatal, not awaited at startup). */
+    async refreshInstanceInfo(instanceId: string, client: mastodon.rest.Client) {
+      try {
+        const info = await client.v2.instance.fetch()
+        // Look up again — the list may have been replaced (storage merge) meanwhile
+        const instance = this.instances.find((i) => i.id === instanceId)
+        if (!instance) return
+        instance.instanceInfo = {
+          ...(instance.instanceInfo || {}),
+          title: info.title || instance.instanceInfo?.title,
+          thumbnail: info.thumbnail?.url || instance.instanceInfo?.thumbnail,
+          description: info.description || instance.instanceInfo?.description,
+          maxCharacters: info.configuration?.statuses?.maxCharacters,
+          maxMediaAttachments: info.configuration?.statuses?.maxMediaAttachments,
+          maxProfileFields: info.configuration?.accounts?.maxProfileFields,
+          imageSizeLimit: info.configuration?.mediaAttachments?.imageSizeLimit,
+          videoSizeLimit: info.configuration?.mediaAttachments?.videoSizeLimit,
+          mediaDescriptionLimit: (
+            info.configuration?.mediaAttachments as { descriptionLimit?: number } | undefined
+          )?.descriptionLimit,
+        }
+        this.saveToStorage()
+      } catch (e) {
+        logWarn(`Instance info refresh failed for ${instanceId}:`, e)
+      }
+    },
+
     async verifyAllInstances() {
       const promises = this.instances
         .filter((i) => i.accessToken)
         .map(async (instance) => {
           try {
-            const client = createRestAPIClient({
-              url: instance.url,
-              accessToken: instance.accessToken!,
-            })
+            const client = clientFor(instance.id)
             instance.user = await client.v1.accounts.verifyCredentials()
             instance.error = null
-            // Refresh compose limit when possible (older saved instances may lack it)
-            try {
-              const info = await client.v2.instance.fetch()
-              instance.instanceInfo = {
-                ...(instance.instanceInfo || {}),
-                title: info.title || instance.instanceInfo?.title,
-                thumbnail: info.thumbnail?.url || instance.instanceInfo?.thumbnail,
-                description: info.description || instance.instanceInfo?.description,
-                maxCharacters: info.configuration?.statuses?.maxCharacters,
-                maxMediaAttachments: info.configuration?.statuses?.maxMediaAttachments,
-                maxProfileFields: info.configuration?.accounts?.maxProfileFields,
-                imageSizeLimit: info.configuration?.mediaAttachments?.imageSizeLimit,
-                videoSizeLimit: info.configuration?.mediaAttachments?.videoSizeLimit,
-                mediaDescriptionLimit: (
-            info.configuration?.mediaAttachments as { descriptionLimit?: number } | undefined
-          )?.descriptionLimit,
-              }
-            } catch {
-              /* non-fatal */
-            }
+            // Refresh compose limit when possible (older saved instances may lack it).
+            // Fire-and-forget — startup shouldn't wait on /api/v2/instance.
+            void this.refreshInstanceInfo(instance.id, client)
           } catch (e: any) {
             const status = e?.status ?? e?.statusCode
             if (status === 401 || status === 403) {
@@ -1082,9 +1093,8 @@ export const useInstancesStore = defineStore('instances', {
     async initialize() {
       if (this.isInitialized) return
       // Coalesce concurrent callers (layout + notifications cold load, etc.)
-      const inflight = (this as { _initPromise?: Promise<void> })._initPromise
-      if (inflight) {
-        await inflight
+      if (initPromise) {
+        await initPromise
         return
       }
 
@@ -1141,11 +1151,11 @@ export const useInstancesStore = defineStore('instances', {
         this.isInitialized = true
       })()
 
-      ;(this as { _initPromise?: Promise<void> })._initPromise = run
+      initPromise = run
       try {
         await run
       } finally {
-        delete (this as { _initPromise?: Promise<void> })._initPromise
+        initPromise = null
       }
     },
 
@@ -1280,12 +1290,10 @@ export const useInstancesStore = defineStore('instances', {
         ? [active]
         : this.instances.filter((i) => i.accessToken)
 
+      const failures: unknown[] = []
       const fetchPromises = authInstances.map(async (instance) => {
         try {
-          const client = createRestAPIClient({
-            url: instance.url,
-            accessToken: instance.accessToken!,
-          })
+          const client = clientFor(instance.id)
 
           const cursor = cursors?.[instance.id]
           const statuses = await client.v1.timelines.home.list({
@@ -1300,11 +1308,16 @@ export const useInstancesStore = defineStore('instances', {
           }))
         } catch (e) {
           logWarn(`Failed to fetch home from ${instance.url}:`, e)
+          failures.push(e)
           return []
         }
       })
 
       const results = await Promise.all(fetchPromises)
+      // Every account failed — surface it so the column shows error/retry instead of "empty"
+      if (authInstances.length && failures.length === authInstances.length) {
+        throw failures[0]
+      }
       results.forEach((statuses) => allStatuses.push(...statuses))
 
       allStatuses.sort(
@@ -1320,10 +1333,7 @@ export const useInstancesStore = defineStore('instances', {
       if (!active?.accessToken) {
         throw new Error('Sign in to view liked posts')
       }
-      const client = createRestAPIClient({
-        url: active.url,
-        accessToken: active.accessToken,
-      })
+      const client = clientFor(active.id)
       const statuses = await client.v1.favourites.list({
         limit,
         ...(maxId ? { maxId } : {}),
@@ -1341,10 +1351,7 @@ export const useInstancesStore = defineStore('instances', {
       if (!active?.accessToken) {
         throw new Error('Sign in to view saved posts')
       }
-      const client = createRestAPIClient({
-        url: active.url,
-        accessToken: active.accessToken,
-      })
+      const client = clientFor(active.id)
       const statuses = await client.v1.bookmarks.list({
         limit,
         ...(maxId ? { maxId } : {}),

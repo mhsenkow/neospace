@@ -1,5 +1,11 @@
+<script lang="ts">
+/** L-system expansions are deterministic per rule/iteration — expand once per app. */
+const expansionCache = new Map<string, string>()
+</script>
+
 <script setup lang="ts">
 import { subscribeSharedRaf } from '~/utils/sharedRaf'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 /**
  * Square-mark L-system branching pulse — inspired by
@@ -82,6 +88,10 @@ let run: RunConfig = {
   headSize: 3.6,
 }
 let resizeObserver: ResizeObserver | null = null
+let intersectionObserver: IntersectionObserver | null = null
+/** Off-screen loaders (other columns, scrolled away) don't need frames. */
+let inView = true
+let mounted = false
 
 const MAX_SEGMENTS = 2800
 
@@ -164,7 +174,12 @@ const parseToSegments = (
 }
 
 const buildSegments = (cfg: RunConfig) => {
-  const instructions = expandCapped('F', { F: cfg.rule, '+': '+', '-': '-' }, cfg.iterations)
+  const key = `${cfg.rule}|${cfg.iterations}`
+  let instructions = expansionCache.get(key)
+  if (instructions === undefined) {
+    instructions = expandCapped('F', { F: cfg.rule, '+': '+', '-': '-' }, cfg.iterations)
+    expansionCache.set(key, instructions)
+  }
   return parseToSegments(instructions, cfg.angle, cfg.step, cfg.startDir)
 }
 
@@ -208,11 +223,8 @@ const inkColor = () => {
   return getComputedStyle(el).color || 'currentColor'
 }
 
-const prefersReducedMotion = () => {
-  if (typeof window === 'undefined') return false
-  if (document.documentElement.classList.contains('reduce-motion')) return true
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
+const reducedMotion = usePrefersReducedMotion()
+const prefersReducedMotion = () => reducedMotion.value
 
 const drawFrame = (ctx: CanvasRenderingContext2D, size: number, t: number) => {
   const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
@@ -322,12 +334,32 @@ const onSharedFrame = (now: number) => {
   if (ctx) drawFrame(ctx, renderSize.value, now - start)
 }
 
+const drawStill = () => {
+  const canvas = canvasRef.value
+  const ctx = canvas?.getContext('2d')
+  if (ctx) drawFrame(ctx, renderSize.value, 0)
+}
+
+/** Run the shared frame loop only while visible, on-screen and motion is allowed. */
+const syncLoop = () => {
+  const shouldRun =
+    mounted &&
+    inView &&
+    !prefersReducedMotion() &&
+    !(typeof document !== 'undefined' && document.hidden)
+  if (shouldRun && !unsubRaf) {
+    unsubRaf = subscribeSharedRaf(onSharedFrame)
+  } else if (!shouldRun && unsubRaf) {
+    unsubRaf()
+    unsubRaf = null
+  }
+}
+
 const onVis = () => {
+  syncLoop()
   if (document.hidden) return
   if (prefersReducedMotion()) {
-    const canvas = canvasRef.value
-    const ctx = canvas?.getContext('2d')
-    if (ctx) drawFrame(ctx, renderSize.value, 0)
+    drawStill()
     return
   }
   start = performance.now()
@@ -382,21 +414,35 @@ onMounted(() => {
   }
 
   start = 0
-  if (prefersReducedMotion()) {
-    const canvas = canvasRef.value
-    const ctx = canvas?.getContext('2d')
-    if (ctx) drawFrame(ctx, renderSize.value, 0)
-  } else {
-    unsubRaf = subscribeSharedRaf(onSharedFrame)
+  mounted = true
+  if (prefersReducedMotion()) drawStill()
+  syncLoop()
+  if (typeof IntersectionObserver !== 'undefined' && rootRef.value) {
+    intersectionObserver = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1]
+      if (!entry) return
+      inView = entry.isIntersecting
+      syncLoop()
+    })
+    intersectionObserver.observe(rootRef.value)
   }
   document.addEventListener('visibilitychange', onVis)
 })
 
+watch(reducedMotion, (reduced) => {
+  if (!mounted) return
+  if (reduced) drawStill()
+  syncLoop()
+})
+
 onUnmounted(() => {
+  mounted = false
   unsubRaf?.()
   unsubRaf = null
   resizeObserver?.disconnect()
   resizeObserver = null
+  intersectionObserver?.disconnect()
+  intersectionObserver = null
   document.removeEventListener('visibilitychange', onVis)
 })
 

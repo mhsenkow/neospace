@@ -59,7 +59,7 @@ useFocusTrap(dialogRef, isOpen, {
 .neo-confirm-root {
   position: fixed;
   inset: 0;
-  z-index: var(--neo-z-modal);
+  z-index: var(--neo-z-dialog-top, 1065);
   display: flex;
   align-items: center;
   justify-content: center;

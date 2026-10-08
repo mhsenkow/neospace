@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
-import { activeClient, publicClient } from '~/composables/useMasto'
+import { activeClient, activeCredentials, publicClient } from '~/composables/useMasto'
 import { hostnameOf } from '~/utils/instances'
 
 /** Per-account LRU for resolve=true status lookups (thread poll / actions). */
@@ -66,19 +66,21 @@ export const useStatusStore = defineStore('status', {
         typeof crypto !== 'undefined' && crypto.randomUUID
           ? crypto.randomUUID()
           : `neo-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      const params: Record<string, unknown> = {
-        status: text || undefined,
+      const base: mastodon.rest.v1.CreateStatusParamsBase = {
         visibility: options.visibility || 'public',
         spoilerText: options.spoilerText,
         inReplyToId: options.inReplyToId,
         sensitive: options.sensitive,
+        ...(options.language ? { language: options.language } : {}),
+        ...(options.quotedStatusId ? { quotedStatusId: options.quotedStatusId } : {}),
       }
-      if (mediaIds.length) params.mediaIds = mediaIds
-      if (options.language) params.language = options.language
-      if (options.quotedStatusId) params.quotedStatusId = options.quotedStatusId
-      return await client.v1.statuses.create(params as any, {
-        headers: { 'Idempotency-Key': idempotencyKey },
-      } as any)
+      const params: mastodon.rest.v1.CreateStatusParams = mediaIds.length
+        ? { ...base, status: text || undefined, mediaIds }
+        : { ...base, status: text }
+      // masto v7 only forwards headers via meta.requestInit
+      return await client.v1.statuses.create(params, {
+        requestInit: { headers: { 'Idempotency-Key': idempotencyKey } },
+      })
     },
 
     /**
@@ -93,9 +95,9 @@ export const useStatusStore = defineStore('status', {
       opts?: { signal?: AbortSignal; timeoutMs?: number },
     ): Promise<mastodon.v1.MediaAttachment> {
       const instances = useInstancesStore()
-      if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
-        throw new Error('Not authenticated')
-      }
+      if (!instances.isAuthenticated) throw new Error('Not authenticated')
+      // Same account postStatus() will use (honors the read-account override)
+      const creds = activeCredentials()
 
       const named =
         file instanceof File
@@ -112,9 +114,9 @@ export const useStatusStore = defineStore('status', {
       const timeoutMs = opts?.timeoutMs ?? 25_000
       const timer = window.setTimeout(() => controller.abort(), timeoutMs)
       try {
-        const res = await fetch(`${instances.instanceUrl}/api/v2/media`, {
+        const res = await fetch(`${creds.url}/api/v2/media`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${instances.accessToken}` },
+          headers: { Authorization: `Bearer ${creds.accessToken}` },
           body: form,
           signal: controller.signal,
         })
@@ -155,14 +157,13 @@ export const useStatusStore = defineStore('status', {
 
     async deleteStatus(statusId: string): Promise<void> {
       const instances = useInstancesStore()
-      if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
-        throw new Error('Not authenticated')
-      }
+      if (!instances.isAuthenticated) throw new Error('Not authenticated')
+      const creds = activeCredentials()
       const res = await fetch(
-        `${instances.instanceUrl}/api/v1/statuses/${encodeURIComponent(statusId)}`,
+        `${creds.url}/api/v1/statuses/${encodeURIComponent(statusId)}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${instances.accessToken}` },
+          headers: { Authorization: `Bearer ${creds.accessToken}` },
         },
       )
       if (!res.ok) {
@@ -173,14 +174,13 @@ export const useStatusStore = defineStore('status', {
     /** Update alt text after upload (Mastodon PUT /api/v1/media/:id). */
     async updateMediaDescription(mediaId: string, description: string): Promise<void> {
       const instances = useInstancesStore()
-      if (!instances.isAuthenticated || !instances.instanceUrl || !instances.accessToken) {
-        throw new Error('Not authenticated')
-      }
+      if (!instances.isAuthenticated) throw new Error('Not authenticated')
+      const creds = activeCredentials()
       const form = new FormData()
       form.append('description', description)
-      const res = await fetch(`${instances.instanceUrl}/api/v1/media/${encodeURIComponent(mediaId)}`, {
+      const res = await fetch(`${creds.url}/api/v1/media/${encodeURIComponent(mediaId)}`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${instances.accessToken}` },
+        headers: { Authorization: `Bearer ${creds.accessToken}` },
         body: form,
       })
       if (!res.ok) {

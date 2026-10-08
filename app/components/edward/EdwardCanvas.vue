@@ -15,6 +15,7 @@ import {
   type EdwardFaceMood,
 } from '~/utils/edwardFaces'
 import { dialectForHost, paintServerDialect } from '~/utils/edwardServers'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const emit = defineEmits<{
   pick: [identity: string]
@@ -142,7 +143,12 @@ const fittedDist = () => {
 /** Soft edge bands — L/R rails + thin T/B */
 const EDGE_X = 0.13
 const EDGE_Y = 0.11
-let reducedMotion = false
+/** OS setting OR in-app html.reduce-motion — kept live for the frame loop */
+const prefersReducedMotion = usePrefersReducedMotion()
+let reducedMotion = prefersReducedMotion.value
+watch(prefersReducedMotion, (v) => {
+  reducedMotion = v
+})
 let balls: BallRuntime[] = []
 let identityToBall = new Map<string, BallRuntime>()
 let clockStart = 0
@@ -549,14 +555,17 @@ const integrateBubblePhysics = (t: number, dt: number) => {
   if (!n) return
   physicsTick++
 
+  // Reduced motion: a still field — no rising, no drift. Bubbles settle into
+  // their lane; ones spawned off-stage get a fixed slot. Only user scrubs move them.
   if (reducedMotion) {
     for (const b of balls) {
       b.x += (b.homeX - b.x) * 0.12
       b.z += (b.homeZ - b.z) * 0.12
-      b.y += b.speed * dt * 0.55
-      if (b.y > STREAM_TOP + 2) {
-        b.y = STREAM_BOTTOM - hash01(b.identity + String(Math.floor(t))) * 2
-        b.vy = 0.4
+      b.vx = 0
+      b.vy = 0
+      b.vz = 0
+      if (b.y < STREAM_BOTTOM || b.y > STREAM_TOP) {
+        b.y = STREAM_BOTTOM + 1 + hash01(b.identity + ':still') * (STREAM_SPAN - 2)
       }
     }
     return
@@ -1351,9 +1360,7 @@ const init = async () => {
   THREE = await import('three')
   if (disposed || !hostEl.value) return
 
-  reducedMotion =
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  reducedMotion = prefersReducedMotion.value
 
   const w = hostEl.value.clientWidth
   const h = hostEl.value.clientHeight

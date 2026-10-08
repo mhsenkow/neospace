@@ -154,19 +154,16 @@ onUnmounted(() => clear())
         aria-autocomplete="list"
         aria-controls="recipient-picker-list"
         :aria-expanded="displayAccounts.length > 0"
+        :aria-activedescendant="listIndex >= 0 ? `recipient-option-${listIndex}` : undefined"
         @keydown="onListKeydown"
       />
     </div>
 
     <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ statusAnnounce }}</p>
 
-    <div
-      id="recipient-picker-list"
-      ref="listRef"
-      class="recipient-picker__list"
-      role="listbox"
-      aria-label="People"
-    >
+    <div ref="listRef" class="recipient-picker__list">
+      <!-- Status / empty / error copy sits outside the listbox (options only inside);
+           the sr-only status above announces it -->
       <p v-if="followingError" class="recipient-picker__status">
         {{ followingError }}
         <button type="button" class="recipient-picker__retry" @click="retryFollowing">Retry</button>
@@ -192,23 +189,27 @@ onUnmounted(() => clear())
         </p>
       </template>
 
-      <button
-        v-for="(account, index) in displayAccounts"
-        :key="account.id"
-        type="button"
-        class="recipient-picker__row"
-        role="option"
-        :aria-selected="listIndex === index"
-        :data-active="listIndex === index ? 'true' : undefined"
-        @click="pick(account)"
-        @mouseenter="listIndex = index"
-      >
-        <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
-        <span class="recipient-picker__meta">
-          <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
-          <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
-        </span>
-      </button>
+      <div id="recipient-picker-list" role="listbox" aria-label="People">
+        <button
+          v-for="(account, index) in displayAccounts"
+          :id="`recipient-option-${index}`"
+          :key="account.id"
+          type="button"
+          tabindex="-1"
+          class="recipient-picker__row"
+          role="option"
+          :aria-selected="listIndex === index"
+          :data-active="listIndex === index ? 'true' : undefined"
+          @click="pick(account)"
+          @mouseenter="listIndex = index"
+        >
+          <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
+          <span class="recipient-picker__meta">
+            <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
+            <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
+          </span>
+        </button>
+      </div>
     </div>
   </div>
 </template>

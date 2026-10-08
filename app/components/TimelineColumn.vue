@@ -25,6 +25,8 @@ import { httpStatusFrom, mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
 import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
 import { emitComposedStatus, onComposedStatus } from '~/composables/useComposedStatus'
+import { useDeskViewport, useMobileViewport } from '~/composables/useBreakpoint'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
 const withBrowseOrigin = (
@@ -93,12 +95,18 @@ const loadAlgorithmPage = async (limit = 20, continueFrom?: string | null) => {
       exhausted = true
       break
     }
-    for (const s of page) {
+    let scannedAll = true
+    for (let i = 0; i < page.length; i++) {
+      const s = page[i]!
+      // Cursor = last status actually scanned, so a mid-page stop doesn't skip the rest
+      cursor = s.id
       if (statusMatchesRecipe(s, recipe)) collected.push(s)
-      if (collected.length >= limit) break
+      if (collected.length >= limit) {
+        scannedAll = i === page.length - 1
+        break
+      }
     }
-    cursor = page.at(-1)!.id
-    if (page.length < 20) {
+    if (scannedAll && page.length < 20) {
       exhausted = true
       break
     }
@@ -122,6 +130,8 @@ interface Props {
    */
   recessed?: boolean
   focused?: boolean
+  /** Column is mounted but hidden (desktop focus mode) — stop polling until shown */
+  paused?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -131,20 +141,11 @@ const props = withDefaults(defineProps<Props>(), {
   dragging: false,
   recessed: false,
   focused: false,
+  paused: false,
 })
 
 /** Desktop-only inline compose — mobile uses the + sheet (avoids stealing Loom handoff) */
-const isDesktop = ref(false)
-onMounted(() => {
-  if (typeof window === 'undefined') return
-  const mq = window.matchMedia('(min-width: 1024px)')
-  const sync = () => {
-    isDesktop.value = mq.matches
-  }
-  sync()
-  mq.addEventListener('change', sync)
-  onUnmounted(() => mq.removeEventListener('change', sync))
-})
+const isDesktop = useDeskViewport()
 
 /** Flip = full-bleed snap — mobile only */
 const isFlip = computed(
@@ -214,7 +215,11 @@ const columnsStore = useColumnsStore()
 const algorithmsStore = useAlgorithmsStore()
 algorithmsStore.hydrate()
 
-const statuses = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
+/**
+ * Shallow: only whole-array replacements trigger. Cards make their own status
+ * reactive (RealPostCard) so optimistic like/boost/bookmark still re-render.
+ */
+const statuses = shallowRef<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isLoading = ref(false)
 const isLoadingMore = ref(false)
 const isPolling = ref(false)
@@ -237,12 +242,16 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const loadTrigger = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollStartTimer: ReturnType<typeof setTimeout> | null = null
+let catchUpTimer: ReturnType<typeof setTimeout> | null = null
+/** False while a keep-alive parent has this column deactivated */
+let isActive = true
 let pullStartY = 0
 let pullListening = false
 let flipRo: ResizeObserver | null = null
 
 /** Newer posts waiting while you read (never auto-jump) */
-const pendingNew = ref<(mastodon.v1.Status | ExtendedStatus)[]>([])
+const pendingNew = shallowRef<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isNearTop = ref(true)
 const toastStore = useToastStore()
 
@@ -251,8 +260,11 @@ const pullDistance = ref(0)
 const isRefreshing = ref(false)
 const PTR_THRESHOLD = 64
 
-const isMobileViewport = () =>
-  typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
+const isMobileRef = useMobileViewport()
+const isMobileViewport = () => isMobileRef.value
+const reducedMotion = usePrefersReducedMotion()
+/** Smooth JS scrolling unless the reader asked for less motion */
+const scrollBehavior = (): ScrollBehavior => (reducedMotion.value ? 'auto' : 'smooth')
 
 const pendingLabel = computed(() => {
   const n = pendingNew.value.length
@@ -439,24 +451,31 @@ const switchFeed = (type: ColumnFeedType, feedParam?: string) => {
   emit('update-feed-type', type, feedParam)
 }
 
-/** Animate TransitionGroup only for short prepend windows (not full refresh). */
-const listMotionActive = ref(false)
+/**
+ * Enter motion only for short prepend windows (not full refresh). A plain
+ * keyed v-for plus a class on just-prepended cards — TransitionGroup would
+ * measure every card (getBoundingClientRect) on every list update.
+ */
+const enteringKeys = shallowRef<ReadonlySet<string>>(new Set())
 let listMotionTimer: ReturnType<typeof setTimeout> | null = null
 
-const preferReducedMotion = () =>
-  typeof window !== 'undefined' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
 const withPrependMotion = (fn: () => void) => {
-  if (preferReducedMotion()) {
+  if (reducedMotion.value) {
     fn()
     return
   }
-  listMotionActive.value = true
-  if (listMotionTimer) clearTimeout(listMotionTimer)
+  const before = new Set(statuses.value.map((s) => statusListKey(s)))
   fn()
+  const added = new Set<string>()
+  for (const s of statuses.value) {
+    const key = statusListKey(s)
+    if (!before.has(key)) added.add(key)
+  }
+  if (!added.size) return
+  enteringKeys.value = added
+  if (listMotionTimer) clearTimeout(listMotionTimer)
   listMotionTimer = setTimeout(() => {
-    listMotionActive.value = false
+    enteringKeys.value = new Set()
     listMotionTimer = null
   }, 280)
 }
@@ -486,6 +505,7 @@ const insertComposedStatus = (status: mastodon.v1.Status) => {
   withPrependMotion(() => {
     statuses.value = dedupeStatusesByIdentity([status, ...statuses.value])
   })
+  trimTailIfNearTop()
   pendingNew.value = pendingNew.value.filter((s) => statusIdentity(s) !== key)
 }
 
@@ -531,7 +551,10 @@ const onPullEnd = async () => {
   isRefreshing.value = true
   try {
     // Soft refresh — keep current posts visible until the new page lands
-    const fresh = await fetchFreshPage()
+    const gen = fetchGen
+    const fresh = await fetchFreshPage(gen)
+    // A feed/account switch landed meanwhile — this page belongs to the old feed
+    if (gen !== fetchGen) return
     if (fresh.length) {
       statuses.value = fresh
       maxId.value = fresh.at(-1)?.id ?? null
@@ -568,7 +591,7 @@ const onFeedTitleClick = () => {
   if (pendingNew.value.length) {
     jumpToNew()
   } else {
-    scrollContainer.value.scrollTo({ top: 0, behavior: 'smooth' })
+    scrollContainer.value.scrollTo({ top: 0, behavior: scrollBehavior() })
   }
 }
 
@@ -608,16 +631,42 @@ const jumpToNew = () => {
     withPrependMotion(() => {
       statuses.value = dedupeStatusesByIdentity([...unique, ...statuses.value])
     })
+    trimTailIfNearTop()
   }
   pendingNew.value = []
   newPostsAnnounce.value = ''
-  scrollContainer.value?.scrollTo({ top: 0, behavior: 'smooth' })
+  scrollContainer.value?.scrollTo({ top: 0, behavior: scrollBehavior() })
   nextTick(() => {
     const first = scrollContainer.value?.querySelector(
       'article.status-card, article[tabindex]',
     ) as HTMLElement | null
     first?.focus?.()
   })
+}
+
+/**
+ * Cap the column so a long session doesn't grow the DOM forever. Only trims
+ * the oldest tail, and only while the reader is at the top (tail is far
+ * off-screen); loadMore never trims. Cursors move to the new tail so
+ * scrolling down refetches what was dropped.
+ */
+const MAX_FEED_STATUSES = 400
+
+const trimTailIfNearTop = () => {
+  if (!isNearTop.value || statuses.value.length <= MAX_FEED_STATUSES) return
+  // Algorithm cursors track the source timeline, not the shown tail — leave those alone
+  if (props.column.feedType === 'algorithm') return
+  const kept = statuses.value.slice(0, MAX_FEED_STATUSES)
+  statuses.value = kept
+  maxId.value = kept.at(-1)?.id ?? null
+  if (
+    props.column.feedType === 'home' ||
+    props.column.feedType === 'local' ||
+    props.column.feedType === 'federated'
+  ) {
+    seedFeedCursors(kept)
+  }
+  hasMore.value = true
 }
 
 const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
@@ -636,6 +685,7 @@ const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
     withPrependMotion(() => {
       statuses.value = dedupeStatusesByIdentity([...newer, ...statuses.value])
     })
+    trimTailIfNearTop()
   } else {
     pendingNew.value = dedupeStatusesByIdentity([...newer, ...pendingNew.value]).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -643,7 +693,10 @@ const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
   }
 }
 
-const loadTimelinePage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+/** `gen`: the fetchGen this load belongs to — stale loads don't touch paging state. */
+const loadTimelinePage = async (
+  gen = fetchGen,
+): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
   if (props.column.feedType === 'group' && props.column.groupTag) {
     return await fetchGroupPage(props.column.groupTag)
   }
@@ -655,8 +708,10 @@ const loadTimelinePage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)
   }
   if (props.column.feedType === 'algorithm') {
     const page = await loadAlgorithmPage(20, null)
-    algoSourceCursor.value = page.nextCursor
-    hasMore.value = !page.exhausted && !!page.nextCursor
+    if (gen === fetchGen) {
+      algoSourceCursor.value = page.nextCursor
+      hasMore.value = !page.exhausted && !!page.nextCursor
+    }
     return page.statuses
   }
   if (props.column.feedType === 'home') {
@@ -678,7 +733,7 @@ const loadTimelinePage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)
   )
 }
 
-const fetchFreshPage = () => loadTimelinePage()
+const fetchFreshPage = (gen = fetchGen) => loadTimelinePage(gen)
 
 const displayStatuses = computed(() => {
   const list = statuses.value
@@ -687,6 +742,14 @@ const displayStatuses = computed(() => {
   }
   return list
 })
+
+/** Keys computed once per list change, not on every column re-render (pull-to-refresh, etc.) */
+const displayRows = computed(() =>
+  displayStatuses.value.map((status) => ({ status, key: statusListKey(status) })),
+)
+
+/** role="feed" articles: total is unknown (-1) while more pages can load */
+const feedSetSize = computed(() => (hasMore.value ? -1 : displayStatuses.value.length))
 
 /** Fetch only posts newer than the current top (since_id) — avoids re-downloading the full page. */
 const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
@@ -752,9 +815,16 @@ const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]>
 /** Recessed only pauses polling on mobile (one visible column); desktop multi-col keeps all live */
 const pauseForRecess = () => props.recessed && isMobileViewport()
 
+/** Polling only while shown, active, unrecessed and the tab is visible */
+const canPoll = () =>
+  isActive &&
+  !props.paused &&
+  !pauseForRecess() &&
+  !(typeof document !== 'undefined' && document.hidden)
+
 const pollForNew = async () => {
   if (
-    pauseForRecess() ||
+    !canPoll() ||
     isLoading.value ||
     isLoadingMore.value ||
     isPolling.value ||
@@ -764,8 +834,11 @@ const pollForNew = async () => {
     return
   }
   isPolling.value = true
+  const gen = fetchGen
   try {
     const fresh = await fetchNewSince()
+    // Feed / account switched mid-poll — these posts belong to the old feed
+    if (gen !== fetchGen) return
     mergeIncoming(fresh)
   } catch {
     // quiet — polling failures shouldn't interrupt reading
@@ -774,18 +847,43 @@ const pollForNew = async () => {
   }
 }
 
+const POLL_INTERVAL_MS = 45_000
+/** Spread columns' poll phases so a board doesn't hit the API in lockstep */
+const POLL_START_JITTER_MS = 8000
+const CATCH_UP_JITTER_MS = 3000
+
 const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  if (pollStartTimer) {
+    clearTimeout(pollStartTimer)
+    pollStartTimer = null
+  }
+  if (catchUpTimer) {
+    clearTimeout(catchUpTimer)
+    catchUpTimer = null
+  }
 }
 
 const startPolling = () => {
   stopPolling()
-  if (pauseForRecess()) return
-  if (typeof document !== 'undefined' && document.hidden) return
-  pollTimer = setInterval(pollForNew, 45000)
+  if (!canPoll()) return
+  pollStartTimer = setTimeout(() => {
+    pollStartTimer = null
+    pollTimer = setInterval(pollForNew, POLL_INTERVAL_MS)
+  }, Math.round(Math.random() * POLL_START_JITTER_MS))
+}
+
+/** Restart polling plus one jittered catch-up poll (tab return, column shown again). */
+const resumePolling = () => {
+  startPolling()
+  if (!canPoll()) return
+  catchUpTimer = setTimeout(() => {
+    catchUpTimer = null
+    void pollForNew()
+  }, Math.round(Math.random() * CATCH_UP_JITTER_MS))
 }
 
 const onVisibilityChange = () => {
@@ -793,15 +891,22 @@ const onVisibilityChange = () => {
     stopPolling()
     return
   }
-  void pollForNew()
-  startPolling()
+  resumePolling()
 }
 
 watch(
-  () => props.recessed,
-  () => {
-    if (pauseForRecess()) stopPolling()
+  () => pauseForRecess(),
+  (recess) => {
+    if (recess) stopPolling()
     else startPolling()
+  },
+)
+
+watch(
+  () => props.paused,
+  (paused) => {
+    if (paused) stopPolling()
+    else resumePolling()
   },
 )
 
@@ -840,6 +945,8 @@ const scheduleAutoRetry = (err: unknown) => {
 const fetchTimeline = async (refresh = false) => {
   cancelAutoRetry()
   const gen = ++fetchGen
+  // An in-flight loadMore from the previous generation won't clear this itself
+  isLoadingMore.value = false
   if (refresh) {
     // Keep existing posts visible until the new page lands — avoids blank Federated
     // when a newer fetch aborts an in-flight one (init + account/filter watches).
@@ -872,7 +979,7 @@ const fetchTimeline = async (refresh = false) => {
       )
     }
 
-    result = await loadTimelinePage()
+    result = await loadTimelinePage(gen)
     if (
       gen === fetchGen &&
       (props.column.feedType === 'home' ||
@@ -1099,10 +1206,12 @@ onMounted(() => {
 })
 
 onActivated(() => {
+  isActive = true
   startPolling()
 })
 
 onDeactivated(() => {
+  isActive = false
   stopPolling()
 })
 
@@ -1201,7 +1310,7 @@ onUnmounted(() => {
               :disabled="!canShowHome"
               @click="switchFeed('home')"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
               </svg>
               For You
@@ -1215,7 +1324,7 @@ onUnmounted(() => {
               @click.stop="algorithmsExpanded = !algorithmsExpanded"
             >
               <span>Algorithms</span>
-              <svg :class="{ rotated: algorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <svg :class="{ rotated: algorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
@@ -1228,7 +1337,7 @@ onUnmounted(() => {
                 :class="{ 'feed-dropdown__item--active': column.feedType === 'local' }"
                 @click="switchFeed('local')"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="2" y1="12" x2="22" y2="12" />
                   <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
@@ -1243,7 +1352,7 @@ onUnmounted(() => {
                 :class="{ 'feed-dropdown__item--active': column.feedType === 'federated' }"
                 @click="switchFeed('federated')"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                   <circle cx="12" cy="12" r="10" />
                   <path d="M2 12h20" />
                   <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
@@ -1321,7 +1430,7 @@ onUnmounted(() => {
                 @click.stop="groupsExpanded = !groupsExpanded"
               >
                 <span>Groups</span>
-                <svg :class="{ rotated: groupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <svg :class="{ rotated: groupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
@@ -1345,12 +1454,13 @@ onUnmounted(() => {
             <div class="feed-dropdown__divider" role="separator" />
             <button
               type="button"
-              role="menuitem"
+              role="menuitemradio"
+              :aria-checked="column.feedType === 'search'"
               class="feed-dropdown__item"
               :class="{ 'feed-dropdown__item--active': column.feedType === 'search' }"
               @click="switchFeed('search')"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <circle cx="11" cy="11" r="8" />
                 <path d="M21 21l-4.35-4.35" />
               </svg>
@@ -1358,12 +1468,13 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              role="menuitem"
+              role="menuitemradio"
+              :aria-checked="column.feedType === 'profile'"
               class="feed-dropdown__item"
               :class="{ 'feed-dropdown__item--active': column.feedType === 'profile' }"
               @click="switchFeed('profile')"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
                 <circle cx="12" cy="7" r="4" />
               </svg>
@@ -1372,12 +1483,13 @@ onUnmounted(() => {
             <button
               v-if="canShowHome"
               type="button"
-              role="menuitem"
+              role="menuitemradio"
+              :aria-checked="column.feedType === 'notifications'"
               class="feed-dropdown__item"
               :class="{ 'feed-dropdown__item--active': column.feedType === 'notifications' }"
               @click="switchFeed('notifications')"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 01-3.46 0" />
               </svg>
@@ -1386,12 +1498,13 @@ onUnmounted(() => {
             <button
               v-if="canShowHome"
               type="button"
-              role="menuitem"
+              role="menuitemradio"
+              :aria-checked="column.feedType === 'messages'"
               class="feed-dropdown__item"
               :class="{ 'feed-dropdown__item--active': column.feedType === 'messages' }"
               @click="switchFeed('messages')"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
               </svg>
               Messages
@@ -1403,7 +1516,7 @@ onUnmounted(() => {
               class="feed-dropdown__item feed-dropdown__item--link"
               @click="feedMenuOpen = false"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
                 <path d="M23 21v-2a4 4 0 00-3-3.87" />
@@ -1425,7 +1538,7 @@ onUnmounted(() => {
           @pointerdown.stop
           @click.stop="emit('move-left')"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
@@ -1438,7 +1551,7 @@ onUnmounted(() => {
           @pointerdown.stop
           @click.stop="emit('move-right')"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <polyline points="9 18 15 12 9 6" />
           </svg>
         </button>
@@ -1454,7 +1567,7 @@ onUnmounted(() => {
         @pointerdown.stop
         @click.stop="emit('focus')"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <polyline points="15 3 21 3 21 9" />
           <polyline points="9 21 3 21 3 15" />
           <line x1="21" y1="3" x2="14" y2="10" />
@@ -1471,7 +1584,7 @@ onUnmounted(() => {
         @pointerdown.stop
         @click.stop="emit('remove')"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
@@ -1501,7 +1614,7 @@ onUnmounted(() => {
         v-if="isFirst && instancesStore.isAuthenticated && isDesktop"
         class="column-compose"
       >
-        <RealComposeBox
+        <LazyRealComposeBox
           compact
           :accept-handoff="true"
           placeholder="What's new?"
@@ -1555,7 +1668,7 @@ onUnmounted(() => {
 
       <!-- Login prompt for home when not authenticated -->
       <div v-else-if="column.feedType === 'home' && !canShowHome" class="column-state">
-        <span>👋</span>
+        <span aria-hidden="true">👋</span>
         <p class="column-state__title">Home needs a sign-in</p>
         <p>
           You’re browsing as a guest. Sign in with a Mastodon account to see people you follow —
@@ -1599,20 +1712,25 @@ onUnmounted(() => {
       >
         <template v-if="isFlip">
           <RealPostCard
-            v-for="status in displayStatuses"
-            :key="statusListKey(status)"
-            :status="status"
+            v-for="(row, idx) in displayRows"
+            :key="row.key"
+            :status="row.status"
             variant="flip"
             hide-inline-reply
+            :aria-posinset="idx + 1"
+            :aria-setsize="feedSetSize"
           />
         </template>
-        <TransitionGroup v-else name="post-list" :css="listMotionActive">
+        <template v-else>
           <RealPostCard
-            v-for="status in displayStatuses"
-            :key="statusListKey(status)"
-            :status="status"
+            v-for="(row, idx) in displayRows"
+            :key="row.key"
+            :status="row.status"
+            :class="{ 'post-list-enter': enteringKeys.has(row.key) }"
+            :aria-posinset="idx + 1"
+            :aria-setsize="feedSetSize"
           />
-        </TransitionGroup>
+        </template>
 
         <!-- Infinite scroll trigger -->
         <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
@@ -1630,7 +1748,7 @@ onUnmounted(() => {
         </div>
 
         <div v-if="!hasMore && statuses.length > 0 && !isFlip" class="column-end" role="status">
-          <span>&#x2728;</span> All caught up
+          <span aria-hidden="true">&#x2728;</span> All caught up
         </div>
       </div>
     </div>
@@ -2216,27 +2334,21 @@ onUnmounted(() => {
   max-height: 300px;
 }
 
-.post-list-enter-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+// Just-prepended cards (see withPrependMotion) — same feel as the old enter transition
+.post-list-enter {
+  animation: post-list-enter 0.25s ease backwards;
 }
-.post-list-leave-active {
-  position: absolute;
-  left: 0.5rem;
-  right: 0.5rem;
-  transition: opacity 0.2s ease;
-  pointer-events: none;
-}
-.post-list-enter-from {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-.post-list-leave-to {
-  opacity: 0;
+@keyframes post-list-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .post-list-enter-active,
-  .post-list-leave-active,
+  .post-list-enter {
+    animation: none !important;
+  }
   .dropdown-enter-active,
   .dropdown-leave-active,
   .groups-expand-enter-active,

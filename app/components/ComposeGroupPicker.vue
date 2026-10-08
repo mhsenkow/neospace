@@ -3,9 +3,9 @@
  * Threads-style “post to a group” picker — selects a hashtag community.
  */
 
-import { useGroupsStore, type Group } from '~/stores/groups'
+import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
-import { createRaceGuard } from '~/composables/useRace'
+import { useGroupSearch } from '~/composables/useGroupSearch'
 import { useKeyboardViewport } from '~/composables/useKeyboardViewport'
 
 const props = withDefaults(
@@ -26,11 +26,12 @@ const instancesStore = useInstancesStore()
 
 const open = ref(false)
 const query = ref('')
-const searchResults = ref<Group[]>([])
-const isSearching = ref(false)
 const sheetRef = ref<HTMLElement | null>(null)
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-const searchRace = createRaceGuard()
+const {
+  results: searchResults,
+  isSearching,
+  reset: resetSearch,
+} = useGroupSearch(query, { minLength: 2, delayMs: 280 })
 
 const { viewportStyle, onFocusField } = useKeyboardViewport(open, { lockScroll: true })
 
@@ -90,33 +91,8 @@ watch(open, async (isOpen) => {
   }
   if (!isOpen) {
     query.value = ''
-    searchResults.value = []
+    resetSearch()
   }
-})
-
-watch(query, (q) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  const trimmed = q.trim()
-  if (trimmed.length < 2) {
-    searchRace.abort()
-    searchResults.value = []
-    isSearching.value = false
-    return
-  }
-  isSearching.value = true
-  searchTimer = setTimeout(async () => {
-    const ticket = searchRace.next()
-    try {
-      const hits = await groupsStore.searchGroups(trimmed)
-      if (!ticket.isCurrent()) return
-      searchResults.value = hits
-    } catch {
-      if (!ticket.isCurrent()) return
-      searchResults.value = []
-    } finally {
-      if (ticket.isCurrent()) isSearching.value = false
-    }
-  }, 280)
 })
 
 const pick = (tag: string) => {
@@ -145,10 +121,6 @@ const toggle = () => {
   open.value = !open.value
 }
 
-onBeforeUnmount(() => {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchRace.abort()
-})
 </script>
 
 <template>

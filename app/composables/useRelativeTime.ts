@@ -10,6 +10,8 @@ import {
 } from '~/utils/relativeTime'
 
 const now = ref(Date.now())
+/** Skip the mount-time refresh when `now` is this fresh — every bump re-renders all timestamps. */
+const FRESH_MS = 15_000
 let subscribers = 0
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -29,7 +31,8 @@ function maybeStop() {
 export function useRelativeTime() {
   onMounted(() => {
     subscribers += 1
-    now.value = Date.now()
+    const t = Date.now()
+    if (t - now.value > FRESH_MS) now.value = t
     ensureTicking()
   })
 

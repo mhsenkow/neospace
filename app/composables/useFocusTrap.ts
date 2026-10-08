@@ -136,6 +136,12 @@ export function useFocusTrap(
       scrollHeld = true
     }
     await nextTick()
+    // Lazily-mounted dialogs (async chunk under Suspense) can attach their
+    // container after `active` flips — wait briefly (timers, not rAF: rAF
+    // stalls in background tabs).
+    for (let i = 0; i < 20 && locked && !containerRef.value; i++) {
+      await new Promise((r) => setTimeout(r, 16))
+    }
     if (!locked) return
     const root = containerRef.value
     if (!root) return

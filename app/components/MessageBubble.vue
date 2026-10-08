@@ -117,9 +117,11 @@ const speakerLabel = computed(() => {
 const openLightbox = (item: mastodon.v1.MediaAttachment) => {
   const src = item.url || item.previewUrl
   if (!src) return
+  const caption = item.description?.trim() || undefined
   overlay.openLightbox({
     src,
-    alt: item.description?.trim() || 'Image with no description',
+    alt: caption || 'Image with no description',
+    items: [{ src, alt: caption || 'Image with no description', caption }],
   })
 }
 
@@ -215,17 +217,6 @@ onBeforeUnmount(() => {
 
     <div class="msg-bubble__row">
       <div ref="menuRef" class="msg-bubble__stack">
-        <div
-          v-if="menuOpen"
-          class="msg-bubble__menu"
-          role="menu"
-          @click.stop
-        >
-          <button type="button" role="menuitem" @click="copyText">Copy text</button>
-          <button v-if="mine" type="button" role="menuitem" @click="deleteOwn">Delete</button>
-          <button type="button" role="menuitem" @click="openAsPost">Open as post</button>
-        </div>
-
         <button
           v-if="showSpoilerGate"
           ref="cwButtonRef"
@@ -316,16 +307,21 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <button
-        type="button"
+      <!-- Shared APG menu button: focus, arrows, Escape, outside-close -->
+      <NeoMenu
+        v-model:open="menuOpen"
         class="msg-bubble__actions-trigger"
-        aria-label="Message actions"
-        aria-haspopup="menu"
-        :aria-expanded="menuOpen"
-        @click.stop="menuOpen = !menuOpen"
+        label="Message actions"
+        teleport
+        @click.stop
       >
         <NeoIcon name="more" :size="16" :stroke="2" />
-      </button>
+        <template #items>
+          <button type="button" role="menuitem" @click="copyText">Copy text</button>
+          <button v-if="mine" type="button" role="menuitem" @click="deleteOwn">Delete</button>
+          <button type="button" role="menuitem" @click="openAsPost">Open as post</button>
+        </template>
+      </NeoMenu>
     </div>
   </article>
 </template>
@@ -397,63 +393,32 @@ onBeforeUnmount(() => {
     position: relative;
   }
 
-  &__menu {
-    position: absolute;
-    right: 0;
-    bottom: calc(100% + 0.25rem);
-    z-index: 2;
-    display: flex;
-    flex-direction: column;
-    min-width: 9rem;
-    padding: 0.25rem;
-    border-radius: var(--neo-radius-md, 10px);
-    border: 1px solid var(--neo-border-color);
-    background: var(--neo-bg-primary);
-    box-shadow: var(--neo-shadow-md);
-
-    button {
-      padding: 0.45rem 0.65rem;
-      border: none;
-      border-radius: var(--neo-radius-sm, 6px);
-      background: transparent;
-      text-align: left;
-      font: inherit;
-      font-size: 0.8125rem;
-      color: var(--neo-text-primary);
-      cursor: pointer;
-
-      &:hover {
-        background: var(--neo-bg-tertiary);
-      }
-    }
-  }
-
+  // NeoMenu root (class falls through); the button itself is .neo-menu__trigger
   &__actions-trigger {
     flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: 50%;
-    background: transparent;
     color: var(--neo-text-tertiary);
-    cursor: pointer;
     opacity: 0;
+
+    :deep(.neo-menu__trigger) {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+    }
 
     .msg-bubble:hover &,
     .msg-bubble:focus-within &,
-    .msg-bubble--menu &,
-    &:focus-visible {
+    .msg-bubble--menu & {
       opacity: 1;
     }
 
     // Touch has no hover — keep the menu discoverable (long-press still works)
     @media (hover: none), (pointer: coarse) {
-      width: 36px;
-      height: 36px;
       opacity: 0.6;
+
+      :deep(.neo-menu__trigger) {
+        width: 36px;
+        height: 36px;
+      }
     }
   }
 

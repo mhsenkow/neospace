@@ -35,9 +35,14 @@ function createMediaRef(query: string, defaultValue = false) {
     }
   }
 
-  onScopeDispose(unsubscribe)
-
   return { matches, subscribe, unsubscribe }
+}
+
+/** Subscribe for the lifetime of the caller's effect scope (component / store). */
+function track(media: ReturnType<typeof createMediaRef>) {
+  media.subscribe()
+  if (getCurrentScope()) onScopeDispose(media.unsubscribe)
+  return media.matches
 }
 
 const mobileRef = createMediaRef(MOBILE_MQ)
@@ -45,21 +50,17 @@ const deskRef = createMediaRef(DESK_MQ)
 
 /** True at viewport widths ≤1023px (matches shell SCSS breakpoint). */
 export function useMobileViewport() {
-  mobileRef.subscribe()
-  return mobileRef.matches
+  return track(mobileRef)
 }
 
 /** True at viewport widths ≥1024px. */
 export function useDeskViewport() {
-  deskRef.subscribe()
-  return deskRef.matches
+  return track(deskRef)
 }
 
 /** Reactive matchMedia result for an arbitrary media query. */
 export function useMediaQuery(query: string, defaultValue = false) {
-  const media = createMediaRef(query, defaultValue)
-  media.subscribe()
-  return media.matches
+  return track(createMediaRef(query, defaultValue))
 }
 
 export { DESK_MQ, MOBILE_MQ }

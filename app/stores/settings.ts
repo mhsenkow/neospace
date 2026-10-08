@@ -35,6 +35,7 @@ import {
   nextUi,
 } from '~/utils/appearance'
 import { ensureFontsLoaded } from '~/utils/loadFonts'
+import { cursorPage } from '~/utils/linkHeader'
 
 // Settings categories for the sidebar
 export interface SettingsCategory {
@@ -94,6 +95,27 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     icon: 'settings',
     description: 'Account settings and data',
     keywords: ['logout', 'sign out', 'clear', 'data', 'export', 'instance', 'linked', 'accounts'],
+  },
+  {
+    id: 'humans',
+    label: 'Humans first',
+    icon: 'heart',
+    description: 'Why NeoSpace exists — people over farms',
+    keywords: [
+      'human',
+      'humans',
+      'bot',
+      'bots',
+      'intent',
+      'mission',
+      'values',
+      'ai',
+      'reality',
+      'photo',
+      'verify',
+      'proof',
+      'edward',
+    ],
   },
 ]
 
@@ -168,6 +190,40 @@ interface SettingsState {
 }
 
 const MODERATION_PAGE_SIZE = 40
+
+type AppearancePrefs = typeof DEFAULT_APPEARANCE
+
+/** Normalize the appearance subset of stored / imported prefs JSON. */
+function parseAppearance(parsed: Record<string, any>, legacyCompact?: boolean): AppearancePrefs {
+  return {
+    theme: normalizeTheme(parsed.theme),
+    ui: normalizeUi(parsed.ui),
+    font: normalizeFont(parsed.font),
+    fontSize: normalizeFontSize(parsed.fontSize),
+    radius: normalizeRadius(parsed.radius),
+    density: normalizeDensity(parsed.density, legacyCompact),
+    line: normalizeLine(parsed.line),
+    reduceMotion: !!parsed.reduceMotion,
+    customProfileCss: !!parsed.customProfileCss,
+    flipTextAlign: (['left', 'center', 'right'].includes(parsed.flipTextAlign)
+      ? parsed.flipTextAlign
+      : 'center') as AppearancePrefs['flipTextAlign'],
+    flipTextSize: (['reading', 'large', 'display'].includes(parsed.flipTextSize)
+      ? parsed.flipTextSize
+      : 'large') as AppearancePrefs['flipTextSize'],
+  }
+}
+
+/**
+ * Bumped by clearModerationLists (account switch) so privacy-list pages for
+ * the previous account are dropped instead of landing in the new account's lists.
+ */
+let moderationEpoch = 0
+/** Link-header max_id cursors — mute/block rows aren't paged by account id */
+const moderationCursor: { muted: string | null; blocked: string | null } = {
+  muted: null,
+  blocked: null,
+}
 
 const DEFAULT_APPEARANCE: Pick<
   SettingsState['localPreferences'],
@@ -346,24 +402,11 @@ export const useSettingsStore = defineStore('settings', {
               ? (({ v: _v, ...rest }) => rest)(raw)
               : raw
           const vis = parsed.defaultVisibility
+          const appearance = parseAppearance(parsed, !!parsed.compactMode)
           this.localPreferences = {
             ...this.localPreferences,
-            theme: normalizeTheme(parsed.theme),
-            ui: normalizeUi(parsed.ui),
-            font: normalizeFont(parsed.font),
-            fontSize: normalizeFontSize(parsed.fontSize),
-            radius: normalizeRadius(parsed.radius),
-            density: normalizeDensity(parsed.density, !!parsed.compactMode),
-            line: normalizeLine(parsed.line),
-            reduceMotion: !!parsed.reduceMotion,
-            compactMode: normalizeDensity(parsed.density, !!parsed.compactMode) === 'dense',
-            customProfileCss: !!parsed.customProfileCss,
-            flipTextAlign: (['left', 'center', 'right'].includes(parsed.flipTextAlign)
-              ? parsed.flipTextAlign
-              : 'center') as SettingsState['localPreferences']['flipTextAlign'],
-            flipTextSize: (['reading', 'large', 'display'].includes(parsed.flipTextSize)
-              ? parsed.flipTextSize
-              : 'large') as SettingsState['localPreferences']['flipTextSize'],
+            ...appearance,
+            compactMode: appearance.density === 'dense',
             postingDefaultsTouched: !!parsed.postingDefaultsTouched,
             defaultVisibility:
               parsed.postingDefaultsTouched &&
@@ -493,12 +536,23 @@ export const useSettingsStore = defineStore('settings', {
     },
     
     clearModerationLists() {
+      moderationEpoch += 1
+      moderationCursor.muted = null
+      moderationCursor.blocked = null
       this.mutedAccounts = []
       this.blockedAccounts = []
       this.blockedDomains = []
       this.hasMoreMuted = true
       this.hasMoreBlocked = true
+      // In-flight loads for the old account are stale — don't let them block the new one
+      this.isLoadingMuted = false
+      this.isLoadingBlocked = false
       this.pendingModeration = {}
+    },
+
+    /** True while a load started under (epoch, accountId) is still current */
+    isModerationLoadCurrent(epoch: number, accountId: string | null) {
+      return epoch === moderationEpoch && accountId === useInstancesStore().activeAccountId
     },
 
     moderationPendingKey(action: string, id: string) {
@@ -520,17 +574,24 @@ export const useSettingsStore = defineStore('settings', {
      */
     async loadMutedAccounts(opts?: { more?: boolean }) {
       if (this.isLoadingMuted) return
+      if (opts?.more && !moderationCursor.muted) {
+        this.hasMoreMuted = false
+        return
+      }
+      const epoch = moderationEpoch
+      const accountId = useInstancesStore().activeAccountId
       this.isLoadingMuted = true
       try {
         const client = this.getClient()
-        const maxId = opts?.more
-          ? this.mutedAccounts[this.mutedAccounts.length - 1]?.id
-          : undefined
-        const page = await client.v1.mutes.list({
-          limit: MODERATION_PAGE_SIZE,
-          maxId: maxId || undefined,
-        })
-        const items = Array.isArray(page) ? page : []
+        const page = await cursorPage(
+          client.v1.mutes.list.$raw({
+            limit: MODERATION_PAGE_SIZE,
+            maxId: (opts?.more && moderationCursor.muted) || undefined,
+          }),
+        )
+        if (!this.isModerationLoadCurrent(epoch, accountId)) return
+        const items = page.items
+        moderationCursor.muted = page.nextMaxId
         if (opts?.more) {
           const seen = new Set(this.mutedAccounts.map((a) => a.id))
           this.mutedAccounts = [
@@ -540,12 +601,13 @@ export const useSettingsStore = defineStore('settings', {
         } else {
           this.mutedAccounts = items
         }
-        this.hasMoreMuted = items.length >= MODERATION_PAGE_SIZE
+        this.hasMoreMuted = !!page.nextMaxId && items.length > 0
       } catch (e) {
+        if (!this.isModerationLoadCurrent(epoch, accountId)) return
         console.error('Failed to load muted accounts:', e)
         this.error = e instanceof Error ? e.message : 'Failed to load muted accounts'
       } finally {
-        this.isLoadingMuted = false
+        if (epoch === moderationEpoch) this.isLoadingMuted = false
       }
     },
     
@@ -554,17 +616,24 @@ export const useSettingsStore = defineStore('settings', {
      */
     async loadBlockedAccounts(opts?: { more?: boolean }) {
       if (this.isLoadingBlocked) return
+      if (opts?.more && !moderationCursor.blocked) {
+        this.hasMoreBlocked = false
+        return
+      }
+      const epoch = moderationEpoch
+      const accountId = useInstancesStore().activeAccountId
       this.isLoadingBlocked = true
       try {
         const client = this.getClient()
-        const maxId = opts?.more
-          ? this.blockedAccounts[this.blockedAccounts.length - 1]?.id
-          : undefined
-        const page = await client.v1.blocks.list({
-          limit: MODERATION_PAGE_SIZE,
-          maxId: maxId || undefined,
-        })
-        const items = Array.isArray(page) ? page : []
+        const page = await cursorPage(
+          client.v1.blocks.list.$raw({
+            limit: MODERATION_PAGE_SIZE,
+            maxId: (opts?.more && moderationCursor.blocked) || undefined,
+          }),
+        )
+        if (!this.isModerationLoadCurrent(epoch, accountId)) return
+        const items = page.items
+        moderationCursor.blocked = page.nextMaxId
         if (opts?.more) {
           const seen = new Set(this.blockedAccounts.map((a) => a.id))
           this.blockedAccounts = [
@@ -574,12 +643,13 @@ export const useSettingsStore = defineStore('settings', {
         } else {
           this.blockedAccounts = items
         }
-        this.hasMoreBlocked = items.length >= MODERATION_PAGE_SIZE
+        this.hasMoreBlocked = !!page.nextMaxId && items.length > 0
       } catch (e) {
+        if (!this.isModerationLoadCurrent(epoch, accountId)) return
         console.error('Failed to load blocked accounts:', e)
         this.error = e instanceof Error ? e.message : 'Failed to load blocked accounts'
       } finally {
-        this.isLoadingBlocked = false
+        if (epoch === moderationEpoch) this.isLoadingBlocked = false
       }
     },
     
@@ -587,9 +657,13 @@ export const useSettingsStore = defineStore('settings', {
      * Load blocked domains
      */
     async loadBlockedDomains() {
+      const epoch = moderationEpoch
+      const accountId = useInstancesStore().activeAccountId
       try {
         const client = this.getClient()
-        this.blockedDomains = await client.v1.domainBlocks.list()
+        const domains = await client.v1.domainBlocks.list()
+        if (!this.isModerationLoadCurrent(epoch, accountId)) return
+        this.blockedDomains = domains
       } catch (e) {
         console.error('Failed to load blocked domains:', e)
       }
@@ -695,7 +769,7 @@ export const useSettingsStore = defineStore('settings', {
       this.saveLocalPreferences()
 
       // Mastodon accepts source[privacy|sensitive|language] on update_credentials
-      const source: Record<string, string | boolean> = {}
+      const source: Partial<Pick<mastodon.v1.AccountSource, 'privacy' | 'sensitive' | 'language'>> = {}
       if (data.visibility) source.privacy = data.visibility
       if (data.sensitive !== undefined) source.sensitive = data.sensitive
       if (data.language !== undefined) source.language = data.language
@@ -703,7 +777,7 @@ export const useSettingsStore = defineStore('settings', {
       if (Object.keys(source).length) {
         try {
           const client = this.getClient()
-          await client.v1.accounts.updateCredentials({ source } as any)
+          await client.v1.accounts.updateCredentials({ source })
         } catch (e) {
           console.warn('Could not sync posting defaults to server:', e)
         }
@@ -792,23 +866,7 @@ export const useSettingsStore = defineStore('settings', {
     importAppearanceJson(raw: string) {
       const parsed = JSON.parse(raw)
       if (!parsed || typeof parsed !== 'object') throw new Error('Invalid appearance JSON')
-      this.updateAppearance({
-        theme: normalizeTheme(parsed.theme),
-        ui: normalizeUi(parsed.ui),
-        font: normalizeFont(parsed.font),
-        fontSize: normalizeFontSize(parsed.fontSize),
-        radius: normalizeRadius(parsed.radius),
-        density: normalizeDensity(parsed.density),
-        line: normalizeLine(parsed.line),
-        reduceMotion: !!parsed.reduceMotion,
-        customProfileCss: !!parsed.customProfileCss,
-        flipTextAlign: (['left', 'center', 'right'].includes(parsed.flipTextAlign)
-          ? parsed.flipTextAlign
-          : 'center') as SettingsState['localPreferences']['flipTextAlign'],
-        flipTextSize: (['reading', 'large', 'display'].includes(parsed.flipTextSize)
-          ? parsed.flipTextSize
-          : 'large') as SettingsState['localPreferences']['flipTextSize'],
-      })
+      this.updateAppearance(parseAppearance(parsed))
     },
     
     /**

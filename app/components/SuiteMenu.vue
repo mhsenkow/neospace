@@ -4,7 +4,7 @@
  * tucked above mobile chrome so it stays out of the way.
  */
 
-import { useEdwardStore } from '~/stores/edward'
+import { edwardActive, toggleEdward } from '~/utils/edwardShell'
 
 type SuiteTool = {
   id: string
@@ -21,7 +21,6 @@ type SuiteGroup = {
   tools: SuiteTool[]
 }
 
-const edward = useEdwardStore()
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 
@@ -83,8 +82,8 @@ const groups = computed<SuiteGroup[]>(() => [
         id: 'edward',
         label: 'edward',
         blurb: 'stream · balls',
-        current: edward.active,
-        action: () => edward.toggle(),
+        current: edwardActive.value,
+        action: () => void toggleEdward(),
       },
     ],
   },

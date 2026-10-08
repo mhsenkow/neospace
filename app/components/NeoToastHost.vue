@@ -3,6 +3,30 @@ import { useToastStore } from '~/stores/toast'
 
 const toast = useToastStore()
 
+/** Hover and focus each hold the timer; it resumes only when both are gone */
+const holds = new Map<number, Set<'hover' | 'focus'>>()
+
+function hold(id: number, why: 'hover' | 'focus') {
+  let set = holds.get(id)
+  if (!set) holds.set(id, (set = new Set()))
+  set.add(why)
+  toast.pause(id)
+}
+
+function release(id: number, why: 'hover' | 'focus') {
+  const set = holds.get(id)
+  set?.delete(why)
+  if (set && set.size) return
+  holds.delete(id)
+  toast.resume(id)
+}
+
+function onFocusOut(id: number, e: FocusEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  if (el && e.relatedTarget instanceof Node && el.contains(e.relatedTarget)) return
+  release(id, 'focus')
+}
+
 function onAction(id: number, fn?: () => void) {
   try {
     fn?.()
@@ -14,13 +38,17 @@ function onAction(id: number, fn?: () => void) {
 
 <template>
   <Teleport to="body">
+    <!-- One always-mounted polite region; toasts inside carry no role of their own -->
     <div class="neo-toast-host" aria-live="polite" aria-relevant="additions">
       <TransitionGroup name="neo-toast">
         <div
           v-for="t in toast.toasts"
           :key="t.id"
           class="neo-toast"
-          role="status"
+          @mouseenter="hold(t.id, 'hover')"
+          @mouseleave="release(t.id, 'hover')"
+          @focusin="hold(t.id, 'focus')"
+          @focusout="onFocusOut(t.id, $event)"
         >
           <span class="neo-toast__msg">{{ t.message }}</span>
           <button
@@ -60,7 +88,10 @@ function onAction(id: number, fn?: () => void) {
   @media (max-width: 1023px) {
     left: max(0.75rem, env(safe-area-inset-left));
     right: max(0.75rem, env(safe-area-inset-right));
-    bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.75rem);
+    // Layout publishes the real bottom chrome height (0 on subview routes without a tab bar)
+    bottom: calc(
+      var(--neo-bottom-chrome-h, var(--neo-mobile-nav-h, 56px)) + env(safe-area-inset-bottom, 0px) + 0.75rem
+    );
     max-width: none;
   }
 }

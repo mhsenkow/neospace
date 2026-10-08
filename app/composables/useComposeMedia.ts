@@ -422,4 +422,3 @@ export function useComposeMedia() {
   }
 }
 
-export { COMPOSE_MEDIA_ACCEPT }

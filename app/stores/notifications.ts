@@ -79,6 +79,12 @@ function tagNotification(
   }
 }
 
+/**
+ * Bumped by markAllRead / clearAll so a server unread_count fetch that started
+ * before the read marker moved can't land afterwards and resurrect the badge.
+ */
+let badgeSeq = 0
+
 function linkHasNext(headers: Headers): boolean {
   const link = headers.get('Link') || headers.get('link')
   return !!link && /rel=["']?next["']?/i.test(link)
@@ -226,6 +232,7 @@ export const useNotificationsStore = defineStore('notifications', {
      * Lightweight badge refresh via /notifications/unread_count.
      */
     async refreshUnreadBadge() {
+      const seq = ++badgeSeq
       const instances = useInstancesStore()
       const authed = instances.authenticatedInstances
       if (!authed.length) {
@@ -246,6 +253,7 @@ export const useNotificationsStore = defineStore('notifications', {
         }),
       )
 
+      if (seq !== badgeSeq) return
       this.unreadCount = total
     },
 
@@ -357,6 +365,7 @@ export const useNotificationsStore = defineStore('notifications', {
         return
       }
 
+      const gen = this.fetchGeneration
       this.isLoadingMore = true
 
       try {
@@ -386,15 +395,19 @@ export const useNotificationsStore = defineStore('notifications', {
           }),
         )
 
+        // A refresh started mid-load replaced the list + cursors — drop this page
+        if (gen !== this.fetchGeneration) return
+
         const seen = new Set(this.notifications.map((n) => n._key))
         let anyHasNext = false
         const nextCursors = { ...this.cursors }
+        const fresh: ExtendedNotification[] = []
 
         for (const batch of batches) {
           for (const n of batch.items) {
             const tagged = tagNotification(n, batch.instanceId, batch.instanceUrl)
             if (!seen.has(tagged._key)) {
-              this.notifications.push(tagged)
+              fresh.push(tagged)
               seen.add(tagged._key)
             }
           }
@@ -406,10 +419,14 @@ export const useNotificationsStore = defineStore('notifications', {
           if (batch.hasNext) anyHasNext = true
         }
 
+        if (fresh.length) {
+          // Accounts page independently — re-sort so 'all'/'newest' stays chronological
+          this.notifications = [...this.notifications, ...fresh].sort((a, b) => b._tsMs - a._tsMs)
+        }
         this.cursors = nextCursors
         this.hasMore = anyHasNext && Object.keys(nextCursors).length > 0
       } catch (e: any) {
-        console.error('Load more notifications error:', e)
+        if (gen === this.fetchGeneration) console.error('Load more notifications error:', e)
       } finally {
         this.isLoadingMore = false
       }
@@ -424,6 +441,7 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     async markAllRead() {
+      badgeSeq += 1
       const sorted = [...this.notifications].sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
@@ -449,6 +467,8 @@ export const useNotificationsStore = defineStore('notifications', {
         }),
       )
 
+      // Discard badge refreshes that started while markers were being written
+      badgeSeq += 1
       for (const r of results) {
         if (r.ok) this.persistLastRead(r.instanceId, r.topId)
       }
@@ -503,6 +523,7 @@ export const useNotificationsStore = defineStore('notifications', {
         if (!anyOk) {
           throw new Error('Couldn’t clear notifications')
         }
+        badgeSeq += 1
         this.notifications = []
         this.unreadCount = 0
         this.cursors = {}

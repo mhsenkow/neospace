@@ -14,7 +14,8 @@ import { categoryColor } from '~/composables/useShellAppearance'
 import { logError } from '~/utils/log'
 import { getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
 import { useMobileViewport } from '~/composables/useBreakpoint'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { plainTextOf } from '~/utils/plainText'
+import { useDebouncedValue } from '~/composables/useDebouncedValue'
 
 const route = useRoute()
 const router = useRouter()
@@ -60,15 +61,17 @@ const isJoining = ref(false)
 const isLeaving = ref(false)
 const loadMoreError = ref<string | null>(null)
 const postsQuery = ref('')
+/** Debounced find-in-feed query — filtering parses every loaded post */
+const postsFindQuery = useDebouncedValue(postsQuery, 150)
 
 const visibleTimeline = computed(() => {
   const list = groupsStore.groupTimeline
-  const q = postsQuery.value.trim().toLowerCase()
+  const q = postsFindQuery.value.trim().toLowerCase()
   if (!q) return list
   return list.filter((s) => {
     const src = s.reblog || s
     const hay = [
-      stripHtml(src.content || ''),
+      plainTextOf(src),
       src.spoilerText || '',
       src.account?.displayName || '',
       src.account?.username || '',
@@ -124,12 +127,23 @@ onBeforeUnmount(() => {
 })
 
 // Handle join
+const joinBtnRef = ref<HTMLButtonElement | null>(null)
+const leaveBtnRef = ref<HTMLButtonElement | null>(null)
+
+/** Join↔Leave swap via v-if destroys the focused button — move focus to its replacement */
+const refocusMembershipButton = async (hadFocus: boolean) => {
+  if (!hadFocus) return
+  await nextTick()
+  ;(leaveBtnRef.value || joinBtnRef.value)?.focus()
+}
+
 const handleJoin = async () => {
   if (!instancesStore.isAuthenticated) {
     router.push('/login')
     return
   }
-  
+
+  const hadFocus = !!joinBtnRef.value && document.activeElement === joinBtnRef.value
   isJoining.value = true
   try {
     await groupsStore.joinGroup(tag.value)
@@ -138,6 +152,7 @@ const handleJoin = async () => {
     void showActionError('Couldn’t join group', () => { void handleJoin() })
   } finally {
     isJoining.value = false
+    void refocusMembershipButton(hadFocus)
   }
 }
 
@@ -145,6 +160,7 @@ const handleJoin = async () => {
 const handleLeave = async () => {
   if (isLeaving.value) return
   const leftTag = tag.value
+  const hadFocus = !!leaveBtnRef.value && document.activeElement === leaveBtnRef.value
   isLeaving.value = true
   try {
     await groupsStore.leaveGroup(leftTag)
@@ -162,6 +178,7 @@ const handleLeave = async () => {
     void showActionError('Couldn’t leave group', () => { void handleLeave() })
   } finally {
     isLeaving.value = false
+    void refocusMembershipButton(hadFocus)
   }
 }
 
@@ -196,7 +213,7 @@ const addToBoard = () => {
 
 // Page meta
 useHead({
-  title: computed(() => `${displayGroup.value.name} - Groups - NeoSpace`),
+  title: computed(() => `${displayGroup.value.name} · Groups | NeoSpace`),
   meta: [
     { 
       name: 'description', 
@@ -249,9 +266,10 @@ useHead({
           </button>
           <button
             v-if="displayGroup.isMember"
+            ref="leaveBtnRef"
             class="action-btn action-btn--leave"
             :disabled="isLeaving"
-            aria-label="Leave group"
+            :aria-label="isLeaving ? 'Leaving group' : 'Joined — leave group'"
             @click="handleLeave"
           >
             <span v-if="isLeaving">Leaving…</span>
@@ -263,6 +281,7 @@ useHead({
           </button>
           <button
             v-else
+            ref="joinBtnRef"
             class="action-btn action-btn--join"
             :disabled="isJoining"
             :title="instancesStore.isAuthenticated ? 'Join this group' : 'Log in to join'"
@@ -325,7 +344,7 @@ useHead({
 
       <!-- Error State -->
       <div v-else-if="groupsStore.error" class="timeline-error" role="alert">
-        <span>😕</span>
+        <span aria-hidden="true">😕</span>
         <p>{{ groupsStore.error }}</p>
         <button type="button" class="neo-btn neo-btn--ghost" @click="groupsStore.fetchGroupTimeline(tag, true)">
           Try again
@@ -334,15 +353,15 @@ useHead({
 
       <!-- Empty State -->
       <div v-else-if="groupsStore.groupTimeline.length === 0" class="timeline-empty">
-        <span class="empty-emoji">📭</span>
+        <span class="empty-emoji" aria-hidden="true">📭</span>
         <h3>No posts yet</h3>
         <p>No posts visible from your server yet. Use #{{ tag }} when you post.</p>
       </div>
 
-      <div v-else-if="postsQuery.trim() && !visibleTimeline.length" class="timeline-empty">
+      <div v-else-if="postsFindQuery.trim() && !visibleTimeline.length" class="timeline-empty">
         <span class="empty-emoji" aria-hidden="true">🔍</span>
         <h3>No matches</h3>
-        <p>No loaded posts match “{{ postsQuery.trim() }}”.</p>
+        <p>No loaded posts match “{{ postsFindQuery.trim() }}”.</p>
       </div>
 
       <!-- Posts -->
@@ -367,7 +386,7 @@ useHead({
 
         <!-- End of Feed -->
         <div v-else class="timeline-end">
-          <span>🎉</span>
+          <span aria-hidden="true">🎉</span>
           <p>You've seen all the posts!</p>
         </div>
       </div>

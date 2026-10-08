@@ -9,6 +9,7 @@ import { useOverlayStore } from '~/stores/overlay'
 import type { mastodon } from 'masto'
 import { activeClient } from '~/composables/useMasto'
 import { usePager } from '~/composables/usePager'
+import { cursorPage } from '~/utils/linkHeader'
 
 const instancesStore = useInstancesStore()
 const overlayStore = useOverlayStore()
@@ -57,14 +58,17 @@ const pager = usePager<mastodon.v1.Account>(async ({ maxId, signal }) => {
   const accountId = props.accountId || instancesStore.currentUser?.id
   if (!accountId) return []
 
+  // Follow lists paginate by follow-row id (Link header), not account id
   const opts = { limit: 20, maxId }
-  const fetched =
+  const account = client.v1.accounts.$select(accountId)
+  const page = await cursorPage(
     activeTab.value === 'followers'
-      ? await client.v1.accounts.$select(accountId).followers.list(opts)
-      : await client.v1.accounts.$select(accountId).following.list(opts)
+      ? account.followers.list.$raw(opts)
+      : account.following.list.$raw(opts),
+  )
 
-  void enrichPage(fetched)
-  return fetched
+  void enrichPage(page.items)
+  return page
 })
 
 const accounts = pager.items
@@ -281,7 +285,7 @@ defineExpose({ open, close })
                     :aria-label="`View profile of ${account.displayName || account.username}`"
                     @click="close()"
                   >
-                    <img :src="account.avatar" alt="" />
+                    <img :src="account.avatar" alt="" loading="lazy" decoding="async" />
                   </NuxtLink>
 
                   <div class="account-info">
@@ -384,7 +388,7 @@ defineExpose({ open, close })
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: var(--neo-z-modal, 200);
+  z-index: var(--neo-z-modal, 1050);
   padding: 1rem;
 }
 
