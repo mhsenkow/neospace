@@ -155,7 +155,8 @@ $z-index-modal-backdrop: 1040;
 $z-index-modal: 1050;
 $z-index-popover: 1060;
 $z-index-tooltip: 1070;
-$z-index-toast: 1080;
+// Above Edward Mode (1090) — feedback must never be hidden by an overlay
+$z-index-toast: 1100;
 $z-index-chaos-overlay: 9999;
 
 $container-sm: 576px;
@@ -196,6 +197,17 @@ $breakpoint-2xl: 1400px;
 @mixin mobile {
   @media (max-width: $bp-desk-max) {
     @content;
+  }
+}
+
+/// :hover only where a pointer can really hover — on touch screens a tap leaves
+/// :hover stuck (e.g. a Like button keeps its hover tint after toggling).
+/// Usage: `@include hover { … }` or `@include hover(':not(:disabled)') { … }`
+@mixin hover($extra: '') {
+  @media (hover: hover) {
+    &:hover#{$extra} {
+      @content;
+    }
   }
 }
 

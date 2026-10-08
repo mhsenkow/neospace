@@ -61,6 +61,7 @@ body {
   background-size: cover;
   cursor: var(--neo-cursor);
   min-height: 100vh;
+  min-height: 100dvh;
   transition: background-color var(--neo-transition), color var(--neo-transition);
   overflow-x: hidden; // Prevent horizontal scroll
   overscroll-behavior-x: none;
@@ -89,7 +90,7 @@ a {
   text-decoration: none;
   transition: color var(--neo-transition);
   
-  &:hover {
+  @include hover {
     color: var(--neo-text-link-hover);
   }
 }
@@ -185,7 +186,7 @@ ul, ol {
     background-color: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));
     
-    &:hover {
+    @include hover {
       background-color: var(--neo-accent-hover);
     }
 
@@ -200,7 +201,7 @@ ul, ol {
     color: var(--neo-text-primary);
     border: 1px solid var(--neo-border-color);
     
-    &:hover {
+    @include hover {
       background-color: var(--neo-bg-hover);
       border-color: var(--neo-border-color-dark);
     }
@@ -212,7 +213,7 @@ ul, ol {
     color: var(--neo-text-tertiary);
     border: 1px solid transparent;
 
-    &:hover:not(:disabled) {
+    @include hover(':not(:disabled)') {
       background-color: var(--neo-bg-tertiary);
       color: var(--neo-text-secondary);
       border-color: var(--neo-border-color);
@@ -230,7 +231,7 @@ ul, ol {
     color: var(--neo-text-secondary);
     border: 1px solid var(--neo-border-color);
     
-    &:hover {
+    @include hover {
       background-color: var(--neo-accent-soft);
       color: var(--neo-accent);
       border-color: color-mix(in srgb, var(--neo-accent) 35%, transparent);
@@ -273,7 +274,7 @@ ul, ol {
     animation: gradient-shift 3s ease infinite;
     box-shadow: var(--neo-glow);
     
-    &:hover {
+    @include hover {
       filter: brightness(1.05);
     }
   }
@@ -422,7 +423,7 @@ ul, ol {
   font-size: var(--neo-font-size-base);
   background-color: var(--neo-bg-secondary);
   color: var(--neo-text-primary);
-  border: var(--neo-border-width) var(--neo-border-style) var(--neo-border-color);
+  border: var(--neo-border-width) var(--neo-border-style) var(--neo-input-border, var(--neo-border-color));
   /* Cap so theme “bubble” radii never clip typed glyphs */
   border-radius: var(--neo-input-radius, min(12px, var(--neo-radius-md)));
   transition: border-color var(--neo-transition), box-shadow var(--neo-transition), background-color var(--neo-transition);
@@ -508,10 +509,7 @@ ul, ol {
 body.chaos-active::after {
   content: '';
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   pointer-events: none;
   z-index: var(--neo-z-chaos-overlay);
   background: repeating-linear-gradient(
@@ -860,6 +858,13 @@ html[data-density='roomy'] {
   }
 }
 
+// Dense trims type only at the default (medium) size — never override an explicit
+// Large / XL choice. Inputs are clamped to 16px on touch above (no iOS zoom).
+html[data-density='dense']:is([data-font-size='medium'], :not([data-font-size])),
+html.compact-mode:is([data-font-size='medium'], :not([data-font-size])) {
+  --neo-font-size-base: 0.875rem;
+}
+
 html[data-density='dense'],
 html.compact-mode {
   --neo-spacing-2: 0.25rem;
@@ -867,12 +872,6 @@ html.compact-mode {
   --neo-spacing-4: 0.5rem;
   --neo-spacing-6: 0.75rem;
   --neo-spacing-8: 1rem;
-  /* Keep ≥16px on touch so dense mode doesn't trigger iOS input zoom */
-  --neo-font-size-base: 0.875rem;
-
-  @media (max-width: 1023px) {
-    --neo-font-size-base: 1rem;
-  }
 
   .neo-card {
     padding: 0.75rem;
@@ -907,3 +906,18 @@ html.compact-mode {
   }
 }
 
+
+// ============================================
+// Long lists: skip layout / paint for off-screen items
+// (timeline columns set their own; this covers profile, groups, threads, activity)
+// ============================================
+
+#main-content .status-card:not(.status-card--menu-open) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
+}
+
+#main-content .notif-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 88px;
+}

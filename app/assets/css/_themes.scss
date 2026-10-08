@@ -77,6 +77,8 @@
   --neo-border-color: #{$hair};
   --neo-border-color-light: #{$hair};
   --neo-border-color-dark: #{$rule};
+  // Form-control edge — hairlines are ~1.2:1; inputs need ≥3:1 (WCAG 1.4.11)
+  --neo-input-border: color-mix(in srgb, #{$mute} 72%, #{$bg});
 
   // Per-scheme shadows — light defaults live in :root; dark themes need deeper lifts
   @if $scheme == dark {

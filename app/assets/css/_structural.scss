@@ -134,11 +134,20 @@
   --neo-z-shell-overlay: 95;
   --neo-z-shell-nav: 100;
   --neo-z-shell-popover: 200;
+  // Bottom sheets (compose, algorithm editor) — above shell, below modals
+  --neo-z-sheet: 200;
+  // Sticky search / filter bars inside pages — above hovered cards (5), below open card menus (30)
+  --neo-z-sticky-bar: 20;
+  // Edward Mode: fullscreen above modals; recessed it drops under sheets so quick-reply shows
+  --neo-z-edward: 1090;
+  --neo-z-edward-recessed: 150;
   --neo-z-dropdown: #{vars.$z-index-dropdown};
   --neo-z-sticky: #{vars.$z-index-sticky};
   --neo-z-fixed: #{vars.$z-index-fixed};
   --neo-z-modal-backdrop: #{vars.$z-index-modal-backdrop};
   --neo-z-modal: #{vars.$z-index-modal};
+  // Confirm / report / lightbox open *from* modals — must win the tie
+  --neo-z-dialog-top: 1065;
   --neo-z-popover: #{vars.$z-index-popover};
   --neo-z-tooltip: #{vars.$z-index-tooltip};
   --neo-z-toast: #{vars.$z-index-toast};
@@ -211,8 +220,9 @@
 // Subview pages offset below SubviewChrome on small viewports.
 .neo-sticky-bar {
   position: sticky;
-  top: 0;
-  z-index: 5;
+  // Pull up over main's top padding, or scrolled content peeks through above
+  top: calc(0px - var(--neo-main-pad-top, 0px));
+  z-index: var(--neo-z-sticky-bar, 20);
   background: var(--neo-bg-primary);
 }
 
@@ -220,6 +230,7 @@
   @media (max-width: 1023px) {
     top: calc(
       var(--neo-subview-chrome-height, 52px) + max(0px, env(safe-area-inset-top, 0px) - 0.35rem)
+        - var(--neo-main-pad-top, 0px)
     );
   }
 }
