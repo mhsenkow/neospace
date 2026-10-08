@@ -19,6 +19,8 @@ const selected = computed(() => edward.selectedStatus)
 const count = computed(() => edward.ballCount)
 const loading = computed(() => edward.loading)
 const error = computed(() => edward.error)
+const recessed = computed(() => edward.recessed)
+const sourceCount = computed(() => edward.sourceCount)
 
 const blink = ref(true)
 let blinkTimer: ReturnType<typeof setInterval> | null = null
@@ -31,18 +33,29 @@ const closeModal = () => {
   edward.clearSelection()
 }
 
+const leaveTo = (to: { path: string; query?: Record<string, string> }) => {
+  edward.exit()
+  stream.stop()
+  router.push(to)
+}
+
 const openThread = () => {
   const status = edward.selectedStatus
   if (!status) return
   const body = status.reblog || status
   const id = body.id
   const url = body.url || body.uri || status.url || status.uri || ''
-  edward.exit()
-  stream.stop()
-  router.push({
-    path: `/status/${id}`,
-    query: url ? { url } : undefined,
-  })
+  const query: Record<string, string> = {}
+  if (url) query.url = url
+  if (status._instanceId) query.account = status._instanceId
+  leaveTo({ path: `/status/${id}`, query })
+}
+
+const openProfile = (acct: string) => {
+  const status = edward.selectedStatus
+  const query: Record<string, string> = { user: acct.replace(/^@/, '') }
+  if (status?._instanceId) query.account = status._instanceId
+  leaveTo({ path: '/profile', query })
 }
 
 const exit = () => {
@@ -94,7 +107,10 @@ onUnmounted(() => {
     <div
       ref="rootEl"
       class="edward-mode"
-      :class="{ 'is-visible': visible }"
+      :class="{
+        'is-visible': visible,
+        'is-recessed': recessed,
+      }"
       role="dialog"
       aria-modal="true"
       aria-label="Edward mode session"
@@ -116,7 +132,10 @@ onUnmounted(() => {
 
         <div class="edward-mode__meta">
           <span v-if="loading && !count" class="edward-mode__count">hacking feed…</span>
-          <span v-else class="edward-mode__count">{{ count }} emoticoins online</span>
+          <span v-else class="edward-mode__count">
+            {{ count }} emoticoins
+            <template v-if="sourceCount"> · {{ sourceCount }} srv</template>
+          </span>
           <ul class="edward-mode__legend" aria-label="Face legend">
             <li v-for="item in EDWARD_FACE_LEGEND" :key="item.mood">
               <span class="edward-mode__glyph" aria-hidden="true">{{ item.glyph }}</span>
@@ -140,14 +159,15 @@ onUnmounted(() => {
       </p>
 
       <p class="edward-mode__hint">
-        ↑ rises · hover face · click!! open
+        ↑ rises · hover · click!! heart · reply · follow
       </p>
 
       <EdwardPostModal
-        v-if="selected"
+        v-if="selected && !recessed"
         :status="selected"
         @close="closeModal"
         @open-thread="openThread"
+        @open-profile="openProfile"
       />
     </div>
   </Teleport>
@@ -166,6 +186,13 @@ onUnmounted(() => {
 
   &.is-visible {
     opacity: 1;
+  }
+
+  /* Drop under compose sheet for quick reply */
+  &.is-recessed {
+    z-index: calc(var(--neo-z-modal, 1050) - 20);
+    pointer-events: none;
+    opacity: 0.35;
   }
 }
 

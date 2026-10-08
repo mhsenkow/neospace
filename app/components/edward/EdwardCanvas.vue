@@ -10,6 +10,7 @@ import type { EdwardBallDescriptor } from '~/utils/edwardSemantics'
 import {
   drawEmoticoin,
   faceSpecFor,
+  MOOD_GLYPH,
   type EdwardFaceMood,
 } from '~/utils/edwardFaces'
 
@@ -24,7 +25,9 @@ const hoverCard = ref<{
   preview: string
   kind: string
   mood: EdwardFaceMood
+  why: string
   glyph: string
+  tag: string | null
   x: number
   y: number
 } | null>(null)
@@ -50,28 +53,20 @@ type BallRuntime = {
   kind: EdwardBallDescriptor['kind']
   badges: EdwardBallDescriptor['badges']
   mood: EdwardFaceMood
+  moodWhy: string
   label: string
   preview: string
   authorKey: string
+  topTag: string | null
   inReplyToId: string | null
   statusId: string
   color: [number, number, number]
 }
 
-const MOOD_GLYPH: Record<EdwardFaceMood, string> = {
-  curious: '◉‿◉',
-  yapping: 'ᕕ(ᐛ)',
-  starry: '★◇★',
-  sparkle: '♥‿♥',
-  hmm: '·_·?',
-  shy: '(⁄⁄)',
-  manic: '✧ヮ✧',
-}
-
 const STREAM_BOTTOM = -18
 const STREAM_TOP = 18
 const STREAM_SPAN = STREAM_TOP - STREAM_BOTTOM
-const MAX_BALLS = 90
+const MAX_BALLS = 140
 
 let disposed = false
 let raf = 0
@@ -118,6 +113,9 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
     kind: d.kind,
     badges: d.badges,
     engagement: d.engagement,
+    text: d.preview,
+    hasCard: d.hasCard,
+    isBot: d.isBot,
   })
   drawEmoticoin(ctx, spec, hash01(d.identity))
 
@@ -185,6 +183,9 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     kind: d.kind,
     badges: d.badges,
     engagement: d.engagement,
+    text: d.preview,
+    hasCard: d.hasCard,
+    isBot: d.isBot,
   })
   const mat = new THREE.MeshBasicMaterial({
     map: texture,
@@ -237,10 +238,12 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     y: ySeed,
     kind: d.kind,
     badges: d.badges,
-    mood: spec.mood,
+    mood: d.mood || spec.mood,
+    moodWhy: d.moodWhy || spec.why,
     label: d.label,
     preview: d.preview,
     authorKey: d.authorKey,
+    topTag: d.topTag,
     inReplyToId: d.inReplyToId,
     statusId: d.statusId,
     color: d.color,
@@ -386,7 +389,9 @@ const projectHover = (b: BallRuntime) => {
     preview: b.badges.includes('cw') ? '··· content warning ···' : b.preview || '…',
     kind: b.kind,
     mood: b.mood,
-    glyph: MOOD_GLYPH[b.mood],
+    why: b.moodWhy,
+    glyph: MOOD_GLYPH[b.mood] || '◉‿◉',
+    tag: b.topTag,
     x: (v.x * 0.5 + 0.5) * rect.width,
     y: (-v.y * 0.5 + 0.5) * rect.height,
   }
@@ -710,11 +715,12 @@ onUnmounted(() => {
     >
       <div class="edward-canvas__hover-top">
         <span class="edward-canvas__hover-glyph" aria-hidden="true">{{ hoverCard.glyph }}</span>
-        <span class="edward-canvas__hover-kind">{{ hoverCard.mood }} · {{ hoverCard.kind }}</span>
+        <span class="edward-canvas__hover-kind">{{ hoverCard.why }} · {{ hoverCard.mood }}</span>
       </div>
       <strong class="edward-canvas__hover-name">{{ hoverCard.name }}</strong>
       <p class="edward-canvas__hover-preview">{{ hoverCard.preview }}</p>
-      <span class="edward-canvas__hover-go">click!! open thread ≫</span>
+      <span v-if="hoverCard.tag" class="edward-canvas__hover-tag">#{{ hoverCard.tag }}</span>
+      <span class="edward-canvas__hover-go">click!! heart · reply · follow · thread</span>
     </div>
   </div>
 </template>
@@ -792,7 +798,16 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.edward-canvas__hover-tag {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  color: #ffe566;
+}
+
 .edward-canvas__hover-go {
+  display: block;
   font-size: 0.625rem;
   letter-spacing: 0.08em;
   color: #59d1e0;
