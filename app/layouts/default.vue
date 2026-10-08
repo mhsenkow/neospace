@@ -6,6 +6,7 @@
 
 import { useThemeStore } from '~/stores/theme'
 import { useSettingsStore } from '~/stores/settings'
+import { useEdwardStore } from '~/stores/edward'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
@@ -18,8 +19,13 @@ import MobileHeader from '~/components/shell/MobileHeader.vue'
 import MobileDrawer from '~/components/shell/MobileDrawer.vue'
 import MobileTabBar from '~/components/shell/MobileTabBar.vue'
 
+const LazyEdwardMode = defineAsyncComponent(
+  () => import('~/components/edward/EdwardMode.vue'),
+)
+
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
+const edwardStore = useEdwardStore()
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
 const conversationsStore = useConversationsStore()
@@ -219,6 +225,7 @@ watch(
       <SuiteMenu />
     </div>
     <NeoOverlayHost />
+    <LazyEdwardMode v-if="edwardStore.active" />
   </div>
 </template>
 

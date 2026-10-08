@@ -4,12 +4,15 @@
  * tucked above mobile chrome so it stays out of the way.
  */
 
+import { useEdwardStore } from '~/stores/edward'
+
 type SuiteTool = {
   id: string
   label: string
   blurb: string
-  href: string
+  href?: string
   current?: boolean
+  action?: () => void
 }
 
 type SuiteGroup = {
@@ -18,10 +21,11 @@ type SuiteGroup = {
   tools: SuiteTool[]
 }
 
+const edward = useEdwardStore()
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 
-const groups: SuiteGroup[] = [
+const groups = computed<SuiteGroup[]>(() => [
   {
     id: 'think',
     label: 'think',
@@ -59,7 +63,25 @@ const groups: SuiteGroup[] = [
       },
     ],
   },
-]
+  {
+    id: 'play',
+    label: 'play',
+    tools: [
+      {
+        id: 'edward',
+        label: 'edward',
+        blurb: 'stream · balls',
+        current: edward.active,
+        action: () => edward.toggle(),
+      },
+    ],
+  },
+])
+
+const runAction = (tool: SuiteTool) => {
+  tool.action?.()
+  close({ restoreFocus: false })
+}
 
 const triggerEl = ref<HTMLButtonElement | null>(null)
 
@@ -148,7 +170,20 @@ onUnmounted(() => {
         <span class="suite-menu__group-label">{{ group.label }}</span>
         <ul class="suite-menu__grid">
           <li v-for="tool in group.tools" :key="tool.id">
+            <button
+              v-if="tool.action"
+              type="button"
+              class="suite-menu__tile"
+              :class="{ 'is-current': tool.current }"
+              :aria-pressed="tool.current ? 'true' : 'false'"
+              :aria-label="tool.label"
+              @click="runAction(tool)"
+            >
+              <span class="suite-menu__tile-label">{{ tool.label }}</span>
+              <span class="suite-menu__tile-blurb">{{ tool.blurb }}</span>
+            </button>
             <a
+              v-else
               class="suite-menu__tile"
               :class="{ 'is-current': tool.current }"
               :href="tool.href"
@@ -287,12 +322,17 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
+  width: 100%;
   min-height: 52px;
   padding: 8px 8px 7px;
+  text-align: left;
   text-decoration: none;
+  font: inherit;
   color: var(--neo-text-muted);
   border: 1px solid transparent;
   border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 
   &:hover {
