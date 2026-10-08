@@ -596,6 +596,16 @@ const focusComposer = () => {
   textareaRef.value?.focus()
 }
 
+/** True when `next` looks like the same handoff plus a page/story URL (or is simply fuller). */
+const handoffIsUpgrade = (current: string, next: string): boolean => {
+  if (next.length <= current.length) return false
+  const urlIn = (s: string) => /https?:\/\/\S+/i.test(s)
+  if (urlIn(next) && !urlIn(current)) return true
+  // Same first line (title / lead) → treat as the postMessage upgrade of the query caption
+  const first = (s: string) => s.split(/\n/)[0]?.trim() || ''
+  return !!first(current) && first(current) === first(next)
+}
+
 const applyHandoff = async () => {
   // Only the active composer absorbs Loom shares — not reply bars / hidden mounts
   if (
@@ -607,12 +617,20 @@ const applyHandoff = async () => {
   }
   const draft = handoffStore.take()
   if (!draft) return
-  // Prefer handoff text; keep existing if user already typed and draft is media-only
+  // Prefer handoff text; keep existing if user already typed and draft is media-only.
+  // bruh often lands a short query caption first, then upgrades with caption + page link —
+  // replace when the new draft is a strict upgrade of what's already in the box.
   if (draft.text) {
-    if (!content.value.trim()) {
+    const current = content.value.trim()
+    const next = draft.text.trim()
+    if (!current) {
       content.value = draft.text
-    } else if (!content.value.includes(draft.text)) {
-      content.value = `${content.value.trim()}\n\n${draft.text}`
+    } else if (next === current || current.includes(next)) {
+      /* already have it (or a longer version) */
+    } else if (next.includes(current) || handoffIsUpgrade(current, next)) {
+      content.value = draft.text
+    } else {
+      content.value = `${current}\n\n${draft.text}`
     }
   }
   // Replace prior handoff media only — keep attachments the user added themselves

@@ -50,6 +50,9 @@ const ALLOWED_IMAGE_TYPES = /^image\/(png|jpeg|webp|gif|avif)$/
 const DATA_URL_IMAGE = /^data:image\/(png|jpeg|webp);base64,/
 
 function storyKey(share: StoredShare): string {
+  // bruh upgrades (query caption → caption + page link) must share one key so the
+  // fuller postMessage replaces the short draft instead of forking a second ingest.
+  if (share.source === 'bruh') return 'local:bruh'
   return share.story || `local:${share.text}|${share.imageName || ''}`
 }
 
@@ -191,15 +194,28 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
 
     async ingestStored(share: StoredShare) {
       const key = storyKey(share)
+      // Wait out any in-flight ingest for this key, then run ours. Important for bruh:
+      // the short query caption and the fuller postMessage (caption + page link) share
+      // one key — returning the first promise would drop the upgrade.
       const inflight = this._ingestPromises[key]
-      if (inflight) return inflight
+      if (inflight) await inflight
+
+      const nextText = (share.text || '').trim()
+      if (
+        this.pending?.text &&
+        nextText &&
+        this.pending.text.includes(nextText) &&
+        this.pending.text.length >= nextText.length
+      ) {
+        return true
+      }
 
       const run = this._ingestStoredOnce(share, key)
       this._ingestPromises[key] = run
       try {
         return await run
       } finally {
-        delete this._ingestPromises[key]
+        if (this._ingestPromises[key] === run) delete this._ingestPromises[key]
       }
     },
 
