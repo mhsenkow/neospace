@@ -49,7 +49,10 @@ const onHeaderProfileClick = (acct: string, e: MouseEvent) => {
   openProfile(acct || displayStatus.value.account?.acct, e)
 }
 
-const displayStatus = computed(() => props.status.reblog || props.status)
+// Feeds hold statuses in shallowRefs (plain objects). Optimistic like / boost /
+// bookmark mutate the status in place, so read it through a reactive proxy —
+// reactive() caches per object, and is a no-op for already-reactive statuses.
+const displayStatus = computed(() => reactive(props.status.reblog || props.status))
 const accountEmojis = computed(() => displayStatus.value.account?.emojis || [])
 const statusEmojis = computed(() => displayStatus.value.emojis || [])
 const nameEmojiUrls = computed(() => emojiUrlSet(accountEmojis.value))
@@ -302,6 +305,10 @@ const {
   displayStatus,
   statusUrl,
   requireAuth,
+  // Reblog unwrap drops provenance — keep the timeline row's origin for likes/boosts.
+  sourceInstanceUrl: computed(
+    () => (props.status as ExtendedStatus)._instanceUrl || null,
+  ),
 })
 
 const handleBoost = async () => {

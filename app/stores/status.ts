@@ -13,7 +13,7 @@ import { hostnameOf } from '~/utils/instances'
 
 /** Per-account LRU for resolve=true status lookups (thread poll / actions). */
 const RESOLVE_CACHE_MAX = 64
-const resolveStatusCache = new Map<string, string | null>()
+const resolveStatusCache = new Map<string, string>()
 
 interface StatusState {
   error: string | null
@@ -192,7 +192,9 @@ export const useStatusStore = defineStore('status', {
       const instances = useInstancesStore()
       const cacheKey = `${instances.activeAccountId || 'anon'}|${statusUrl}`
       const cached = resolveStatusCache.get(cacheKey)
-      if (cached !== undefined) return cached
+      // Only positive hits are cached — a transient miss/network blip must not
+      // brick likes/boosts for the rest of the session.
+      if (cached) return cached
 
       try {
         const client = this.getReadClient()
@@ -203,10 +205,12 @@ export const useStatusStore = defineStore('status', {
           limit: 1,
         })
         const id = results.statuses[0]?.id ?? null
-        resolveStatusCache.set(cacheKey, id)
-        if (resolveStatusCache.size > RESOLVE_CACHE_MAX) {
-          const oldest = resolveStatusCache.keys().next().value
-          if (oldest) resolveStatusCache.delete(oldest)
+        if (id) {
+          resolveStatusCache.set(cacheKey, id)
+          if (resolveStatusCache.size > RESOLVE_CACHE_MAX) {
+            const oldest = resolveStatusCache.keys().next().value
+            if (oldest) resolveStatusCache.delete(oldest)
+          }
         }
         return id
       } catch (e) {

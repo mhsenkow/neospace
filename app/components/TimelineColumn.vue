@@ -34,11 +34,19 @@ const withBrowseOrigin = (
     instancesStore.activeAccount ||
     instancesStore.instances.find((i) => i.accessToken) ||
     instancesStore.instances[0]
-  if (!account) return list
+  if (account) {
+    return list.map((s) => ({
+      ...s,
+      _instanceId: account.id,
+      _instanceUrl: account.url,
+    }))
+  }
+  const url = resolvePublicInstanceUrl()
+  const host = hostnameOf(url) || 'fallback'
   return list.map((s) => ({
     ...s,
-    _instanceId: account.id,
-    _instanceUrl: account.url,
+    _instanceId: `public:${host}`,
+    _instanceUrl: url,
   }))
 }
 
@@ -662,10 +670,12 @@ const loadTimelinePage = async (): Promise<(mastodon.v1.Status | ExtendedStatus)
     return await instancesStore.fetchMergedTimeline(props.column.feedType, 20)
   }
   const client = publicClient()
-  return await client.v1.timelines.public.list({
-    local: props.column.feedType === 'local',
-    limit: 20,
-  })
+  return withBrowseOrigin(
+    await client.v1.timelines.public.list({
+      local: props.column.feedType === 'local',
+      limit: 20,
+    }),
+  )
 }
 
 const fetchFreshPage = () => loadTimelinePage()
@@ -726,11 +736,13 @@ const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]>
       )
     }
     const client = publicClient()
-    return await client.v1.timelines.public.list({
-      local: props.column.feedType === 'local',
-      limit: 20,
-      sinceId,
-    })
+    return withBrowseOrigin(
+      await client.v1.timelines.public.list({
+        local: props.column.feedType === 'local',
+        limit: 20,
+        sinceId,
+      }),
+    )
   }
 
   // Liked / Saved / algorithms: no since_id polling (lists aren’t live firehoses)

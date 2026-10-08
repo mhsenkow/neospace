@@ -52,6 +52,7 @@ const {
   displayStatus: body,
   statusUrl,
   requireAuth,
+  sourceInstanceUrl: computed(() => props.status._instanceUrl || null),
 })
 
 const replyBusy = ref(false)

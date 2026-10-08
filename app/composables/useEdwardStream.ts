@@ -7,7 +7,7 @@ import { useEdwardStore, EDWARD_MAX_BALLS } from '~/stores/edward'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import { statusIdentity, dedupeStatusesByIdentity } from '~/utils/statusIdentity'
-import { isAuthGatedPublicHost } from '~/utils/instances'
+import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 import { publicClient } from '~/composables/useMasto'
 import {
   emptyAffinityContext,
@@ -124,14 +124,18 @@ export function useEdwardStream() {
     // Guest fallback only when no server could answer — an empty *poll*
     // (nothing new since the cursor) must not pull a stranger's firehose in.
     if (!all.length && !succeeded && !rateLimited) {
-      // Guest / gated fallback
+      // Guest / gated fallback — tag the real host so likes can resolve later
       try {
-        const client = publicClient()
+        const fallbackUrl = resolvePublicInstanceUrl(
+          instances.activeAccount?.url || instances.instances[0]?.url,
+        )
+        const client = publicClient(fallbackUrl)
         const statuses = await client.v1.timelines.public.list({ local: false, limit })
+        const host = hostnameOf(fallbackUrl) || 'fallback'
         all = statuses.map((s) => ({
           ...s,
-          _instanceId: 'fallback',
-          _instanceUrl: '',
+          _instanceId: `public:${host}`,
+          _instanceUrl: fallbackUrl,
         }))
       } catch {
         if (errors[0]) throw new Error(errors[0])
