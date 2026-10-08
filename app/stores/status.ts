@@ -196,7 +196,7 @@ export const useStatusStore = defineStore('status', {
 
       try {
         const client = this.getReadClient()
-        const results = await client.v2.search.fetch({
+        const results = await client.v2.search.list({
           q: statusUrl,
           resolve: true,
           type: 'statuses',
@@ -268,7 +268,9 @@ export const useStatusStore = defineStore('status', {
         } catch {
           // fall through to search
         }
-        const results = await client.v1.accounts.search({
+        // `.search.list` — calling `accounts.search()` directly dispatched an
+        // unknown masto action and threw, so this fallback never worked
+        const results = await client.v1.accounts.search.list({
           q: acct.replace(/^@/, ''),
           resolve: true,
           limit: 1,

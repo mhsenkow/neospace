@@ -16,6 +16,7 @@ import {
   sanitizeDisplayName,
   sanitizeFieldHtml,
   sanitizeStatusHtml,
+  stripHtml,
 } from '~/utils/sanitizeHtml'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import {
@@ -117,6 +118,21 @@ const websiteFieldUrl = computed(
 )
 
 const instanceProfileUrl = computed(() => profileStore.viewedProfile?.url || null)
+
+const instanceHost = computed(() => {
+  const url = instanceProfileUrl.value
+  if (!url) return ''
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+})
+
+/** External presence for the identity strip (instance is shown separately). */
+const identityPresenceLinks = computed(() =>
+  presenceLinks.value.filter((l) => l.kind !== 'mastodon'),
+)
 
 /** Dedicated cross-network inputs while editing (saved as Mastodon fields). */
 const presenceDraft = ref({ bluesky: '', seenu: '', website: '' })
@@ -269,18 +285,34 @@ const tabFetchOpts = computed(() => {
   return { excludeReplies: true, onlyMedia: false }
 })
 
+const postsQuery = ref('')
+
 const visibleStatuses = computed(() => {
   const list = profileStore.statuses
-  if (profileTab.value === 'replies') {
-    return list.filter((s) => !!s.inReplyToId)
-  }
-  if (profileTab.value === 'reposts') {
-    return list.filter((s) => !!s.reblog)
-  }
-  if (profileTab.value === 'posts') {
-    return list.filter((s) => !s.inReplyToId && !s.reblog)
-  }
-  return list.filter((s) => !s.reblog)
+  let filtered =
+    profileTab.value === 'replies'
+      ? list.filter((s) => !!s.inReplyToId)
+      : profileTab.value === 'reposts'
+        ? list.filter((s) => !!s.reblog)
+        : profileTab.value === 'posts'
+          ? list.filter((s) => !s.inReplyToId && !s.reblog)
+          : list.filter((s) => !s.reblog)
+
+  const q = postsQuery.value.trim().toLowerCase()
+  if (!q) return filtered
+  return filtered.filter((s) => {
+    const src = s.reblog || s
+    const hay = [
+      stripHtml(src.content || ''),
+      src.spoilerText || '',
+      src.account?.displayName || '',
+      src.account?.username || '',
+      src.account?.acct || '',
+    ]
+      .join(' ')
+      .toLowerCase()
+    return hay.includes(q)
+  })
 })
 
 const optsForTab = (tab: typeof profileTab.value) => {
@@ -300,6 +332,7 @@ const setProfileTab = async (
 ) => {
   if (profileTab.value === tab) return
   profileTab.value = tab
+  postsQuery.value = ''
   if (tab === 'insights') return
   await fetchStatusesGuarded(true, optsForTab(tab))
 }
@@ -521,35 +554,47 @@ useHead({
   <div class="profile-page">
     <SubviewChrome :title="chromeTitle">
       <template #actions>
-        <a
-          v-if="websiteFieldUrl"
-          class="subview-chrome__btn neo-tip"
-          :href="websiteFieldUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Website"
-        >
-          <NeoIcon name="globe" :size="18" :stroke="1.75" />
-        </a>
-        <a
-          v-if="instanceProfileUrl"
-          class="subview-chrome__btn neo-tip"
-          :href="instanceProfileUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Open on instance"
-        >
-          <NeoIcon name="servers" :size="18" :stroke="1.75" />
-        </a>
-        <button
+        <NeoMenu
           v-if="profileStore.viewedProfile"
-          type="button"
-          class="subview-chrome__btn neo-tip"
-          aria-label="Share profile"
-          @click="shareProfile"
+          class="profile-chrome-menu"
+          label="Profile options"
+          align="end"
         >
-          <NeoIcon name="share" :size="18" :stroke="1.75" />
-        </button>
+          <NeoIcon name="more" :size="18" :stroke="1.75" />
+          <template #items>
+            <button type="button" role="menuitem" class="profile-menu-item" @click="shareProfile">
+              <NeoIcon name="share" :size="18" :stroke="1.75" />
+              <span>Share profile</span>
+            </button>
+            <button type="button" role="menuitem" class="profile-menu-item" @click="copyHandle">
+              <NeoIcon name="mention" :size="18" :stroke="1.75" />
+              <span>Copy handle</span>
+            </button>
+            <a
+              v-if="instanceProfileUrl"
+              role="menuitem"
+              class="profile-menu-item"
+              :href="instanceProfileUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <NeoIcon name="servers" :size="18" :stroke="1.75" />
+              <span>{{ instanceHost ? `Open on ${instanceHost}` : 'Open on instance' }}</span>
+            </a>
+            <a
+              v-for="link in identityPresenceLinks"
+              :key="`menu-${link.kind}`"
+              role="menuitem"
+              class="profile-menu-item"
+              :href="link.href"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <NeoIcon name="globe" :size="18" :stroke="1.75" />
+              <span>{{ link.label }}</span>
+            </a>
+          </template>
+        </NeoMenu>
       </template>
     </SubviewChrome>
 
@@ -715,64 +760,74 @@ useHead({
           </component>
         </div>
 
-        <!-- Stats + open-web presence (Mastodon / Bluesky / SeenU / site) -->
+        <!-- Identity row: network stats + presence as labeled profile links (not chrome icons) -->
         <div v-if="!profileStore.isEditing" class="profile-social">
           <p class="profile-social__posts">{{ postsJoinLine }}</p>
-          <div class="profile-social__stats-row">
-            <button
-              type="button"
-              class="profile-social__stat"
-              @click="followersModalRef?.open('followers')"
-            >
-              {{ followerCountLabel }}
-            </button>
-            <button
-              type="button"
-              class="profile-social__stat"
-              @click="followersModalRef?.open('following')"
-            >
-              {{ followingCountLabel }}
-            </button>
-          </div>
-          <div v-if="presenceLinks.length" class="profile-social__links">
-            <a
-              v-for="link in presenceLinks"
-              :key="link.kind"
-              class="profile-social__link neo-tip"
-              :href="link.href"
-              target="_blank"
-              rel="noopener noreferrer"
-              :aria-label="`${link.label}: ${link.hint}`"
-            >
-              <NeoIcon v-if="link.kind === 'mastodon'" name="servers" :size="18" :stroke="1.75" />
-              <NeoIcon v-else-if="link.kind === 'website'" name="globe" :size="18" :stroke="1.75" />
-              <!-- Bluesky butterfly -->
-              <svg
-                v-else-if="link.kind === 'bluesky'"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
+          <div class="profile-social__row">
+            <div class="profile-social__stats-row">
+              <button
+                type="button"
+                class="profile-social__stat"
+                @click="followersModalRef?.open('followers')"
               >
-                <path d="M12 11.4c-.9-1.75-3.35-5-5.62-6.6C4.7 3.5 3.5 4.05 3.5 5.7c0 .55.3 4.55.5 5.25.6 2.15 2.7 2.85 4.6 2.5-.1.9-.15 1.75-.15 2.35 0 2.1 1.35 3.45 3.55 3.45s3.55-1.35 3.55-3.45c0-.6-.05-1.45-.15-2.35 1.9.35 4-.35 4.6-2.5.2-.7.5-4.7.5-5.25 0-1.65-1.2-2.2-2.88-.9C15.35 6.4 12.9 9.65 12 11.4z" />
-              </svg>
-              <!-- SeenU mark -->
-              <svg
-                v-else
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                aria-hidden="true"
+                {{ followerCountLabel }}
+              </button>
+              <button
+                type="button"
+                class="profile-social__stat"
+                @click="followersModalRef?.open('following')"
               >
-                <circle cx="12" cy="12" r="8.25" />
-                <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
-                <path d="M12 3.75v2.5M12 17.75v2.5M3.75 12h2.5M17.75 12h2.5" />
-              </svg>
-            </a>
+                {{ followingCountLabel }}
+              </button>
+            </div>
+            <div v-if="instanceProfileUrl || identityPresenceLinks.length" class="profile-social__presence">
+              <a
+                v-if="instanceProfileUrl"
+                class="profile-social__chip"
+                :href="instanceProfileUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <NeoIcon name="servers" :size="14" :stroke="1.75" />
+                <span>{{ instanceHost || 'Instance' }}</span>
+              </a>
+              <a
+                v-for="link in identityPresenceLinks"
+                :key="link.kind"
+                class="profile-social__chip"
+                :href="link.href"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="link.hint"
+              >
+                <svg
+                  v-if="link.kind === 'bluesky'"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M12 11.4c-.9-1.75-3.35-5-5.62-6.6C4.7 3.5 3.5 4.05 3.5 5.7c0 .55.3 4.55.5 5.25.6 2.15 2.7 2.85 4.6 2.5-.1.9-.15 1.75-.15 2.35 0 2.1 1.35 3.45 3.55 3.45s3.55-1.35 3.55-3.45c0-.6-.05-1.45-.15-2.35 1.9.35 4-.35 4.6-2.5.2-.7.5-4.7.5-5.25 0-1.65-1.2-2.2-2.88-.9C15.35 6.4 12.9 9.65 12 11.4z" />
+                </svg>
+                <svg
+                  v-else-if="link.kind === 'seenu'"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="8.25" />
+                  <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+                  <path d="M12 3.75v2.5M12 17.75v2.5M3.75 12h2.5M17.75 12h2.5" />
+                </svg>
+                <NeoIcon v-else name="globe" :size="14" :stroke="1.75" />
+                <span>{{ link.kind === 'website' ? link.hint || link.label : link.label }}</span>
+              </a>
+            </div>
           </div>
         </div>
 
@@ -943,16 +998,36 @@ useHead({
         </div>
       </section>
 
-      <NeoTabs
-        class="profile-tabs"
-        :tabs="profileTabDefs"
-        :model-value="profileTab === 'insights' ? 'posts' : profileTab"
-        :panels="false"
-        controls-id="profile-tab-panel"
-        @update:model-value="setProfileTab($event as 'posts' | 'replies' | 'media' | 'reposts')"
-      />
+      <div class="profile-tabs-wrap neo-sticky-bar neo-sticky-bar--under-chrome">
+        <NeoTabs
+          class="profile-tabs"
+          :tabs="profileTabDefs"
+          :model-value="profileTab === 'insights' ? 'posts' : profileTab"
+          :panels="false"
+          controls-id="profile-tab-panel"
+          id-prefix="profile-tabs"
+          aria-label="Profile sections"
+          @update:model-value="setProfileTab($event as 'posts' | 'replies' | 'media' | 'reposts')"
+        />
+        <label v-if="profileTab !== 'insights'" class="profile-search">
+          <span class="sr-only">Search posts</span>
+          <NeoIcon name="search" :size="16" :stroke="1.75" class="profile-search__icon" aria-hidden="true" />
+          <input
+            v-model="postsQuery"
+            type="search"
+            class="profile-search__input"
+            placeholder="Search posts…"
+            autocomplete="off"
+            enterkeyhint="search"
+          />
+        </label>
+      </div>
 
-      <div id="profile-tab-panel">
+      <div
+        id="profile-tab-panel"
+        role="tabpanel"
+        :aria-labelledby="`profile-tabs-tab-${profileTab === 'insights' ? 'posts' : profileTab}`"
+      >
         <ProfileInsights
           v-if="profileTab === 'insights' && profileStore.isOwnProfile && profileStore.viewedProfile"
           :account="profileStore.viewedProfile"
@@ -1000,13 +1075,15 @@ useHead({
             <div v-else class="profile-posts-empty">
               <p>
                 {{
-                  profileTab === 'media'
-                    ? 'No media yet.'
-                    : profileTab === 'replies'
-                      ? 'No replies yet.'
-                      : profileTab === 'reposts'
-                        ? 'No reposts yet.'
-                        : 'No posts yet.'
+                  postsQuery.trim()
+                    ? `No loaded posts match “${postsQuery.trim()}”.`
+                    : profileTab === 'media'
+                      ? 'No media yet.'
+                      : profileTab === 'replies'
+                        ? 'No replies yet.'
+                        : profileTab === 'reposts'
+                          ? 'No reposts yet.'
+                          : 'No posts yet.'
                 }}
               </p>
             </div>
@@ -1067,14 +1144,19 @@ useHead({
 }
 
 .profile-handle__badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   font-size: 0.6875rem;
   font-weight: 650;
   letter-spacing: 0.03em;
+  line-height: 1.2;
   text-transform: uppercase;
   color: var(--neo-text-muted);
   background: var(--neo-bg-tertiary);
   border-radius: 999px;
-  padding: 0.1rem 0.45rem;
+  padding: 0.15rem 0.5rem;
+  white-space: nowrap;
 }
 
 .profile-chip--rel {
@@ -1091,10 +1173,15 @@ useHead({
 .profile-social__stats-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.65rem 1rem;
+  min-width: 0;
+  flex: 0 0 auto;
 }
 
 .profile-social__stat {
+  min-height: 2rem;
+  white-space: nowrap;
   padding: 0;
   border: none;
   background: transparent;
@@ -1315,17 +1402,6 @@ useHead({
   color: var(--neo-text-secondary);
 }
 
-.profile-handle__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--neo-bg-tertiary);
-  color: var(--neo-text-tertiary);
-}
-
 .profile-chip {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -1422,53 +1498,93 @@ useHead({
 
 .profile-social {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  width: 100%;
+  margin-top: 0.85rem;
+}
+
+.profile-social__row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  width: 100%;
-  margin-top: 0.75rem;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
 }
 
-.profile-social__stats {
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  color: var(--neo-text-muted);
-  cursor: pointer;
-  text-align: left;
+.profile-social__presence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
   min-width: 0;
 
-  &:hover {
-    text-decoration: underline;
-    color: var(--neo-text-primary);
+  // Phones: chips drop under the counts — line them up with the text column
+  @media (max-width: 599px) {
+    flex-basis: 100%;
+    justify-content: flex-start;
   }
 }
 
-.profile-social__links {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
-.profile-social__link {
+.profile-social__chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+  gap: 0.3rem;
+  max-width: 11rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.4rem;
+  border-radius: 999px;
+  background: var(--neo-bg-tertiary);
   color: var(--neo-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 550;
+  line-height: 1.2;
   text-decoration: none;
+  min-width: 0;
+
+  @media (pointer: coarse) {
+    min-height: 2rem;
+    padding-inline: 0.5rem 0.7rem;
+  }
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   &:hover {
-    background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
+    background: color-mix(in srgb, var(--neo-accent-soft, var(--neo-bg-tertiary)) 70%, var(--neo-bg-tertiary));
   }
+}
+
+.profile-chrome-menu {
+  :deep(.neo-menu__trigger) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    color: var(--neo-text-primary);
+
+    &:hover {
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
+  }
+}
+
+.profile-chrome-more {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.profile-menu-item {
+  text-decoration: none;
+  color: inherit;
 }
 
 .profile-cta {
@@ -1604,16 +1720,52 @@ useHead({
   cursor: pointer;
 }
 
-.profile-tabs {
+.profile-tabs-wrap {
   margin: 0.75rem 0 0;
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  padding-bottom: 0.45rem;
   background: var(--neo-bg-primary);
+}
 
-  @media (max-width: 1023px) {
-    top: var(--neo-subview-chrome-height, 52px);
+.profile-search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.55rem 0 0;
+  min-height: 2.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-md, 12px);
+  background: var(--neo-bg-tertiary);
+  box-sizing: border-box;
+
+  &:focus-within {
+    border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
+    box-shadow: 0 0 0 3px var(--neo-accent-soft);
   }
+
+  &__icon {
+    flex-shrink: 0;
+    color: var(--neo-text-muted);
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.875rem;
+    outline: none;
+
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
+  }
+}
+
+.profile-tabs {
+  margin: 0;
 
   :deep(.neo-tabs__list) {
     display: flex;

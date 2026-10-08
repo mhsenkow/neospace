@@ -611,6 +611,54 @@ body.chaos-active::after {
   }
 }
 
+// Desktop board: reorder arrows appear with the column's hover/focus so ~250px
+// columns keep room for their title ("📚 Book …" otherwise). Touch keeps them.
+@media (hover: hover) and (pointer: fine) {
+  .timeline-column:not(:hover):not(:focus-within),
+  .panel-column:not(:hover):not(:focus-within) {
+    .column-reorder {
+      display: none;
+    }
+  }
+}
+
+// Small glyph buttons (remove ×, ⋮, close) keep their look on touch but get an
+// invisible ~44px hit area. Absolutely-positioned ones already anchor ::before.
+@media (pointer: coarse) {
+  .compose-media__remove,
+  .chat-composer__thumb-x,
+  .profile-avatar__edit,
+  .group-pick__clear,
+  .compose-handoff__dismiss,
+  .notes-panel__close,
+  .status-menu-container .neo-menu__trigger {
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
+    }
+  }
+
+  .group-pick__clear,
+  .compose-handoff__dismiss,
+  .notes-panel__close,
+  .status-menu-container .neo-menu__trigger {
+    position: relative;
+  }
+
+  .neo-tabs__tab {
+    min-height: 40px;
+  }
+}
+
+// Phones/tablets: touch already makes these 44px tall — 10px labels were hard to
+// read. Not on the ≥1024 desktop shell (iPad landscape), where toolbars are dense.
+@media (pointer: coarse) and (max-width: 1023px) {
+  .neo-btn--sm {
+    font-size: var(--neo-font-size-sm);
+  }
+}
+
 // Installed PWA (Pixel home screen / Chrome app window)
 @media (display-mode: standalone), (display-mode: minimal-ui) {
   html {

@@ -11,6 +11,11 @@ const props = withDefaults(
     maxHeight?: string
     /** Wider desktop panel (compose) vs compact (group picker) */
     desktopWidth?: 'compose' | 'compact'
+    /**
+     * useKeyboardViewport() box — pins the sheet to the visual viewport so the
+     * soft keyboard (iOS / Android overlay mode) can't cover the panel.
+     */
+    viewportStyle?: Record<string, string>
   }>(),
   {
     zIndex: 200,
@@ -29,6 +34,7 @@ const panelStyle = computed(() => ({
 }))
 
 const rootStyle = computed(() => ({
+  ...props.viewportStyle,
   zIndex: props.zIndex,
 }))
 </script>

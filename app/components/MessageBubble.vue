@@ -5,6 +5,7 @@
 
 import type { mastodon } from 'masto'
 import { sanitizeStatusHtml } from '~/utils/sanitizeHtml'
+import { stripParticipantMentions } from '~/utils/dmMentions'
 import { useOverlayStore } from '~/stores/overlay'
 import { useStatusStore } from '~/stores/status'
 import { useToastStore } from '~/stores/toast'
@@ -38,34 +39,16 @@ let longPressTimer: ReturnType<typeof setTimeout> | null = null
 const isPending = computed(() => props.delivery === 'pending')
 const isFailed = computed(() => props.delivery === 'failed')
 
-const participantSet = computed(() => {
-  const set = new Set<string>()
-  for (const acct of props.participantAccts || []) {
-    set.add(acct.replace(/^@/, '').toLowerCase())
-  }
-  return set
-})
-
 /** Strip only participant mention links at the start — keep "@home tonight" etc. */
-const bubbleHtml = computed(() => {
-  let html = props.status.content || ''
-  if (participantSet.value.size) {
-    html = html.replace(
-      /^(?:\s*<p>)?(?:\s*<a[^>]*class="[^"]*mention[^"]*"[^>]*>.*?<\/a>\s*)+/i,
-      (m) => {
-        const mentions = [...m.matchAll(/<a[^>]*class="[^"]*mention[^"]*"[^>]*>@?([^<]+)<\/a>/gi)]
-        const allParticipants = mentions.every((match) => {
-          const acct = (match[1] || '').replace(/^@/, '').toLowerCase()
-          return participantSet.value.has(acct)
-        })
-        if (!allParticipants) return m
-        const openP = m.match(/^(\s*<p>)/i)
-        return openP ? openP[1]! : ''
-      },
-    )
-  }
-  return sanitizeStatusHtml(html)
-})
+const bubbleHtml = computed(() =>
+  sanitizeStatusHtml(
+    stripParticipantMentions(
+      props.status.content || '',
+      props.participantAccts || [],
+      props.status.mentions || [],
+    ),
+  ),
+)
 
 const hasText = computed(() =>
   bubbleHtml.value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().length > 0,
@@ -278,7 +261,7 @@ onBeforeUnmount(() => {
                 @click="openLightbox(item)"
               >
                 <img
-                  :src="item.previewUrl || item.url"
+                  :src="item.previewUrl || item.url || undefined"
                   :alt="item.description || ''"
                   class="msg-bubble__img"
                   loading="lazy"
@@ -286,7 +269,7 @@ onBeforeUnmount(() => {
               </button>
               <video
                 v-else-if="item.type === 'video'"
-                :src="item.url"
+                :src="item.url || undefined"
                 :poster="item.previewUrl || undefined"
                 class="msg-bubble__img"
                 controls
@@ -296,7 +279,7 @@ onBeforeUnmount(() => {
               />
               <audio
                 v-else-if="item.type === 'audio'"
-                :src="item.url"
+                :src="item.url || undefined"
                 class="msg-bubble__audio"
                 controls
                 preload="metadata"
@@ -459,10 +442,18 @@ onBeforeUnmount(() => {
     cursor: pointer;
     opacity: 0;
 
+    .msg-bubble:hover &,
     .msg-bubble:focus-within &,
     .msg-bubble--menu &,
     &:focus-visible {
       opacity: 1;
+    }
+
+    // Touch has no hover — keep the menu discoverable (long-press still works)
+    @media (hover: none), (pointer: coarse) {
+      width: 36px;
+      height: 36px;
+      opacity: 0.6;
     }
   }
 
@@ -488,6 +479,9 @@ onBeforeUnmount(() => {
   }
 
   &__body {
+    // Long-press on text opens our menu — don't also raise the iOS callout.
+    // (Media keeps the native sheet so images can still be saved.)
+    -webkit-touch-callout: none;
     padding: 0.55rem 0.8rem;
     border-radius: var(--neo-radius-lg, 1.1rem);
     background: var(--neo-bg-tertiary);
@@ -508,6 +502,13 @@ onBeforeUnmount(() => {
   &--mine &__body {
     background: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));
+
+    // Accent links vanished on the accent bubble
+    :deep(a) {
+      color: inherit;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
   }
 
   &__media {

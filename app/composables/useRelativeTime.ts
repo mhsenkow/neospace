@@ -3,7 +3,11 @@
  */
 
 import { onMounted, onUnmounted, ref, type Ref } from 'vue'
-import { formatAbsoluteTime, formatRelativeTime } from '~/utils/relativeTime'
+import {
+  formatAbsoluteTime,
+  formatCompactRelativeTime,
+  formatRelativeTime,
+} from '~/utils/relativeTime'
 
 const now = ref(Date.now())
 let subscribers = 0
@@ -36,6 +40,7 @@ export function useRelativeTime() {
 
   const relative = (date: Date | string | number) => formatRelativeTime(date, now.value)
   const absolute = (date: Date | string | number) => formatAbsoluteTime(date)
+  const compact = (date: Date | string | number) => formatCompactRelativeTime(date, now.value)
 
   return {
     now: now as Ref<number>,
@@ -44,5 +49,7 @@ export function useRelativeTime() {
     /** Uses shared minute-ticking `now` so list timestamps refresh together */
     formatRelativeTime: relative,
     formatAbsoluteTime: absolute,
+    /** "5m" / "3h" / "Oct 3" — for tight rows on phones */
+    formatCompactRelativeTime: compact,
   }
 }

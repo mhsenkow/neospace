@@ -44,6 +44,13 @@ const contentEl = ref<HTMLElement | null>(null)
 const modalRef = ref<HTMLElement | null>(null)
 const isOpen = computed(() => settingsStore.isOpen)
 const linkedAccounts = computed(() => instancesStore.authenticatedInstances)
+const {
+  isAndroid,
+  isIos,
+  alreadyInstalled,
+  canNativeInstall,
+  installNative,
+} = useInstallApp()
 
 const signOutAll = async () => {
   const ok = await overlayStore.openConfirm({
@@ -135,19 +142,54 @@ const confirmDiscard = async () => {
   })
 }
 
+/** Phone/tablet: category list → panel drill-down (replaces icon rail). */
+const isNarrowSettings = useMediaQuery('(max-width: 768px)')
+const mobilePanelOpen = ref(false)
+
+const headerTitle = computed(() => {
+  if (isNarrowSettings.value && mobilePanelOpen.value) {
+    return settingsStore.currentCategory?.label || 'Settings'
+  }
+  return 'Settings'
+})
+
 const tryClose = async () => {
   if (!(await confirmDiscard())) return
+  mobilePanelOpen.value = false
   settingsStore.close()
 }
 
-const trySetCategory = async (categoryId: string) => {
-  if (categoryId === settingsStore.activeCategory) return
+const mobileBack = async () => {
   if (!(await confirmDiscard())) return
-  settingsStore.setCategory(categoryId)
+  mobilePanelOpen.value = false
 }
 
+const onSettingsEscape = () => {
+  if (isNarrowSettings.value && mobilePanelOpen.value) {
+    void mobileBack()
+    return
+  }
+  void tryClose()
+}
+
+const trySetCategory = async (categoryId: string) => {
+  if (categoryId !== settingsStore.activeCategory) {
+    if (!(await confirmDiscard())) return
+    settingsStore.setCategory(categoryId)
+  }
+  if (isNarrowSettings.value) mobilePanelOpen.value = true
+}
+
+watch(isOpen, (open) => {
+  if (open) mobilePanelOpen.value = false
+})
+
+watch(isNarrowSettings, (narrow) => {
+  if (!narrow) mobilePanelOpen.value = false
+})
+
 useFocusTrap(modalRef, isOpen, {
-  onEscape: () => void tryClose(),
+  onEscape: () => onSettingsEscape(),
   initialFocus: '.settings-search__input, .settings-close',
 })
 
@@ -519,13 +561,28 @@ const fontPreviewStack = (fontId: NeoFontId) => {
         aria-labelledby="settings-title"
         @click.self="tryClose"
       >
-        <div class="settings-modal">
+        <div
+          class="settings-modal"
+          :class="{
+            'settings-modal--mobile-list': isNarrowSettings && !mobilePanelOpen,
+            'settings-modal--mobile-panel': isNarrowSettings && mobilePanelOpen,
+          }"
+        >
           <!-- Header with search -->
           <header class="settings-header">
             <div class="settings-header__left">
-              <h1 id="settings-title" class="settings-title">Settings</h1>
+              <button
+                v-if="isNarrowSettings && mobilePanelOpen"
+                type="button"
+                class="settings-back"
+                aria-label="Back to settings categories"
+                @click="mobileBack"
+              >
+                <NeoIcon name="chevron-left" :size="20" :stroke="2" />
+              </button>
+              <h1 id="settings-title" class="settings-title">{{ headerTitle }}</h1>
             </div>
-            <div class="settings-header__center">
+            <div v-if="!(isNarrowSettings && mobilePanelOpen)" class="settings-header__center">
               <div class="settings-search">
                 <label class="sr-only" for="settings-search-input">Search settings</label>
                 <span class="settings-search__icon" aria-hidden="true">
@@ -549,19 +606,36 @@ const fontPreviewStack = (fontId: NeoFontId) => {
           </header>
 
           <div class="settings-body">
-            <!-- Sidebar -->
+            <!-- Sidebar / mobile category list -->
             <nav class="settings-sidebar" aria-label="Settings categories">
               <button
                 v-for="category in settingsStore.filteredCategories"
                 :key="category.id"
                 type="button"
-                :class="['settings-nav-item', { active: settingsStore.activeCategory === category.id }]"
+                :class="[
+                  'settings-nav-item',
+                  {
+                    active:
+                      !isNarrowSettings && settingsStore.activeCategory === category.id,
+                  },
+                ]"
                 :aria-label="category.label"
-                :aria-current="settingsStore.activeCategory === category.id ? 'page' : undefined"
+                :aria-current="
+                  !isNarrowSettings && settingsStore.activeCategory === category.id
+                    ? 'page'
+                    : undefined
+                "
                 @click="trySetCategory(category.id)"
               >
                 <span class="settings-nav-item__icon" aria-hidden="true"><NeoIcon :name="(category.icon as any)" :size="18" :stroke="1.75" /></span>
                 <span class="settings-nav-item__label">{{ category.label }}</span>
+                <span
+                  v-if="isNarrowSettings"
+                  class="settings-nav-item__chevron"
+                  aria-hidden="true"
+                >
+                  <NeoIcon name="chevron-left" :size="16" :stroke="2" />
+                </span>
               </button>
               <p
                 v-if="settingsStore.searchQuery.trim() && !settingsStore.filteredCategories.length"
@@ -1188,6 +1262,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       <input 
                         v-model="postingForm.visibility" 
                         type="radio" 
+                        name="settings-visibility"
                         :value="option.value"
                         class="settings-radio-hidden"
                       />
@@ -1356,7 +1431,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <h3 class="settings-subheading">Connected Account</h3>
                   
                   <div v-if="settingsStore.account" class="settings-account-card">
-                    <img :src="settingsStore.account.avatar" class="settings-account-card__avatar" />
+                    <img :src="settingsStore.account.avatar" alt="" class="settings-account-card__avatar" />
                     <div class="settings-account-card__info">
                       <span class="settings-account-card__name">
                         {{ settingsStore.account.displayName || settingsStore.account.username }}
@@ -1405,6 +1480,43 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   >
                     Add account
                   </NuxtLink>
+
+                  <div class="settings-divider" />
+
+                  <h3 class="settings-subheading">Install app</h3>
+                  <p v-if="alreadyInstalled" class="settings-hint">
+                    NeoSpace is already installed on this device.
+                  </p>
+                  <template v-else>
+                    <p class="settings-hint">
+                      {{
+                        canNativeInstall
+                          ? 'Install for a full-screen home-screen app.'
+                          : isAndroid
+                            ? 'Chrome often hides Install in ⋮ — use Add to Home screen, or tap below if Chrome offers a prompt.'
+                            : isIos
+                              ? 'In Safari: Share → Add to Home Screen.'
+                              : 'Install NeoSpace on a phone for the app experience.'
+                      }}
+                    </p>
+                    <button
+                      v-if="canNativeInstall"
+                      type="button"
+                      class="settings-btn settings-btn--primary"
+                      @click="installNative"
+                    >
+                      Install NeoSpace
+                    </button>
+                    <ol v-if="isAndroid && !canNativeInstall" class="settings-install-steps">
+                      <li>Open neospace.ibm.io in the <strong>Chrome</strong> app.</li>
+                      <li>Tap <strong>⋮</strong> → <strong>Add to Home screen</strong> (or Install app / Add to…).</li>
+                      <li>Confirm to pin the icon.</li>
+                    </ol>
+                    <ol v-else-if="isIos" class="settings-install-steps">
+                      <li>Open in <strong>Safari</strong>.</li>
+                      <li><strong>Share</strong> → <strong>Add to Home Screen</strong>.</li>
+                    </ol>
+                  </template>
 
                   <div class="settings-divider" />
 
@@ -1516,6 +1628,9 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   border-bottom: var(--neo-border-width, 1px) solid var(--neo-border-color-dark);
 
   &__left {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
     flex: 0 1 auto;
     min-width: 0;
   }
@@ -1581,12 +1696,14 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 }
 
-.settings-close {
+.settings-close,
+.settings-back {
   width: 36px;
   height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   background: transparent;
   border: var(--neo-border-width, 1px) solid transparent;
   border-radius: var(--neo-radius-sm, 4px);
@@ -1599,6 +1716,14 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     background: var(--neo-bg-hover);
     border-color: var(--neo-border-color-dark);
   }
+}
+
+.settings-nav-item__chevron {
+  display: none;
+  margin-left: auto;
+  color: var(--neo-text-muted);
+  transform: rotate(180deg);
+  line-height: 0;
 }
 
 .settings-body {
@@ -1780,6 +1905,24 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   max-width: 52ch;
 }
 
+.settings-install-steps {
+  margin: 0 0 0.875rem;
+  padding: 0 0 0 1.15rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--neo-text-secondary);
+  max-width: 52ch;
+
+  li + li {
+    margin-top: 0.3rem;
+  }
+
+  strong {
+    color: var(--neo-text-primary);
+    font-weight: 650;
+  }
+}
+
 .settings-divider {
   height: 1px;
   background: var(--neo-border-color);
@@ -1876,6 +2019,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   pointer-events: none;
 }
 
+// The real radio is invisible — show keyboard focus on its card instead
+label:has(> .settings-radio-hidden:focus-visible) {
+  outline: 2px solid var(--neo-focus, var(--neo-accent));
+  outline-offset: 2px;
+}
+
 // Option Cards (for themes)
 .settings-option-grid {
   display: grid;
@@ -1932,12 +2081,18 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   padding: 0;
   border: 0;
   min-width: 0;
+  /* Contain children — floated <legend> hacks make Name/Bio wrap beside the heading */
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 
-  .settings-subheading {
-    float: left;
+  > .settings-subheading {
+    float: none;
+    display: block;
     width: 100%;
+    max-width: 100%;
     padding: 0;
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.75rem;
   }
 }
 
@@ -2564,6 +2719,9 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 .settings-account-handle {
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 // Account Card
@@ -2798,7 +2956,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   opacity: 0;
 }
 
-// Responsive - Tablet
+// Responsive - Tablet / phone drill-down
 @media (max-width: 768px) {
   .settings-modal {
     --settings-h: calc(100dvh - 1rem);
@@ -2807,43 +2965,88 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 
   .settings-header {
-    padding: 0.75rem 1rem;
-    flex-wrap: wrap;
-    gap: 0.625rem;
+    padding: 0.65rem 0.85rem;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
 
-    &__left { order: 1; }
-    &__center { order: 3; flex: 1 1 100%; }
-    &__right { order: 2; margin-left: auto; }
-  }
-
-  .settings-search { max-width: none; }
-
-  .settings-title { font-size: 1rem; }
-
-  .settings-sidebar {
-    width: 3.25rem;
-    padding: 0.375rem;
-  }
-
-  .settings-nav-item {
-    justify-content: center;
-    padding: 0.625rem;
-
-    &__label {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
+    &__left {
+      flex: 1 1 auto;
+      min-width: 0;
     }
-    &__icon { font-size: 1.125rem; }
+
+    &__center {
+      flex: 1 1 12rem;
+      min-width: 0;
+    }
+
+    &__right {
+      margin-left: 0;
+    }
   }
 
-  .settings-content { padding: 1rem 1.125rem 1.25rem; }
+  .settings-search {
+    max-width: none;
+  }
+
+  .settings-title {
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-body {
+    flex-direction: column;
+  }
+
+  /* List view: full-width labelled categories */
+  .settings-modal--mobile-list {
+    .settings-sidebar {
+      // Shrink so overflow-y kicks in on short (landscape) screens
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+      border-right: none;
+      border-bottom: none;
+      padding: 0.5rem 0.65rem 1rem;
+    }
+
+    .settings-content {
+      display: none;
+    }
+
+    .settings-nav-item {
+      justify-content: flex-start;
+      padding: 0.85rem 0.75rem;
+      margin-bottom: 0.35rem;
+      font-size: 0.9375rem;
+
+      &__chevron {
+        display: inline-flex;
+      }
+
+      &__icon {
+        width: 1.5rem;
+        height: 1.5rem;
+      }
+    }
+  }
+
+  /* Panel view: full-width content + back chrome */
+  .settings-modal--mobile-panel {
+    .settings-sidebar {
+      display: none;
+    }
+
+    .settings-content {
+      display: block;
+      width: 100%;
+      padding: 1rem 1.125rem 1.5rem;
+    }
+
+    .settings-header__center {
+      display: none;
+    }
+  }
 
   .settings-section__header {
     margin-bottom: 1rem;
@@ -2852,15 +3055,30 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     p { font-size: 0.875rem; }
   }
 
-  .settings-option-grid { grid-template-columns: 1fr; }
+  .settings-option-grid,
+  .settings-theme-grid,
+  .settings-chrome-grid,
+  .settings-font-grid,
+  .settings-radius-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  }
 
   .settings-toggle {
     flex-wrap: wrap;
     gap: 0.75rem;
   }
+
+  .settings-account-item {
+    flex-wrap: wrap;
+  }
+
+  :deep(.neo-radio-group) {
+    width: 100%;
+    flex-wrap: wrap;
+  }
 }
 
-// Responsive - Mobile
+// Responsive - Phone full-bleed
 @media (max-width: 480px) {
   .settings-overlay {
     padding: 0;
@@ -2876,8 +3094,11 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 
   .settings-header {
-    padding: 0.75rem;
-    gap: 0.5rem;
+    padding:
+      max(0.65rem, env(safe-area-inset-top, 0px))
+      0.75rem
+      0.65rem;
+    gap: 0.4rem;
   }
 
   .settings-search__input {
@@ -2889,13 +3110,13 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     left: 0.75rem;
   }
 
-  .settings-sidebar { width: 3rem; }
-
-  .settings-nav-item {
-    padding: 0.5rem;
+  .settings-modal--mobile-list .settings-sidebar {
+    padding: 0.35rem 0.5rem calc(1rem + env(safe-area-inset-bottom, 0px));
   }
 
-  .settings-content { padding: 0.875rem; }
+  .settings-modal--mobile-panel .settings-content {
+    padding: 0.875rem 0.875rem calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  }
 
   .settings-group {
     padding: 1rem;
@@ -2921,6 +3142,13 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   .settings-segmented__btn {
     padding: 0.5rem 0.75rem;
     font-size: 0.8125rem;
+  }
+
+  .settings-theme-grid,
+  .settings-chrome-grid,
+  .settings-font-grid,
+  .settings-radius-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

@@ -46,8 +46,13 @@ let fetchGen = 0
 let fetchController: AbortController | null = null
 const statusCache = new Map<string, CacheEntry>()
 
-function coerceAnnual(raw: mastodon.v1.AnnualReport): AnnualLite {
-  const data = (raw.data || {}) as Record<string, unknown>
+// masto doesn't re-export AnnualReport from v1 — derive it from the endpoint
+type AnnualReport = Awaited<
+  ReturnType<mastodon.rest.Client['v1']['annualReports']['list']>
+>['annualReports'][number]
+
+function coerceAnnual(raw: AnnualReport): AnnualLite {
+  const data = (raw.data || {}) as unknown as Record<string, unknown>
   const tagsRaw = (data.topHashtags || data.top_hashtags || []) as unknown
   const seriesRaw = (data.timeSeries || data.time_series || []) as unknown
   const topHashtags = Array.isArray(tagsRaw)

@@ -112,7 +112,20 @@ const notifPreview = (status?: mastodon.v1.Status | null) => {
   return text.length > 100 ? `${text.slice(0, 100)}…` : text
 }
 
-const panelNotifications = computed(() => notificationsStore.filteredNotifications)
+const notifSearchQuery = ref('')
+const msgSearchQuery = ref('')
+
+const panelNotifications = computed(() => {
+  const items = notificationsStore.filteredNotifications
+  const q = notifSearchQuery.value.trim().toLowerCase()
+  if (!q) return items
+  return items.filter((n) => {
+    const name = `${n.account?.displayName || ''} ${n.account?.username || ''} ${n.account?.acct || ''}`.toLowerCase()
+    const action = notifLabel(n.type).toLowerCase()
+    const preview = notifPreview(n.status).toLowerCase()
+    return name.includes(q) || action.includes(q) || preview.includes(q)
+  })
+})
 
 const formatTime = (dateString?: string | null) => {
   if (!dateString) return ''
@@ -292,7 +305,7 @@ const loadRemoteStatuses = async (refresh = false) => {
       excludeReplies: true,
     })
     remoteStatuses.value = refresh ? page : [...remoteStatuses.value, ...page]
-    if (page.length > 0) remoteMaxId.value = page[page.length - 1].id
+    if (page.length > 0) remoteMaxId.value = page[page.length - 1]!.id
     remoteHasMore.value = page.length === 20
   } catch (e: any) {
     remoteError.value = e?.message || 'Couldn’t load posts'
@@ -330,7 +343,7 @@ const runSearch = async (q: string) => {
   searchError.value = null
   try {
     const client = instancesStore.hasAuthenticatedInstance ? activeClient() : publicClient()
-    const res = await client.v2.search.fetch({
+    const res = await client.v2.search.list({
       q: query,
       limit: 8,
       resolve: instancesStore.hasAuthenticatedInstance && /@[\w.-]+@[\w.-]+/.test(query),
@@ -416,6 +429,20 @@ const myAcct = computed(() => instancesStore.currentUser?.acct || '')
 
 const previewText = (c: mastodon.v1.Conversation) =>
   conversationsStore.previewFor(c, myId.value, myAcct.value)
+
+const panelConversations = computed(() => {
+  const list = conversationsStore.conversations
+  const q = msgSearchQuery.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter((c) => {
+    const names = (c.accounts || [])
+      .map((a) => `${a.displayName || ''} ${a.username || ''} ${a.acct || ''}`)
+      .join(' ')
+      .toLowerCase()
+    const preview = previewText(c).toLowerCase()
+    return names.includes(q) || preview.includes(q)
+  })
+})
 
 const openConversation = async (c: mastodon.v1.Conversation) => {
   if (!c.lastStatus?.id) return
@@ -503,6 +530,8 @@ onUnmounted(() => {
     @dragover="onColumnDragOver"
     @drop="onColumnDrop"
   >
+    <!-- Same outline as TimelineColumn: each column is an h2 section -->
+    <h2 class="sr-only">{{ title }}</h2>
     <ColumnChrome
       :column-id="column.id"
       :can-reorder="canReorder"
@@ -766,6 +795,10 @@ onUnmounted(() => {
             v-model="searchQuery"
             type="search"
             placeholder="People, tags, posts…"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="search"
             autocomplete="off"
             aria-label="Search people, tags, and posts"
             :aria-busy="searchBusy || undefined"
@@ -778,11 +811,11 @@ onUnmounted(() => {
           </template>
         </p>
         <p v-if="searchBusy" class="panel-hint" aria-hidden="true">Searching…</p>
-        <p v-else-if="searchError" class="panel-hint panel-hint--err">{{ searchError }}</p>
+        <p v-else-if="searchError" class="panel-hint panel-hint--err" role="alert">{{ searchError }}</p>
         <p v-else-if="searchQuery.trim().length < 2" class="panel-hint">Type at least two characters.</p>
 
         <section v-if="searchAccounts.length" class="panel-section">
-          <h4>People</h4>
+          <h3 class="panel-section__title">People</h3>
           <button
             v-for="acct in searchAccounts"
             :key="acct.id"
@@ -799,7 +832,7 @@ onUnmounted(() => {
         </section>
 
         <section v-if="searchHashtags.length" class="panel-section">
-          <h4>Tags</h4>
+          <h3 class="panel-section__title">Tags</h3>
           <button
             v-for="tag in searchHashtags"
             :key="tag.name"
@@ -812,7 +845,7 @@ onUnmounted(() => {
         </section>
 
         <section v-if="searchStatuses.length" class="panel-section">
-          <h4>Posts</h4>
+          <h3 class="panel-section__title">Posts</h3>
           <button
             v-for="status in searchStatuses"
             :key="status.id"
@@ -852,8 +885,22 @@ onUnmounted(() => {
             </button>
             <NuxtLink to="/notifications" class="panel-link">Full page</NuxtLink>
           </div>
+          <label v-if="!notificationsStore.isEmpty" class="search-field panel-list-search">
+            <NeoIcon name="search" :size="14" :stroke="1.75" aria-hidden="true" />
+            <span class="sr-only">Search activity</span>
+            <input
+              v-model="notifSearchQuery"
+              type="search"
+              placeholder="Search activity…"
+              autocomplete="off"
+              enterkeyhint="search"
+            />
+          </label>
           <p v-if="notificationsStore.isLoading && notificationsStore.isEmpty" class="panel-hint">Loading…</p>
           <p v-else-if="notificationsStore.isEmpty" class="panel-hint">All caught up.</p>
+          <p v-else-if="notifSearchQuery.trim() && !panelNotifications.length" class="panel-hint">
+            No matches for “{{ notifSearchQuery.trim() }}”.
+          </p>
           <div
             v-for="notif in panelNotifications"
             :key="notif._key"
@@ -910,6 +957,17 @@ onUnmounted(() => {
             <button type="button" class="neo-btn neo-btn--primary" @click="startNewMessage">New</button>
             <NuxtLink to="/messages" class="panel-link">Full page</NuxtLink>
           </div>
+          <label v-if="conversationsStore.conversations.length" class="search-field panel-list-search">
+            <NeoIcon name="search" :size="14" :stroke="1.75" aria-hidden="true" />
+            <span class="sr-only">Search chats</span>
+            <input
+              v-model="msgSearchQuery"
+              type="search"
+              placeholder="Search chats…"
+              autocomplete="off"
+              enterkeyhint="search"
+            />
+          </label>
           <div
             v-if="conversationsStore.isLoading && !conversationsStore.conversations.length"
             class="panel-loading"
@@ -924,8 +982,11 @@ onUnmounted(() => {
             </button>
             <NuxtLink to="/explore?tab=people" class="panel-link">Find people</NuxtLink>
           </div>
+          <p v-else-if="msgSearchQuery.trim() && !panelConversations.length" class="panel-hint">
+            No chats match “{{ msgSearchQuery.trim() }}”.
+          </p>
           <div
-            v-for="c in conversationsStore.conversations"
+            v-for="c in panelConversations"
             :key="c.id"
             class="panel-msg-row"
             :class="{ 'panel-msg-row--unread': c.unread, 'panel-msg-row--disabled': !c.lastStatus?.id }"
@@ -1135,14 +1196,16 @@ onUnmounted(() => {
 
 .panel-section {
   margin-top: 1rem;
+}
 
-  h4 {
-    margin: 0 0 0.4rem;
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--neo-text-quaternary);
-  }
+.panel-section__title {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  // quaternary was ~2:1 — section labels still need to be legible
+  color: var(--neo-text-tertiary);
 }
 
 .sr-only {
@@ -1166,6 +1229,11 @@ onUnmounted(() => {
   border-radius: 8px;
   background: var(--neo-bg-secondary);
 
+  &:focus-within {
+    border-color: var(--neo-accent);
+    box-shadow: 0 0 0 3px var(--neo-accent-soft);
+  }
+
   input {
     flex: 1;
     border: none;
@@ -1175,6 +1243,14 @@ onUnmounted(() => {
     outline: none;
     min-width: 0;
   }
+}
+
+.panel-list-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin-bottom: 0.55rem;
+  background: var(--neo-bg-secondary);
 }
 
 .row-btn-wrap {

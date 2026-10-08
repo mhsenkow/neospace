@@ -51,6 +51,7 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - **Refs:** `stores/instances.ts`, audit CODE·M·L
 
 ### 7. Settings: mobile drill-down nav
+- **Status:** Done (list → panel + back chrome at ≤768px)
 - **Why:** Phone nav is an unlabelled 3rem icon rail
 - **Scope:** List → panel drill-down with back chrome; labelled sections
 - **Size:** M

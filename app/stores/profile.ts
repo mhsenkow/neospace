@@ -164,7 +164,7 @@ export const useProfileStore = defineStore('profile', {
         try {
           account = await client.v1.accounts.lookup({ acct: username })
         } catch {
-          const res = await client.v2.search.fetch({
+          const res = await client.v2.search.list({
             q: username,
             type: 'accounts',
             resolve: true,

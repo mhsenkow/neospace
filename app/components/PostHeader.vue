@@ -16,7 +16,7 @@ const emit = defineEmits<{
   profileClick: [acct: string, event: MouseEvent]
 }>()
 
-const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
+const { formatAbsoluteTime } = useRelativeTime()
 </script>
 
 <template>
@@ -51,20 +51,26 @@ const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
       <time
         :datetime="createdAt"
         :title="formatAbsoluteTime(createdAt)"
-      >{{ formatRelativeTime(createdAt) }}</time>
+      >
+        <NeoTimeAgo :date="createdAt" />
+      </time>
     </NuxtLink>
     <time
       v-else
       class="status-time"
       :datetime="createdAt"
       :title="formatAbsoluteTime(createdAt)"
-    >{{ formatRelativeTime(createdAt) }}</time>
+    >
+      <NeoTimeAgo :date="createdAt" />
+    </time>
     <slot />
   </header>
 </template>
 
 <style lang="scss" scoped>
 .status-header {
+  // NeoTimeAgo goes compact when this row is narrow
+  container-type: inline-size;
   display: flex;
   align-items: center;
   gap: 0.375rem;
@@ -103,7 +109,10 @@ const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  flex: 0 1 auto;
+  // Don't shrink (fractional flex shrink ellipsized names that fit by <1px);
+  // cap at the row instead so long names still truncate.
+  flex: 0 0 auto;
+  max-width: 100%;
 
   :deep(img.emoji) {
     height: 1em;
@@ -114,6 +123,7 @@ const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
 }
 
 .status-handle {
+  // Handle yields all the squeeze to the display name
   flex: 0 1 auto;
   min-width: 0;
   font-size: 0.8125rem;

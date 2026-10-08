@@ -13,6 +13,7 @@ import {
   participantAccts,
   participantLabel,
 } from '~/utils/dmHelpers'
+import { getPageScrollTop } from '~/utils/pageScroll'
 import type { mastodon } from 'masto'
 
 const conversationsStore = useConversationsStore()
@@ -137,13 +138,14 @@ const refreshInbox = async () => {
   conversationsStore.resetQuietRefreshFailures()
   await Promise.all([
     conversationsStore.fetchConversations({ force: true }),
-    loadFollowing(80, true),
+    loadFollowing(true),
   ])
 }
 
 const onTouchStart = (e: TouchEvent) => {
   const el = listEl.value
-  if (!el || el.scrollTop > 2) return
+  // The list grows with content — `main` (mobile) or the window is what scrolls
+  if (!el || el.scrollTop > 2 || getPageScrollTop() > 2) return
   pullStartY = e.touches[0]?.clientY || 0
   pullActive = true
 }
@@ -290,7 +292,7 @@ useHead(() => ({ title: pageTitle.value }))
 
     <div
       v-if="canView && conversationsStore.conversations.length"
-      class="messages-toolbar"
+      class="messages-toolbar neo-sticky-bar neo-sticky-bar--under-chrome"
     >
       <label class="messages-search">
         <span class="sr-only">Search messages</span>
@@ -300,6 +302,8 @@ useHead(() => ({ title: pageTitle.value }))
           class="messages-search__input"
           placeholder="Search chats…"
           autocomplete="off"
+          enterkeyhint="search"
+          @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' })"
         />
       </label>
     </div>
@@ -521,7 +525,8 @@ useHead(() => ({ title: pageTitle.value }))
   border-radius: var(--neo-radius-sm, 8px);
   background: color-mix(in srgb, var(--neo-text-primary) 5%, transparent);
   border: 1px solid var(--neo-border-color);
-  font-size: var(--neo-font-size-xs, 0.75rem);
+  // Privacy caveat people need to actually read — xs rendered ~10px
+  font-size: var(--neo-font-size-sm, 0.8125rem);
   line-height: 1.4;
   color: var(--neo-text-secondary);
 
@@ -532,7 +537,11 @@ useHead(() => ({ title: pageTitle.value }))
 }
 
 .messages-toolbar {
-  padding: 0.65rem 1rem 0.35rem;
+  padding: 0.65rem 1rem 0.5rem;
+  /* Keep search above the soft keyboard when the shell hasn't fully resized yet */
+  scroll-margin-bottom: calc(1rem + var(--neo-keyboard-inset, 0px));
+  background: var(--neo-bg-primary);
+  border-bottom: 1px solid var(--neo-border-color);
 }
 
 .messages-search {

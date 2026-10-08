@@ -123,38 +123,75 @@ export function useKeyboardViewport(
 /**
  * Bottom inset for fixed composers/docks that sit above the soft keyboard.
  * Call when the bar is mounted (always-on), unlike useKeyboardViewport's active gate.
+ *
+ * With `interactive-widget=resizes-content` (Android), layout already shrinks and
+ * inset is often ~0; keep the math for iOS / overlay keyboards. Also publishes
+ * `--neo-keyboard-inset` for page padding (threads / DMs).
+ *
+ * Shared singleton — layout + ChatComposer + reply dock can all subscribe without
+ * fighting over listeners / zeroing the CSS var on unmount.
  */
+const sharedInsetStyle = ref<Record<string, string>>({ bottom: '0px' })
+const sharedKeyboardOpen = ref(false)
+let keyboardInsetSubs = 0
+
+const syncKeyboardInset = () => {
+  if (typeof window === 'undefined') return
+  const vv = window.visualViewport
+  if (!vv) {
+    sharedInsetStyle.value = { bottom: '0px' }
+    sharedKeyboardOpen.value = false
+    document.documentElement.style.setProperty('--neo-keyboard-inset', '0px')
+    return
+  }
+  // Prefer layout-vs-visual gap; also catch vv.offsetTop (iOS Safari URL bar / keyboard)
+  const inset = Math.max(
+    0,
+    Math.round(window.innerHeight - vv.height - vv.offsetTop),
+    // When resizes-content already shrank innerHeight, still lift if vv is smaller
+    Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop),
+  )
+  // Ignore URL-bar jitter. Android 10 / overlay keyboards often land ~180–280px;
+  // keep threshold below that. With interactive-widget=resizes-content, inset≈0
+  // and the layout shell already shrinks — composers sit at bottom:0.
+  const kb = inset >= 100 ? inset : 0
+  sharedInsetStyle.value = { bottom: `${kb}px` }
+  sharedKeyboardOpen.value = kb > 0
+  document.documentElement.style.setProperty('--neo-keyboard-inset', `${kb}px`)
+}
+
+const attachKeyboardInset = () => {
+  if (typeof window === 'undefined') return
+  syncKeyboardInset()
+  window.visualViewport?.addEventListener('resize', syncKeyboardInset)
+  window.visualViewport?.addEventListener('scroll', syncKeyboardInset)
+  window.addEventListener('resize', syncKeyboardInset)
+}
+
+const detachKeyboardInset = () => {
+  if (typeof window === 'undefined') return
+  window.visualViewport?.removeEventListener('resize', syncKeyboardInset)
+  window.visualViewport?.removeEventListener('scroll', syncKeyboardInset)
+  window.removeEventListener('resize', syncKeyboardInset)
+  document.documentElement.style.setProperty('--neo-keyboard-inset', '0px')
+  sharedInsetStyle.value = { bottom: '0px' }
+  sharedKeyboardOpen.value = false
+}
+
 export function useKeyboardBottomInset() {
-  const insetStyle = ref<Record<string, string>>({})
+  onMounted(() => {
+    keyboardInsetSubs += 1
+    if (keyboardInsetSubs === 1) attachKeyboardInset()
+    else syncKeyboardInset()
+  })
+  onUnmounted(() => {
+    keyboardInsetSubs = Math.max(0, keyboardInsetSubs - 1)
+    if (keyboardInsetSubs === 0) detachKeyboardInset()
+  })
 
-  const syncInset = () => {
-    if (typeof window === 'undefined') return
-    const vv = window.visualViewport
-    if (!vv) {
-      insetStyle.value = { bottom: '0px' }
-      return
-    }
-    const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-    insetStyle.value = { bottom: `${inset}px` }
+  return {
+    insetStyle: sharedInsetStyle,
+    syncInset: syncKeyboardInset,
+    keyboardOpen: sharedKeyboardOpen,
   }
-
-  const attach = () => {
-    if (typeof window === 'undefined') return
-    syncInset()
-    window.visualViewport?.addEventListener('resize', syncInset)
-    window.visualViewport?.addEventListener('scroll', syncInset)
-    window.addEventListener('resize', syncInset)
-  }
-
-  const detach = () => {
-    if (typeof window === 'undefined') return
-    window.visualViewport?.removeEventListener('resize', syncInset)
-    window.visualViewport?.removeEventListener('scroll', syncInset)
-    window.removeEventListener('resize', syncInset)
-  }
-
-  onMounted(attach)
-  onUnmounted(detach)
-
-  return { insetStyle, syncInset }
 }

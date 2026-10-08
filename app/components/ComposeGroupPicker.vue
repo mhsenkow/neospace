@@ -230,6 +230,7 @@ onBeforeUnmount(() => {
       :z-index="240"
       desktop-width="compact"
       max-height="min(78dvh, 560px)"
+      :viewport-style="viewportStyle"
       @close="open = false"
     >
       <div
@@ -257,6 +258,9 @@ onBeforeUnmount(() => {
                 type="search"
                 class="group-pick-sheet__input"
                 placeholder="Search groups or any hashtag…"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
                 enterkeyhint="search"
               />
             </div>
@@ -543,6 +547,16 @@ onBeforeUnmount(() => {
   }
 }
 
+// Bound the column so __body (flex:1; overflow-y:auto) actually scrolls
+.group-pick-sheet__inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .group-pick-sheet__header {
   display: flex;
   align-items: center;
@@ -585,6 +599,11 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   color: var(--neo-text-muted);
   background: var(--neo-bg-secondary);
+
+  &:focus-within {
+    border-color: var(--neo-accent);
+    box-shadow: 0 0 0 3px var(--neo-accent-soft);
+  }
 }
 
 .group-pick-sheet__input {

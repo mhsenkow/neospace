@@ -15,6 +15,12 @@ const router = useRouter()
 
 const selectedCategory = ref('all')
 const searchQuery = ref('')
+
+/** Results filter live — on touch, Enter just puts the keyboard away */
+const dismissKeyboardOnTouch = (e: KeyboardEvent) => {
+  if (window.matchMedia('(pointer: fine)').matches) return
+  ;(e.target as HTMLInputElement | null)?.blur()
+}
 const searchResults = ref<any[]>([])
 const isSearching = ref(false)
 
@@ -107,7 +113,7 @@ useHead({
 
     <div class="groups-main">
       <!-- Search -->
-      <div class="groups-search">
+      <div class="groups-search neo-sticky-bar">
         <div class="search-input-wrapper">
           <span class="search-icon" aria-hidden="true">
             <NeoIcon name="search" :size="18" :stroke="1.75" />
@@ -116,8 +122,13 @@ useHead({
             v-model="searchQuery"
             type="search"
             placeholder="Search any hashtag — baking, horror, vinyl…"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
             class="search-input"
             aria-label="Search groups"
+            enterkeyhint="search"
+            @keydown.enter="dismissKeyboardOnTouch"
           />
           <span v-if="isSearching" class="search-loading" role="status" aria-live="polite">Searching…</span>
         </div>
@@ -359,7 +370,9 @@ useHead({
 }
 
 .groups-search {
-  margin-bottom: 1.35rem;
+  margin: 0 0 1.35rem;
+  padding: 0.15rem 0 0.65rem;
+  background: var(--neo-bg-primary);
 }
 
 .search-input-wrapper {
@@ -401,9 +414,15 @@ useHead({
   }
 }
 
+.search-input-wrapper:has(.search-loading) .search-input {
+  padding-right: 6.5rem;
+}
+
 .search-loading {
   position: absolute;
   right: 1rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
   animation: pulse 1s infinite;
 }
 
@@ -422,10 +441,12 @@ useHead({
 
 .section-title {
   margin: 0;
+  min-width: 0;
   font-size: 1.0625rem;
   font-weight: 700;
   color: var(--neo-text-primary);
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .section-lede {
@@ -468,6 +489,11 @@ useHead({
   cursor: pointer;
   box-shadow: 0 2px 8px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
 
+  /* Phones swipe the rail — overlay arrows just cover tiles */
+  @media (pointer: coarse) {
+    display: none;
+  }
+
   &:focus-visible {
     outline: 2px solid var(--neo-accent);
     outline-offset: 2px;
@@ -493,6 +519,8 @@ useHead({
   overscroll-behavior-x: contain;
   margin: 0 -0.75rem;
   padding: 0.15rem 0.75rem 0.35rem;
+  // Snap to the page gutter, not the bleed edge
+  scroll-padding-inline: 0.75rem;
 
   &::-webkit-scrollbar {
     display: none;
@@ -502,18 +530,27 @@ useHead({
     margin: 0 -1.25rem;
     padding-left: 1.25rem;
     padding-right: 1.25rem;
+    scroll-padding-inline: 1.25rem;
   }
 
   @media (min-width: 1024px) {
     margin: 0;
     padding-left: 0;
     padding-right: 0;
+    scroll-padding-inline: 0;
   }
 }
 
 .groups-rail {
   gap: 0.85rem;
   padding-bottom: 0.5rem;
+
+  // Phones: ~2.3 tiles so the next one peeks in — a cue the rail swipes sideways
+  @media (max-width: 599px) {
+    > :deep(.group-card--tile) {
+      flex-basis: 42%;
+    }
+  }
 }
 
 .jump-chip {
@@ -594,7 +631,7 @@ useHead({
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0.375rem 0.875rem;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);

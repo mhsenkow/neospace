@@ -12,6 +12,9 @@ import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore } from '~/stores/columns'
 import { categoryColor } from '~/composables/useShellAppearance'
 import { logError } from '~/utils/log'
+import { getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
+import { useMobileViewport } from '~/composables/useBreakpoint'
+import { stripHtml } from '~/utils/sanitizeHtml'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,9 +53,32 @@ const displayGroup = computed(() => {
   }
 })
 
+/** Phones/tablets: one-row composer pill so posts start above the fold */
+const isMobile = useMobileViewport()
+
 const isJoining = ref(false)
 const isLeaving = ref(false)
 const loadMoreError = ref<string | null>(null)
+const postsQuery = ref('')
+
+const visibleTimeline = computed(() => {
+  const list = groupsStore.groupTimeline
+  const q = postsQuery.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter((s) => {
+    const src = s.reblog || s
+    const hay = [
+      stripHtml(src.content || ''),
+      src.spoilerText || '',
+      src.account?.displayName || '',
+      src.account?.username || '',
+      src.account?.acct || '',
+    ]
+      .join(' ')
+      .toLowerCase()
+    return hay.includes(q)
+  })
+})
 
 const showActionError = async (message: string, retry?: () => void) => {
   const { useToastStore } = await import('~/stores/toast')
@@ -72,7 +98,7 @@ const loadTimeline = async (newTag: string) => {
   const restoredScroll = groupsStore.restoreTimeline(newTag)
   if (restoredScroll != null) {
     await nextTick()
-    window.scrollTo({ top: restoredScroll, behavior: 'auto' })
+    scrollPageTo(restoredScroll)
     return
   }
   await groupsStore.fetchGroupTimeline(newTag, true)
@@ -87,13 +113,14 @@ onMounted(async () => {
 
 watch(tag, async (newTag, oldTag) => {
   if (oldTag && oldTag !== newTag) {
-    groupsStore.cacheTimeline(oldTag, window.scrollY)
+    groupsStore.cacheTimeline(oldTag, getPageScrollTop())
   }
+  postsQuery.value = ''
   if (newTag) await loadTimeline(newTag)
 })
 
-onUnmounted(() => {
-  groupsStore.clearTimeline(tag.value, window.scrollY)
+onBeforeUnmount(() => {
+  groupsStore.clearTimeline(tag.value, getPageScrollTop())
 })
 
 // Handle join
@@ -144,8 +171,9 @@ const handleLoadMore = async () => {
   try {
     await groupsStore.loadMoreTimeline()
   } catch (e: any) {
-    loadMoreError.value = e?.message || 'Couldn’t load more posts'
-    void showActionError(loadMoreError.value, () => { void handleLoadMore() })
+    const message: string = e?.message || 'Couldn’t load more posts'
+    loadMoreError.value = message
+    void showActionError(message, () => { void handleLoadMore() })
   }
 }
 
@@ -180,20 +208,29 @@ useHead({
 
 <template>
   <div class="group-detail">
+    <SubviewChrome :title="displayGroup.name" :back-action="goBack">
+      <template #actions>
+        <button
+          type="button"
+          class="subview-chrome__btn neo-tip group-chrome-board"
+          :aria-label="isOnBoard ? 'Open on your board' : 'Add as a column on Home'"
+          @click="addToBoard"
+        >
+          <NeoIcon :name="isOnBoard ? 'check' : 'plus'" :size="18" :stroke="1.75" />
+        </button>
+      </template>
+    </SubviewChrome>
+
     <!-- Header -->
     <header class="group-header" :style="{ '--category-color': categoryColor(displayGroup.category) }">
-      <button class="back-btn" @click="goBack">
-        <NeoIcon name="chevron-left" :size="18" :stroke="2" />
-        <span>All Groups</span>
-      </button>
-
       <div class="group-info">
         <div class="group-icon">
           <span aria-hidden="true">{{ displayGroup.icon }}</span>
         </div>
         
         <div class="group-meta">
-          <h1 class="group-name">{{ displayGroup.name }}</h1>
+          <!-- SubviewChrome already renders the page h1 -->
+          <h2 class="group-name">{{ displayGroup.name }}</h2>
           <p class="group-tag">#{{ displayGroup.tag }}</p>
           <p v-if="displayGroup.description" class="group-description">
             {{ displayGroup.description }}
@@ -208,7 +245,7 @@ useHead({
             @click="addToBoard"
           >
             <NeoIcon :name="isOnBoard ? 'check' : 'plus'" :size="14" :stroke="2.5" />
-            <span>{{ isOnBoard ? 'On board' : 'Add column' }}</span>
+            <span class="action-btn__text">{{ isOnBoard ? 'On board' : 'Add column' }}</span>
           </button>
           <button
             v-if="displayGroup.isMember"
@@ -232,7 +269,7 @@ useHead({
             @click="handleJoin"
           >
             <span v-if="isJoining">Joining...</span>
-            <span v-else>+ Join Group</span>
+            <span v-else>+ Join</span>
           </button>
         </div>
       </div>
@@ -245,7 +282,7 @@ useHead({
 
     <!-- Membership Banner -->
     <div v-if="displayGroup.isMember" class="member-banner">
-      <span>✨</span>
+      <span aria-hidden="true">✨</span>
       <p>You're a member! Posts from this group will appear in your home timeline.</p>
     </div>
 
@@ -254,6 +291,7 @@ useHead({
       v-if="instancesStore.isAuthenticated"
       :initial-group-tag="tag"
       lock-group
+      :compact="isMobile"
       :title="`Post to ${displayGroup.name}`"
       :placeholder="`Share with #${tag}…`"
       :accept-handoff="false"
@@ -262,13 +300,31 @@ useHead({
 
     <!-- Timeline -->
     <section class="group-timeline">
+      <div
+        v-if="groupsStore.groupTimeline.length || postsQuery.trim()"
+        class="group-posts-search neo-sticky-bar neo-sticky-bar--under-chrome"
+      >
+        <label class="group-posts-search__field">
+          <span class="sr-only">Search group posts</span>
+          <NeoIcon name="search" :size="16" :stroke="1.75" class="group-posts-search__icon" aria-hidden="true" />
+          <input
+            v-model="postsQuery"
+            type="search"
+            class="group-posts-search__input"
+            placeholder="Search posts…"
+            autocomplete="off"
+            enterkeyhint="search"
+          />
+        </label>
+      </div>
+
       <!-- Loading State -->
       <div v-if="groupsStore.isLoadingTimeline" class="timeline-loading" aria-busy="true">
         <FunLoader fill label="Loading group posts" />
       </div>
 
       <!-- Error State -->
-      <div v-else-if="groupsStore.error" class="timeline-error">
+      <div v-else-if="groupsStore.error" class="timeline-error" role="alert">
         <span>😕</span>
         <p>{{ groupsStore.error }}</p>
         <button type="button" class="neo-btn neo-btn--ghost" @click="groupsStore.fetchGroupTimeline(tag, true)">
@@ -283,10 +339,16 @@ useHead({
         <p>No posts visible from your server yet. Use #{{ tag }} when you post.</p>
       </div>
 
+      <div v-else-if="postsQuery.trim() && !visibleTimeline.length" class="timeline-empty">
+        <span class="empty-emoji" aria-hidden="true">🔍</span>
+        <h3>No matches</h3>
+        <p>No loaded posts match “{{ postsQuery.trim() }}”.</p>
+      </div>
+
       <!-- Posts -->
       <div v-else class="timeline-posts">
         <RealPostCard
-          v-for="status in groupsStore.groupTimeline"
+          v-for="status in visibleTimeline"
           :key="status.id"
           :status="status"
         />
@@ -323,14 +385,40 @@ useHead({
 .group-detail {
   max-width: 700px;
   margin: 0 auto;
-  padding: 0 0.5rem 5rem; // Extra bottom padding for mobile nav
+  padding: 0 0.5rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 
   @media (min-width: 480px) {
-    padding: 0 1rem 5rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
   }
 
   @media (min-width: 1024px) {
-    padding: 0 1rem 3rem; // Less padding on desktop (no bottom nav)
+    padding-bottom: 3rem;
+  }
+}
+
+/* Sticky chrome: board action on phones; header button on desktop */
+.group-chrome-board {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--neo-text-primary);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+  }
+
+  @media (min-width: 1024px) {
+    display: none;
   }
 }
 
@@ -361,48 +449,13 @@ useHead({
   }
 }
 
-.back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  background: rgba(255, 255, 255, 0.2);
-  border: none;
-  border-radius: 100px;
-  color: white;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  margin-bottom: 0.75rem;
-
-  @media (min-width: 480px) {
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
-  }
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: translateX(-4px);
-  }
-
-  span:first-child {
-    font-size: 1rem;
-
-    @media (min-width: 480px) {
-      font-size: 1.125rem;
-    }
-  }
-}
-
 .group-info {
   position: relative;
   z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
 
   @media (min-width: 480px) {
     gap: 1rem;
@@ -463,6 +516,8 @@ useHead({
   color: white;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 
   @media (min-width: 480px) {
     font-size: 1.5rem;
@@ -478,6 +533,8 @@ useHead({
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.85);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 
   @media (min-width: 480px) {
     margin-top: 0.25rem;
@@ -490,6 +547,7 @@ useHead({
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.95);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 
   @media (min-width: 480px) {
     margin-top: 0.75rem;
@@ -500,10 +558,11 @@ useHead({
 
 .group-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.5rem;
   flex-shrink: 0;
-  align-self: flex-start;
+  align-self: stretch;
   width: 100%;
   position: relative;
   z-index: 2;
@@ -511,6 +570,7 @@ useHead({
   @media (min-width: 600px) {
     align-self: center;
     width: auto;
+    flex-wrap: nowrap;
   }
 }
 
@@ -519,23 +579,26 @@ useHead({
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  padding: 0.625rem 1.25rem;
+  padding: 0.625rem 1rem;
+  min-height: 44px;
   font-size: 0.875rem;
   font-weight: 700;
   border: none;
   border-radius: 100px;
   cursor: pointer;
   transition: all 0.15s ease;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
   pointer-events: auto;
 
   @media (min-width: 480px) {
-    padding: 0.75rem 1.5rem;
+    padding: 0.75rem 1.25rem;
     font-size: 0.9375rem;
   }
 
   @media (min-width: 600px) {
-    width: auto;
+    flex: 0 0 auto;
     min-width: 9.5rem;
   }
 
@@ -544,6 +607,10 @@ useHead({
     color: white;
     border: 2px solid rgba(255, 255, 255, 0.65);
 
+    @media (max-width: 1023px) {
+      display: none;
+    }
+
     &:hover {
       background: rgba(255, 255, 255, 0.28);
     }
@@ -551,13 +618,14 @@ useHead({
 
   &--board-on {
     background: white;
-    color: var(--category-color);
+    color: color-mix(in srgb, var(--category-color) 68%, #000);
     border-color: white;
   }
 
   &--join {
     background: white;
-    color: var(--category-color);
+    // Raw gold/orange category hues are ~3:1 on white — darken the label
+    color: color-mix(in srgb, var(--category-color) 68%, #000);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 
     &:hover:not(:disabled) {
@@ -595,6 +663,17 @@ useHead({
 
     &:disabled {
       opacity: 0.6;
+    }
+
+    // Touch has no hover reveal — one tap leaves, so say so up front
+    @media (hover: none) {
+      .action-btn__leave-label {
+        display: inline;
+
+        &::before {
+          content: '· ';
+        }
+      }
     }
   }
 }
@@ -636,13 +715,14 @@ useHead({
 // Member Banner
 .member-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.625rem;
   padding: 0.875rem 1rem;
   background: var(--neo-accent-soft);
   border: 1px solid var(--neo-accent);
   border-radius: 10px;
   margin-bottom: 1rem;
+  min-width: 0;
 
   @media (min-width: 480px) {
     gap: 0.75rem;
@@ -651,7 +731,8 @@ useHead({
     margin-bottom: 1.5rem;
   }
 
-  span {
+  > span {
+    flex-shrink: 0;
     font-size: 1.125rem;
 
     @media (min-width: 480px) {
@@ -661,8 +742,11 @@ useHead({
 
   p {
     margin: 0;
+    flex: 1;
+    min-width: 0;
     font-size: 0.875rem;
     color: var(--neo-text-primary);
+    line-height: 1.4;
 
     @media (min-width: 480px) {
       font-size: 0.9375rem;
@@ -676,6 +760,50 @@ useHead({
 
   @media (min-width: 480px) {
     min-height: 300px;
+  }
+}
+
+.group-posts-search {
+  margin: 0 0 0.85rem;
+  padding: 0.35rem 0 0.55rem;
+  background: var(--neo-bg-primary);
+  border-bottom: 1px solid var(--neo-border-color);
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.35rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-md, 12px);
+    background: var(--neo-bg-tertiary);
+    box-sizing: border-box;
+
+    &:focus-within {
+      border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
+      box-shadow: 0 0 0 3px var(--neo-accent-soft);
+    }
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    color: var(--neo-text-muted);
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.875rem;
+    outline: none;
+
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
   }
 }
 
@@ -719,7 +847,7 @@ useHead({
     margin-top: 0.75rem;
     padding: 0.625rem 1.25rem;
     background: var(--neo-accent);
-    color: white;
+    color: var(--neo-text-on-accent, #fff);
     border: none;
     border-radius: 100px;
     font-weight: 600;
@@ -852,12 +980,14 @@ useHead({
   }
 }
 
-// Post Hint (for non-authenticated users)
+// Post Hint (for non-authenticated users) — detail is a mobile subview (no tab bar)
 .post-hint {
   position: fixed;
-  bottom: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 0.75rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
   left: 0.5rem;
   right: 0.5rem;
+  max-width: min(36rem, calc(100vw - 1rem));
+  margin: 0 auto;
   padding: 0.75rem 1rem;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
@@ -869,9 +999,9 @@ useHead({
   justify-content: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+  box-sizing: border-box;
 
   @media (min-width: 480px) {
-    bottom: 1rem;
     left: 1rem;
     right: 1rem;
     padding: 0.875rem 1.25rem;
@@ -879,7 +1009,7 @@ useHead({
     gap: 1rem;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 1024px) {
     left: 50%;
     right: auto;
     transform: translateX(-50%);
@@ -916,7 +1046,7 @@ useHead({
   &__login {
     padding: 0.5rem 1rem;
     background: var(--neo-accent);
-    color: white;
+    color: var(--neo-text-on-accent, #fff);
     text-decoration: none;
     border-radius: 100px;
     font-size: 0.8125rem;

@@ -45,6 +45,14 @@ type PendingSend = {
 }
 const pendingSend = ref<PendingSend | null>(null)
 
+/** Plain text → bubble HTML: escape markup, keep line breaks */
+const escapeForBubble = (text: string) =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
+
 const makeOptimisticStatus = (body: string): mastodon.v1.Status => {
   const me = instancesStore.currentUser
   const now = new Date().toISOString()
@@ -53,7 +61,7 @@ const makeOptimisticStatus = (body: string): mastodon.v1.Status => {
     uri: '',
     url: null,
     createdAt: now,
-    content: body ? `<p>${body.replace(/</g, '&lt;')}</p>` : '',
+    content: body ? `<p>${escapeForBubble(body)}</p>` : '',
     visibility: 'direct',
     sensitive: false,
     spoilerText: '',
@@ -97,7 +105,8 @@ const makeOptimisticStatus = (body: string): mastodon.v1.Status => {
     reblog: null,
     poll: null,
     card: null,
-  } as mastodon.v1.Status
+    // Placeholder until the server echo replaces it — not every Status field is meaningful
+  } as unknown as mastodon.v1.Status
 }
 
 const {
@@ -121,7 +130,16 @@ const {
   onDrop,
 } = useComposeMedia()
 
-const { insetStyle: barStyle } = useKeyboardBottomInset()
+const { insetStyle: barStyle, keyboardOpen } = useKeyboardBottomInset()
+
+/** Keep the focused field visible above the soft keyboard on Android overlay keyboards. */
+const onComposerFocus = (e: FocusEvent) => {
+  const el = e.target as HTMLElement | null
+  if (!el || (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT')) return
+  window.setTimeout(() => {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, keyboardOpen.value ? 50 : 280)
+}
 
 const maxChars = computed(() => instancesStore.statusMaxCharacters || 500)
 const counterAnnounce = ref('')
@@ -365,6 +383,7 @@ onMounted(() => {
               :disabled="item.uploading"
               :value="item.description"
               placeholder="Alt text"
+              @focus="onComposerFocus"
               @input="setDescription(item.localId, ($event.target as HTMLInputElement).value)"
             />
           </label>
@@ -404,6 +423,7 @@ onMounted(() => {
             aria-label="Message"
             :aria-busy="isSending || undefined"
             :aria-invalid="overLimit || undefined"
+            @focus="onComposerFocus"
             @keydown="onKeydown"
             @paste="onPaste"
           />
@@ -455,10 +475,14 @@ onMounted(() => {
   z-index: 40;
   display: flex;
   justify-content: center;
+  /* Safe area when keyboard closed; :style bottom lifts for overlay keyboards */
   padding: 0.75rem 1rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
   background: color-mix(in srgb, var(--neo-bg-primary) 96%, transparent);
   border-top: 1px solid var(--neo-border-color);
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  /* Avoid layout jump when Android resizes-content + inset both apply */
+  transition: bottom 0.12s ease-out;
 
   @media (min-width: 1024px) {
     left: var(--neo-sidebar-width, 248px);

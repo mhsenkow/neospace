@@ -1,62 +1,71 @@
 <script setup lang="ts">
 /**
- * Android / Chrome install prompt — “Add to Home screen” for Pixel etc.
- * Uses @vite-pwa/nuxt $pwa when beforeinstallprompt is available.
+ * Install promo for Android / iOS.
+ * Uses native beforeinstallprompt when Chrome offers it; otherwise shows
+ * Add-to-Home-screen steps (Chrome won’t always put “Install app” in ⋮).
  */
 
-import { useMediaQuery } from '~/composables/useBreakpoint'
+const {
+  isAndroid,
+  isIos,
+  canNativeInstall,
+  showPromo,
+  installNative,
+  dismissPromo,
+} = useInstallApp()
 
-const { $pwa } = useNuxtApp()
+const showHowTo = ref(false)
 
-const pwa = computed(() => $pwa as {
-  showInstallPrompt?: boolean
-  isPWAInstalled?: boolean
-  install?: () => Promise<unknown>
-  cancelInstall?: () => void
-} | undefined)
-
-const isStandalone = useMediaQuery('(display-mode: standalone)')
-
-const show = computed(() => {
-  if (!pwa.value) return false
-  if (pwa.value.isPWAInstalled) return false
-  if (isStandalone.value) return false
-  return !!pwa.value.showInstallPrompt
-})
-
-const install = async () => {
-  try {
-    await pwa.value?.install?.()
-  } catch {
-    /* user cancelled sheet */
+const onInstallClick = async () => {
+  if (canNativeInstall.value) {
+    await installNative()
+    return
   }
+  showHowTo.value = !showHowTo.value
 }
 
-const dismiss = () => {
-  pwa.value?.cancelInstall?.()
-}
+const subtitle = computed(() => {
+  if (canNativeInstall.value) return 'Add to your home screen for a full-screen app.'
+  if (isAndroid.value) return 'Chrome may hide Install in the menu — tap below for steps.'
+  if (isIos.value) return 'Add NeoSpace to your Home Screen from Safari Share.'
+  return 'Install NeoSpace on this device.'
+})
 </script>
 
 <template>
   <Transition name="install-banner">
     <aside
-      v-if="show"
+      v-if="showPromo"
       class="install-banner"
       role="region"
       aria-labelledby="install-banner-title"
     >
       <div class="install-banner__copy">
         <strong id="install-banner-title">Install NeoSpace</strong>
-        <span>Add to your home screen for a full-screen app.</span>
+        <span>{{ subtitle }}</span>
       </div>
       <div class="install-banner__actions">
-        <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="install">
-          Install
+        <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="onInstallClick">
+          {{ canNativeInstall ? 'Install' : showHowTo ? 'Hide steps' : 'How to install' }}
         </button>
-        <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="dismiss">
+        <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="dismissPromo">
           Not now
         </button>
       </div>
+      <ol v-if="showHowTo && isAndroid" class="install-banner__steps">
+        <li>Open this site in the <strong>Chrome</strong> app (not inside another app).</li>
+        <li>Tap <strong>⋮</strong> (top right).</li>
+        <li>
+          Tap <strong>Add to Home screen</strong> or <strong>Install app</strong>
+          (sometimes under <strong>Add to…</strong>).
+        </li>
+        <li>Confirm — NeoSpace appears as an icon.</li>
+      </ol>
+      <ol v-else-if="showHowTo && isIos" class="install-banner__steps">
+        <li>Open in <strong>Safari</strong>.</li>
+        <li>Tap the <strong>Share</strong> button.</li>
+        <li>Tap <strong>Add to Home Screen</strong>, then Add.</li>
+      </ol>
     </aside>
   </Transition>
 </template>
@@ -105,6 +114,24 @@ const dismiss = () => {
     display: flex;
     flex-shrink: 0;
     gap: 0.35rem;
+  }
+
+  &__steps {
+    flex: 1 1 100%;
+    margin: 0;
+    padding: 0.15rem 0 0 1.15rem;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--neo-text-secondary);
+
+    li + li {
+      margin-top: 0.25rem;
+    }
+
+    strong {
+      color: var(--neo-text-primary);
+      font-weight: 650;
+    }
   }
 }
 

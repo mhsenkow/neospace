@@ -7,6 +7,8 @@ import type { mastodon } from 'masto'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { groupActorLabel } from '~/utils/notifGroup'
+import { getMainScroller } from '~/utils/pageScroll'
+import { useMobileViewport } from '~/composables/useBreakpoint'
 import type { NeoIconName } from '~/utils/neoIcons'
 
 const notificationsStore = useNotificationsStore()
@@ -19,6 +21,7 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const loadTrigger = ref<HTMLElement | null>(null)
 const sortMenuOpen = ref(false)
 const actionsMenuOpen = ref(false)
+const searchQuery = ref('')
 let observer: IntersectionObserver | null = null
 const overlayStore = useOverlayStore()
 
@@ -67,9 +70,52 @@ const sortOptions: { key: SortOrder; label: string }[] = [
 
 const grouped = computed(() => notificationsStore.groupedByTime)
 const groupOrder = ['Today', 'Yesterday', 'This Week', 'Older']
+
+const notifMatchesQuery = (notif: {
+  type: string
+  account?: { displayName?: string | null; username?: string; acct?: string } | null
+  status?: mastodon.v1.Status | null
+}) => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return true
+  const name = `${notif.account?.displayName || ''} ${notif.account?.username || ''} ${notif.account?.acct || ''}`.toLowerCase()
+  const action = notifLabel(notif.type).toLowerCase()
+  const preview = (() => {
+    const status = notif.status
+    if (!status?.content) return ''
+    return stripHtml(status.content).replace(/\s+/g, ' ').trim().toLowerCase()
+  })()
+  return name.includes(q) || action.includes(q) || preview.includes(q)
+}
+
+const filteredGrouped = computed(() => {
+  const q = searchQuery.value.trim()
+  if (!q) return grouped.value
+  const out: typeof grouped.value = {}
+  for (const label of groupOrder) {
+    const items = grouped.value[label]
+    if (!items?.length) continue
+    const hit = items.filter(notifMatchesQuery)
+    if (hit.length) out[label] = hit
+  }
+  return out
+})
+
 const visibleGroups = computed(() =>
-  groupOrder.filter(g => grouped.value[g]?.length)
+  groupOrder.filter(g => filteredGrouped.value[g]?.length)
 )
+
+const filteredNotifCount = computed(() =>
+  visibleGroups.value.reduce((n, g) => n + (filteredGrouped.value[g]?.length || 0), 0)
+)
+
+const searchStatusText = computed(() => {
+  const q = searchQuery.value.trim()
+  if (!q) return ''
+  const n = filteredNotifCount.value
+  if (!n) return `No activity matches “${q}”.`
+  return `${n} match${n === 1 ? '' : 'es'} for “${q}”.`
+})
 
 const selectFilter = (key: NotificationFilterType) => {
   notificationsStore.setFilter(key)
@@ -144,7 +190,7 @@ const hostLabel = (url?: string) => {
   }
 }
 
-const { formatRelativeTime, formatAbsoluteTime } = useRelativeTime()
+const { formatAbsoluteTime } = useRelativeTime()
 
 const ensureNotifAccount = (notif: ExtendedNotification) => {
   if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
@@ -244,11 +290,12 @@ const bindLoadObserver = (el: Element | null) => {
   if (!el) return
   observer = new IntersectionObserver(
     ([entry]) => {
-      if (entry.isIntersecting && !notificationsStore.isLoadingMore) {
+      if (entry?.isIntersecting && !notificationsStore.isLoadingMore) {
         notificationsStore.loadMore()
       }
     },
-    { threshold: 0.1 },
+    // Mobile scrolls `main` — observe it so we start loading before the end
+    { root: getMainScroller(), rootMargin: '0px 0px 400px 0px', threshold: 0.1 },
   )
   observer.observe(el)
 }
@@ -265,6 +312,9 @@ onMounted(async () => {
 watch(loadTrigger, (el) => {
   bindLoadObserver(el)
 })
+
+// Observer root depends on the shell (main vs window) — rebind when it flips
+watch(useMobileViewport(), () => bindLoadObserver(loadTrigger.value), { flush: 'post' })
 
 watch(
   () => route.query.filter,
@@ -290,87 +340,118 @@ onDeactivated(() => {
     void notificationsStore.markAllRead()
   }
 })
+
+const goHome = () => {
+  void router.push('/')
+}
+
+const chromeTitle = computed(() => {
+  const n = notificationsStore.unreadCount
+  return n > 0 ? `Activity (${n})` : 'Activity'
+})
 </script>
 
 <template>
   <div class="notif-page" ref="scrollContainer">
+    <SubviewChrome :title="chromeTitle" :back-action="goHome">
+      <template v-if="canView" #actions>
+        <button
+          type="button"
+          class="subview-chrome__btn neo-tip"
+          title="Refresh"
+          aria-label="Refresh notifications"
+          :disabled="notificationsStore.isLoading"
+          @click="handleRefresh"
+        >
+          <NeoIcon
+            name="refresh"
+            :size="18"
+            :stroke="1.75"
+            :class="{ spinning: notificationsStore.isLoading }"
+          />
+        </button>
+
+        <NeoMenu
+          v-model:open="sortMenuOpen"
+          class="sort-menu"
+          label="Sort notifications"
+        >
+          <NeoIcon name="menu" :size="18" :stroke="1.75" />
+          <template #items>
+            <button
+              v-for="opt in sortOptions"
+              :key="opt.key"
+              type="button"
+              role="menuitem"
+              class="sort-menu__item"
+              :class="{ active: notificationsStore.sortOrder === opt.key }"
+              @click="selectSort(opt.key)"
+            >{{ opt.label }}</button>
+          </template>
+        </NeoMenu>
+
+        <NeoMenu
+          v-model:open="actionsMenuOpen"
+          class="actions-menu"
+          label="More notification actions"
+        >
+          <NeoIcon name="more" :size="18" :stroke="1.75" />
+          <template #items>
+            <button type="button" role="menuitem" class="actions-menu__item" @click="handleMarkRead">Mark all as read</button>
+            <button type="button" role="menuitem" class="actions-menu__item actions-menu__item--danger" @click="handleClearAll">Clear all notifications</button>
+          </template>
+        </NeoMenu>
+      </template>
+    </SubviewChrome>
+
     <!-- Not authenticated -->
     <div v-if="!canView" class="notif-empty">
       <div class="notif-empty__icon"><NeoIcon name="lock" :size="32" :stroke="1.5" /></div>
-      <h2 class="notif-empty__title">Notifications</h2>
+      <h2 class="notif-empty__title">Activity</h2>
       <p class="notif-empty__desc">Sign in to see activity.</p>
       <NuxtLink to="/login" class="notif-empty__cta">Sign in</NuxtLink>
     </div>
 
     <!-- Main content -->
     <div v-else class="notif-container">
-      <!-- Header -->
-      <header class="notif-header">
-        <div class="notif-header__top">
-          <h1 class="notif-header__title">Notifications</h1>
-          <div class="notif-header__actions">
-            <!-- Refresh -->
-            <button
-              type="button"
-              class="notif-icon-btn"
-              title="Refresh"
-              aria-label="Refresh notifications"
-              :disabled="notificationsStore.isLoading"
-              @click="handleRefresh"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: notificationsStore.isLoading }">
-                <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
-                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-              </svg>
-            </button>
-
-            <NeoMenu
-              v-model:open="sortMenuOpen"
-              class="sort-menu"
-              label="Sort notifications"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="16" y2="12" /><line x1="4" y1="18" x2="12" y2="18" />
-              </svg>
-              <template #items>
-                <button
-                  v-for="opt in sortOptions"
-                  :key="opt.key"
-                  type="button"
-                  role="menuitem"
-                  class="sort-menu__item"
-                  :class="{ active: notificationsStore.sortOrder === opt.key }"
-                  @click="selectSort(opt.key)"
-                >{{ opt.label }}</button>
-              </template>
-            </NeoMenu>
-
-            <NeoMenu
-              v-model:open="actionsMenuOpen"
-              class="actions-menu"
-              label="More notification actions"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
-              </svg>
-              <template #items>
-                <button type="button" role="menuitem" class="actions-menu__item" @click="handleMarkRead">Mark all as read</button>
-                <button type="button" role="menuitem" class="actions-menu__item actions-menu__item--danger" @click="handleClearAll">Clear all notifications</button>
-              </template>
-            </NeoMenu>
-          </div>
-        </div>
-
+      <div class="notif-filters-wrap neo-sticky-bar neo-sticky-bar--under-chrome">
+        <label class="notif-search">
+          <span class="sr-only">Search activity</span>
+          <NeoIcon name="search" :size="16" :stroke="1.75" class="notif-search__icon" aria-hidden="true" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            class="notif-search__input"
+            placeholder="Search activity…"
+            autocomplete="off"
+            enterkeyhint="search"
+          />
+        </label>
         <NeoTabs
           v-model="filterTabId"
           class="notif-filters"
           :tabs="filterTabs"
           :panels="false"
           controls-id="notif-list"
+          id-prefix="notif-tabs"
+          aria-label="Filter activity"
         />
-      </header>
+        <p
+          v-if="searchStatusText"
+          class="notif-search-status"
+          role="status"
+          aria-live="polite"
+        >
+          {{ searchStatusText }}
+        </p>
+      </div>
 
-      <div id="notif-list" class="notif-panel">
+      <div
+        id="notif-list"
+        class="notif-panel"
+        role="tabpanel"
+        :aria-labelledby="`notif-tabs-tab-${filterTabId}`"
+      >
       <div
         v-if="notificationsStore.failedHosts.length"
         class="notif-partial"
@@ -413,13 +494,20 @@ onDeactivated(() => {
         </p>
       </div>
 
+      <!-- Search miss (loaded items exist, query matched none) -->
+      <div v-else-if="searchQuery.trim() && !filteredNotifCount" class="notif-empty">
+        <div class="notif-empty__icon"><NeoIcon name="search" :size="32" :stroke="1.5" /></div>
+        <h2 class="notif-empty__title">No matches</h2>
+        <p class="notif-empty__desc">Nothing in loaded activity matches “{{ searchQuery.trim() }}”.</p>
+      </div>
+
       <!-- Notification list, grouped by time -->
       <div v-else class="notif-list">
         <div v-for="group in visibleGroups" :key="group" class="notif-group">
           <h2 class="notif-group__label">{{ group }}</h2>
           <div class="notif-group__items">
             <article
-              v-for="notif in grouped[group]"
+              v-for="notif in filteredGrouped[group]"
               :key="notif._key"
               class="notif-item"
               :class="[
@@ -461,7 +549,7 @@ onDeactivated(() => {
                     :datetime="notif.createdAt"
                     :title="formatAbsoluteTime(notif.createdAt)"
                   >
-                    {{ formatRelativeTime(notif.createdAt) }}
+                    <NeoTimeAgo :date="notif.createdAt" />
                   </time>
                 </div>
 
@@ -550,10 +638,11 @@ onDeactivated(() => {
 <style scoped lang="scss">
 .notif-page {
   width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
-  overflow-y: auto;
-  padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0));
+  min-width: 0;
+  max-width: 820px;
+  margin: 0 auto;
+  padding-bottom: 2rem;
+  box-sizing: border-box;
 }
 
 .notif-container {
@@ -572,77 +661,70 @@ onDeactivated(() => {
   }
 }
 
-// ====== Header ======
-
-.notif-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.notif-filters-wrap {
+  padding-top: 0.35rem;
+  padding-bottom: 0.15rem;
   margin: 0 -0.75rem;
-  padding: 1rem 0.75rem 0;
-  background: color-mix(in srgb, var(--neo-bg-primary) 92%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  background: var(--neo-bg-primary);
+  border-bottom: 1px solid var(--neo-border-color);
 
   @media (min-width: 600px) {
     margin: 0 -1.25rem;
-    padding: 1.25rem 1.25rem 0;
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
   }
 
   @media (min-width: 1024px) {
-    top: 0;
     margin: 0 -1.5rem;
-    padding: 1.5rem 1.5rem 0;
-  }
-
-  &__top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.875rem;
-  }
-
-  &__title {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 650;
-    color: var(--neo-text-primary);
-    letter-spacing: -0.03em;
-    line-height: 1.15;
-  }
-
-  &__actions {
-    display: flex;
-    align-items: center;
-    gap: 0.125rem;
-    flex-shrink: 0;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
   }
 }
 
-.notif-icon-btn {
+.notif-search {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--neo-radius-sm, 4px);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--neo-text-secondary);
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  gap: 0.45rem;
+  margin: 0 0 0.45rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-md, 12px);
+  background: var(--neo-bg-tertiary);
+  box-sizing: border-box;
 
-  &:hover {
-    background: var(--neo-bg-hover);
-    border-color: var(--neo-border-color);
+  &:focus-within {
+    border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
+    box-shadow: 0 0 0 3px var(--neo-accent-soft);
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    color: var(--neo-text-muted);
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
     color: var(--neo-text-primary);
-  }
+    font: inherit;
+    font-size: 0.875rem;
+    outline: none;
 
-  &:disabled {
-    opacity: 0.45;
-    cursor: default;
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
   }
+}
+
+.notif-search-status {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
 }
 
 .spinning {
@@ -661,10 +743,13 @@ onDeactivated(() => {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--neo-radius-sm, 4px);
-    color: var(--neo-text-secondary);
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--neo-text-primary);
+    cursor: pointer;
 
     &:hover {
       background: var(--neo-bg-hover);
@@ -718,8 +803,8 @@ onDeactivated(() => {
 // ====== Filter tabs ======
 
 .notif-filters {
-  margin: 0 -0.75rem;
-  padding: 0 0.75rem 0.5rem;
+  margin: 0;
+  padding: 0 0 0.35rem;
   border-bottom: none;
 
   :deep(.neo-tabs__list) {
@@ -1042,12 +1127,19 @@ onDeactivated(() => {
   }
 
   &__headline {
+    // NeoTimeAgo goes compact when this row is narrow
+    container-type: inline-size;
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 0.75rem;
     font-size: 0.9375rem;
     line-height: 1.35;
+
+    // Touch: dismiss stays visible (no hover) — keep the timestamp clear of it
+    @media (hover: none) {
+      padding-right: 2.25rem;
+    }
   }
 
   &__who {

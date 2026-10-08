@@ -12,7 +12,9 @@ export const useAppShellHeight = () => {
     cancelAnimationFrame(raf)
     raf = requestAnimationFrame(() => {
       const vv = window.visualViewport
-      const h = Math.round(vv?.height ?? window.innerHeight)
+      const vvH = vv?.height ?? Number.POSITIVE_INFINITY
+      // Prefer the smaller measurement — oversized heights push the tab bar off-screen
+      const h = Math.round(Math.min(vvH, window.innerHeight, document.documentElement.clientHeight))
       if (h > 0) {
         document.documentElement.style.setProperty('--neo-app-height', `${h}px`)
       }

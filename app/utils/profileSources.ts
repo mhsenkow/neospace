@@ -213,7 +213,7 @@ export function mergePresenceIntoFields(
     const byName = kindFromFieldName(f.name || '')
     const fromUrl = kindFromUrl(raw)
     const kind = byName || fromUrl
-    if (!kind || kind === 'mastodon') {
+    if (!kind) {
       other.push({ name: f.name?.trim() || 'Other', value: raw })
       continue
     }

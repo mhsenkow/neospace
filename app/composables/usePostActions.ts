@@ -5,7 +5,8 @@ import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { activeClient, clientFor } from '~/composables/useMasto'
 
-type ActionStatus = mastodon.v1.Status & { reblogged?: boolean; favourited?: boolean; bookmarked?: boolean }
+// Status already carries reblogged/favourited/bookmarked (as boolean | null)
+type ActionStatus = mastodon.v1.Status
 
 /**
  * Like, boost, and bookmark handlers shared by RealPostCard (and future extracts).

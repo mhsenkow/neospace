@@ -83,6 +83,10 @@ const onFocusIn = (e: FocusEvent) => {
   if (!root) return
   const target = e.target as Node | null
   if (target && root.contains(target)) return
+  // Teleported popups (NeoMenu `teleport`) live in <body> but belong to a trigger
+  // inside the trap — let focus in, or keyboard users can never reach the items.
+  const menu = target instanceof Element ? target.closest('[role="menu"][id]') : null
+  if (menu && root.querySelector(`[aria-controls="${CSS.escape(menu.id)}"]`)) return
   const nodes = listFocusable(root)
   ;(nodes[0] || root).focus()
 }

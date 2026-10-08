@@ -352,6 +352,7 @@ const isActive = (instance: ConnectedInstance) =>
   width: 100%;
   max-width: 32rem;
   max-height: 85vh;
+  max-height: 85dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;

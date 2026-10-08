@@ -972,7 +972,7 @@ export const useGroupsStore = defineStore('groups', {
           ? this.getClient()
           : this.getPublicClient()
 
-        const results = await client.v2.search.fetch({
+        const results = await client.v2.search.list({
           q,
           type: 'hashtags',
           limit: 20,

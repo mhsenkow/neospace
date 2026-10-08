@@ -115,7 +115,13 @@ export default defineNuxtConfig({
       },
       meta: [
         { name: 'description', content: 'NeoSpace — a multi-column Fediverse client.' },
-        { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
+        // interactive-widget: Android Chrome resizes the layout when the soft
+        // keyboard opens so fixed composers (DMs / reply dock) stay visible.
+        {
+          name: 'viewport',
+          content:
+            'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content',
+        },
         { name: 'theme-color', content: '#faf9f7', media: '(prefers-color-scheme: light)' },
         { name: 'theme-color', content: '#1a1a18', media: '(prefers-color-scheme: dark)' },
         { name: 'mobile-web-app-capable', content: 'yes' },

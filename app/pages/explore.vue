@@ -12,6 +12,8 @@ import { normalizeServer, friendlyServerError } from '~/utils/instances'
 import { stripHtml } from '~/utils/sanitizeHtml'
 import { tagHistorySummary } from '~/utils/hashtag'
 import { useToastStore } from '~/stores/toast'
+import { useMobileViewport } from '~/composables/useBreakpoint'
+import { getMainScroller } from '~/utils/pageScroll'
 
 type ExploreTab = 'all' | 'people' | 'posts' | 'tags' | 'servers'
 
@@ -172,19 +174,28 @@ const persistRoute = () => {
   router.replace({ path: '/explore', query: nextQuery })
 }
 
+/**
+ * Keep keyboard users in the field — but on touch, focusing pops the soft
+ * keyboard over the results someone just asked for (tab/topic taps).
+ */
+const refocusSearch = () => {
+  if (typeof window !== 'undefined' && !window.matchMedia('(pointer: fine)').matches) return
+  nextTick(() => searchInputRef.value?.focus())
+}
+
 const setTab = (next: ExploreTab) => {
   const meta = TABS.find((t) => t.id === next)
   if (meta?.needsAuth && !isSignedIn.value) {
     tab.value = next
     persistRoute()
-    nextTick(() => searchInputRef.value?.focus())
+    refocusSearch()
     return
   }
   tab.value = next
   customError.value = null
   searchError.value = null
   persistRoute()
-  nextTick(() => searchInputRef.value?.focus())
+  refocusSearch()
   // Search is driven by watch(tab) — avoid a double request here
 }
 
@@ -228,6 +239,8 @@ const lookUpCustom = async () => {
 }
 
 const onSearchEnter = () => {
+  // Touch: drop the keyboard so the results aren't hidden behind it
+  if (!window.matchMedia('(pointer: fine)').matches) searchInputRef.value?.blur()
   if (tab.value === 'servers' || (tab.value === 'all' && looksLikeHostname(query.value))) {
     void lookUpCustom()
     return
@@ -246,7 +259,7 @@ const applyTopic = (tag: string) => {
   if (tab.value === 'servers') tab.value = 'all'
   persistRoute()
   void runFediverseSearch(tag)
-  nextTick(() => searchInputRef.value?.focus())
+  refocusSearch()
 }
 
 const goSignIn = () => router.push('/login')
@@ -286,7 +299,10 @@ const handleFollowTag = async (tag: mastodon.v1.Tag, e: Event) => {
 }
 
 let loadMoreObserver: IntersectionObserver | null = null
-watch(loadMoreSentinel, (el) => {
+const isMobileShell = useMobileViewport()
+// Mobile scrolls `main`, not the window — observe against it so the prefetch
+// margin works; rebind when the shell flips (iPad rotation across 1024px).
+watch([loadMoreSentinel, isMobileShell], ([el]) => {
   loadMoreObserver?.disconnect()
   loadMoreObserver = null
   if (!el) return
@@ -294,10 +310,10 @@ watch(loadMoreSentinel, (el) => {
     (entries) => {
       if (entries.some((x) => x.isIntersecting)) loadMoreSearch()
     },
-    { rootMargin: '120px' },
+    { root: getMainScroller(), rootMargin: '0px 0px 400px 0px' },
   )
   loadMoreObserver.observe(el)
-})
+}, { flush: 'post' })
 
 watch(tab, () => {
   persistRoute()
@@ -314,7 +330,11 @@ onMounted(async () => {
     void groupsStore.initializeGroups()
   }
   nextTick(() => {
-    searchInputRef.value?.focus()
+    // Fresh visit → ready to type. Arriving with a query (Back, shared link) →
+    // show results; on touch that would put the keyboard over them.
+    if (!hasQuery.value || window.matchMedia('(pointer: fine)').matches) {
+      searchInputRef.value?.focus()
+    }
     // Route sync already set query/tab; the query watcher + tab watcher cover search
     if (searchTimer) clearTimeout(searchTimer)
     if (hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
@@ -349,7 +369,7 @@ onUnmounted(() => {
       <h1>Search</h1>
     </header>
 
-    <div class="explore-search-block">
+    <div class="explore-search-block neo-sticky-bar">
       <div class="explore-search-row">
         <label class="explore-search">
           <NeoIcon name="search" :size="20" :stroke="1.75" class="explore-search__icon" />
@@ -359,7 +379,11 @@ onUnmounted(() => {
             v-model="query"
             type="search"
             :placeholder="searchPlaceholder"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
             autocomplete="off"
+            enterkeyhint="search"
             @keydown.enter.prevent="onSearchEnter"
           />
           <button
@@ -379,6 +403,8 @@ onUnmounted(() => {
           :tabs="TABS.map((t) => ({ id: t.id, label: t.label }))"
           :panels="false"
           controls-id="explore-results"
+          id-prefix="explore-tabs"
+          aria-label="Search in"
           @update:model-value="setTab($event as ExploreTab)"
         />
       </div>
@@ -396,7 +422,12 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <div id="explore-results" :aria-busy="searchBusy">
+    <div
+      id="explore-results"
+      role="tabpanel"
+      :aria-labelledby="`explore-tabs-tab-${tab}`"
+      :aria-busy="searchBusy"
+    >
     <div v-if="!isSignedIn" class="explore-cta-row">
       <a
         href="https://joinmastodon.org/servers"
@@ -742,6 +773,9 @@ onUnmounted(() => {
 
 .explore-search-block {
   margin-bottom: 0.85rem;
+  padding-bottom: 0.35rem;
+  /* Solid fill so results don’t show through while sticky */
+  background: var(--neo-bg-primary);
 }
 
 .explore-search-row {
@@ -1088,6 +1122,11 @@ onUnmounted(() => {
   margin: 0 0 1rem;
   font-size: 0.875rem;
   color: var(--neo-text-muted);
+
+  // Result count sits under the mode tabs — give it the same gap as errors
+  &--status {
+    margin-top: 0.5rem;
+  }
 }
 
 .explore-section-title {
@@ -1306,7 +1345,8 @@ onUnmounted(() => {
 
 .explore-toast {
   position: fixed;
-  bottom: 5.5rem;
+  // Clear the in-flow tab bar + home indicator
+  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.75rem);
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;

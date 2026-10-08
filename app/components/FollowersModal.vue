@@ -231,13 +231,20 @@ defineExpose({ open, close })
               :tabs="tabDefs"
               :panels="false"
               controls-id="followers-modal-list"
+              id-prefix="followers-tabs"
+              aria-label="Followers or following"
             />
             <button type="button" class="close-btn" @click="close" aria-label="Close">
               <NeoIcon name="x" :size="22" :stroke="2" />
             </button>
           </header>
 
-          <div id="followers-modal-list" class="modal-content">
+          <div
+            id="followers-modal-list"
+            class="modal-content"
+            role="tabpanel"
+            :aria-labelledby="`followers-tabs-tab-${activeTab}`"
+          >
             <div v-if="isLoading && accounts.length === 0" class="loading-state" aria-busy="true">
               <FunLoader fill label="Loading" />
             </div>
@@ -318,6 +325,7 @@ defineExpose({ open, close })
                     <NeoMenu
                       class="action-menu"
                       :label="`More actions for @${account.acct}`"
+                      teleport
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <circle cx="12" cy="5" r="2"/>
@@ -383,6 +391,7 @@ defineExpose({ open, close })
 .followers-modal {
   width: min(520px, 100%);
   max-height: min(85vh, 720px);
+  max-height: min(85dvh, 720px);
   display: flex;
   flex-direction: column;
   background: var(--neo-bg-primary);
@@ -567,6 +576,11 @@ defineExpose({ open, close })
     border-radius: var(--neo-radius-sm, 4px);
     color: var(--neo-text-secondary);
 
+    @media (pointer: coarse) {
+      width: 40px;
+      height: 40px;
+    }
+
     &:hover {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-primary);
@@ -576,10 +590,11 @@ defineExpose({ open, close })
   :deep(.neo-menu__panel) {
     min-width: 10rem;
   }
+}
 
-  :deep(.danger) {
-    color: var(--neo-danger);
-  }
+// Menu items are teleported to <body> — style them by their own scope, not via .action-menu
+[role='menuitem'].danger {
+  color: var(--neo-danger);
 }
 
 .recent-post {
@@ -660,6 +675,9 @@ defineExpose({ open, close })
     width: 100%;
     max-height: 100%;
     border-radius: 0;
+    // Full-bleed: keep tabs/close off the notch and rows above the home indicator
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 </style>

@@ -112,7 +112,7 @@ export function useFediverseSearch(opts: {
       const offset = append ? searchOffset.value : 0
       const resolve = searchOpts?.resolve ?? shouldResolveQuery(trimmed)
 
-      const res = await client.v2.search.fetch({
+      const res = await client.v2.search.list({
         q: trimmed,
         limit: PAGE_SIZE,
         offset,

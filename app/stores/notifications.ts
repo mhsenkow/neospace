@@ -21,7 +21,9 @@ export type NotificationFilterType =
 
 export type SortOrder = 'newest' | 'oldest'
 
-export interface ExtendedNotification extends mastodon.v1.Notification {
+// masto v7's Notification is a union (one member per type) — interfaces can't
+// extend unions, so intersect instead; narrowing on `type` keeps working.
+export type ExtendedNotification = mastodon.v1.Notification & {
   /** Stable list key across accounts (instanceId:id) */
   _key: string
   _instanceId: string
@@ -150,8 +152,7 @@ export const useNotificationsStore = defineStore('notifications', {
           label = 'Older'
         }
 
-        if (!groups[label]) groups[label] = []
-        groups[label].push(notif)
+        ;(groups[label] ??= []).push(notif)
       }
 
       return groups

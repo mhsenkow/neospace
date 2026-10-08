@@ -111,5 +111,31 @@ const goBack = () => {
   :deep(.chrome-btn) {
     flex-shrink: 0;
   }
+
+  // Page-provided icon actions (refresh, new message…) — same 40px target as ChromeButton
+  :deep(.subview-chrome__btn) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--neo-text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+    text-decoration: none;
+
+    &:hover:not(:disabled) {
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
 }
 </style>

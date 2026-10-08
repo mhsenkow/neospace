@@ -17,7 +17,8 @@ function bufferFromMessage(raw: unknown): ArrayBuffer | null {
   if (raw instanceof ArrayBuffer && raw.byteLength > 0) return raw
   if (ArrayBuffer.isView(raw) && raw.byteLength > 0) {
     const view = raw as ArrayBufferView
-    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+    // Copy into a plain ArrayBuffer (the view may sit on a SharedArrayBuffer)
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice().buffer
   }
   return null
 }

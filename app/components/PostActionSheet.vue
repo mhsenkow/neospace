@@ -95,6 +95,10 @@ useFocusTrap(sheetRef, isOpen, {
   border: 1px solid var(--neo-border-color);
   border-radius: 16px;
   box-shadow: 0 16px 40px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
+  // Landscape phones: scroll rather than cut off the top rows
+  max-height: calc(100dvh - 1rem - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 
   @media (min-width: 640px) {
     align-self: center;

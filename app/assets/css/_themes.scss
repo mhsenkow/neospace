@@ -148,7 +148,8 @@
     #e8e2d6,
     #f3efe6,
     #1c1914,
-    #6e685c,
+    // mute: #6e685c read ~4.2:1 on the tinted paper panels
+    #5c564b,
     #c4bbaa,
     #d9d1c3,
     #8b4510,
@@ -163,7 +164,8 @@
     #e8eef8,
     #f4f7fc,
     #0f172a,
-    #666666,
+    // mute: #666 dipped under 4.5:1 on the blue-grey hover/tertiary panels
+    #575d69,
     #c5d0e0,
     #d6deeb,
     #7c3aed,
@@ -301,14 +303,15 @@
 }
 
 [data-theme='tank'] {
+  // mute/accent lifted a step: #69a1b3 / #57a253 read ~4.3:1 on the #163040 cards
   @include neo-from-braun(
     #0b1a22,
     #163040,
     #c5e2e7,
-    #69a1b3,
+    #78adbf,
     #23475a,
     #1d3b22,
-    #57a253,
+    #63b25f,
     #ff6b6b,
     dark
   );
@@ -731,7 +734,11 @@ html[data-ui='nyt'] h1 {
 .compose-cw-input,
 .chat-composer__field,
 .explore-search,
-.messages-search__input {
+.messages-search__input,
+.notif-search,
+.profile-search,
+.thread-search__field,
+.group-posts-search__field {
   border-radius: var(--neo-input-radius, min(12px, var(--neo-radius-md)));
   border-style: var(--neo-border-style, solid);
 }

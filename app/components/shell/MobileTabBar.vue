@@ -46,7 +46,6 @@ const openCompose = () => {
     :aria-current="route.path === '/' ? 'page' : undefined"
   >
     <NeoIcon name="home" :size="22" :stroke="route.path === '/' ? 2 : 1.5" :filled="route.path === '/'" />
-    <span class="mobile-nav__label">Home</span>
   </NuxtLink>
 
   <NuxtLink
@@ -66,7 +65,6 @@ const openCompose = () => {
       :stroke="path === '/messages' || boardPortal === 'inbox' ? 2 : 1.5"
       :filled="path === '/messages'"
     />
-    <span class="mobile-nav__label">Inbox</span>
     <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
   </NuxtLink>
   <NuxtLink
@@ -80,7 +78,6 @@ const openCompose = () => {
     aria-label="Messages — sign in"
   >
     <NeoIcon name="message" :size="22" :stroke="boardPortal === 'inbox' ? 2 : 1.5" />
-    <span class="mobile-nav__label">Inbox</span>
   </NuxtLink>
 
   <button
@@ -92,7 +89,6 @@ const openCompose = () => {
     <span class="mobile-nav__compose-mark">
       <NeoIcon name="plus" :size="22" :stroke="2" />
     </span>
-    <span class="mobile-nav__label">Post</span>
   </button>
 
   <NuxtLink
@@ -112,7 +108,6 @@ const openCompose = () => {
       :stroke="isActivity || boardPortal === 'activity' ? 2 : 1.5"
       :filled="isActivity"
     />
-    <span class="mobile-nav__label">Activity</span>
     <span v-if="notifBadge" class="nav-badge" aria-hidden="true">{{ notifBadge }}</span>
   </NuxtLink>
   <NuxtLink
@@ -127,7 +122,6 @@ const openCompose = () => {
     :aria-current="route.path.startsWith('/groups') ? 'page' : undefined"
   >
     <NeoIcon name="users" :size="22" :stroke="route.path.startsWith('/groups') ? 2 : 1.5" />
-    <span class="mobile-nav__label">Groups</span>
   </NuxtLink>
 
   <AccountSwitcher
@@ -147,7 +141,6 @@ const openCompose = () => {
     aria-label="Sign in"
   >
     <NeoIcon name="user" :size="22" :stroke="1.5" />
-    <span class="mobile-nav__label">You</span>
   </NuxtLink>
 </nav>
 </template>
@@ -161,12 +154,15 @@ const openCompose = () => {
   bottom: 0;
   flex-shrink: 0;
   width: 100%;
-  height: calc(var(--neo-mobile-nav-h, 64px) + env(safe-area-inset-bottom, 0px));
+  /* Icon row + safe area as padding (not inside a fixed content box) so
+     buttons never sit under the home indicator / Android gesture bar. */
+  min-height: var(--neo-mobile-nav-h, 56px);
+  height: auto;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-around;
-  padding: 4px 0.35rem 0;
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding: 0.2rem 0.35rem;
+  padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
   background: var(--neo-bg-primary);
   border-top: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-header, 90);
@@ -178,13 +174,10 @@ const openCompose = () => {
 
   &__item {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
-    gap: 2px;
-    width: 52px;
-    min-height: 52px;
-    padding-top: 4px;
+    justify-content: center;
+    width: 48px;
+    height: 44px;
     color: var(--neo-text-secondary);
     text-decoration: none;
     background: transparent;
@@ -209,14 +202,6 @@ const openCompose = () => {
     }
   }
 
-  &__label {
-    font-size: max(0.6875rem, 11px);
-    font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-  }
-
   &__compose {
     color: var(--neo-text-secondary);
 
@@ -235,7 +220,7 @@ const openCompose = () => {
     align-items: center;
     justify-content: center;
     width: 44px;
-    height: 28px;
+    height: 32px;
     border-radius: var(--neo-radius-xl, 10px);
     background: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));
@@ -265,7 +250,7 @@ const openCompose = () => {
 
 .nav-badge {
   position: absolute;
-  top: 4px;
+  top: 2px;
   right: 2px;
   min-width: 1.15rem;
   height: 1.15rem;

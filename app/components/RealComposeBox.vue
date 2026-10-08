@@ -100,6 +100,15 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const composeMediaRef = ref<HTMLElement | null>(null)
 const composeFocused = ref(false)
+
+/** Keep the field above the soft keyboard (inline reply / thread dock on Android). */
+const onComposeFocus = () => {
+  composeFocused.value = true
+  if (typeof window === 'undefined') return
+  window.setTimeout(() => {
+    textareaRef.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, 280)
+}
 const selectedGroupTag = ref<string | null>(
   props.initialGroupTag ? props.initialGroupTag.replace(/^#/, '') : null,
 )
@@ -194,12 +203,32 @@ const {
   onPaste,
 } = useComposeMedia()
 
+/** Typed something beyond the reply's prefilled @mention */
+const hasOwnContent = computed(() => {
+  const text = content.value.trim()
+  return !!text && text !== (props.initialText || '').trim()
+})
+
+/** Screen-reader confirmation — the form just resets on success otherwise */
+const postAnnounce = ref('')
+let postAnnounceTimer: ReturnType<typeof setTimeout> | null = null
+const announcePosted = (message: string) => {
+  postAnnounce.value = message
+  if (postAnnounceTimer) clearTimeout(postAnnounceTimer)
+  postAnnounceTimer = setTimeout(() => {
+    postAnnounce.value = ''
+  }, 4000)
+}
+onBeforeUnmount(() => {
+  if (postAnnounceTimer) clearTimeout(postAnnounceTimer)
+})
+
 /** Threads pill: stay one row until you engage */
 const compactExpanded = computed(
   () =>
     !props.compact ||
     composeFocused.value ||
-    !!content.value.trim() ||
+    hasOwnContent.value ||
     hasMedia.value ||
     showCW.value ||
     !!error.value ||
@@ -479,6 +508,7 @@ const handlePost = async () => {
     clearDraft()
     resetForm()
     emit('posted', status)
+    announcePosted(props.inReplyToId ? 'Reply posted' : 'Posted')
     nextTick(() => {
       textareaRef.value?.focus()
       if (props.initialText && content.value === props.initialText) {
@@ -695,12 +725,12 @@ onUnmounted(() => {
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
           :aria-keyshortcuts="submitKeyshortcuts"
-          @focus="composeFocused = true"
+          @focus="onComposeFocus"
           @blur="composeFocused = false"
           @paste="onPaste"
           @keydown="onKeydown"
           @input="onComposeInput"
-          @click="syncMentions"
+          @click="syncMentions()"
           @keyup="onMentionKeyup"
         />
         <ComposeAutocomplete
@@ -778,10 +808,12 @@ onUnmounted(() => {
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
           :aria-keyshortcuts="submitKeyshortcuts"
+          @focus="onComposeFocus"
+          @blur="composeFocused = false"
           @paste="onPaste"
           @keydown="onKeydown"
           @input="onComposeInput"
-          @click="syncMentions"
+          @click="syncMentions()"
           @keyup="onMentionKeyup"
         />
 
@@ -887,7 +919,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ uploadAnnounce }}</p>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ postAnnounce || uploadAnnounce }}</p>
 
     <div v-if="handoffNotice" class="compose-handoff" role="status">
       <span>{{ handoffNotice }}</span>

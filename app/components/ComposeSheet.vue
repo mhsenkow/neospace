@@ -79,14 +79,19 @@ const onPick = async (account: mastodon.v1.Account) => {
 </script>
 
 <template>
-  <NeoSheet :open="sheet.open" :z-index="200" @close="requestClose">
+  <NeoSheet
+    :open="sheet.open"
+    :z-index="200"
+    :viewport-style="viewportStyle"
+    @close="requestClose"
+  >
     <div
       ref="panelRef"
       class="compose-sheet__inner"
       :style="viewportStyle"
       role="dialog"
       aria-modal="true"
-      :aria-labelledby="sheetTitleId"
+      :aria-labelledby="sheet.pickRecipient ? 'recipient-picker-title' : sheetTitleId"
     >
           <RecipientPicker
             v-if="sheet.pickRecipient"

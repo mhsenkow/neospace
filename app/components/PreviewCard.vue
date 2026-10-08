@@ -24,6 +24,7 @@ const hasImage = computed(() => !!props.card.image)
     rel="noopener noreferrer nofollow"
     :aria-label="card.title ? `${card.title} — ${hostname}` : hostname || card.url"
   >
+    <div class="preview-card__inner">
     <div v-if="hasImage" class="preview-card__media">
       <img
         :src="card.image!"
@@ -38,13 +39,15 @@ const hasImage = computed(() => !!props.card.image)
       <p v-if="card.title" class="preview-card__title">{{ card.title }}</p>
       <p v-if="card.description" class="preview-card__desc">{{ card.description }}</p>
     </div>
+    </div>
   </a>
 </template>
 
 <style lang="scss" scoped>
 .preview-card {
-  display: flex;
-  flex-direction: column;
+  display: block;
+  // Lay out by the card's own width — board columns are ~250px even on wide screens
+  container-type: inline-size;
   margin-top: 0.5rem;
   max-width: 100%;
   overflow: hidden;
@@ -59,8 +62,14 @@ const hasImage = computed(() => !!props.card.image)
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));
     border-color: color-mix(in srgb, var(--neo-border-color) 70%, var(--neo-accent));
   }
+}
 
-  @media (min-width: 480px) {
+.preview-card__inner {
+  display: flex;
+  flex-direction: column;
+
+  // Side-by-side only when the text column keeps ~240px
+  @container (min-width: 360px) {
     flex-direction: row;
     align-items: stretch;
   }
@@ -73,7 +82,7 @@ const hasImage = computed(() => !!props.card.image)
   overflow: hidden;
   background: var(--neo-bg-tertiary);
 
-  @media (min-width: 480px) {
+  @container (min-width: 360px) {
     width: 7.5rem;
     max-height: none;
     min-height: 5.5rem;

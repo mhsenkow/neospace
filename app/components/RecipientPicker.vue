@@ -130,12 +130,8 @@ onUnmounted(() => clear())
 </script>
 
 <template>
-  <div
-    class="recipient-picker"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="recipient-picker-title"
-  >
+  <!-- Lives inside ComposeSheet's dialog, which takes its name from our title -->
+  <div class="recipient-picker">
     <NeoSheetHeader title="Message someone" title-id="recipient-picker-title" @cancel="emit('cancel')" />
 
     <p class="recipient-picker__hint">

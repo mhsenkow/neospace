@@ -14,6 +14,7 @@ import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { setReadAccountOverride } from '~/composables/useMasto'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
+import { stripHtml } from '~/utils/sanitizeHtml'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +57,29 @@ const isDirectThread = computed(() => focusStatus.value?.visibility === 'direct'
 const chatMessages = computed(() => {
   if (!focusStatus.value) return [] as mastodon.v1.Status[]
   return [...ancestors.value, focusStatus.value, ...descendants.value]
+})
+
+const threadQuery = ref('')
+
+const statusMatchesQuery = (s: mastodon.v1.Status, q: string) => {
+  if (!q) return true
+  const hay = [
+    stripHtml(s.content || ''),
+    s.spoilerText || '',
+    s.account?.displayName || '',
+    s.account?.username || '',
+    s.account?.acct || '',
+  ]
+    .join(' ')
+    .toLowerCase()
+  return hay.includes(q)
+}
+
+/** Filtered chat stream (client-side find-in-conversation) */
+const visibleChatMessages = computed(() => {
+  const q = threadQuery.value.trim().toLowerCase()
+  if (!q) return chatMessages.value
+  return chatMessages.value.filter((s) => statusMatchesQuery(s, q))
 })
 
 const myAcct = computed(() => instancesStore.currentUser?.acct?.toLowerCase() || '')
@@ -151,7 +175,7 @@ const replyPrefill = computed(() => {
 })
 
 const dayLabelFor = (status: mastodon.v1.Status, index: number) => {
-  const prev = chatMessages.value[index - 1]
+  const prev = visibleChatMessages.value[index - 1]
   if (!prev || dayKey(prev.createdAt) !== dayKey(status.createdAt)) {
     return daySeparatorLabel(status.createdAt)
   }
@@ -162,7 +186,7 @@ const dayLabelFor = (status: mastodon.v1.Status, index: number) => {
 const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
   if (isMine(status)) return false
   if (index === 0) return true
-  const prev = chatMessages.value[index - 1]
+  const prev = visibleChatMessages.value[index - 1]
   return !prev || prev.account.id !== status.account.id
 }
 
@@ -235,8 +259,38 @@ const replyTree = computed((): ReplyNode[] => {
   return out
 })
 
-/** Keep public reply dock above the soft keyboard (iOS visualViewport) */
-const { insetStyle: replyDockStyle } = useKeyboardBottomInset()
+const visibleAncestors = computed(() => {
+  const q = threadQuery.value.trim().toLowerCase()
+  if (!q) return ancestors.value
+  return ancestors.value.filter((s) => statusMatchesQuery(s, q))
+})
+
+const visibleReplyTree = computed(() => {
+  const q = threadQuery.value.trim().toLowerCase()
+  if (!q) return replyTree.value
+  return replyTree.value.filter((n) => statusMatchesQuery(n.status, q))
+})
+
+const showFocusInSearch = computed(() => {
+  const q = threadQuery.value.trim().toLowerCase()
+  if (!q || !focusStatus.value) return true
+  return statusMatchesQuery(focusStatus.value, q)
+})
+
+const threadSearchStatus = computed(() => {
+  const q = threadQuery.value.trim()
+  if (!q) return ''
+  const n = isDirectThread.value
+    ? visibleChatMessages.value.length
+    : (showFocusInSearch.value ? 1 : 0) +
+      visibleAncestors.value.length +
+      visibleReplyTree.value.length
+  if (!n) return `No messages match “${q}”.`
+  return `${n} match${n === 1 ? '' : 'es'}`
+})
+
+/** Keep public reply dock / DM bar above the soft keyboard */
+const { insetStyle: replyDockStyle, keyboardOpen } = useKeyboardBottomInset()
 
 const preferReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -250,6 +304,11 @@ const scrollChatToEnd = async () => {
     behavior: preferReducedMotion() ? 'auto' : 'smooth',
   })
 }
+
+// Android: when the keyboard opens, keep the latest message above the composer
+watch(keyboardOpen, (open) => {
+  if (open) void scrollChatToEnd()
+})
 
 const syncDmLiveRefresh = (isDm: boolean) => {
   if (isDm && instancesStore.isAuthenticated) {
@@ -271,6 +330,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     ancestors.value = []
     descendants.value = []
     resolvedThreadId = null
+    threadQuery.value = ''
   } else {
     isRefreshing.value = true
   }
@@ -440,6 +500,8 @@ useHead({
       :back-action="() => router.push('/messages')"
     >
       <template #title>
+        <!-- The person button replaces SubviewChrome's h1 — keep a page heading -->
+        <h1 class="sr-only">Conversation with {{ threadTitle }}</h1>
         <button type="button" class="chat-header__person" @click="goProfile">
           <div class="chat-header__avatars">
             <img
@@ -499,6 +561,27 @@ useHead({
       </template>
     </SubviewChrome>
 
+    <div
+      v-if="focusStatus && !isLoading && !error"
+      class="thread-search neo-sticky-bar neo-sticky-bar--under-chrome"
+    >
+      <label class="thread-search__field">
+        <span class="sr-only">{{ isDirectThread ? 'Search conversation' : 'Search thread' }}</span>
+        <NeoIcon name="search" :size="16" :stroke="1.75" class="thread-search__icon" aria-hidden="true" />
+        <input
+          v-model="threadQuery"
+          type="search"
+          class="thread-search__input"
+          :placeholder="isDirectThread ? 'Search conversation…' : 'Search thread…'"
+          autocomplete="off"
+          enterkeyhint="search"
+        />
+      </label>
+      <p v-if="threadSearchStatus" class="thread-search__status" role="status" aria-live="polite">
+        {{ threadSearchStatus }}
+      </p>
+    </div>
+
     <div v-if="isLoading" class="thread-loading" aria-busy="true">
       <FunLoader variant="region" :label="isDirectThread ? 'Loading messages' : 'Loading conversation'" />
     </div>
@@ -522,14 +605,17 @@ useHead({
         aria-relevant="additions"
         aria-label="Conversation messages"
       >
-        <p v-if="chatMessages.length <= 1" class="chat-empty">
+        <p v-if="!threadQuery.trim() && chatMessages.length <= 1" class="chat-empty">
           Private conversation — everyone mentioned can see these messages.
         </p>
-        <p v-else-if="chatMessages.length >= 40" class="chat-empty chat-empty--soft">
+        <p v-else-if="!threadQuery.trim() && chatMessages.length >= 40" class="chat-empty chat-empty--soft">
           Older messages may be truncated by your server’s context limit.
         </p>
+        <p v-else-if="threadQuery.trim() && !visibleChatMessages.length" class="chat-empty">
+          No messages match “{{ threadQuery.trim() }}”.
+        </p>
 
-        <template v-for="(status, index) in chatMessages" :key="status.id">
+        <template v-for="(status, index) in visibleChatMessages" :key="status.id">
           <div
             v-if="dayLabelFor(status, index)"
             class="chat-day-separator"
@@ -565,7 +651,7 @@ useHead({
     <template v-else>
       <div class="thread-stream">
         <RealPostCard
-          v-for="status in ancestors"
+          v-for="status in visibleAncestors"
           :key="status.id"
           :status="status"
           hide-inline-reply
@@ -573,7 +659,13 @@ useHead({
           @replied="onReplyPosted"
         />
 
-        <div ref="focusEl" class="thread-focus" tabindex="-1" aria-current="true">
+        <div
+          v-if="showFocusInSearch"
+          ref="focusEl"
+          class="thread-focus"
+          tabindex="-1"
+          aria-current="true"
+        >
           <RealPostCard
             v-if="focusStatus"
             :status="focusStatus"
@@ -584,7 +676,7 @@ useHead({
         </div>
 
         <RealPostCard
-          v-for="node in replyTree"
+          v-for="node in visibleReplyTree"
           :key="node.status.id"
           :status="node.status"
           hide-inline-reply
@@ -594,7 +686,13 @@ useHead({
           @replied="onReplyPosted"
         />
 
-        <p v-if="!descendants.length && !ancestors.length" class="thread-lonely">
+        <p
+          v-if="threadQuery.trim() && !showFocusInSearch && !visibleAncestors.length && !visibleReplyTree.length"
+          class="thread-lonely"
+        >
+          No posts match “{{ threadQuery.trim() }}”.
+        </p>
+        <p v-else-if="!threadQuery.trim() && !descendants.length && !ancestors.length" class="thread-lonely">
           No replies yet — be the first.
         </p>
 
@@ -633,6 +731,61 @@ useHead({
 </template>
 
 <style lang="scss" scoped>
+.thread-search {
+  margin: 0 0.5rem 0.5rem;
+  padding: 0.45rem 0 0.55rem;
+  background: var(--neo-bg-primary);
+  border-bottom: 1px solid var(--neo-border-color);
+
+  .thread-page--dm & {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.35rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-md, 12px);
+    background: var(--neo-bg-tertiary);
+    box-sizing: border-box;
+
+    &:focus-within {
+      border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
+      box-shadow: 0 0 0 3px var(--neo-accent-soft);
+    }
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    color: var(--neo-text-muted);
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.875rem;
+    outline: none;
+
+    &::placeholder {
+      color: var(--neo-text-muted);
+    }
+  }
+
+  &__status {
+    margin: 0.35rem 0.15rem 0;
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+}
+
 .thread-page {
   width: 100%;
   max-width: 40rem;
@@ -642,18 +795,23 @@ useHead({
   box-sizing: border-box;
 
   &--can-reply {
-    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0));
+    padding-bottom: calc(
+      6.5rem + env(safe-area-inset-bottom, 0px) + var(--neo-keyboard-inset, 0px)
+    );
   }
 
   &--signin-hint {
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0));
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   }
 
   &--dm {
     max-width: 36rem;
     padding-left: 0;
     padding-right: 0;
-    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0));
+    /* Room for ChatComposer + soft keyboard lift */
+    padding-bottom: calc(
+      6.5rem + env(safe-area-inset-bottom, 0px) + var(--neo-keyboard-inset, 0px)
+    );
   }
 }
 
@@ -876,6 +1034,7 @@ useHead({
   border-top: 1px solid var(--neo-border-color);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  transition: bottom 0.12s ease-out;
 
   &--pending {
     opacity: 0.72;

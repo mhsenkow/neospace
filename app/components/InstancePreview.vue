@@ -393,7 +393,7 @@ const formatDate = (dateStr: string) => {
   .label {
     display: block;
     font-size: 0.75rem;
-    color: #6b7280;
+    color: var(--neo-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 0.25rem;
@@ -401,7 +401,8 @@ const formatDate = (dateStr: string) => {
 
   .value {
     font-weight: 600;
-    color: #111827;
+    // Was #111827 — invisible on dark themes
+    color: var(--neo-text-primary);
     font-size: 1.1rem;
   }
 }
@@ -513,17 +514,17 @@ const formatDate = (dateStr: string) => {
   margin-bottom: 0.25rem;
 
   strong {
-    color: #111827;
+    color: var(--neo-text-primary);
     font-size: 0.9rem;
   }
 
   .handle {
-    color: #6b7280;
+    color: var(--neo-text-muted);
     font-size: 0.85rem;
   }
 
   .time {
-    color: #9ca3af;
+    color: var(--neo-text-muted);
     font-size: 0.8rem;
     margin-left: auto;
   }
@@ -531,7 +532,7 @@ const formatDate = (dateStr: string) => {
 
 .post-text {
   margin: 0;
-  color: #374151;
+  color: var(--neo-text-secondary);
   font-size: 0.9rem;
   line-height: 1.5;
   overflow: hidden;
@@ -556,13 +557,13 @@ const formatDate = (dateStr: string) => {
 
 .no-posts {
   text-align: center;
-  color: #6b7280;
+  color: var(--neo-text-muted);
   padding: 2rem;
 }
 
 .preview-error {
   padding: 0.75rem 2rem;
-  background: #fef2f2;
+  background: color-mix(in srgb, var(--neo-danger) 12%, transparent);
   color: var(--neo-danger);
   text-align: center;
   font-size: 0.875rem;
@@ -642,15 +643,15 @@ const formatDate = (dateStr: string) => {
 }
 
 .watching-badge {
-  background: #ecfdf5;
-  color: #059669;
-  border: 1px solid #a7f3d0;
+  background: var(--neo-success-soft);
+  color: var(--neo-success);
+  border: 1px solid color-mix(in srgb, var(--neo-success) 40%, transparent);
 }
 
 .logged-in-badge {
-  background: #f0f9ff;
-  color: #0284c7;
-  border: 1px solid #bae6fd;
+  background: var(--neo-info-soft);
+  color: var(--neo-info);
+  border: 1px solid color-mix(in srgb, var(--neo-info) 40%, transparent);
 }
 
 // Transition
@@ -669,6 +670,50 @@ const formatDate = (dateStr: string) => {
 
   .preview-modal {
     transform: scale(0.95) translateY(20px);
+  }
+}
+
+// Phones: full-bleed sheet — 2rem gutters left ~230px for posts at 360px wide
+@media (max-width: 600px) {
+  .preview-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .preview-modal {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+    // One scroller for the whole sheet instead of a squeezed timeline slot
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .preview-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding: 0.85rem 1rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .preview-header {
+    padding: max(0.85rem, env(safe-area-inset-top, 0px)) 1rem 0.85rem;
+  }
+
+  .instance-info {
+    padding: 1rem;
+  }
+
+  .info-grid {
+    gap: 0.5rem;
+  }
+
+  .timeline-section {
+    flex: none;
+    overflow: visible;
+    padding: 1rem;
   }
 }
 </style>

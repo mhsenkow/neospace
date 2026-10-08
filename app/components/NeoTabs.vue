@@ -15,6 +15,13 @@ const props = withDefaults(
     panels?: boolean
     /** External panel id when `panels` is false (for aria-controls). */
     controlsId?: string
+    /** Accessible name for the tablist ("Notification filter", …). */
+    ariaLabel?: string
+    /**
+     * Stable id prefix — lets a parent-owned panel (`panels: false`) point
+     * `aria-labelledby` at `${idPrefix}-tab-${activeId}`.
+     */
+    idPrefix?: string
   }>(),
   { panels: true },
 )
@@ -24,7 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const listRef = ref<HTMLElement | null>(null)
-const uid = `neo-tabs-${Math.random().toString(36).slice(2, 9)}`
+const uid = props.idPrefix || `neo-tabs-${Math.random().toString(36).slice(2, 9)}`
 
 const activeId = computed(() => {
   if (props.tabs.some((t) => t.id === props.modelValue)) return props.modelValue
@@ -32,7 +39,8 @@ const activeId = computed(() => {
 })
 
 function select(id: string) {
-  if (id === props.modelValue) return
+  // Always emit — parents may need to re-scroll / re-park even when the
+  // selected id is unchanged (Android carousel desync recovery).
   emit('update:modelValue', id)
 }
 
@@ -83,7 +91,7 @@ watch(
 
 <template>
   <div class="neo-tabs">
-    <div ref="listRef" class="neo-tabs__list" role="tablist">
+    <div ref="listRef" class="neo-tabs__list" role="tablist" :aria-label="ariaLabel">
       <button
         v-for="(tab, i) in tabs"
         :id="tabId(tab.id)"
@@ -152,5 +160,11 @@ watch(
 .neo-tabs__panel {
   padding-top: var(--neo-spacing-4, 0.75rem);
   outline: none;
+
+  // Panels are a Tab stop — keep keyboard focus visible
+  &:focus-visible {
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 2px;
+  }
 }
 </style>

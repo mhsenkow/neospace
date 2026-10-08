@@ -35,6 +35,8 @@ const { sidebarRail, loadSidebarRail, applyTheme } = useShellAppearance()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
 const isDesk = useDeskViewport()
 useAppShellHeight()
+// Publish --neo-keyboard-inset for any page (messages list, explore, …)
+useKeyboardBottomInset()
 
 /** Column board owns its scrollers; every other mobile page scrolls `main`. */
 const isBoardRoute = computed(() => path.value === '/')

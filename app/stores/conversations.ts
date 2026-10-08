@@ -234,10 +234,15 @@ export const useConversationsStore = defineStore('conversations', {
         return () => this.stopLiveRefresh()
       }
 
+      let lastTickAt = 0
       const tick = () => {
         const instancesStore = useInstancesStore()
         if (!instancesStore.hasAuthenticatedInstance) return
         if (typeof document !== 'undefined' && document.hidden) return
+        // Returning to the tab fires both visibilitychange and focus — one fetch is enough
+        const now = Date.now()
+        if (now - lastTickAt < 5000) return
+        lastTickAt = now
         void this.fetchConversations({ quiet: true, force: true })
       }
 

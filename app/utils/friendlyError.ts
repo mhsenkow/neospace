@@ -20,7 +20,10 @@ export function httpStatusFrom(err: unknown): number | null {
   // Only scrape a status code when the message looks like an HTTP error line
   const m = msg.match(/\b(?:HTTP\/\d(?:\.\d)?\s+|status(?:Code)?[:=]\s*)([45]\d{2})\b/i)
     || msg.match(/\b([45]\d{2})\s+(?:Not Found|Unprocessable|Too Many|Forbidden|Unauthorized)\b/i)
-  return m ? Number(m[1]) : null
+  if (m) return Number(m[1])
+  // Stores often keep only err.message — Mastodon's 429 body is exactly this phrase
+  if (/^too many requests\b/i.test(msg.trim())) return 429
+  return null
 }
 
 function statusFrom(err: unknown): number | null {
@@ -77,8 +80,8 @@ export function mapErrorToMessage(err: unknown): FriendlyError {
   }
   if (status === 429) {
     return {
-      title: 'Slow down',
-      detail: 'Too many requests. Wait a moment and try again.',
+      title: 'Taking a breather',
+      detail: 'Your server is limiting requests for a moment. Try again in a minute.',
       retryable: true,
     }
   }
@@ -131,7 +134,7 @@ export function mapComposeError(
     return friendly.detail
   }
   if (status === 429) {
-    return 'Too many requests. Wait a moment and try again.'
+    return 'Your server is limiting requests for a moment. Try again in a minute.'
   }
   return friendly.detail || friendly.title || raw || 'Failed to post'
 }

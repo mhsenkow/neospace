@@ -63,6 +63,8 @@ function onKeydown(e: KeyboardEvent, index: number) {
 <style scoped lang="scss">
 .neo-radio-group {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   padding: 2px;
   gap: 2px;
   background: var(--neo-bg-tertiary);
@@ -82,6 +84,9 @@ function onKeydown(e: KeyboardEvent, index: number) {
   padding: var(--neo-spacing-2, 0.35rem) var(--neo-spacing-4, 0.75rem);
   border-radius: calc(var(--neo-radius-chrome, var(--neo-radius-sm)) - 1px);
   cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
   transition: background-color var(--neo-transition-fast, 100ms), color var(--neo-transition-fast, 100ms);
 
   &[aria-checked='true'] {
@@ -92,6 +97,17 @@ function onKeydown(e: KeyboardEvent, index: number) {
 
   &:hover:not([aria-checked='true']) {
     color: var(--neo-text-secondary);
+  }
+}
+
+@media (max-width: 480px) {
+  .neo-radio-group {
+    width: 100%;
+  }
+
+  .neo-radio-group__btn {
+    flex: 1 1 calc(33.333% - 2px);
+    padding: 0.45rem 0.5rem;
   }
 }
 </style>

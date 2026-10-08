@@ -55,6 +55,14 @@ function onAction(id: number, fn?: () => void) {
   gap: var(--neo-spacing-2, 0.35rem);
   max-width: min(22rem, calc(100vw - 2rem));
   pointer-events: none;
+
+  // Mobile: sit above the tab bar (and home indicator) instead of on top of it
+  @media (max-width: 1023px) {
+    left: max(0.75rem, env(safe-area-inset-left));
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.75rem);
+    max-width: none;
+  }
 }
 
 .neo-toast {
@@ -92,6 +100,11 @@ function onAction(id: number, fn?: () => void) {
   cursor: pointer;
   font-size: 1.1rem;
   line-height: 1;
+
+  @media (pointer: coarse) {
+    width: 40px;
+    height: 40px;
+  }
 
   &:hover {
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));

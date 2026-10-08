@@ -120,6 +120,7 @@ watch(isOpen, (open) => {
 .neo-report {
   width: min(24rem, 100%);
   max-height: min(90vh, 640px);
+  max-height: min(90dvh, 640px);
   overflow-y: auto;
   padding: var(--neo-spacing-6, 1.25rem);
   background: var(--neo-bg-card, var(--neo-bg-primary));

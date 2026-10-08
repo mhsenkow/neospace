@@ -2097,6 +2097,14 @@ onUnmounted(() => {
   gap: 0.375rem;
   padding: 0.5rem;
 
+  // Wide single columns (tablet portrait, desktop tab mode): keep ~70ch lines
+  &:not(.column-posts--flip) {
+    width: 100%;
+    max-width: 44rem;
+    margin-inline: auto;
+    box-sizing: border-box;
+  }
+
   // Subtle card edges within columns
   // Paint containment clips the post's "More options" dropdown at the card edge
   :deep(.status-card.status-card--menu-open) {

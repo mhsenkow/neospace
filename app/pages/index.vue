@@ -121,7 +121,8 @@ const activeFeedTabId = computed({
       columnsStore.setFocusedColumn(id)
       return
     }
-    scrollToColumn(idx)
+    // Always re-park — same-id taps recover Android desync; use auto on mobile
+    scrollToColumn(idx, isMobileUi.value ? 'auto' : 'smooth')
   },
 })
 
@@ -245,7 +246,15 @@ const getSlideEls = (): HTMLElement[] => {
   return Array.from(el.children).filter((c): c is HTMLElement => c instanceof HTMLElement)
 }
 
-/** Prefer offsetLeft over scrollLeft/width — padding/subpixels break index math with many slides. */
+/**
+ * Slide position inside the scroller — getBoundingClientRect survives Android
+ * subpixel / transform quirks better than offsetLeft alone.
+ */
+const slideScrollLeft = (el: HTMLElement, child: HTMLElement) => {
+  return child.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft
+}
+
+/** Prefer viewport-relative left — padding/subpixels break index math with many slides. */
 const nearestSlideIndex = (scrollLeft?: number) => {
   const el = columnsContainer.value
   const slides = getSlideEls()
@@ -254,7 +263,7 @@ const nearestSlideIndex = (scrollLeft?: number) => {
   let best = 0
   let bestDist = Infinity
   for (let i = 0; i < slides.length; i++) {
-    const d = Math.abs(slides[i]!.offsetLeft - x)
+    const d = Math.abs(slideScrollLeft(el, slides[i]!) - x)
     if (d < bestDist) {
       bestDist = d
       best = i
@@ -280,11 +289,18 @@ const parkSlideNow = (el: HTMLElement, slideIndex: number) => {
   const slides = getSlideEls()
   const child = slides[clamp(slideIndex, 0, Math.max(0, slides.length - 1))]
   if (!child) return
-  el.scrollLeft = child.offsetLeft
+  el.scrollLeft = slideScrollLeft(el, child)
   el.style.scrollSnapType = 'none'
   el.style.touchAction = ''
   el.classList.remove('columns-container--settling', 'columns-container--swiping')
   armParkCooldown()
+  // Keep the top feed strip glued to the parked column (Android swipe path)
+  const feeds = columnsStore.columns.length
+  if (slideIndex >= EDGE_LEFT && slideIndex < EDGE_LEFT + feeds) {
+    const colIdx = slideIndex - EDGE_LEFT
+    if (activeColumnIndex.value !== colIdx) activeColumnIndex.value = colIdx
+    syncTabIntoView(colIdx, 'auto')
+  }
 }
 
 const finishCarouselSettle = (gen: number, finalIndex: number) => {
@@ -319,7 +335,7 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   el.style.scrollSnapType = 'none'
   el.classList.add('columns-container--settling')
   window.clearTimeout(settleTimer)
-  el.scrollTo({ left: child.offsetLeft, behavior: 'smooth' })
+  el.scrollTo({ left: slideScrollLeft(el, child), behavior: 'smooth' })
 
   const done = () => {
     el.removeEventListener('scrollend', done)
@@ -331,10 +347,34 @@ const scrollToSlide = (slideIndex: number, behavior: ScrollBehavior = 'smooth') 
   settleTimer = window.setTimeout(done, 380)
 }
 
+/** Scroll the feed-tab strip so the active column’s tab is visible. */
 const syncTabIntoView = (columnIndex: number, behavior: ScrollBehavior = 'smooth') => {
   nextTick(() => {
-    const tab = feedTabsScroller.value?.children[columnIndex] as HTMLElement | undefined
-    tab?.scrollIntoView({ behavior, inline: 'center', block: 'nearest' })
+    const root = feedTabsScroller.value
+    if (!root) return
+    const tabs = root.querySelectorAll<HTMLElement>('[role="tab"]')
+    const tab = tabs[columnIndex]
+    if (!tab) return
+    // Nested overflow (scroller + neo-tabs__list) is common — Android only
+    // moves the ancestor that actually overflows. Prefer that one; never use
+    // document scrollIntoView (it yanks the page vertically on Chrome Android).
+    const inner = tab.closest('.neo-tabs__list') as HTMLElement | null
+    const list =
+      (inner && inner.scrollWidth > inner.clientWidth + 2 ? inner : null) ||
+      (root.scrollWidth > root.clientWidth + 2 ? root : null) ||
+      inner ||
+      root
+    const listRect = list.getBoundingClientRect()
+    const tabRect = tab.getBoundingClientRect()
+    const delta =
+      tabRect.left + tabRect.width / 2 - (listRect.left + listRect.width / 2)
+    if (Math.abs(delta) < 2) return
+    const nextLeft = list.scrollLeft + delta
+    if (typeof list.scrollTo === 'function') {
+      list.scrollTo({ left: nextLeft, behavior: isMobileUi.value ? 'auto' : behavior })
+    } else {
+      list.scrollLeft = nextLeft
+    }
   })
 }
 
@@ -351,6 +391,20 @@ const scrollToColumn = (index: number, behavior: ScrollBehavior = 'smooth') => {
   syncTabIntoView(colIdx, behavior)
 }
 
+/** Desktop: shelf focus. Mobile: park that column in the carousel instead. */
+const onColumnFocus = (columnId: string) => {
+  const idx = columnsStore.columns.findIndex((c) => c.id === columnId)
+  if (isMobileUi.value) {
+    if (idx >= 0) scrollToColumn(idx, 'auto')
+    return
+  }
+  columnsStore.toggleColumnFocus(columnId)
+  if (idx >= 0) {
+    activeColumnIndex.value = idx
+    syncTabIntoView(idx, 'smooth')
+  }
+}
+
 /** Update which column is "active" from scroll position — never yanks scrollLeft back */
 const syncActiveColumnFromScroll = () => {
   const el = columnsContainer.value
@@ -360,7 +414,7 @@ const syncActiveColumnFromScroll = () => {
   let bestDist = Infinity
   const x = el.scrollLeft
   for (let i = 0; i < cols.length; i++) {
-    const d = Math.abs(cols[i]!.offsetLeft - x)
+    const d = Math.abs(slideScrollLeft(el, cols[i]!) - x)
     if (d < bestDist) {
       bestDist = d
       best = i
@@ -568,7 +622,13 @@ const onColumnsScroll = () => {
   const feeds = columnsStore.columns.length
   // Only remap tab highlight while parked on a real feed
   if (index >= EDGE_LEFT && index < EDGE_LEFT + feeds) {
-    activeColumnIndex.value = index - EDGE_LEFT
+    const next = index - EDGE_LEFT
+    if (activeColumnIndex.value !== next) {
+      activeColumnIndex.value = next
+    }
+    // Keep the top strip glued while swiping — highlight alone isn't enough
+    // when many feeds push the active pill off-screen (Chrome Android).
+    syncTabIntoView(next, 'auto')
   }
 }
 
@@ -610,8 +670,12 @@ const onCarouselScrollEnd = () => {
   carouselSlideIndex.value = idx
   syncBoardPortalFromSlide(idx)
   // Already parked — don't kick another settle (avoids bounce loops)
-  if (Math.abs(el.scrollLeft - child.offsetLeft) < 8) {
+  if (Math.abs(el.scrollLeft - slideScrollLeft(el, child)) < 8) {
     armParkCooldown(200)
+    const feeds = columnsStore.columns.length
+    if (idx >= EDGE_LEFT && idx < EDGE_LEFT + feeds) {
+      syncTabIntoView(idx - EDGE_LEFT, 'auto')
+    }
     return
   }
   settleCarousel(idx, 'auto')
@@ -738,7 +802,8 @@ const onCarouselTouchMove = (e: TouchEvent) => {
   // Calling preventDefault then is ignored (Intervention) and fighting
   // native scrollLeft makes the board vibrate / bounce.
   if (!e.cancelable) {
-    el.style.touchAction = ''
+    // Chrome Android: allow native horizontal momentum, then park when idle
+    el.style.touchAction = 'pan-x'
     el.classList.remove('columns-container--swiping')
     nativeTookOver = true
     carouselGesture = null
@@ -806,6 +871,19 @@ const finishCarouselGesture = (e: TouchEvent) => {
   syncActiveColumnFromScroll()
 }
 
+/** Re-park after Android URL-bar / keyboard / orientation changes slide width. */
+let carouselResizeRo: ResizeObserver | null = null
+let carouselVvParkTimer = 0
+
+const reparkCarouselAfterResize = () => {
+  if (!isMobileUi.value || carouselGesture || carouselSettling || portalActionLock) return
+  window.clearTimeout(carouselVvParkTimer)
+  carouselVvParkTimer = window.setTimeout(() => {
+    if (!isMobileUi.value || carouselGesture || carouselSettling) return
+    scrollToSlide(carouselSlideIndex.value, 'auto')
+  }, 80)
+}
+
 const bindCarouselGestures = () => {
   const el = columnsContainer.value
   if (!el) return
@@ -817,6 +895,14 @@ const bindCarouselGestures = () => {
   el.addEventListener('scrollend', onCarouselScrollEnd)
   // Mobile: JS parks — never leave mandatory snap armed (it bounced against settle)
   if (isMobileUi.value) el.style.scrollSnapType = 'none'
+
+  if (typeof ResizeObserver !== 'undefined') {
+    carouselResizeRo?.disconnect()
+    carouselResizeRo = new ResizeObserver(() => reparkCarouselAfterResize())
+    carouselResizeRo.observe(el)
+  }
+  window.visualViewport?.addEventListener('resize', reparkCarouselAfterResize)
+  window.addEventListener('orientationchange', reparkCarouselAfterResize)
 }
 
 const unbindCarouselGestures = () => {
@@ -828,6 +914,11 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('touchcancel', finishCarouselGesture, true)
   el.removeEventListener('wheel', onColumnsWheel, true)
   el.removeEventListener('scrollend', onCarouselScrollEnd)
+  carouselResizeRo?.disconnect()
+  carouselResizeRo = null
+  window.visualViewport?.removeEventListener('resize', reparkCarouselAfterResize)
+  window.removeEventListener('orientationchange', reparkCarouselAfterResize)
+  window.clearTimeout(carouselVvParkTimer)
   window.clearTimeout(wheelIdleTimer)
   window.clearTimeout(settleTimer)
   window.clearTimeout(nativeParkTimer)
@@ -883,25 +974,13 @@ watch(
 )
 
 /**
- * After returning from a subview, layout chrome reflow can leave scroll at slide 0
- * (Settings). Re-park on the active feed — but only if we're stranded on an edge
- * portal, so intentional portal parking isn't always yanked away.
+ * After returning from a subview / portal route, Android often leaves the board
+ * mid-slide or at Settings (slide 0). Always re-park on the active feed.
  */
 const restoreFeedPark = () => {
   nextTick(() => {
     requestAnimationFrame(() => {
-      if (!isMobileUi.value) {
-        scrollToColumn(activeColumnIndex.value, 'auto')
-        return
-      }
-      const idx = nearestSlideIndex()
-      const feeds = columnsStore.columns.length
-      const onEdge = idx < EDGE_LEFT || idx >= EDGE_LEFT + feeds
-      if (onEdge) scrollToColumn(activeColumnIndex.value, 'auto')
-      else {
-        carouselSlideIndex.value = idx
-        syncBoardPortalFromSlide(idx)
-      }
+      scrollToColumn(activeColumnIndex.value, 'auto')
     })
   })
 }
@@ -1333,7 +1412,7 @@ useHead({ title: 'Home | NeoSpace' })
           :drop-target="dropTargetColumnId === column.id"
           :focused="columnsStore.focusedColumnId === column.id"
           @remove="columnsStore.removeColumn(column.id)"
-          @focus="columnsStore.toggleColumnFocus(column.id)"
+          @focus="onColumnFocus(column.id)"
           @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
           @column-drag-start="onColumnDragStart"
           @column-drag-end="onColumnDragEnd"
@@ -1355,7 +1434,7 @@ useHead({ title: 'Home | NeoSpace' })
           :drop-target="dropTargetColumnId === column.id"
           :focused="columnsStore.focusedColumnId === column.id"
           @remove="columnsStore.removeColumn(column.id)"
-          @focus="columnsStore.toggleColumnFocus(column.id)"
+          @focus="onColumnFocus(column.id)"
           @column-drag-start="onColumnDragStart"
           @column-drag-end="onColumnDragEnd"
           @column-drag-over="onColumnDragOver"
@@ -1385,6 +1464,8 @@ useHead({ title: 'Home | NeoSpace' })
             placeholder="Search…"
             autocomplete="off"
             enterkeyhint="search"
+            @focus="($event.target as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' })"
+            @blur="reparkCarouselAfterResize"
             @keydown.enter.prevent="openPortal('search')"
           />
         </label>
@@ -2401,16 +2482,13 @@ useHead({ title: 'Home | NeoSpace' })
     flex: 1;
     min-width: 0;
 
+    // One horizontal scroller only (the outer __scroller). Nested overflow
+    // made syncTabIntoView scroll a list that never overflowed on Android.
     :deep(.neo-tabs__list) {
       display: flex;
       gap: 0.35rem;
       border-bottom: none;
-      overflow-x: auto;
-      scrollbar-width: none;
-
-      &::-webkit-scrollbar {
-        display: none;
-      }
+      overflow: visible;
     }
 
     :deep(.neo-tabs__tab) {
@@ -2431,7 +2509,13 @@ useHead({ title: 'Home | NeoSpace' })
       &[aria-selected='true'] {
         color: var(--neo-text-primary);
         background: var(--neo-bg-tertiary);
-        box-shadow: none;
+        // Android touch often never shows :focus-visible — make selection unmistakable
+        box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--neo-accent) 70%, transparent);
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--neo-focus, var(--neo-accent));
+        outline-offset: 2px;
       }
     }
   }

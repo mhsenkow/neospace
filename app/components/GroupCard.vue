@@ -354,6 +354,18 @@ const catTint = computed(() =>
           color: var(--neo-danger);
         }
       }
+
+      /* Touch: no hover reveal — show Leave up front */
+      @media (hover: none) {
+        .group-card__btn-leave {
+          display: inline;
+          color: var(--neo-danger);
+
+          &::before {
+            content: '· ';
+          }
+        }
+      }
     }
   }
 

@@ -2,7 +2,7 @@
  * Prev/next controls for overflow-x scroll rails (groups suggested row, etc.).
  */
 
-import { ref, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, watch, onUnmounted, type Ref } from 'vue'
 
 export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
   const canScrollBack = ref(false)
@@ -25,20 +25,33 @@ export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
   }
 
   let ro: ResizeObserver | null = null
+  let attached: HTMLElement | null = null
 
-  onMounted(() => {
-    const el = elRef.value
-    if (!el) return
-    el.addEventListener('scroll', update, { passive: true })
-    ro = new ResizeObserver(update)
-    ro.observe(el)
-    update()
-  })
-
-  onUnmounted(() => {
-    elRef.value?.removeEventListener('scroll', update)
+  const detach = () => {
+    attached?.removeEventListener('scroll', update)
     ro?.disconnect()
-  })
+    ro = null
+    attached = null
+  }
+
+  // Rails often mount after the page (behind v-if while data loads) — follow the ref
+  // instead of measuring once in onMounted, or the arrows never appear.
+  watch(
+    elRef,
+    (el) => {
+      detach()
+      if (el) {
+        attached = el
+        el.addEventListener('scroll', update, { passive: true })
+        ro = new ResizeObserver(update)
+        ro.observe(el)
+      }
+      update()
+    },
+    { immediate: true, flush: 'post' },
+  )
+
+  onUnmounted(detach)
 
   return { canScrollBack, canScrollForward, scrollBy, update }
 }

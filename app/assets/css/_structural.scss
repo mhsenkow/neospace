@@ -168,7 +168,7 @@
 
   // Mobile shell chrome — in-flow header/tabs; FABs offset above tab bar
   --neo-mobile-chrome-top: 0px;
-  --neo-mobile-nav-h: 64px;
+  --neo-mobile-nav-h: 56px;
   --neo-subview-chrome-height: 52px;
   
   --neo-container-sm: #{vars.$container-sm};
@@ -204,4 +204,22 @@
   --neo-chaos-stop-2: #{vars.$chaos-stop-2};
   --neo-chaos-stop-3: #{vars.$chaos-stop-3};
   --neo-chaos-fg: #{vars.$chaos-fg};
+}
+
+// Sticky secondary chrome (search / filters) inside #main-content.
+// MobileHeader sits outside the scroller, so top: 0 pins under it.
+// Subview pages offset below SubviewChrome on small viewports.
+.neo-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--neo-bg-primary);
+}
+
+.neo-sticky-bar--under-chrome {
+  @media (max-width: 1023px) {
+    top: calc(
+      var(--neo-subview-chrome-height, 52px) + max(0px, env(safe-area-inset-top, 0px) - 0.35rem)
+    );
+  }
 }

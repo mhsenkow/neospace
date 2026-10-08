@@ -117,7 +117,6 @@ onUnmounted(() => {
       type="button"
       class="suite-menu__btn"
       :aria-expanded="open"
-      aria-haspopup="dialog"
       aria-controls="neoSuitePanel"
       aria-label="Tools"
       title="Tools"

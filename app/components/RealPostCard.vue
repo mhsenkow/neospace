@@ -164,8 +164,8 @@ const revealMedia = () => {
 watch(
   () => props.status.uri || props.status.id,
   () => {
-    _resolvedIdCache = null
-    _resolvedClientCache = null
+    // Resolved id/client belong to the previous status — actions must re-resolve
+    clearActionCache()
     mediaRevealed.value = false
     cwOpen.value = false
     contentExpanded.value = false
@@ -297,6 +297,7 @@ const {
   toggleBoost,
   handleBookmark: bookmarkAction,
   getActionContext,
+  clearActionCache,
 } = usePostActions({
   displayStatus,
   statusUrl,
@@ -909,12 +910,15 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                 :autoplay="media.type === 'gifv' && !prefersReducedMotion"
                 :loop="media.type === 'gifv'"
                 :muted="media.type === 'gifv'"
+                playsinline
+                :aria-label="media.description?.trim() || (media.type === 'gifv' ? 'Animated image' : 'Video attachment')"
                 class="status-media-video"
               />
               <audio
                 v-else-if="media.type === 'audio'"
                 :src="media.url ?? undefined"
                 controls
+                :aria-label="media.description?.trim() || 'Audio attachment'"
                 class="status-media-audio"
               />
             </template>
