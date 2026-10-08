@@ -548,7 +548,7 @@ html[data-ui='nyt'] .sidebar__mark {
 html[data-ui='military'] .sidebar__link,
 html[data-ui='military'] .mobile-sidebar__link,
 html[data-ui='military'] .mobile-sidebar__action,
-html[data-ui='military'] .mobile-header__logo,
+html[data-ui='military'] .mobile-header__logo .neo-mark__glyph,
 html[data-ui='military'] .settings-nav__item,
 html[data-ui='military'] .settings-subheading,
 html[data-ui='military'] .neo-btn,
@@ -574,7 +574,7 @@ html[data-ui='terminal'] .sidebar {
   border-right-style: dashed;
 }
 
-html[data-ui='nyt'] .mobile-header__logo,
+html[data-ui='nyt'] .mobile-header__logo .neo-mark__glyph,
 html[data-ui='nyt'] .sidebar__mark,
 html[data-ui='nyt'] .login__wordmark,
 html[data-ui='nyt'] .explore-hero h1,

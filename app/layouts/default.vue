@@ -69,7 +69,7 @@ const isMessagesRoute = computed(() => path.value === '/messages')
 const isNotificationsRoute = computed(() => path.value === '/notifications')
 /** Single group page — not the /groups hub */
 const isGroupsDetailRoute = computed(() => /^\/groups\/.+/.test(path.value))
-/** Nested mobile screens — own chrome, no global header/tabs */
+/** Nested mobile screens — own top chrome (no global header) */
 const isMobileSubview = computed(
   () =>
     isThreadRoute.value ||
@@ -78,7 +78,8 @@ const isMobileSubview = computed(
     isNotificationsRoute.value ||
     isGroupsDetailRoute.value,
 )
-const showMobileNav = computed(() => !isMobileSubview.value)
+/** Profile keeps the tab bar so Home / compose stay one thumb away */
+const showMobileNav = computed(() => !isMobileSubview.value || isProfileRoute.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
 
 const closeMobileMenu = () => {
@@ -111,10 +112,11 @@ watchEffect(() => {
 })
 
 onMounted(async () => {
-  // Loom handoff listener MUST register before initialize() — Loom may postMessage
-  // while auth/storage is still loading, and those messages are otherwise lost.
+  // Loom / bruh handoff listener MUST register before initialize() — siblings may
+  // postMessage while auth/storage is still loading, and those messages are otherwise lost.
   const cleanups: Array<() => void> = []
   cleanups.push(registerLoomListeners())
+  cleanups.push(settingsStore.startSuiteLookSync())
 
   // Register listeners + cleanups synchronously BEFORE any await
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -239,10 +241,12 @@ watch(
     <FeedbackNotes v-if="!isMobileSubview" />
     <LazySettingsModal v-if="mounted.settings" />
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
+    <!-- Hide while compose is open so the waffle never fights the soft keyboard / Post bar -->
     <div
+      v-show="!composeSheet.open"
       class="neo-bottom-dock"
       :class="{
-        'neo-bottom-dock--subview': isMobileSubview,
+        'neo-bottom-dock--subview': isMobileSubview && !isProfileRoute,
         'neo-bottom-dock--thread': isThreadRoute,
       }"
     >
@@ -460,7 +464,7 @@ watch(
   .neo-layout--thread &,
   .neo-layout--profile &,
   .neo-layout--subview & {
-    /* Nested mobile screens: own top bar, no global header/tabs */
+    /* Nested mobile screens: own top bar, no global header */
     --neo-main-pad-top: 0px;
     padding-top: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
@@ -471,6 +475,15 @@ watch(
 
     @media (min-width: 1200px) {
       padding: 1.5rem 2rem;
+    }
+  }
+
+  /* Profile keeps MobileTabBar — leave room so the last posts aren't under it */
+  .neo-layout--profile & {
+    @media (max-width: 1023px) {
+      padding-bottom: calc(
+        var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.5rem
+      );
     }
   }
 }

@@ -20,6 +20,20 @@ export type BruhShareMessage = {
   doc?: string
 }
 
+/** True for allowlisted bruh hosts + local/preview siblings. */
+export function isBruhOrigin(origin: string): boolean {
+  if (BRUH_ORIGINS.has(origin)) return true
+  try {
+    const host = new URL(origin).hostname
+    if (host === 'localhost' || host === '127.0.0.1') return true
+    if (host.endsWith('.pages.dev') && host.includes('bruh')) return true
+    if (host.endsWith('.workers.dev') && host.includes('bruh')) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
 export function isBruhShare(data: unknown): data is BruhShareMessage {
   if (!data || typeof data !== 'object') return false
   const d = data as Record<string, unknown>
@@ -28,8 +42,10 @@ export function isBruhShare(data: unknown): data is BruhShareMessage {
 
 /** Compose text for a bruh share — make sure the page link rides along. */
 export function bruhShareText(msg: BruhShareMessage): string {
-  const text = msg.text.trim()
+  const text = typeof msg.text === 'string' ? msg.text.trim() : ''
   const doc = typeof msg.doc === 'string' ? msg.doc.trim() : ''
-  if (!doc || text.includes(doc)) return text
-  return text ? `${text}\n\n${doc}` : doc
+  if (!doc) return text
+  if (!text) return doc
+  if (text.includes(doc)) return text
+  return `${text}\n\n${doc}`
 }

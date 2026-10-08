@@ -30,9 +30,16 @@ const openSearch = () => {
       :aria-expanded="open"
       aria-controls="mobile-sidebar"
     >
-      <NeoIcon name="menu" :size="22" :stroke="1.75" />
+      <NeoIcon name="menu" :size="20" :stroke="1.75" />
     </button>
-    <NuxtLink to="/" class="mobile-header__logo" @click="void goHome()">neospace</NuxtLink>
+    <NuxtLink
+      to="/"
+      class="mobile-header__logo"
+      aria-label="neospace home"
+      @click="void goHome()"
+    >
+      <NeoMark :show-brand="false" :active="route.path === '/'" />
+    </NuxtLink>
   </div>
   <div class="mobile-header__actions">
     <button
@@ -58,11 +65,11 @@ const openSearch = () => {
   position: relative;
   flex-shrink: 0;
   width: 100%;
-  height: calc(52px + env(safe-area-inset-top, 0px));
+  height: calc(44px + env(safe-area-inset-top, 0px));
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: env(safe-area-inset-top, 0px) 0.5rem 0;
+  padding: env(safe-area-inset-top, 0px) 0.35rem 0;
   // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
@@ -75,14 +82,14 @@ const openSearch = () => {
   &__start {
     display: flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: 0.1rem;
     min-width: 0;
   }
 
   &__actions {
     display: flex;
     align-items: center;
-    gap: 0.1rem;
+    gap: 0.05rem;
     margin-left: auto;
   }
 
@@ -111,24 +118,23 @@ const openSearch = () => {
   }
 
   &__logo {
-    font-size: 0.9375rem;
-    font-weight: 700;
-    color: var(--neo-text-primary);
-    letter-spacing: -0.02em;
-    text-transform: lowercase;
-    line-height: 1;
-    padding-bottom: 1px;
+    display: inline-flex;
+    align-items: center;
     text-decoration: none;
-  }
+    color: inherit;
+    padding: 0 0.15rem;
+    border-radius: var(--neo-radius-sm, 4px);
 
-  &__theme-swatch {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background:
-      radial-gradient(circle at 30% 30%, var(--neo-accent) 0 35%, transparent 36%),
-      linear-gradient(135deg, var(--neo-bg-card) 45%, var(--neo-text-primary) 46%);
-    border: 1.5px solid var(--neo-border-color-dark);
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+    }
+
+    :deep(.neo-mark__glyph) {
+      width: 1.5rem;
+      height: 1.5rem;
+      font-size: 0.625rem;
+    }
   }
 }
 </style>

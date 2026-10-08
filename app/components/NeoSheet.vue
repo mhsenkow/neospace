@@ -118,6 +118,8 @@ const rootStyle = computed(() => ({
     max-height: 100%;
     height: 100%;
     border-radius: 12px 12px 0 0;
+    // vv pin already clears the home indicator / keyboard — don't double-pad
+    padding-bottom: 0;
   }
 
   .neo-sheet--compact & {

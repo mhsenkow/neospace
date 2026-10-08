@@ -7,10 +7,11 @@
 import {
   useComposeHandoffStore,
   LOOM_ORIGINS,
+  clearPersistedLoomShare,
   persistLoomShare,
-  readPersistedLoomShare,
+  peekPersistedLoomShare,
 } from '~/stores/composeHandoff'
-import { BRUH_ORIGINS, bruhShareText, isBruhShare } from '~/utils/bruhHandoff'
+import { BRUH_ORIGINS, bruhShareText, isBruhOrigin, isBruhShare } from '~/utils/bruhHandoff'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useInstancesStore } from '~/stores/instances'
 
@@ -25,6 +26,27 @@ function bufferFromMessage(raw: unknown): ArrayBuffer | null {
   return null
 }
 
+function isLoomOrigin(origin: string): boolean {
+  if (LOOM_ORIGINS.has(origin)) return true
+  try {
+    const host = new URL(origin).hostname
+    if (host === 'localhost' || host === '127.0.0.1') return true
+    if (host.endsWith('.pages.dev') && host.includes('loom')) return true
+    if (host.endsWith('.workers.dev') && host.includes('loom')) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+function hasSharePayload(share: {
+  story?: string
+  text?: string
+  imageDataUrl?: string
+} | null): boolean {
+  return !!(share && (share.story || share.text || share.imageDataUrl))
+}
+
 export function useLoomHandoff() {
   const composeHandoff = useComposeHandoffStore()
   const composeSheet = useComposeSheetStore()
@@ -33,11 +55,11 @@ export function useLoomHandoff() {
   const route = useRoute()
 
   /**
-   * Loom → compose: open the mobile sheet once.
+   * Loom / bruh → compose: open the mobile sheet once.
    * Never call show() again while open — that remounts RealComposeBox after take()
    * and the draft vanishes (looks filled for a beat, then empty).
    */
-  const openLoomCompose = async () => {
+  const openHandoffCompose = async () => {
     const isMobile = window.matchMedia('(max-width: 1023px)').matches
     if (isMobile) {
       if (!composeSheet.open) {
@@ -54,7 +76,10 @@ export function useLoomHandoff() {
     }
   }
 
+  /** Per-source accept flags — bruh upgrades must not lock out a later Loom share. */
   let loomShareAccepted = false
+  let bruhShareAccepted = false
+  let bruhUpgradeTimer: number | null = null
 
   const ackLoom = (origin: string) => {
     try {
@@ -63,20 +88,6 @@ export function useLoomHandoff() {
       }
     } catch {
       /* opener may be gone */
-    }
-  }
-
-  const pingLoomReady = () => {
-    try {
-      if (typeof window === 'undefined' || !window.opener || window.opener.closed) return
-      for (const origin of LOOM_ORIGINS) {
-        window.opener.postMessage({ type: 'neospace-loom-ready', v: 1 }, origin)
-      }
-      for (const origin of BRUH_ORIGINS) {
-        window.opener.postMessage({ type: 'neospace-bruh-ready', v: 1 }, origin)
-      }
-    } catch {
-      /* cross-origin opener may throw */
     }
   }
 
@@ -90,33 +101,78 @@ export function useLoomHandoff() {
     }
   }
 
+  const pingSuiteReady = () => {
+    try {
+      if (typeof window === 'undefined' || !window.opener || window.opener.closed) return
+      for (const origin of LOOM_ORIGINS) {
+        window.opener.postMessage({ type: 'neospace-loom-ready', v: 1 }, origin)
+      }
+      for (const origin of BRUH_ORIGINS) {
+        window.opener.postMessage({ type: 'neospace-bruh-ready', v: 1 }, origin)
+      }
+    } catch {
+      /* cross-origin opener may throw */
+    }
+  }
+
+  const markBruhAcceptedSoon = () => {
+    if (bruhUpgradeTimer != null) window.clearTimeout(bruhUpgradeTimer)
+    // Keep the door open for a postMessage upgrade (full caption + share link).
+    bruhUpgradeTimer = window.setTimeout(() => {
+      bruhShareAccepted = true
+      bruhUpgradeTimer = null
+    }, 2500)
+  }
+
+  /** Persist across login, ingest when authed, open compose. */
+  const deliverShare = async (
+    share: {
+      story: string
+      text: string
+      source: 'loom' | 'bruh'
+      imageDataUrl?: string
+      imageName?: string
+    },
+    opts?: { open?: boolean },
+  ) => {
+    persistLoomShare(share)
+    if (!instancesStore.isAuthenticated) {
+      if (route.path !== '/login') await router.replace('/login')
+      return false
+    }
+    const ok = await composeHandoff.ingestStored(share)
+    if (ok) clearPersistedLoomShare()
+    if (opts?.open !== false) await openHandoffCompose()
+    return ok
+  }
+
   /** bruh → compose: text-only (page excerpt + share link). Always ack; upgrade draft if fuller text arrives. */
   const onBruhMessage = (e: MessageEvent) => {
-    if (!BRUH_ORIGINS.has(e.origin) || !isBruhShare(e.data)) return
+    if (!isBruhOrigin(e.origin) || !isBruhShare(e.data)) return
     ackBruh(e.origin)
     const text = bruhShareText(e.data)
     if (!text) return
-    const already = loomShareAccepted
-    loomShareAccepted = true
+    const already = bruhShareAccepted
+    bruhShareAccepted = true
+    if (bruhUpgradeTimer != null) {
+      window.clearTimeout(bruhUpgradeTimer)
+      bruhUpgradeTimer = null
+    }
     void (async () => {
-      const share = { story: '', text, source: 'bruh' as const }
-      persistLoomShare(share)
-      if (!instancesStore.isAuthenticated) {
-        await router.replace('/login')
-        return
-      }
-      await composeHandoff.ingestStored(share)
-      // First delivery opens compose; later postMessage upgrades the pending draft quietly.
-      if (!already) await openLoomCompose()
+      await deliverShare(
+        { story: '', text, source: 'bruh' },
+        // First delivery opens compose; later postMessage upgrades the pending draft quietly.
+        { open: !already },
+      )
     })()
   }
 
   const onLoomMessage = (e: MessageEvent) => {
-    if (BRUH_ORIGINS.has(e.origin)) {
+    if (isBruhOrigin(e.origin)) {
       onBruhMessage(e)
       return
     }
-    if (!LOOM_ORIGINS.has(e.origin)) return
+    if (!isLoomOrigin(e.origin)) return
     if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
     const buffer = bufferFromMessage(e.data.image?.buffer)
     // Always ACK so Loom stops retrying — even for duplicate deliveries
@@ -128,6 +184,7 @@ export function useLoomHandoff() {
       await composeHandoff.ingestFromMessage({
         text: typeof e.data.text === 'string' ? e.data.text : '',
         story: typeof e.data.story === 'string' ? e.data.story : '',
+        source: 'loom',
         image: buffer
           ? {
               name: typeof e.data.image?.name === 'string' ? e.data.image.name : undefined,
@@ -136,11 +193,14 @@ export function useLoomHandoff() {
             }
           : undefined,
       })
-      if (buffer) loomShareAccepted = true
+      if (buffer || composeHandoff.hasPending) {
+        loomShareAccepted = true
+        clearPersistedLoomShare()
+      }
       if (!instancesStore.isAuthenticated) {
         await router.replace('/login')
       } else {
-        await openLoomCompose()
+        await openHandoffCompose()
       }
     })()
   }
@@ -149,20 +209,24 @@ export function useLoomHandoff() {
   const registerLoomListeners = (): (() => void) => {
     window.addEventListener('message', onLoomMessage)
     if (window.opener && !window.opener.closed) {
-      pingLoomReady()
-      const readyInterval = window.setInterval(pingLoomReady, 400)
+      pingSuiteReady()
+      const readyInterval = window.setInterval(pingSuiteReady, 400)
       window.setTimeout(() => window.clearInterval(readyInterval), 10000)
       return () => {
         window.removeEventListener('message', onLoomMessage)
         window.clearInterval(readyInterval)
+        if (bruhUpgradeTimer != null) window.clearTimeout(bruhUpgradeTimer)
       }
     }
-    return () => window.removeEventListener('message', onLoomMessage)
+    return () => {
+      window.removeEventListener('message', onLoomMessage)
+      if (bruhUpgradeTimer != null) window.clearTimeout(bruhUpgradeTimer)
+    }
   }
 
   /** Re-ping + query / persisted share boot (after initialize). */
   const bootLoomHandoff = async () => {
-    pingLoomReady()
+    pingSuiteReady()
 
     const composeFrom = String(route.query.compose || '')
     const fromQuery = composeFrom === 'loom' || composeFrom === 'bruh'
@@ -172,56 +236,61 @@ export function useLoomHandoff() {
         text: typeof route.query.text === 'string' ? route.query.text : '',
         source: composeFrom as 'loom' | 'bruh',
       }
-      persistLoomShare(share)
+      // Drop compose params so refresh / back doesn't re-fire the handoff.
       await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })
 
-      // Story URL is authoritative for Loom. For bruh, keep the door open for a
-      // postMessage upgrade (full caption + share link) — query text is deliberately short.
       if (!instancesStore.isAuthenticated) {
         persistLoomShare(share)
         if (route.path !== '/login') await router.replace('/login')
       } else {
-        await composeHandoff.ingestStored(share)
+        await deliverShare(share)
         if (composeFrom === 'loom') loomShareAccepted = composeHandoff.hasPending
-        await openLoomCompose()
-        // bruh: mark accepted after a beat so an early postMessage can still upgrade text
-        if (composeFrom === 'bruh') {
-          window.setTimeout(() => {
-            loomShareAccepted = true
-          }, 2500)
-        }
+        if (composeFrom === 'bruh') markBruhAcceptedSoon()
       }
-    } else {
-      // Give optional postMessage a short window when we weren't opened via query
-      await new Promise((r) => setTimeout(r, 1200))
-      if (!composeHandoff.hasPending && !loomShareAccepted) {
-        const loomPayload = readPersistedLoomShare()
-        if (loomPayload && (loomPayload.story || loomPayload.text || loomPayload.imageDataUrl)) {
-          if (!instancesStore.isAuthenticated) {
-            persistLoomShare(loomPayload)
-            if (route.path !== '/login') await router.replace('/login')
-          } else {
-            await composeHandoff.ingestStored(loomPayload)
-            await openLoomCompose()
-          }
-        }
-      }
+      return
     }
+
+    // Give optional postMessage a short window when we weren't opened via query
+    await new Promise((r) => setTimeout(r, 1200))
+    if (composeHandoff.hasPending || loomShareAccepted || bruhShareAccepted) return
+    const persisted = peekPersistedLoomShare()
+    if (!hasSharePayload(persisted) || !persisted) return
+    if (!instancesStore.isAuthenticated) {
+      if (route.path !== '/login') await router.replace('/login')
+      return
+    }
+    await deliverShare({
+      story: persisted.story || '',
+      text: persisted.text || '',
+      source: persisted.source || (persisted.story ? 'loom' : 'bruh'),
+      imageDataUrl: persisted.imageDataUrl,
+      imageName: persisted.imageName,
+    })
   }
 
   watch(
     () => instancesStore.isAuthenticated,
     async (ok) => {
       if (!ok) return
-      const loomPayload = readPersistedLoomShare()
-      if (!loomPayload || (!loomPayload.story && !loomPayload.text && !loomPayload.imageDataUrl)) return
-      await composeHandoff.ingestStored(loomPayload)
-      await openLoomCompose()
+      const persisted = peekPersistedLoomShare()
+      if (!hasSharePayload(persisted) || !persisted) return
+      // Already composing from an earlier delivery — just upgrade quietly.
+      const shouldOpen = !composeSheet.open && !composeHandoff.hasPending
+      await deliverShare(
+        {
+          story: persisted.story || '',
+          text: persisted.text || '',
+          source: persisted.source || (persisted.story ? 'loom' : 'bruh'),
+          imageDataUrl: persisted.imageDataUrl,
+          imageName: persisted.imageName,
+        },
+        { open: shouldOpen },
+      )
     },
   )
 
   return {
-    openLoomCompose,
+    openLoomCompose: openHandoffCompose,
     registerLoomListeners,
     bootLoomHandoff,
   }

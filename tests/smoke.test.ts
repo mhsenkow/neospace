@@ -6,6 +6,9 @@ import {
   suggestedChartAlt,
   STORY_PUBLIC_NOTICE,
 } from '../app/utils/loomHandoff'
+import { bruhShareText, isBruhOrigin, isBruhShare } from '../app/utils/bruhHandoff'
+import { suiteGroups, SUITE_URLS } from '../app/utils/suiteCatalog'
+import { measureKeyboard } from '../app/utils/keyboardDetect'
 import { friendlyAuthError } from '../app/utils/authErrors'
 import {
   isAuthGatedPublicHost,
@@ -35,6 +38,63 @@ import {
   sharePayloadToRecipe,
   statusMatchesRecipe,
 } from '../app/utils/algorithms'
+
+describe('bruh handoff', () => {
+  it('accepts allowlisted + preview bruh origins', () => {
+    expect(isBruhOrigin('https://bruh.ibm.io')).toBe(true)
+    expect(isBruhOrigin('https://bruh-15b.pages.dev')).toBe(true)
+    expect(isBruhOrigin('https://foo.bruh.pages.dev')).toBe(true)
+    expect(isBruhOrigin('http://localhost:5173')).toBe(true)
+    expect(isBruhOrigin('https://evil.example')).toBe(false)
+  })
+
+  it('appends the page link when missing from the caption', () => {
+    expect(
+      bruhShareText({
+        type: 'bruh-neospace-share',
+        v: 1,
+        text: 'Hello from the paper',
+        doc: 'https://bruh.ibm.io/s/abc1234567',
+      }),
+    ).toBe('Hello from the paper\n\nhttps://bruh.ibm.io/s/abc1234567')
+    expect(
+      bruhShareText({
+        type: 'bruh-neospace-share',
+        v: 1,
+        text: 'Already has https://bruh.ibm.io/s/abc1234567',
+        doc: 'https://bruh.ibm.io/s/abc1234567',
+      }),
+    ).toBe('Already has https://bruh.ibm.io/s/abc1234567')
+  })
+
+  it('type-guards share messages', () => {
+    expect(isBruhShare({ type: 'bruh-neospace-share', v: 1, text: 'x' })).toBe(true)
+    expect(isBruhShare({ type: 'loom-neospace-share', v: 1, text: 'x' })).toBe(false)
+  })
+})
+
+describe('keyboard detect', () => {
+  it('returns closed with no browser visualViewport', () => {
+    expect(measureKeyboard()).toEqual({ inset: 0, open: false })
+  })
+})
+
+describe('suite catalog', () => {
+  it('keeps the wordcount think map (bruh → loom → notebook → words → neospace)', () => {
+    const think = suiteGroups({ currentId: 'neospace' }).find((g) => g.id === 'think')
+    expect(think?.tools.map((t) => t.id)).toEqual([
+      'bruh',
+      'loom',
+      'notebook',
+      'wordcount',
+      'neospace',
+    ])
+    expect(think?.tools.find((t) => t.id === 'neospace')?.current).toBe(true)
+    expect(SUITE_URLS.bruh).toContain('bruh.ibm.io')
+    expect(SUITE_URLS.loom).toContain('loom.ibm.io')
+    expect(SUITE_URLS.wordcount).toContain('wordcount')
+  })
+})
 
 describe('loom handoff story URLs', () => {
   it('parses loom.ibm.io story ids', () => {

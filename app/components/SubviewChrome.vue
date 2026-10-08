@@ -62,11 +62,11 @@ const goBack = () => {
   z-index: var(--neo-z-shell-header, 40);
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  min-height: var(--neo-subview-chrome-height, 52px);
-  padding: 0.35rem 0.5rem;
-  padding-top: max(0.35rem, env(safe-area-inset-top, 0px));
-  padding-bottom: 0.35rem;
+  gap: 0.25rem;
+  min-height: var(--neo-subview-chrome-height, 44px);
+  padding: 0.2rem 0.35rem;
+  padding-top: max(0.2rem, env(safe-area-inset-top, 0px));
+  padding-bottom: 0.2rem;
   overflow: visible;
   /* Solid fill — backdrop-filter flashes black on iOS Safari */
   background: var(--neo-bg-primary);
@@ -74,9 +74,11 @@ const goBack = () => {
 
   @media (min-width: 1024px) {
     margin: 0 -0.5rem;
+    min-height: 48px;
     padding-left: 0.25rem;
     padding-right: 0.25rem;
     padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
   }
 }
 
@@ -92,13 +94,17 @@ const goBack = () => {
 .subview-chrome__name {
   display: block;
   margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: 0.9375rem;
+  font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--neo-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+
+  @media (max-width: 1023px) {
+    font-size: 0.875rem;
+  }
 }
 
 .subview-chrome__actions {

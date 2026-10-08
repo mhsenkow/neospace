@@ -1,10 +1,10 @@
 /**
- * Cross-app compose handoff — Loom → NeoSpace chart + lineage.
+ * Cross-app compose handoff — Loom chart + lineage, bruh page excerpt + link.
  *
- * Reliable path: Loom publishes the story (KV-backed `/s/{id}.img`) and opens
- * NeoSpace with `?compose=loom&story=…`. We fetch the PNG + lineage over HTTPS.
- * postMessage is an optional fast path when opener survives; large charts often
- * fail that channel, so story fetch is authoritative.
+ * Reliable path: sibling opens NeoSpace with `?compose=loom|bruh&…`.
+ * Loom publishes the story (KV-backed `/s/{id}.img`); we fetch PNG + lineage.
+ * bruh lands a short query caption; postMessage upgrades with caption + `/s/{id}`.
+ * postMessage is an optional fast path when opener survives.
  */
 
 import { defineStore } from 'pinia'
@@ -133,15 +133,30 @@ export function persistLoomShare(share: StoredShare) {
   }
 }
 
-export function readPersistedLoomShare(): StoredShare | null {
+/** Read without clearing — survive login redirects / failed first ingest. */
+export function peekPersistedLoomShare(): StoredShare | null {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    sessionStorage.removeItem(STORAGE_KEY)
     return JSON.parse(raw) as StoredShare
   } catch {
     return null
   }
+}
+
+export function clearPersistedLoomShare() {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Peek then clear — prefer peek + clearPersisted after a successful ingest. */
+export function readPersistedLoomShare(): StoredShare | null {
+  const share = peekPersistedLoomShare()
+  if (share) clearPersistedLoomShare()
+  return share
 }
 
 export const useComposeHandoffStore = defineStore('composeHandoff', {
@@ -289,10 +304,11 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
 
     async ingestFromQuery(query: Record<string, unknown> | { [key: string]: any }) {
       const mode = String(query.compose || '')
-      if (mode !== 'loom') return false
+      if (mode !== 'loom' && mode !== 'bruh') return false
       return this.ingestStored({
         story: typeof query.story === 'string' ? query.story : '',
         text: typeof query.text === 'string' ? query.text : '',
+        source: mode,
       })
     },
 
@@ -300,6 +316,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       text?: string
       story?: string
       image?: { name?: string; type?: string; buffer: ArrayBuffer }
+      source?: StoredShare['source']
     }) {
       const imageName = data.image?.name || 'loom-chart.png'
       const imageType = data.image?.type?.startsWith('image/')
@@ -322,6 +339,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         story: data.story || '',
         imageDataUrl,
         imageName,
+        source: data.source || 'loom',
       }
       persistLoomShare(share)
 

@@ -14,7 +14,6 @@ import {
   type FeedbackKind,
 } from '~/utils/feedback'
 import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
-import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 declare global {
   interface Window {
@@ -64,11 +63,11 @@ const submitDisabledReason = computed(() => {
 
 const canSubmit = computed(() => !submitDisabledReason.value)
 
-/** visualViewport offset — keeps the sheet in the visible area above the keyboard */
-const viewportStyle = ref<Record<string, string>>({})
+const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(open, {
+  lockScroll: true,
+})
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null
-let scrollLockY = 0
 
 const showToast = (msg: string) => {
   toast.value = msg
@@ -84,61 +83,6 @@ const reset = () => {
   kind.value = 'ux'
   shot.value = null
   if (fileRef.value) fileRef.value.value = ''
-}
-
-const syncViewport = () => {
-  if (typeof window === 'undefined') return
-  const vv = window.visualViewport
-  if (!vv) {
-    viewportStyle.value = {
-      top: '0px',
-      left: '0px',
-      width: '100%',
-      height: '100%',
-    }
-    return
-  }
-  // Position overlay to the *visible* viewport (above soft keyboard)
-  viewportStyle.value = {
-    top: `${vv.offsetTop}px`,
-    left: `${vv.offsetLeft}px`,
-    width: `${vv.width}px`,
-    height: `${vv.height}px`,
-  }
-}
-
-const lockScroll = () => {
-  if (typeof document === 'undefined') return
-  scrollLockY = window.scrollY || 0
-  document.documentElement.style.overflow = 'hidden'
-  document.body.style.overflow = 'hidden'
-  document.body.style.position = 'fixed'
-  document.body.style.inset = '0'
-  document.body.style.width = '100%'
-}
-
-const unlockScroll = () => {
-  if (typeof document === 'undefined') return
-  document.documentElement.style.overflow = ''
-  document.body.style.overflow = ''
-  document.body.style.position = ''
-  document.body.style.inset = ''
-  document.body.style.width = ''
-  window.scrollTo(0, scrollLockY)
-}
-
-const reduceMotion = usePrefersReducedMotion()
-
-const onFocusField = (e: FocusEvent) => {
-  const el = e.target as HTMLElement | null
-  if (!el || !panelRef.value) return
-  // After keyboard animates, scroll within the panel — not the document
-  window.setTimeout(() => {
-    syncViewport()
-    scrollFieldIntoKeyboardView(el, {
-      behavior: reduceMotion.value ? 'auto' : 'smooth',
-    })
-  }, 300)
 }
 
 const tryClose = () => {
@@ -163,9 +107,11 @@ const loadTurnstileScript = () => {
 }
 
 const mountTurnstile = async () => {
-  if (!turnstileSiteKey.value || !turnstileRef.value) return
+  if (!turnstileSiteKey.value || !turnstileRef.value || !open.value) return
   try {
     await loadTurnstileScript()
+    // Panel may have closed while the script loaded
+    if (!open.value || !turnstileRef.value) return
     if (turnstileWidgetId.value) {
       window.turnstile?.remove(turnstileWidgetId.value)
       turnstileWidgetId.value = null
@@ -185,7 +131,7 @@ const mountTurnstile = async () => {
         },
       }) ?? null
   } catch {
-    showToast('Verification widget failed to load.')
+    if (open.value) showToast('Verification widget failed to load.')
   }
 }
 
@@ -269,33 +215,17 @@ useFocusTrap(overlayRef, open, {
 watch(open, async (isOpen) => {
   if (typeof window === 'undefined') return
   if (isOpen) {
-    syncViewport()
-    lockScroll()
-    window.visualViewport?.addEventListener('resize', syncViewport)
-    window.visualViewport?.addEventListener('scroll', syncViewport)
-    window.addEventListener('resize', syncViewport)
     await nextTick()
     void mountTurnstile()
-  } else {
-    unlockScroll()
-    window.visualViewport?.removeEventListener('resize', syncViewport)
-    window.visualViewport?.removeEventListener('scroll', syncViewport)
-    window.removeEventListener('resize', syncViewport)
-    viewportStyle.value = {}
-    if (turnstileWidgetId.value) {
-      window.turnstile?.remove(turnstileWidgetId.value)
-      turnstileWidgetId.value = null
-    }
+  } else if (turnstileWidgetId.value) {
+    window.turnstile?.remove(turnstileWidgetId.value)
+    turnstileWidgetId.value = null
     turnstileToken.value = null
   }
 })
 
 onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
-  window.visualViewport?.removeEventListener('resize', syncViewport)
-  window.visualViewport?.removeEventListener('scroll', syncViewport)
-  window.removeEventListener('resize', syncViewport)
-  if (open.value) unlockScroll()
 })
 </script>
 
@@ -326,7 +256,13 @@ onUnmounted(() => {
         @click.self="tryClose"
         @keydown="onFormKeydown"
       >
-        <div ref="panelRef" class="notes-panel" data-keyboard-scroll>
+        <div
+          ref="panelRef"
+          class="notes-panel"
+          :class="{ 'notes-panel--keyboard': keyboardOpen }"
+          data-keyboard-scroll
+          @focusin="onFocusField"
+        >
           <header class="notes-panel__header">
             <h2 id="neospace-notes-title">Leave a note</h2>
             <button
@@ -340,12 +276,12 @@ onUnmounted(() => {
             </button>
           </header>
 
-          <p class="notes-panel__lede">
+          <p v-if="!keyboardOpen" class="notes-panel__lede">
             Files as a <strong>public</strong> GitHub issue on NeoSpace — bugs, UX, ideas.
             The current page URL and any screenshot are included.
           </p>
 
-          <fieldset class="notes-kinds">
+          <fieldset v-if="!keyboardOpen" class="notes-kinds">
             <legend class="notes-kinds__legend">Note type</legend>
             <label
               v-for="k in KINDS"
@@ -402,7 +338,7 @@ onUnmounted(() => {
             {{ body.length }}/{{ FEEDBACK_BODY_MAX }}
           </p>
 
-          <div class="notes-shot-row">
+          <div v-if="!keyboardOpen" class="notes-shot-row">
             <input
               id="neospace-note-shot"
               ref="fileRef"
@@ -425,12 +361,19 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <img v-if="shot" :src="shot" alt="Screenshot preview" class="notes-preview" />
+          <img
+            v-if="shot && !keyboardOpen"
+            :src="shot"
+            alt="Screenshot preview"
+            class="notes-preview"
+          />
 
+          <!-- Keep Turnstile mounted — hiding it for the keyboard blocks submit -->
           <div
             v-if="turnstileSiteKey"
             ref="turnstileRef"
             class="notes-turnstile"
+            :class="{ 'notes-turnstile--compact': keyboardOpen }"
             aria-label="Bot verification"
           />
 
@@ -476,9 +419,10 @@ onUnmounted(() => {
 .notes-fab {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
+  /* Sit just above the tab bar — a hair higher so it doesn’t kiss the chrome */
   bottom: calc(
     var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 0px) + env(safe-area-inset-bottom, 0px) +
-      0.65rem
+      1.15rem
   );
   z-index: var(--neo-z-shell-header, 90);
   display: grid;
@@ -545,18 +489,29 @@ onUnmounted(() => {
   gap: 0.5rem;
   flex-shrink: 0;
   margin-bottom: 0.35rem;
+  min-height: 40px;
 
   h2 {
     margin: 0;
-    font-size: 1rem;
+    font-size: 0.9375rem;
     font-weight: 600;
     color: var(--neo-text-primary);
   }
 }
 
+.notes-panel--keyboard {
+  .notes-panel__header {
+    margin-bottom: 0.15rem;
+
+    h2 {
+      font-size: 0.8125rem;
+    }
+  }
+}
+
 .notes-panel__close {
-  width: 2rem;
-  height: 2rem;
+  width: 44px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -565,6 +520,8 @@ onUnmounted(() => {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
 
   &:hover {
     color: var(--neo-text-primary);
@@ -590,6 +547,12 @@ onUnmounted(() => {
 .notes-turnstile {
   flex-shrink: 0;
   margin-bottom: 0.5rem;
+
+  &--compact {
+    margin-bottom: 0.25rem;
+    transform: scale(0.92);
+    transform-origin: left center;
+  }
 }
 
 .notes-panel__lede {
@@ -674,8 +637,8 @@ onUnmounted(() => {
   width: 100%;
   margin-bottom: 0.5rem;
   padding: 0.7rem 0.75rem;
-  /* ≥16px avoids iOS auto-zoom on focus */
-  font-size: 1rem;
+  /* Absolute 16px — root rem is 15px; iOS zooms anything smaller */
+  font-size: max(16px, 1rem);
   color: var(--neo-text-primary);
   background: var(--neo-bg-primary);
   border: 1px solid var(--neo-border-color-dark);
@@ -693,6 +656,11 @@ onUnmounted(() => {
   resize: vertical;
   line-height: 1.45;
   flex: 0 1 auto;
+}
+
+.notes-panel--keyboard .notes-textarea {
+  min-height: 4rem;
+  max-height: 8rem;
 }
 
 .notes-file {

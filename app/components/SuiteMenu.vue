@@ -1,100 +1,46 @@
 <script setup lang="ts">
 /**
- * Subtle bottom-right suite waffle — same pattern as ibm.io/wordcount,
- * tucked above mobile chrome so it stays out of the way.
+ * Subtle bottom-right suite waffle — same quiet map as ibm.io/wordcount.
+ * Catalog lives in suiteCatalog so bruh / loom / words stay aligned.
  */
 
 import { edwardActive, toggleEdward } from '~/utils/edwardShell'
-
-type SuiteTool = {
-  id: string
-  label: string
-  blurb: string
-  href?: string
-  current?: boolean
-  action?: () => void
-}
-
-type SuiteGroup = {
-  id: string
-  label: string
-  tools: SuiteTool[]
-}
+import { suiteGroups, SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
+import { rememberSuiteVisit } from '~/utils/suiteLook'
 
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
+const triggerEl = ref<HTMLButtonElement | null>(null)
 
-const groups = computed<SuiteGroup[]>(() => [
-  {
-    id: 'think',
-    label: 'think',
-    tools: [
+onMounted(() => {
+  rememberSuiteVisit('neospace')
+})
+
+const groups = computed(() =>
+  suiteGroups({
+    currentId: 'neospace',
+    extraGroups: [
       {
-        id: 'bruh',
-        label: 'bruh',
-        blurb: 'ideas · paper',
-        href: 'https://bruh.ibm.io/',
-      },
-      {
-        id: 'notebook',
-        label: 'notebook',
-        blurb: 'cells · teach',
-        href: 'https://ibm.io/notebook/',
-      },
-      {
-        id: 'loom',
-        label: 'loom',
-        blurb: 'data · stories',
-        href: 'https://loom.ibm.io/',
-      },
-      {
-        id: 'wordcount',
-        label: 'words',
-        blurb: 'count · draft',
-        href: 'https://ibm.io/wordcount/',
+        id: 'play',
+        label: 'play',
+        tools: [
+          {
+            id: 'edward',
+            label: 'edward',
+            blurb: 'stream · balls',
+            current: edwardActive.value,
+            action: () => void toggleEdward(),
+          },
+        ],
       },
     ],
-  },
-  {
-    id: 'connect',
-    label: 'connect',
-    tools: [
-      {
-        id: 'neospace',
-        label: 'neospace',
-        blurb: 'people · feed',
-        href: 'https://neospace.ibm.io/',
-        current: true,
-      },
-      {
-        id: 'ibm',
-        label: 'ibm.io',
-        blurb: 'home · work',
-        href: 'https://ibm.io/',
-      },
-    ],
-  },
-  {
-    id: 'play',
-    label: 'play',
-    tools: [
-      {
-        id: 'edward',
-        label: 'edward',
-        blurb: 'stream · balls',
-        current: edwardActive.value,
-        action: () => void toggleEdward(),
-      },
-    ],
-  },
-])
+  }),
+)
 
 const runAction = (tool: SuiteTool) => {
   tool.action?.()
   close({ restoreFocus: false })
 }
-
-const triggerEl = ref<HTMLButtonElement | null>(null)
 
 const close = (opts?: { restoreFocus?: boolean }) => {
   open.value = false
@@ -213,7 +159,7 @@ onUnmounted(() => {
 
       <a
         class="suite-menu__map"
-        href="https://ibm.io/tools/"
+        :href="SUITE_TOOLS_MAP"
         target="_blank"
         rel="noopener noreferrer"
         aria-label="All tools (opens in new tab)"

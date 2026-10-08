@@ -36,7 +36,8 @@ const requestClose = async () => {
 useFocusTrap(panelRef, sheetOpen, {
   onEscape: requestClose,
   // Prefer the composer — Cancel is first in the DOM and stole focus on mobile
-  initialFocus: 'textarea, .compose-input, #recipient-search-input, .group-pick-sheet__input, .compose-sheet__close',
+  initialFocus:
+    'textarea, .compose-input, #recipient-search-input, .group-pick-sheet__input, .neo-sheet-header__close',
 })
 
 const onPosted = (status: mastodon.v1.Status) => {
@@ -94,71 +95,76 @@ const onPick = async (account: mastodon.v1.Account) => {
       aria-modal="true"
       :aria-labelledby="sheet.pickRecipient ? 'recipient-picker-title' : sheetTitleId"
     >
-          <RecipientPicker
-            v-if="sheet.pickRecipient"
-            @select="onPick"
-            @cancel="sheet.hide()"
-          />
-          <template v-else>
-            <NeoSheetHeader
-              :title="sheet.title || 'New post'"
-              :title-id="sheetTitleId"
-              @cancel="requestClose"
+      <RecipientPicker
+        v-if="sheet.pickRecipient"
+        :keyboard-open="keyboardOpen"
+        @select="onPick"
+        @cancel="sheet.hide()"
+        @focusin="onFocusField"
+      />
+      <template v-else>
+        <NeoSheetHeader
+          :title="sheet.title || 'New post'"
+          :title-id="sheetTitleId"
+          :title-sr-only="keyboardOpen"
+          @cancel="requestClose"
+        />
+        <div
+          class="compose-sheet__body"
+          data-keyboard-scroll
+          @focusin="onFocusField"
+        >
+          <article v-if="sheet.contextPost" class="compose-sheet__context">
+            <img
+              v-if="sheet.contextPost.avatar"
+              :src="sheet.contextPost.avatar"
+              alt=""
+              class="compose-sheet__context-avatar"
             />
-            <div
-              class="compose-sheet__body"
-              data-keyboard-scroll
-              @focusin="onFocusField"
-            >
-              <article v-if="sheet.contextPost" class="compose-sheet__context">
-                <img
-                  v-if="sheet.contextPost.avatar"
-                  :src="sheet.contextPost.avatar"
-                  alt=""
-                  class="compose-sheet__context-avatar"
-                />
-                <div class="compose-sheet__context-body">
-                  <p class="compose-sheet__context-meta">
-                    <strong>{{ sheet.contextPost.name }}</strong>
-                    <span>@{{ sheet.contextPost.handle }}</span>
-                  </p>
-                  <p
-                    class="compose-sheet__context-text"
-                    :class="{ 'compose-sheet__context-text--collapsed': !contextExpanded }"
-                  >
-                    {{ sheet.contextPost.text }}
-                  </p>
-                  <button
-                    v-if="sheet.contextPost.text.length > 120"
-                    type="button"
-                    class="compose-sheet__context-toggle"
-                    @click="contextExpanded = !contextExpanded"
-                  >
-                    {{ contextExpanded ? 'Show less' : 'Show more' }}
-                  </button>
-                </div>
-              </article>
-              <RealComposeBox
-                :key="sheet.instanceKey"
-                :initial-text="sheet.initialText || undefined"
-                :initial-visibility="sheet.initialVisibility || undefined"
-                :initial-group-tag="sheet.groupTag || undefined"
-                :placeholder="sheet.placeholder || undefined"
-                :title="sheet.title || undefined"
-                :in-reply-to-id="sheet.inReplyToId || undefined"
-                :quote-url="sheet.quoteUrl || undefined"
-                :quote-context="sheet.contextPost && sheet.quoteUrl ? sheet.contextPost : undefined"
-                :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
-                @posted="onPosted"
-              />
+            <div class="compose-sheet__context-body">
+              <p class="compose-sheet__context-meta">
+                <strong>{{ sheet.contextPost.name }}</strong>
+                <span>@{{ sheet.contextPost.handle }}</span>
+              </p>
+              <p
+                class="compose-sheet__context-text"
+                :class="{ 'compose-sheet__context-text--collapsed': !contextExpanded }"
+              >
+                {{ sheet.contextPost.text }}
+              </p>
+              <button
+                v-if="sheet.contextPost.text.length > 120"
+                type="button"
+                class="compose-sheet__context-toggle"
+                @click="contextExpanded = !contextExpanded"
+              >
+                {{ contextExpanded ? 'Show less' : 'Show more' }}
+              </button>
             </div>
-          </template>
+          </article>
+          <RealComposeBox
+            :key="sheet.instanceKey"
+            :initial-text="sheet.initialText || undefined"
+            :initial-visibility="sheet.initialVisibility || undefined"
+            :initial-group-tag="sheet.groupTag || undefined"
+            :placeholder="sheet.placeholder || undefined"
+            :title="sheet.title || undefined"
+            :in-reply-to-id="sheet.inReplyToId || undefined"
+            :quote-url="sheet.quoteUrl || undefined"
+            :quote-context="sheet.contextPost && sheet.quoteUrl ? sheet.contextPost : undefined"
+            :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
+            @posted="onPosted"
+          />
+        </div>
+      </template>
     </div>
   </NeoSheet>
 </template>
 
 <style lang="scss" scoped>
 .compose-sheet__inner {
+  --compose-pad-x: 0.75rem;
+  --compose-pad-y: 0.65rem;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -167,39 +173,84 @@ const onPick = async (account: mastodon.v1.Account) => {
   overflow: hidden;
 }
 
-.compose-sheet__header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  border-bottom: 1px solid var(--neo-border-color);
-  flex-shrink: 0;
-}
-
-.compose-sheet__close {
-  min-width: auto;
-  min-height: 40px;
-  padding: 0.35rem 0.65rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.compose-sheet__title {
-  flex: 1;
-  text-align: center;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  color: var(--neo-text-primary);
-}
-
-.compose-sheet__spacer {
-  width: 4.5rem;
-}
-
 .compose-sheet__inner--keyboard {
-  // Soft keyboard up — hug the visual viewport, keep Post glued to the bottom
-  :deep(.compose-input-wrap) {
-    min-height: 6.5rem;
+  --compose-pad-x: 0.65rem;
+  --compose-pad-y: 0.4rem;
+
+  // Soft keyboard — reclaim chrome so the textarea + Post bar stay usable
+  .compose-sheet__context {
+    margin-bottom: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    gap: 0.4rem;
+  }
+
+  .compose-sheet__context-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .compose-sheet__context-text,
+  .compose-sheet__context-text--collapsed {
+    -webkit-line-clamp: 1;
+  }
+
+  .compose-sheet__context-toggle {
+    display: none;
+  }
+
+  :deep(.compose-header) {
+    gap: 0.4rem;
+    margin-bottom: 0.1rem;
+  }
+
+  :deep(.compose-avatar) {
+    width: 28px;
+    height: 28px;
+  }
+
+  :deep(.compose-title) {
+    font-size: 0.8125rem;
+  }
+
+  :deep(.compose-input-wrap),
+  :deep(.compose-input) {
+    flex: 1 1 auto;
+    min-height: 3.25rem;
+  }
+
+  :deep(.compose-media) {
+    gap: 0.4rem;
+  }
+
+  :deep(.compose-media__item) {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  :deep(.compose-media__alt-input) {
+    min-height: 2rem;
+    max-height: 3rem;
+  }
+
+  :deep(.compose-handoff) {
+    padding: 0.3rem 0.45rem;
+    font-size: 0.75rem;
+  }
+
+  :deep(.compose-footer) {
+    padding: 0.35rem var(--compose-pad-x);
+    padding-bottom: 0.35rem;
+    gap: 0.35rem;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :deep(.compose-language),
+  :deep(.compose-media-count) {
+    display: none;
+  }
+
+  :deep(.compose-counter) {
+    font-size: 0.6875rem;
   }
 }
 
@@ -209,8 +260,8 @@ const onPick = async (account: mastodon.v1.Account) => {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0.85rem 0.85rem 0.65rem;
-  padding-bottom: max(0.85rem, env(safe-area-inset-bottom, 0px));
+  padding: var(--compose-pad-y) var(--compose-pad-x);
+  padding-bottom: 0;
   -webkit-overflow-scrolling: touch;
   flex: 1;
   min-height: 0;
@@ -229,12 +280,12 @@ const onPick = async (account: mastodon.v1.Account) => {
 
   :deep(.compose-input-wrap) {
     flex: 1 1 auto;
-    min-height: 8rem;
+    min-height: 7rem;
   }
 
   :deep(.compose-input) {
     flex: 1;
-    min-height: 8rem;
+    min-height: 7rem;
     max-height: none;
     /* Absolute 16px — root rem is 15px; iOS zooms anything smaller */
     font-size: max(16px, 1rem);
@@ -246,9 +297,9 @@ const onPick = async (account: mastodon.v1.Account) => {
     bottom: 0;
     z-index: 2;
     margin-top: auto;
-    margin-inline: -0.85rem;
-    padding: 0.65rem 0.85rem;
-    padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+    margin-inline: calc(-1 * var(--compose-pad-x));
+    padding: 0.5rem var(--compose-pad-x);
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
     background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -277,8 +328,8 @@ const onPick = async (account: mastodon.v1.Account) => {
 .compose-sheet__context {
   display: flex;
   gap: 0.65rem;
-  margin: 0 0 0.85rem;
-  padding: 0.75rem 0.85rem;
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
   border-radius: 12px;
   background: var(--neo-bg-tertiary);
   border: 1px solid var(--neo-border-color);
@@ -320,32 +371,5 @@ const onPick = async (account: mastodon.v1.Account) => {
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.compose-sheet-enter-active,
-.compose-sheet-leave-active {
-  transition: opacity 0.2s ease;
-
-  .compose-sheet__panel {
-    transition: transform 0.22s ease;
-  }
-}
-
-.compose-sheet-enter-from,
-.compose-sheet-leave-to {
-  opacity: 0;
-
-  .compose-sheet__panel {
-    transform: translateY(100%);
-  }
-}
-
-@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-  .compose-sheet-enter-from,
-  .compose-sheet-leave-to {
-    .compose-sheet__panel {
-      transform: translateY(12px) scale(0.98);
-    }
-  }
 }
 </style>

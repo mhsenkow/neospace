@@ -443,12 +443,19 @@ const onReplyPosted = async (status: mastodon.v1.Status) => {
       repliesCount: (focusStatus.value.repliesCount || 0) + 1,
     }
   }
-  await loadThread({ quiet: true })
+  // Land on the new reply immediately — don't wait on a quiet reload
+  await nextTick()
   if (isDirectThread.value) await scrollChatToEnd()
   else {
-    await nextTick()
-    chatEndEl.value?.scrollIntoView({ block: 'end', behavior: preferReducedMotion() ? 'auto' : 'smooth' })
+    chatEndEl.value?.scrollIntoView({
+      block: 'end',
+      behavior: preferReducedMotion() ? 'auto' : 'smooth',
+    })
   }
+  // Echo / nesting from the server in the background
+  void loadThread({ quiet: true }).then(() => {
+    if (isDirectThread.value) void scrollChatToEnd()
+  })
 }
 
 const goProfile = () => {
@@ -731,7 +738,10 @@ useHead({
         v-if="focusStatus && canReply"
         class="thread-reply-dock"
         data-keyboard-fixed
-        :class="{ 'thread-reply-dock--pending': replyResolving || !publicReplyId }"
+        :class="{
+          'thread-reply-dock--pending': replyResolving || !publicReplyId,
+          'thread-reply-dock--keyboard': keyboardOpen,
+        }"
         :style="replyDockStyle"
         :aria-busy="replyResolving || !publicReplyId || undefined"
       >
@@ -1062,11 +1072,41 @@ useHead({
   border-top: 1px solid var(--neo-border-color);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  transition: bottom 0.12s ease-out;
 
   &--pending {
     opacity: 0.72;
     pointer-events: none;
+  }
+
+  &--keyboard {
+    padding: 0.3rem 0.5rem 0.3rem;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+
+    :deep(.compose-footer) {
+      padding-top: 0.2rem;
+      gap: 0.3rem;
+    }
+
+    :deep(.compose-language),
+    :deep(.compose-media-count),
+    :deep(.compose-visibility) {
+      display: none;
+    }
+
+    :deep(.compose-input) {
+      min-height: 2.35rem;
+      max-height: 5rem;
+    }
+
+    /* Reclaim width — send lives in the field */
+    :deep(.compose-avatar) {
+      display: none;
+    }
+
+    :deep(.compose--compact.compose--expanded) {
+      padding: 0.35rem 0.45rem 0.3rem;
+    }
   }
 
   @media (min-width: 1024px) {
@@ -1087,9 +1127,9 @@ useHead({
     font-size: max(16px, 1rem);
   }
 
-  :deep(.compose-submit) {
-    min-height: 36px;
-    min-width: 4.25rem;
+  :deep(.compose-send) {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 

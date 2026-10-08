@@ -31,7 +31,7 @@ const open = computed({
 })
 
 const sheetRef = ref<HTMLElement | null>(null)
-const { viewportStyle, onFocusField } = useKeyboardViewport(open, { lockScroll: true })
+const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(open, { lockScroll: true })
 
 useFocusTrap(sheetRef, open, {
   onEscape: () => algorithms.closeEditor(),
@@ -288,15 +288,31 @@ function removeRecipe() {
     :viewport-style="viewportStyle"
     @close="algorithms.closeEditor()"
   >
-    <div ref="sheetRef" class="algo-sheet" role="dialog" aria-modal="true" :aria-label="title">
+    <div
+      ref="sheetRef"
+      class="algo-sheet"
+      :class="{ 'algo-sheet--keyboard': keyboardOpen }"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="algo-sheet-title"
+    >
       <div class="algo-sheet__hero" aria-hidden="true">
         <span class="algo-sheet__hero-glow" />
       </div>
 
-      <NeoSheetHeader :title="title" @cancel="algorithms.closeEditor()" />
+      <NeoSheetHeader
+        :title="title"
+        title-id="algo-sheet-title"
+        :title-sr-only="keyboardOpen"
+        @cancel="algorithms.closeEditor()"
+      />
 
-      <div class="algo-sheet__body">
-        <p class="algo-sheet__lede">
+      <div
+        class="algo-sheet__body"
+        data-keyboard-scroll
+        @focusin="onFocusField"
+      >
+        <p v-if="!keyboardOpen" class="algo-sheet__lede">
           Describe what you want — or fine-tune the rules. Share a link so others can run your curation on their board.
         </p>
 
@@ -566,11 +582,33 @@ function removeRecipe() {
   position: relative;
   z-index: 1;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.65rem 1rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.algo-sheet--keyboard {
+  .algo-sheet__hero {
+    display: none;
+  }
+
+  .algo-sheet__body {
+    padding: 0.4rem 0.75rem 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .algo-sheet__footer {
+    padding: 0.4rem 0.65rem;
+    backdrop-filter: none;
+  }
+
+  .algo-sheet__danger {
+    display: none;
+  }
 }
 
 .algo-sheet__lede {
@@ -638,7 +676,8 @@ function removeRecipe() {
   textarea {
     width: 100%;
     padding: 0.6rem 0.75rem;
-    font-size: 0.875rem;
+    /* Absolute 16px — root rem is 15px; iOS zooms anything smaller */
+    font-size: max(16px, 0.875rem);
     font-weight: 500;
     font-family: inherit;
     color: var(--neo-text-primary);
@@ -659,7 +698,7 @@ function removeRecipe() {
   resize: vertical;
   min-height: 5.5rem;
   line-height: 1.45;
-  font-size: 1rem !important;
+  font-size: max(16px, 1rem) !important;
   font-weight: 500 !important;
   background:
     linear-gradient(

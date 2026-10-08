@@ -134,8 +134,9 @@ const composeAriaLabel = computed(() => {
 })
 
 const submitAriaLabel = computed(() => {
-  if (isPosting.value) return props.inReplyToId ? 'Replying' : 'Posting'
+  if (isPosting.value) return props.inReplyToId ? 'Sending reply' : 'Posting'
   if (isUploading.value) return 'Uploading attachments'
+  if (props.compact) return props.inReplyToId ? 'Send reply' : 'Post'
   return props.inReplyToId ? 'Reply' : 'Post'
 })
 
@@ -583,6 +584,12 @@ const onKeydown = (e: KeyboardEvent) => {
       return
     }
   }
+  // Compact reply / Threads pill: Enter sends (Shift+Enter keeps a newline)
+  if (props.compact && e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
+    e.preventDefault()
+    void handlePost()
+    return
+  }
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault()
     void handlePost()
@@ -736,7 +743,7 @@ onUnmounted(() => {
       <span class="compose-drop__label">Drop photos to add</span>
     </div>
 
-    <!-- Threads pill: avatar · What's new? · Post -->
+    <!-- Threads pill: avatar · field with Send tucked inside -->
     <div v-if="compact" class="compose-pill" @click.stop>
       <img
         v-if="instancesStore.userAvatar"
@@ -744,14 +751,14 @@ onUnmounted(() => {
         :alt="instancesStore.userDisplayName"
         class="compose-avatar neo-avatar"
       />
-      <div class="compose-input-wrap">
+      <div class="compose-input-wrap compose-input-wrap--send">
         <textarea
           ref="textareaRef"
           v-model="content"
           class="compose-input neo-input"
           :placeholder="placeholder"
           rows="1"
-          enterkeyhint="enter"
+          enterkeyhint="send"
           autocapitalize="sentences"
           :readonly="inputLocked"
           :aria-busy="isPosting || isUploading || props.disabled || undefined"
@@ -762,7 +769,7 @@ onUnmounted(() => {
           :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
-          :aria-keyshortcuts="submitKeyshortcuts"
+          :aria-keyshortcuts="compact ? 'Enter' : submitKeyshortcuts"
           @focus="onComposeFocus"
           @blur="composeFocused = false"
           @paste="onPaste"
@@ -780,20 +787,24 @@ onUnmounted(() => {
           :flip-up="mentionFlipUp"
           @select="insertMention"
         />
+        <button
+          type="button"
+          class="compose-send"
+          :class="{ 'compose-send--ready': canPost }"
+          :disabled="!canPost"
+          :aria-label="submitAriaLabel"
+          :title="compact ? (inReplyToId ? 'Send reply · Enter' : 'Post · Enter') : submitShortcutTitle"
+          @click.stop="handlePost"
+        >
+          <FunLoader
+            v-if="isPosting || isUploading"
+            variant="seed"
+            :size="26"
+            :label="isUploading ? 'Uploading' : 'Sending'"
+          />
+          <NeoIcon v-else name="send" :size="17" :stroke="2" filled />
+        </button>
       </div>
-      <button
-        type="button"
-        class="compose-submit neo-btn neo-btn--primary"
-        :disabled="!canPost"
-        :aria-label="submitAriaLabel"
-        :title="submitShortcutTitle"
-        :aria-keyshortcuts="submitKeyshortcuts"
-        @click="handlePost"
-      >
-        <span v-if="isPosting">{{ inReplyToId ? 'Replying…' : 'Posting…' }}</span>
-        <span v-else-if="isUploading">Uploading…</span>
-        <span v-else>{{ inReplyToId ? 'Reply' : 'Post' }}</span>
-      </button>
     </div>
 
     <template v-else>
@@ -1154,9 +1165,21 @@ onUnmounted(() => {
       min-width: 0;
     }
 
+    .compose-input-wrap--send {
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      gap: 0.25rem;
+      min-height: 2.75rem;
+    }
+
     .compose-input {
+      flex: 1;
+      min-width: 0;
       min-height: 0;
-      padding: 0.35rem 0;
+      padding: 0.5rem 0.15rem 0.5rem 0;
+      /* Room for the in-field send control (44px touch target) */
+      padding-right: 3rem;
       border: none;
       background: transparent;
       box-shadow: none;
@@ -1172,14 +1195,42 @@ onUnmounted(() => {
       }
     }
 
-    .compose-submit {
+    .compose-send {
+      position: absolute;
+      right: 0.1rem;
+      bottom: 0.15rem;
+      width: 2.15rem;
+      height: 2.15rem;
       flex-shrink: 0;
-      align-self: flex-start;
-      margin-top: 0.05rem;
-      min-height: 32px;
-      padding: 0.3rem 0.85rem;
-      border-radius: 10px;
-      font-size: 0.8125rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--neo-accent) 32%, var(--neo-bg-tertiary));
+      color: var(--neo-text-on-accent, #fff);
+      cursor: pointer;
+      transition:
+        background 0.14s ease,
+        transform 0.12s ease,
+        opacity 0.12s ease;
+
+      &--ready {
+        background: var(--neo-accent);
+
+        &:hover:not(:disabled) {
+          filter: brightness(1.06);
+        }
+
+        &:active:not(:disabled) {
+          transform: scale(0.94);
+        }
+      }
+
+      &:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
     }
 
     .compose-counter {

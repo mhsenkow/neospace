@@ -36,6 +36,7 @@ import {
 } from '~/utils/appearance'
 import { ensureFontsLoaded } from '~/utils/loadFonts'
 import { cursorPage } from '~/utils/linkHeader'
+import { listenSuiteLook, readSuiteLook, writeSuiteLook } from '~/utils/suiteLook'
 
 // Settings categories for the sidebar
 export interface SettingsCategory {
@@ -420,6 +421,12 @@ export const useSettingsStore = defineStore('settings', {
             collapseReblogs: parsed.collapseReblogs !== false,
           }
         }
+        // Suite look (wordcount / bruh / loom) wins when hopping instruments —
+        // same ibm.tools.shared blob the waffle started on.
+        const suite = readSuiteLook()
+        if (suite.theme) this.localPreferences.theme = suite.theme
+        if (suite.ui) this.localPreferences.ui = suite.ui
+        if (suite.font) this.localPreferences.font = suite.font
         this.applyLocalAppearance()
         this.syncCustomProfileCss()
       } catch (e) {
@@ -444,6 +451,43 @@ export const useSettingsStore = defineStore('settings', {
           this.localPreferences.reduceMotion,
         )
       }
+      writeSuiteLook({
+        theme: this.localPreferences.theme,
+        ui: this.localPreferences.ui,
+        font: this.localPreferences.font,
+      })
+    },
+
+    /** Follow sibling tools editing ibm.tools.shared (bruh / loom / words). */
+    startSuiteLookSync(): () => void {
+      return listenSuiteLook((slice) => {
+        let changed = false
+        if (slice.theme && slice.theme !== this.localPreferences.theme) {
+          this.localPreferences.theme = slice.theme
+          changed = true
+        }
+        if (slice.ui && slice.ui !== this.localPreferences.ui) {
+          this.localPreferences.ui = slice.ui
+          changed = true
+        }
+        if (slice.font && slice.font !== this.localPreferences.font) {
+          this.localPreferences.font = slice.font
+          changed = true
+        }
+        if (!changed) return
+        // Apply without re-writing the blob we just read (avoid storage thrash).
+        applyAppearance({
+          theme: this.localPreferences.theme,
+          ui: this.localPreferences.ui,
+          font: this.localPreferences.font,
+          fontSize: this.localPreferences.fontSize,
+          radius: this.localPreferences.radius,
+          density: this.localPreferences.density,
+          line: this.localPreferences.line,
+        })
+        ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
+        this.saveLocalPreferences()
+      })
     },
 
     /**

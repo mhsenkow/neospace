@@ -131,7 +131,7 @@ const {
   onDrop,
 } = useComposeMedia()
 
-const { insetStyle: barStyle } = useKeyboardBottomInset()
+const { insetStyle: barStyle, keyboardOpen } = useKeyboardBottomInset()
 
 /**
  * Fixed bar already lifts with --neo-keyboard-inset. Document scrollIntoView
@@ -212,11 +212,16 @@ const autosize = () => {
   const el = textareaRef.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+  const max = keyboardOpen.value ? 96 : 140
+  el.style.height = `${Math.min(el.scrollHeight, max)}px`
 }
 
 watch(content, () => {
   // Single nextTick — avoid double autosize from @input + watch
+  void nextTick(autosize)
+})
+
+watch(keyboardOpen, () => {
   void nextTick(autosize)
 })
 
@@ -311,7 +316,10 @@ onMounted(() => {
 <template>
   <div
     class="chat-composer"
-    :class="{ 'chat-composer--dragging': isDragging }"
+    :class="{
+      'chat-composer--dragging': isDragging,
+      'chat-composer--keyboard': keyboardOpen,
+    }"
     data-keyboard-fixed
     :style="barStyle"
     @dragenter="onDragEnter"
@@ -484,9 +492,6 @@ onMounted(() => {
   border-top: 1px solid var(--neo-border-color);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  /* Avoid layout jump when Android resizes-content + inset both apply */
-  transition: bottom 0.12s ease-out;
-
   @media (min-width: 1024px) {
     left: var(--neo-sidebar-width, 248px);
     padding: 0.9rem 1.25rem 1rem;
@@ -495,6 +500,39 @@ onMounted(() => {
   &--dragging {
     outline: 2px dashed var(--neo-accent);
     outline-offset: -4px;
+  }
+
+  &--keyboard {
+    padding: 0.4rem 0.65rem 0.4rem;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+
+    .chat-composer__hint {
+      display: none;
+    }
+
+    .chat-composer__media {
+      padding-bottom: 0.35rem;
+      gap: 0.4rem;
+    }
+
+    .chat-composer__attach-wrap,
+    .chat-composer__thumb {
+      width: 64px;
+    }
+
+    .chat-composer__thumb {
+      height: 48px;
+      border-radius: 8px;
+    }
+
+    .chat-composer__input {
+      max-height: 96px;
+    }
+
+    .chat-composer__count:not(.chat-composer__count--warn):not(.chat-composer__count--over) {
+      display: none;
+    }
   }
 }
 
@@ -685,8 +723,8 @@ onMounted(() => {
   background: transparent;
   color: var(--neo-text-primary);
   font: inherit;
-  /* ≥16px avoids iOS auto-zoom on focus */
-  font-size: 1rem;
+  /* Absolute 16px — root rem is 15px; iOS zooms anything smaller */
+  font-size: max(16px, 1rem);
   line-height: 1.35;
   resize: none;
   outline: none;

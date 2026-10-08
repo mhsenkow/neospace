@@ -5,12 +5,47 @@
 
 import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useScrollLock } from '~/composables/useScrollLock'
+import {
+  captureKeyboardBaseline,
+  measureKeyboard,
+} from '~/utils/keyboardDetect'
 
 const KEYBOARD_SCROLL_SEL =
-  '[data-keyboard-scroll], .compose-sheet__body, .group-pick-sheet__inner, .notes-panel, .notes-sheet__panel, .neo-sheet__panel, .recipient-picker'
+  '[data-keyboard-scroll], .compose-sheet__body, .algo-sheet__body, .group-pick-sheet__inner, .notes-panel, .notes-sheet__panel, .recipient-picker__list'
 
 const KEYBOARD_FIXED_SEL =
   '.chat-composer, [data-keyboard-fixed], .reply-dock, .thread-reply-dock'
+
+const KEYBOARD_FOOTER_SEL =
+  '.compose-footer, .notes-actions, .compose-sheet__footer, .algo-sheet__footer, [data-keyboard-footer]'
+
+/** Sheets currently pinned — keeps data-keyboard-open honest while docks report inset 0. */
+let sheetPins = 0
+let sheetKeyboardOpen = false
+
+const sharedInsetStyle = ref<Record<string, string>>({ bottom: '0px' })
+const sharedKeyboardOpen = ref(false)
+let keyboardInsetSubs = 0
+let lastInset = -1
+let lastOpen = false
+let insetRaf = 0
+
+function publishKeyboardOpen(open: boolean) {
+  const next = open || sheetKeyboardOpen
+  lastOpen = next
+  sharedKeyboardOpen.value = next
+  document.documentElement.toggleAttribute('data-keyboard-open', next)
+}
+
+function publishInset(inset: number, open: boolean) {
+  const kb = inset >= 100 ? inset : 0
+  if (kb !== lastInset) {
+    lastInset = kb
+    sharedInsetStyle.value = { bottom: `${kb}px` }
+    document.documentElement.style.setProperty('--neo-keyboard-inset', `${kb}px`)
+  }
+  publishKeyboardOpen(open)
+}
 
 /**
  * Scroll a focused field into its sheet/panel scrollport — never yank the
@@ -30,10 +65,9 @@ export function scrollFieldIntoKeyboardView(
   if (parent && parent !== el && parent.scrollHeight > parent.clientHeight + 2) {
     const pRect = parent.getBoundingClientRect()
     const eRect = el.getBoundingClientRect()
-    const pad = 16
-    const footer = parent.querySelector(
-      '.compose-footer, .notes-actions, .compose-sheet__footer',
-    ) as HTMLElement | null
+    const pad = 12
+    const footer = parent.querySelector(KEYBOARD_FOOTER_SEL) as HTMLElement | null
+      || parent.parentElement?.querySelector(KEYBOARD_FOOTER_SEL) as HTMLElement | null
     const footerH = footer?.offsetHeight ?? 0
     const topLimit = pRect.top + pad
     const bottomLimit = pRect.bottom - pad - footerH
@@ -62,18 +96,22 @@ export function useKeyboardViewport(
   let scrollHeld = false
   let scrollY = 0
   let rafPending = 0
+  let pinned = false
 
   const syncViewport = () => {
     if (typeof window === 'undefined') return
+    // Desktop mouse/trackpad: keep the centered card — don't pin to visualViewport.
+    const deskFine = window.matchMedia(
+      '(min-width: 1024px) and (hover: hover) and (pointer: fine)',
+    ).matches
     const vv = window.visualViewport
-    if (!vv) {
-      viewportStyle.value = {
-        top: '0px',
-        left: '0px',
-        width: '100%',
-        height: '100%',
-      }
+    if (deskFine || !vv) {
+      viewportStyle.value = {}
       keyboardOpen.value = false
+      sheetKeyboardOpen = false
+      // Preserve dock-driven open state; don't force-clear the shared flag.
+      const { open } = measureKeyboard()
+      publishKeyboardOpen(open)
       return
     }
     viewportStyle.value = {
@@ -82,13 +120,10 @@ export function useKeyboardViewport(
       width: `${vv.width}px`,
       height: `${vv.height}px`,
     }
-    // Layout vs visual gap — soft keyboard (not URL-bar jitter)
-    const inset = Math.max(
-      0,
-      Math.round(window.innerHeight - vv.height - vv.offsetTop),
-      Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop),
-    )
-    keyboardOpen.value = inset >= 100
+    const { open } = measureKeyboard()
+    keyboardOpen.value = open
+    sheetKeyboardOpen = open
+    publishKeyboardOpen(open)
   }
 
   const scheduleSync = () => {
@@ -101,11 +136,15 @@ export function useKeyboardViewport(
 
   const attach = () => {
     if (typeof window === 'undefined') return
+    if (!pinned) {
+      pinned = true
+      sheetPins += 1
+    }
     scrollY = window.scrollY
+    captureKeyboardBaseline()
     syncViewport()
     if (opts?.lockScroll && !scrollHeld) {
       scrollLock.lock()
-      document.body.style.top = `-${scrollY}px`
       scrollHeld = true
     }
     window.visualViewport?.addEventListener('resize', scheduleSync)
@@ -115,9 +154,12 @@ export function useKeyboardViewport(
 
   const detach = () => {
     if (typeof window === 'undefined') return
+    if (pinned) {
+      pinned = false
+      sheetPins = Math.max(0, sheetPins - 1)
+    }
     if (scrollHeld) {
       scrollLock.unlock()
-      document.body.style.top = ''
       window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' as ScrollBehavior })
       scrollHeld = false
     }
@@ -130,6 +172,10 @@ export function useKeyboardViewport(
     }
     viewportStyle.value = {}
     keyboardOpen.value = false
+    if (sheetPins === 0) sheetKeyboardOpen = false
+    const { open } = measureKeyboard()
+    publishKeyboardOpen(open)
+    captureKeyboardBaseline()
   }
 
   let focusTimer: ReturnType<typeof setTimeout> | null = null
@@ -186,41 +232,13 @@ export function useKeyboardViewport(
  * Shared singleton — layout + ChatComposer + reply dock can all subscribe without
  * fighting over listeners / zeroing the CSS var on unmount.
  */
-const sharedInsetStyle = ref<Record<string, string>>({ bottom: '0px' })
-const sharedKeyboardOpen = ref(false)
-let keyboardInsetSubs = 0
-
 const syncKeyboardInset = () => {
   if (typeof window === 'undefined') return
-  const vv = window.visualViewport
-  if (!vv) {
-    sharedInsetStyle.value = { bottom: '0px' }
-    sharedKeyboardOpen.value = false
-    document.documentElement.style.setProperty('--neo-keyboard-inset', '0px')
-    return
-  }
-  // Prefer layout-vs-visual gap; also catch vv.offsetTop (iOS Safari URL bar / keyboard)
-  const inset = Math.max(
-    0,
-    Math.round(window.innerHeight - vv.height - vv.offsetTop),
-    // When resizes-content already shrank innerHeight, still lift if vv is smaller
-    Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop),
-  )
-  // Ignore URL-bar jitter. Android 10 / overlay keyboards often land ~180–280px;
-  // keep threshold below that. With interactive-widget=resizes-content, inset≈0
-  // and the layout shell already shrinks — composers sit at bottom:0.
-  const kb = inset >= 100 ? inset : 0
-  // visualViewport scroll fires constantly — only touch reactive state / CSS on change
-  if (kb === lastInset) return
-  lastInset = kb
-  sharedInsetStyle.value = { bottom: `${kb}px` }
-  sharedKeyboardOpen.value = kb > 0
-  document.documentElement.style.setProperty('--neo-keyboard-inset', `${kb}px`)
+  const { inset, open } = measureKeyboard()
+  if (!open) captureKeyboardBaseline()
+  publishInset(inset, open)
 }
 
-let lastInset = -1
-let insetRaf = 0
-/** One measurement per frame (vv resize + scroll + window resize can all fire together) */
 const scheduleKeyboardInset = () => {
   if (insetRaf) return
   insetRaf = requestAnimationFrame(() => {
@@ -229,13 +247,25 @@ const scheduleKeyboardInset = () => {
   })
 }
 
+const onInsetFocusIn = () => scheduleKeyboardInset()
+const onInsetFocusOut = () => {
+  window.setTimeout(() => {
+    captureKeyboardBaseline()
+    scheduleKeyboardInset()
+  }, 80)
+}
+
 const attachKeyboardInset = () => {
   if (typeof window === 'undefined') return
   lastInset = -1
+  lastOpen = false
+  captureKeyboardBaseline()
   syncKeyboardInset()
   window.visualViewport?.addEventListener('resize', scheduleKeyboardInset)
   window.visualViewport?.addEventListener('scroll', scheduleKeyboardInset)
   window.addEventListener('resize', scheduleKeyboardInset)
+  document.addEventListener('focusin', onInsetFocusIn)
+  document.addEventListener('focusout', onInsetFocusOut)
 }
 
 const detachKeyboardInset = () => {
@@ -243,6 +273,8 @@ const detachKeyboardInset = () => {
   window.visualViewport?.removeEventListener('resize', scheduleKeyboardInset)
   window.visualViewport?.removeEventListener('scroll', scheduleKeyboardInset)
   window.removeEventListener('resize', scheduleKeyboardInset)
+  document.removeEventListener('focusin', onInsetFocusIn)
+  document.removeEventListener('focusout', onInsetFocusOut)
   if (insetRaf) {
     cancelAnimationFrame(insetRaf)
     insetRaf = 0
@@ -250,7 +282,12 @@ const detachKeyboardInset = () => {
   lastInset = 0
   document.documentElement.style.setProperty('--neo-keyboard-inset', '0px')
   sharedInsetStyle.value = { bottom: '0px' }
-  sharedKeyboardOpen.value = false
+  if (sheetPins === 0) {
+    sheetKeyboardOpen = false
+    publishKeyboardOpen(false)
+  } else {
+    publishKeyboardOpen(sheetKeyboardOpen)
+  }
 }
 
 export function useKeyboardBottomInset() {

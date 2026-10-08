@@ -6,6 +6,14 @@
 import type { mastodon } from 'masto'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 
+const props = withDefaults(
+  defineProps<{
+    /** Soft keyboard up — hide lede / compact header title */
+    keyboardOpen?: boolean
+  }>(),
+  { keyboardOpen: false },
+)
+
 const emit = defineEmits<{
   select: [account: mastodon.v1.Account]
   cancel: []
@@ -131,10 +139,15 @@ onUnmounted(() => clear())
 
 <template>
   <!-- Lives inside ComposeSheet's dialog, which takes its name from our title -->
-  <div class="recipient-picker">
-    <NeoSheetHeader title="Message someone" title-id="recipient-picker-title" @cancel="emit('cancel')" />
+  <div class="recipient-picker" :class="{ 'recipient-picker--keyboard': props.keyboardOpen }">
+    <NeoSheetHeader
+      title="Message someone"
+      title-id="recipient-picker-title"
+      :title-sr-only="props.keyboardOpen"
+      @cancel="emit('cancel')"
+    />
 
-    <p class="recipient-picker__hint">
+    <p v-if="!props.keyboardOpen" class="recipient-picker__hint">
       No separate friends list — pick someone you follow, or search the fediverse.
     </p>
 
@@ -162,7 +175,7 @@ onUnmounted(() => clear())
 
     <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ statusAnnounce }}</p>
 
-    <div ref="listRef" class="recipient-picker__list">
+    <div ref="listRef" class="recipient-picker__list" data-keyboard-scroll>
       <!-- Status / empty / error copy sits outside the listbox (options only inside);
            the sr-only status above announces it -->
       <p v-if="followingError" class="recipient-picker__status">
@@ -238,7 +251,18 @@ onUnmounted(() => clear())
 }
 
 .recipient-picker__input {
-  font-size: 1rem;
+  font-size: max(16px, 1rem);
+}
+
+.recipient-picker--keyboard {
+  .recipient-picker__search {
+    padding: 0.35rem 0.75rem 0.45rem;
+  }
+
+  .recipient-picker__section {
+    padding-top: 0.2rem;
+    padding-bottom: 0.3rem;
+  }
 }
 
 .recipient-picker__list {
