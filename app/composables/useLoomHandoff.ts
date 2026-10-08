@@ -1,6 +1,7 @@
 /**
- * Loom → NeoSpace postMessage / compose handoff.
+ * Loom / bruh → NeoSpace postMessage / compose handoff.
  * Registers the message listener early (before auth init) so shares aren't lost.
+ * bruh (the suite's writing room) rides the same channel as text-only shares.
  */
 
 import {
@@ -9,6 +10,7 @@ import {
   persistLoomShare,
   readPersistedLoomShare,
 } from '~/stores/composeHandoff'
+import { BRUH_ORIGINS, bruhShareText, isBruhShare } from '~/utils/bruhHandoff'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useInstancesStore } from '~/stores/instances'
 
@@ -70,12 +72,49 @@ export function useLoomHandoff() {
       for (const origin of LOOM_ORIGINS) {
         window.opener.postMessage({ type: 'neospace-loom-ready', v: 1 }, origin)
       }
+      for (const origin of BRUH_ORIGINS) {
+        window.opener.postMessage({ type: 'neospace-bruh-ready', v: 1 }, origin)
+      }
     } catch {
       /* cross-origin opener may throw */
     }
   }
 
+  const ackBruh = (origin: string) => {
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'neospace-bruh-ack', v: 1 }, origin)
+      }
+    } catch {
+      /* opener may be gone */
+    }
+  }
+
+  /** bruh → compose: text-only (page excerpt + share link). */
+  const onBruhMessage = (e: MessageEvent) => {
+    if (!BRUH_ORIGINS.has(e.origin) || !isBruhShare(e.data)) return
+    ackBruh(e.origin)
+    if (loomShareAccepted) return
+    const text = bruhShareText(e.data)
+    if (!text) return
+    loomShareAccepted = true
+    void (async () => {
+      const share = { story: '', text, source: 'bruh' as const }
+      persistLoomShare(share)
+      if (!instancesStore.isAuthenticated) {
+        await router.replace('/login')
+      } else {
+        await composeHandoff.ingestStored(share)
+        await openLoomCompose()
+      }
+    })()
+  }
+
   const onLoomMessage = (e: MessageEvent) => {
+    if (BRUH_ORIGINS.has(e.origin)) {
+      onBruhMessage(e)
+      return
+    }
     if (!LOOM_ORIGINS.has(e.origin)) return
     if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
     const buffer = bufferFromMessage(e.data.image?.buffer)
@@ -124,11 +163,14 @@ export function useLoomHandoff() {
   const bootLoomHandoff = async () => {
     pingLoomReady()
 
-    const fromQuery = String(route.query.compose || '') === 'loom'
+    const composeFrom = String(route.query.compose || '')
+    const fromQuery = composeFrom === 'loom' || composeFrom === 'bruh'
     if (fromQuery) {
+      if (composeFrom === 'bruh') loomShareAccepted = true
       const share = {
         story: typeof route.query.story === 'string' ? route.query.story : '',
         text: typeof route.query.text === 'string' ? route.query.text : '',
+        source: composeFrom as 'loom' | 'bruh',
       }
       persistLoomShare(share)
       await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })

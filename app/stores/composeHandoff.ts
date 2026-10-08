@@ -33,6 +33,8 @@ type StoredShare = {
   /** data URL for the chart image (optional; story fetch is preferred) */
   imageDataUrl?: string
   imageName?: string
+  /** Which suite tool sent this. Text-only tools (bruh) never carry an image. */
+  source?: 'loom' | 'bruh'
 }
 
 type StoryPhase = 'idle' | 'loading' | 'ready' | 'error'
@@ -101,7 +103,10 @@ function bufferToDataUrl(buffer: ArrayBuffer, type: string): string {
   return `data:${type};base64,${btoa(binary)}`
 }
 
-function handoffNotice(hasImage: boolean): string {
+function handoffNotice(hasImage: boolean, source: StoredShare['source'] = 'loom'): string {
+  if (source === 'bruh') {
+    return 'Page excerpt + link from bruh. Anyone with the link can read the page.'
+  }
   if (!hasImage) {
     return 'Caption ready — chart image missing; try Post to NeoSpace again from Loom'
   }
@@ -114,6 +119,7 @@ export function persistLoomShare(share: StoredShare) {
       text: share.text,
       story: share.story,
       imageName: share.imageName,
+      source: share.source,
     }
     if (share.imageDataUrl && share.imageDataUrl.length < 500_000) {
       slim.imageDataUrl = share.imageDataUrl
@@ -250,7 +256,7 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
             text,
             files: files.map((f) => markRaw(f)),
             descriptions,
-            notice: handoffNotice(files.length > 0),
+            notice: handoffNotice(files.length > 0, share.source),
           },
           files.length > 0,
         )

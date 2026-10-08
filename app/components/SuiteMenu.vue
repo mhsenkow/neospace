@@ -31,6 +31,18 @@ const groups = computed<SuiteGroup[]>(() => [
     label: 'think',
     tools: [
       {
+        id: 'bruh',
+        label: 'bruh',
+        blurb: 'ideas · paper',
+        href: 'https://bruh.ibm.io/',
+      },
+      {
+        id: 'notebook',
+        label: 'notebook',
+        blurb: 'cells · teach',
+        href: 'https://ibm.io/notebook/',
+      },
+      {
         id: 'loom',
         label: 'loom',
         blurb: 'data · stories',
