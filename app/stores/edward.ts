@@ -125,6 +125,51 @@ export const useEdwardStore = defineStore('edward', {
       return state.watchScrubbing
     },
 
+    /**
+     * Filmstrip around current watch: up to 2 before + current + 1 after.
+     * Index -2,-1 = trailing; 0 = current; +1 = ahead (or live slot).
+     */
+    watchFilmstrip(state): {
+      identity: string
+      offset: number
+      current: boolean
+    }[] {
+      const hist = state.watchHistory
+      if (!hist.length) {
+        if (!state.focusedIdentity) return []
+        return [{ identity: state.focusedIdentity, offset: 0, current: true }]
+      }
+      let cursor = state.watchCursor
+      if (!state.watchScrubbing) {
+        // Live: cursor is conceptually past the last history item
+        cursor = hist.length - 1
+        if (state.focusedIdentity && hist[cursor] !== state.focusedIdentity) {
+          // focused not yet in hist as last — treat as current live
+          const trail = hist.slice(-2).map((id, i, arr) => ({
+            identity: id,
+            offset: i - arr.length,
+            current: false,
+          }))
+          return [
+            ...trail,
+            { identity: state.focusedIdentity, offset: 0, current: true },
+          ]
+        }
+      }
+      cursor = Math.max(0, Math.min(cursor, hist.length - 1))
+      const out: { identity: string; offset: number; current: boolean }[] = []
+      for (let o = -2; o <= 1; o++) {
+        const i = cursor + o
+        if (i < 0 || i >= hist.length) continue
+        out.push({
+          identity: hist[i]!,
+          offset: o,
+          current: o === 0,
+        })
+      }
+      return out
+    },
+
     ballCount(state): number {
       return state.statuses.length
     },
@@ -284,6 +329,22 @@ export const useEdwardStore = defineStore('edward', {
     resumeWatchLive() {
       this.watchScrubbing = false
       this.watchCursor = -1
+    },
+
+    /** Jump watch deck to a history identity (filmstrip click) */
+    watchJumpTo(identity: string) {
+      if (!identity) return
+      const idx = this.watchHistory.lastIndexOf(identity)
+      if (idx < 0) {
+        this.pushWatchHistory(identity)
+        this.focusedIdentity = identity
+        this.watchScrubbing = true
+        this.watchCursor = this.watchHistory.length - 1
+        return
+      }
+      this.watchScrubbing = true
+      this.watchCursor = idx
+      this.focusedIdentity = identity
     },
 
     cycleFocusMode() {
