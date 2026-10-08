@@ -17,7 +17,7 @@
     "typecheck": "tsc -p functions/tsconfig.json --noEmit",
     "typecheck:app": "nuxt typecheck",
     "lint": "echo 'eslint not configured — use typecheck + test' && exit 0",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm run typecheck:app && npm test",
     "analyze": "nuxt analyze",
     "cf:preview": "npm run generate && wrangler pages dev",
     "cf:deploy": "npm run generate && wrangler pages deploy --commit-dirty=true",
@@ -33,6 +33,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/three": "^0.186.0",
     "@vite-pwa/nuxt": "^1.1.1",
     "@vitest/coverage-v8": "^2.1.9",
