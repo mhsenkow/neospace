@@ -13,6 +13,11 @@ import {
   emptyAffinityContext,
   type EdwardAffinityContext,
 } from '~/utils/edwardAffinity'
+import {
+  filterAndSortBalls,
+  cycleEdwardSort,
+  type EdwardSortMode,
+} from '~/utils/edwardExplore'
 
 export const EDWARD_MAX_BALLS = 280
 
@@ -27,6 +32,9 @@ interface EdwardState {
   /** Identity currently inside the watch focus zone */
   focusedIdentity: string | null
   focusMode: EdwardFocusMode
+  /** Explore console query — search / filter grammar */
+  exploreQuery: string
+  exploreSort: EdwardSortMode
   loading: boolean
   error: string | null
   streamStartedAt: number | null
@@ -43,6 +51,8 @@ export const useEdwardStore = defineStore('edward', {
     selectedIdentity: null,
     focusedIdentity: null,
     focusMode: 'bar',
+    exploreQuery: '',
+    exploreSort: 'stream',
     loading: false,
     error: null,
     streamStartedAt: null,
@@ -53,6 +63,28 @@ export const useEdwardStore = defineStore('edward', {
   getters: {
     balls(state): EdwardBallDescriptor[] {
       return state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
+    },
+
+    /** Filtered + sorted view the canvas actually renders */
+    visibleBalls(state): EdwardBallDescriptor[] {
+      const all = state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
+      return filterAndSortBalls(all, state.exploreQuery, state.exploreSort).balls
+    },
+
+    exploreSummary(state): {
+      matched: number
+      total: number
+      sort: EdwardSortMode
+      active: boolean
+    } {
+      const all = state.statuses.map((s) => statusToEdwardBall(s, state.affinity))
+      const { balls, sort } = filterAndSortBalls(all, state.exploreQuery, state.exploreSort)
+      return {
+        matched: balls.length,
+        total: all.length,
+        sort,
+        active: !!state.exploreQuery.trim() || state.exploreSort !== 'stream',
+      }
     },
 
     selectedStatus(state): ExtendedStatus | null {
@@ -88,6 +120,8 @@ export const useEdwardStore = defineStore('edward', {
       this.recessed = false
       this.selectedIdentity = null
       this.focusedIdentity = null
+      this.exploreQuery = ''
+      this.exploreSort = 'stream'
       this.loading = false
       this.error = null
       this.streamStartedAt = null
@@ -96,6 +130,38 @@ export const useEdwardStore = defineStore('edward', {
       if (typeof document !== 'undefined') {
         document.body.classList.remove('edward-active')
       }
+    },
+
+    setExploreQuery(q: string) {
+      this.exploreQuery = q
+    },
+
+    clearExplore() {
+      this.exploreQuery = ''
+      this.exploreSort = 'stream'
+    },
+
+    setExploreSort(mode: EdwardSortMode) {
+      this.exploreSort = mode
+    },
+
+    cycleExploreSort() {
+      this.exploreSort = cycleEdwardSort(this.exploreSort)
+    },
+
+    /** Toggle a chip query token into / out of the explore bar */
+    toggleExploreChip(token: string) {
+      const q = this.exploreQuery.trim()
+      if (!q) {
+        this.exploreQuery = token
+        return
+      }
+      const parts = q.split(/\s+/).filter(Boolean)
+      const key = token.toLowerCase()
+      const idx = parts.findIndex((p) => p.toLowerCase() === key)
+      if (idx >= 0) parts.splice(idx, 1)
+      else parts.push(token)
+      this.exploreQuery = parts.join(' ')
     },
 
     setRecessed(v: boolean) {

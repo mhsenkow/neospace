@@ -409,7 +409,7 @@ const applyAffinityLayout = (b: BallRuntime, d: EdwardBallDescriptor) => {
 
 const syncBallsFromStore = () => {
   if (!THREE || !ballGroup) return
-  const descriptors = edward.balls.slice(0, MAX_BALLS)
+  const descriptors = edward.visibleBalls.slice(0, MAX_BALLS)
   const keep = new Set(descriptors.map((d) => d.identity))
   const byId = new Map(descriptors.map((d) => [d.identity, d]))
 
@@ -1001,7 +1001,7 @@ const init = async () => {
 }
 
 watch(
-  () => edward.balls,
+  () => edward.visibleBalls,
   () => syncBallsFromStore(),
   { deep: false },
 )
@@ -1010,6 +1010,11 @@ watch(
   () => edward.affinity,
   () => syncBallsFromStore(),
   { deep: false },
+)
+
+watch(
+  () => [edward.exploreQuery, edward.exploreSort] as const,
+  () => syncBallsFromStore(),
 )
 
 onMounted(() => {

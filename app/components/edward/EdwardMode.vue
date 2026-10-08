@@ -8,6 +8,13 @@ import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND } from '~/utils/edwardFaces'
 import { statusIdentity } from '~/utils/statusIdentity'
 import { stripHtml } from '~/utils/sanitizeHtml'
+import {
+  EDWARD_EXPLORE_CHIPS,
+  EDWARD_EXPLORE_PLACEHOLDERS,
+  EDWARD_SORT_LABELS,
+  describeEdwardExplore,
+  parseEdwardExplore,
+} from '~/utils/edwardExplore'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
 import EdwardPostModal from '~/components/edward/EdwardPostModal.vue'
 
@@ -15,6 +22,7 @@ const edward = useEdwardStore()
 const stream = useEdwardStream()
 const router = useRouter()
 const rootEl = ref<HTMLElement | null>(null)
+const exploreInput = ref<HTMLInputElement | null>(null)
 const visible = ref(false)
 
 const selected = computed(() => edward.selectedStatus)
@@ -24,6 +32,21 @@ const error = computed(() => edward.error)
 const recessed = computed(() => edward.recessed)
 const sourceCount = computed(() => edward.sourceCount)
 const focusMode = computed(() => edward.focusMode)
+const exploreQuery = computed({
+  get: () => edward.exploreQuery,
+  set: (v: string) => edward.setExploreQuery(v),
+})
+const exploreSummary = computed(() => edward.exploreSummary)
+const exploreCrumb = computed(() => {
+  const parsed = parseEdwardExplore(edward.exploreQuery)
+  const sort = parsed.sort || edward.exploreSort
+  return describeEdwardExplore(
+    parsed,
+    sort,
+    exploreSummary.value.matched,
+    exploreSummary.value.total,
+  )
+})
 const focusedStatus = computed(() => {
   const id = edward.focusedIdentity
   if (!id || edward.focusMode === 'off') return null
@@ -34,9 +57,23 @@ const focusLabel = computed(() => {
   if (focusMode.value === 'square') return 'focus · square'
   return 'focus · off'
 })
+const sortLabel = computed(
+  () => `sort · ${EDWARD_SORT_LABELS[edward.exploreSort]}`,
+)
 
 const blink = ref(true)
+const placeholderIdx = ref(0)
 let blinkTimer: ReturnType<typeof setInterval> | null = null
+let placeholderTimer: ReturnType<typeof setInterval> | null = null
+
+const explorePlaceholder = computed(
+  () => EDWARD_EXPLORE_PLACEHOLDERS[placeholderIdx.value % EDWARD_EXPLORE_PLACEHOLDERS.length]!,
+)
+
+const chipActive = (query: string) => {
+  const parts = edward.exploreQuery.toLowerCase().split(/\s+/).filter(Boolean)
+  return parts.includes(query.toLowerCase())
+}
 
 const onPick = (identity: string) => {
   edward.selectByIdentity(identity)
@@ -44,6 +81,19 @@ const onPick = (identity: string) => {
 
 const cycleFocus = () => {
   edward.cycleFocusMode()
+}
+
+const cycleSort = () => {
+  edward.cycleExploreSort()
+}
+
+const toggleChip = (query: string) => {
+  edward.toggleExploreChip(query)
+}
+
+const clearExplore = () => {
+  edward.clearExplore()
+  exploreInput.value?.focus()
 }
 
 const openFocused = () => {
@@ -91,11 +141,33 @@ const exit = () => {
 
 const onKey = (e: KeyboardEvent) => {
   if (e.defaultPrevented) return
+  const target = e.target as HTMLElement | null
+  const typing =
+    target?.tagName === 'INPUT' ||
+    target?.tagName === 'TEXTAREA' ||
+    target?.isContentEditable
+
+  // / focuses explore console (Session OS muscle memory)
+  if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault()
+    exploreInput.value?.focus()
+    exploreInput.value?.select()
+    return
+  }
+
   if (e.key !== 'Escape') return
   e.preventDefault()
   e.stopPropagation()
   if (edward.selectedIdentity) {
     closeModal()
+    return
+  }
+  if (edward.exploreQuery || edward.exploreSort !== 'stream') {
+    clearExplore()
+    return
+  }
+  if (document.activeElement === exploreInput.value) {
+    exploreInput.value?.blur()
     return
   }
   exit()
@@ -113,6 +185,9 @@ onMounted(() => {
   blinkTimer = setInterval(() => {
     blink.value = !blink.value
   }, 530)
+  placeholderTimer = setInterval(() => {
+    placeholderIdx.value = (placeholderIdx.value + 1) % EDWARD_EXPLORE_PLACEHOLDERS.length
+  }, 4200)
   void stream.start()
 })
 
@@ -120,6 +195,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onKey, true)
   document.body.style.overflow = prevOverflow
   if (blinkTimer) clearInterval(blinkTimer)
+  if (placeholderTimer) clearInterval(placeholderTimer)
   stream.stop()
   document.body.classList.remove('edward-active')
 })
@@ -156,7 +232,10 @@ onUnmounted(() => {
         <div class="edward-mode__meta">
           <span v-if="loading && !count" class="edward-mode__count">hacking feed…</span>
           <span v-else class="edward-mode__count">
-            {{ count }} emoticoins
+            <template v-if="exploreSummary.active">
+              {{ exploreSummary.matched }}/{{ exploreSummary.total }}
+            </template>
+            <template v-else>{{ count }} emoticoins</template>
             <template v-if="sourceCount"> · {{ sourceCount }} srv</template>
           </span>
           <ul class="edward-mode__legend" aria-label="Face legend">
@@ -213,9 +292,62 @@ onUnmounted(() => {
         {{ error }}
       </p>
 
-      <p class="edward-mode__hint">
-        ↑ glass bubbles rise · drag orbit · focus · click!!
-      </p>
+      <div
+        v-if="!recessed"
+        class="edward-mode__explore"
+        role="search"
+        aria-label="Explore thought stream"
+      >
+        <div class="edward-mode__explore-row">
+          <span class="edward-mode__explore-prompt" aria-hidden="true">&gt;</span>
+          <input
+            ref="exploreInput"
+            v-model="exploreQuery"
+            type="search"
+            class="edward-mode__explore-input"
+            :placeholder="explorePlaceholder"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="search"
+            aria-label="Search filter and sort the thought stream"
+          />
+          <button
+            type="button"
+            class="edward-mode__explore-sort"
+            :aria-label="`Cycle sort, currently ${sortLabel}`"
+            @click="cycleSort"
+          >
+            {{ sortLabel }}
+          </button>
+          <button
+            v-if="exploreSummary.active"
+            type="button"
+            class="edward-mode__explore-clear"
+            aria-label="Clear explore filters"
+            @click="clearExplore"
+          >
+            clr
+          </button>
+        </div>
+        <div class="edward-mode__explore-chips" role="group" aria-label="Quick filters">
+          <button
+            v-for="chip in EDWARD_EXPLORE_CHIPS"
+            :key="chip.query"
+            type="button"
+            class="edward-mode__chip"
+            :class="{ 'is-on': chipActive(chip.query) }"
+            :title="chip.hint"
+            @click="toggleChip(chip.query)"
+          >
+            {{ chip.label }}
+          </button>
+        </div>
+        <p class="edward-mode__explore-crumb" aria-live="polite">
+          {{ exploreCrumb }}
+          <span class="edward-mode__explore-hint"> · / to type · esc clears</span>
+        </p>
+      </div>
 
       <EdwardPostModal
         v-if="selected && !recessed"
@@ -416,7 +548,7 @@ onUnmounted(() => {
 .edward-mode__watch {
   position: absolute;
   left: max(1rem, env(safe-area-inset-left));
-  bottom: max(3.25rem, calc(env(safe-area-inset-bottom) + 2.5rem));
+  bottom: max(7.5rem, calc(env(safe-area-inset-bottom) + 6.75rem));
   z-index: 3;
   width: min(320px, calc(100vw - 2rem));
   padding: 0.65rem 0.85rem;
@@ -485,21 +617,147 @@ onUnmounted(() => {
   box-shadow: 4px 4px 0 #ff7eb3;
 }
 
-.edward-mode__hint {
+.edward-mode__explore {
   position: absolute;
-  bottom: max(1rem, env(safe-area-inset-bottom));
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
   left: 50%;
-  z-index: 3;
+  z-index: 4;
   transform: translateX(-50%);
-  margin: 0;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.625rem;
-  letter-spacing: 0.12em;
-  text-transform: lowercase;
+  width: min(640px, calc(100vw - 1.5rem));
+  padding: 0.55rem 0.65rem 0.45rem;
+  border: 2px solid #ffe566;
+  border-radius: 4px;
+  background: color-mix(in srgb, #12081c 94%, transparent);
+  box-shadow:
+    4px 4px 0 #ff7eb3,
+    0 0 28px color-mix(in srgb, #59d1e0 18%, transparent);
+  pointer-events: auto;
+}
+
+.edward-mode__explore-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.edward-mode__explore-prompt {
+  flex-shrink: 0;
+  color: #ff7eb3;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.edward-mode__explore-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #fff8d6;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  padding: 0.25rem 0;
+
+  &::placeholder {
+    color: color-mix(in srgb, #59d1e0 75%, transparent);
+    letter-spacing: 0.03em;
+  }
+
+  &::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+}
+
+.edward-mode__explore-sort,
+.edward-mode__explore-clear {
+  flex-shrink: 0;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid #59d1e0;
+  border-radius: 2px;
+  background: color-mix(in srgb, #1a1420 80%, transparent);
   color: #59d1e0;
-  pointer-events: none;
+  font-family: inherit;
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  cursor: pointer;
   white-space: nowrap;
-  border: 1px dashed color-mix(in srgb, #59d1e0 50%, transparent);
-  background: color-mix(in srgb, #12081c 75%, transparent);
+
+  &:hover,
+  &:focus-visible {
+    background: #59d1e0;
+    color: #1a1420;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #ffe566;
+    outline-offset: 1px;
+  }
+}
+
+.edward-mode__explore-clear {
+  border-color: #ff7eb3;
+  color: #ff7eb3;
+
+  &:hover,
+  &:focus-visible {
+    background: #ff7eb3;
+    color: #1a1420;
+  }
+}
+
+.edward-mode__explore-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+}
+
+.edward-mode__chip {
+  padding: 0.18rem 0.45rem;
+  border: 1px dashed color-mix(in srgb, #ffe566 45%, transparent);
+  border-radius: 2px;
+  background: transparent;
+  color: color-mix(in srgb, #fff8d6 75%, transparent);
+  font-family: inherit;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-style: solid;
+    color: #ffe566;
+    border-color: #ffe566;
+  }
+
+  &.is-on {
+    border-style: solid;
+    border-color: #ff7eb3;
+    background: color-mix(in srgb, #ff7eb3 22%, transparent);
+    color: #ffe566;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #59d1e0;
+    outline-offset: 1px;
+  }
+}
+
+.edward-mode__explore-crumb {
+  margin: 0.4rem 0 0;
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: color-mix(in srgb, #fff8d6 55%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edward-mode__explore-hint {
+  color: color-mix(in srgb, #59d1e0 70%, transparent);
 }
 </style>
