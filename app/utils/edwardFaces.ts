@@ -102,7 +102,7 @@ const SLEEPY_RE =
 const PARTY_RE =
   /\b(congrats|celebration|birthday|yay|woo+|let'?s go|lfg|party|hype)\b|🎉|🥳|✨|🎊/i
 const CONFUSED_RE =
-  /\b(confused|what+|huh+|idk|wait what|????+|bewilder)\b|😕|🤔|😵|🥴/i
+  /\b(confused|whaa+t+|huh+|idk|wait what|bewilder)\b|\?{3,}|😕|🤔|😵|🥴/i
 const SICK_RE =
   /\b(gross|disgust|nauseat|sick|vomit|ew+|yuck)\b|🤢|🤮|😷/i
 const COOL_RE =
