@@ -26,9 +26,9 @@ export default defineNuxtPlugin(() => {
     lastUpdate = now
     navigator.serviceWorker
       .getRegistration()
-      .then((reg) => {
-        void reg?.update()
-      })
+      // Return it so an offline update() rejection lands in the catch below
+      // instead of the unhandledrejection log on every tab refocus
+      .then((reg) => reg?.update())
       .catch(() => {})
   }
 

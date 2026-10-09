@@ -14,7 +14,7 @@ import {
   GITHUB_ISSUE_BODY_BUDGET,
   isFeedbackKind,
 } from '../../shared/feedbackConstants'
-import { allowRequest, clientIp } from '../utils/rateLimit'
+import { allowRequest, clientIp, rawClientIp } from '../utils/rateLimit'
 
 interface Env {
   GITHUB_TOKEN?: string
@@ -99,6 +99,44 @@ async function verifyTurnstile(
   return !!data.success
 }
 
+/** Read at most `max` bytes — Content-Length is optional (chunked uploads). */
+async function readBodyCapped(request: Request, max: number): Promise<string | null> {
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    bytes.set(c, offset)
+    offset += c.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+/**
+ * Screenshot must be a plain base64 PNG/JPEG/WebP/GIF — it is interpolated into
+ * `![screenshot](…)`, so anything else (a `)`, spaces, newlines) is markdown
+ * injection: @-mentions, phishing links, cross-repo issue references.
+ */
+export function screenshotDataUrl(raw: string): string | null {
+  const m = raw.match(/^(?:data:image\/(png|jpeg|webp|gif);base64,)?([A-Za-z0-9+/]+={0,2})$/)
+  if (!m) return null
+  return `data:image/${m[1] || 'png'};base64,${m[2]}`
+}
+
 /** Path-only page area — same-origin paths; strip query/hash */
 function normalizeHref(href: string): string {
   const raw = href.trim().slice(0, 500)
@@ -143,7 +181,12 @@ async function createIssue(
   const text = await res.text()
 
   if (res.ok) {
-    const issue = JSON.parse(text) as { html_url?: string }
+    let issue: { html_url?: string } = {}
+    try {
+      issue = JSON.parse(text) as typeof issue
+    } catch {
+      /* fall through */
+    }
     if (!issue.html_url) return { ok: false, code: 'GITHUB_NO_URL' }
     return { ok: true, url: issue.html_url }
   }
@@ -180,6 +223,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const ip = clientIp(request)
+  const rawIp = rawClientIp(request)
   const rateKey = ip ? `feedback:${ip}` : `feedback:local:${origin}`
   const rate = allowRequest(rateKey, RATE_LIMIT, RATE_WINDOW_MS)
   if (!rate.allowed) {
@@ -209,47 +253,55 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: 'Expected application/json', code: 'UNSUPPORTED_MEDIA_TYPE' }, 415)
   }
 
-  let rawBody: string
+  let rawBody: string | null
   try {
-    rawBody = await request.text()
+    rawBody = await readBodyCapped(request, FEEDBACK_JSON_MAX_BYTES)
   } catch {
     return json({ error: 'Invalid body', code: 'INVALID_BODY' }, 400)
   }
 
-  if (rawBody.length > FEEDBACK_JSON_MAX_BYTES) {
+  if (rawBody === null) {
     return json({ error: 'Payload too large', code: 'PAYLOAD_TOO_LARGE' }, 413)
   }
 
-  let payload: {
-    title?: string
-    body?: string
-    imageBase64?: string | null
-    href?: string
-    kind?: string
-    turnstileToken?: string
-  }
-
+  let parsed: unknown
   try {
-    payload = JSON.parse(rawBody) as typeof payload
+    parsed = JSON.parse(rawBody)
   } catch {
     return json({ error: 'Invalid JSON', code: 'INVALID_JSON' }, 400)
   }
+  // `null`, arrays, numbers and non-string fields used to throw → opaque 500
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return json({ error: 'Invalid JSON', code: 'INVALID_JSON' }, 400)
+  }
+  const fields = parsed as Record<string, unknown>
+  const payload = {
+    title: str(fields.title),
+    body: str(fields.body),
+    imageBase64: str(fields.imageBase64),
+    href: str(fields.href),
+    kind: str(fields.kind),
+    turnstileToken: str(fields.turnstileToken),
+  }
 
   if (env.TURNSTILE_SECRET_KEY) {
-    const token = (payload.turnstileToken || '').trim()
+    const token = payload.turnstileToken.trim()
     if (!token) {
       return json(
         { error: 'Verification required', code: 'TURNSTILE_REQUIRED' },
         403,
       )
     }
-    const ok = await verifyTurnstile(token, env.TURNSTILE_SECRET_KEY, ip)
+    // siteverify wants the real address, not our /64 bucket key
+    const ok = await verifyTurnstile(token, env.TURNSTILE_SECRET_KEY, rawIp).catch(() => false)
     if (!ok) {
       return json({ error: 'Verification failed', code: 'TURNSTILE_FAILED' }, 403)
     }
   }
 
-  const title = (payload.title || 'NeoSpace feedback').trim().slice(0, FEEDBACK_TITLE_MAX)
+  const title =
+    payload.title.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, FEEDBACK_TITLE_MAX) ||
+    'NeoSpace feedback'
   const escapeMd = (s: string) =>
     s
       .replace(/(^|[^a-zA-Z0-9_])@/g, '$1&#64;')
@@ -280,10 +332,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let body = `${fencedBody}\n\n${meta}`
 
-  if (payload.imageBase64 && payload.imageBase64.length < FEEDBACK_SCREENSHOT_SERVER_MAX) {
-    const dataUrl = payload.imageBase64.startsWith('data:')
-      ? payload.imageBase64
-      : `data:image/png;base64,${payload.imageBase64}`
+  const dataUrl =
+    payload.imageBase64 && payload.imageBase64.length < FEEDBACK_SCREENSHOT_SERVER_MAX
+      ? screenshotDataUrl(payload.imageBase64)
+      : null
+  if (dataUrl) {
     const withShot = `${body}\n\n![screenshot](${dataUrl})`
     if (withShot.length <= GITHUB_ISSUE_BODY_BUDGET) {
       body = withShot
@@ -291,12 +344,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       body += `\n\n_(screenshot omitted — too large for GitHub issue body)_`
     }
   } else if (payload.imageBase64) {
-    body += `\n\n_(screenshot omitted — too large for GitHub issue body)_`
+    body += `\n\n_(screenshot omitted — too large or not a PNG/JPEG/WebP/GIF)_`
   }
   body = body.slice(0, GITHUB_ISSUE_BODY_BUDGET)
 
   const labels = ['feedback', kindLabel]
-  const result = await createIssue(env.GITHUB_TOKEN, title, body, labels)
+  // Network / timeout errors would otherwise surface as a Cloudflare 1101 page
+  const result = await createIssue(env.GITHUB_TOKEN, title, body, labels).catch(
+    (): GitHubIssueResult => ({ ok: false, code: 'GITHUB_UNAVAILABLE' }),
+  )
 
   if (!result.ok) {
     return json({ error: 'Could not file note', code: result.code }, 502)

@@ -3,7 +3,7 @@
  * Stored as regular metadata fields so others can see them too.
  */
 
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 
 export type PresenceKind = 'mastodon' | 'bluesky' | 'seenu' | 'website'
 

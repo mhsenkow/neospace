@@ -32,7 +32,11 @@ const mainHandle = computed(() => {
   return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
 })
 
+/** Bumped by Cancel / bfcache restore so a slow app-registration can't redirect afterwards */
+let loginAttempt = 0
+
 const resetConnecting = () => {
+  loginAttempt++
   isConnecting.value = false
   connectingTo.value = null
 }
@@ -63,6 +67,8 @@ onMounted(async () => {
 
   await instancesStore.initialize()
   settingsStore.loadLocalPreferences()
+  // The fast path may already have left /login — don't yank the user back
+  if (router.currentRoute.value.path !== '/login') return
   if (instancesStore.isAuthenticated && !isAddMode.value) {
     router.replace(returnTo.value || '/')
   }
@@ -74,6 +80,7 @@ onUnmounted(() => {
 
 const startLogin = async (url: string) => {
   const host = url.replace(/^https?:\/\//, '')
+  const attempt = ++loginAttempt
   isConnecting.value = true
   connectingTo.value = host
   pickerRef.value?.setError(null)
@@ -87,8 +94,10 @@ const startLogin = async (url: string) => {
       addMode: isAddMode.value,
       returnTo: returnTo.value,
     })
+    if (attempt !== loginAttempt) return
     window.location.href = authUrl
   } catch (e) {
+    if (attempt !== loginAttempt) return
     pickerRef.value?.setError(friendlyServerError(e))
     resetConnecting()
   }

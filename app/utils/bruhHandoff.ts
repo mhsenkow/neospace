@@ -20,14 +20,23 @@ export type BruhShareMessage = {
   doc?: string
 }
 
-/** True for allowlisted bruh hosts + local/preview siblings. */
+/** Pages projects whose preview subdomains (`<hash>.<project>.pages.dev`) we trust */
+const BRUH_PAGES_PROJECTS = ['bruh-15b.pages.dev', 'bruh.pages.dev']
+/** workers.dev account that hosts the suite's preview builds */
+const SUITE_WORKERS_SUFFIX = '.mhsenkow.workers.dev'
+
+/**
+ * True for allowlisted bruh hosts + local/preview siblings. Anyone can register
+ * `*bruh*.pages.dev` / `*bruh*.workers.dev`, so only our projects/account count.
+ */
 export function isBruhOrigin(origin: string): boolean {
   if (BRUH_ORIGINS.has(origin)) return true
   try {
-    const host = new URL(origin).hostname
+    const { protocol, hostname: host } = new URL(origin)
     if (host === 'localhost' || host === '127.0.0.1') return true
-    if (host.endsWith('.pages.dev') && host.includes('bruh')) return true
-    if (host.endsWith('.workers.dev') && host.includes('bruh')) return true
+    if (protocol !== 'https:') return false
+    if (BRUH_PAGES_PROJECTS.some((p) => host === p || host.endsWith(`.${p}`))) return true
+    if (host.endsWith(SUITE_WORKERS_SUFFIX) && host.includes('bruh')) return true
   } catch {
     /* ignore */
   }

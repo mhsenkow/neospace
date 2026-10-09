@@ -11,7 +11,7 @@ import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeS
 import { useEdwardStore } from '~/stores/edward'
 import { usePostActions } from '~/composables/usePostActions'
 import { activeClient } from '~/composables/useMasto'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 import { lookupAcctFor } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
 

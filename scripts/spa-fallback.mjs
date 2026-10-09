@@ -1,10 +1,11 @@
 /**
  * After `nuxt generate`:
  * 1. Sync SPA fallbacks (404.html / 200.html = index.html)
- * 2. Emit Content-Security-Policy-Report-Only with sha256 hashes for any
- *    leftover inline scripts (boot scripts are external under /boot/).
+ * 2. Add sha256 hashes for the remaining inline scripts (Nuxt's importmap and
+ *    window.__NUXT__ config; boot scripts are external under /boot/) to the
+ *    enforced CSP in .output/public/_headers.
  */
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 
@@ -22,20 +23,25 @@ if (!existsSync(index)) {
 copyFileSync(index, notFound)
 console.log('spa-fallback: synced 404.html to index.html (Cloudflare Pages SPA fallback)')
 
-const html = readFileSync(index, 'utf8')
-const inlineScripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(
-  (m) => m[1],
-)
-const hashes = inlineScripts
-  .filter((s) => s.trim())
-  .map((s) => {
-    const digest = createHash('sha256').update(s, 'utf8').digest('base64')
-    return `'sha256-${digest}'`
-  })
+/** Every prerendered route page, so a per-page inline script can't be missed. */
+function htmlFiles(dir, found = []) {
+  for (const name of readdirSync(dir)) {
+    const p = resolve(dir, name)
+    if (statSync(p).isDirectory()) htmlFiles(p, found)
+    else if (name.endsWith('.html')) found.push(p)
+  }
+  return found
+}
 
-const scriptSrc = ["'self'", ...hashes].join(' ')
-const reportOnly =
-  `Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data: https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src ${scriptSrc}; connect-src 'self' https:; worker-src 'self' blob:; manifest-src 'self'`
+const hashes = new Set()
+for (const file of htmlFiles(out)) {
+  const html = readFileSync(file, 'utf8')
+  for (const m of html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    // JSON data blocks never execute, so CSP doesn't apply to them
+    if (/\btype=["']?application\/(?:ld\+)?json/i.test(m[1]) || !m[2].trim()) continue
+    hashes.add(`'sha256-${createHash('sha256').update(m[2], 'utf8').digest('base64')}'`)
+  }
+}
 
 let headers = existsSync(headersOut)
   ? readFileSync(headersOut, 'utf8')
@@ -43,22 +49,22 @@ let headers = existsSync(headersOut)
     ? readFileSync(headersSrc, 'utf8')
     : ''
 
-// Strip prior Report-Only line, then append under /*
-headers = headers
-  .split('\n')
-  .filter((line) => !line.includes('Content-Security-Policy-Report-Only:'))
-  .join('\n')
-
-if (headers.includes('Content-Security-Policy:')) {
-  headers = headers.replace(
-    /(Content-Security-Policy:[^\n]+)/,
-    `$1\n  ${reportOnly}`,
-  )
-} else {
-  headers = `/*\n  ${reportOnly}\n` + headers
+// Hashes go into the ENFORCED policy. CSP2+ browsers ignore 'unsafe-inline'
+// once a hash is present, so the importmap + __NUXT__ config stay allowed and
+// any injected inline script is blocked; CSP1-only browsers keep the fallback.
+let applied = false
+headers = headers.replace(
+  /^(\s*Content-Security-Policy:[^\n]*?script-src )([^;\n]*)/m,
+  (_m, head, sources) => {
+    applied = true
+    const kept = sources.split(/\s+/).filter((s) => s && !s.startsWith("'sha256-"))
+    return `${head}${[...kept, ...hashes].join(' ')}`
+  },
+)
+if (hashes.size && !applied) {
+  console.error('spa-fallback: no Content-Security-Policy script-src to extend in _headers')
+  process.exit(1)
 }
 
 writeFileSync(headersOut, headers)
-console.log(
-  `spa-fallback: CSP-Report-Only with ${hashes.length} inline script hash(es)`,
-)
+console.log(`spa-fallback: CSP script-src += ${hashes.size} inline script hash(es)`)

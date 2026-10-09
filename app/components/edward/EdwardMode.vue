@@ -7,7 +7,7 @@ import { useEdwardStore, edwardBallFor } from '~/stores/edward'
 import { useMediaQuery } from '~/composables/useBreakpoint'
 import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND, MOOD_GLYPH } from '~/utils/edwardFaces'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 import { statusIdentity } from '~/utils/statusIdentity'
 import type { ExtendedStatus } from '~/stores/instances'
 import {

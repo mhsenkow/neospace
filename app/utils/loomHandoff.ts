@@ -10,6 +10,25 @@ export const LOOM_ORIGINS = new Set([
   'https://loom-storyteller.mhsenkow.workers.dev',
 ])
 
+/** workers.dev account that hosts the suite's preview builds */
+const SUITE_WORKERS_SUFFIX = '.mhsenkow.workers.dev'
+
+/**
+ * True for allowlisted Loom hosts, local dev, and this account's workers.dev
+ * previews. Anyone can register `*loom*.pages.dev` / `*loom*.workers.dev`, so a
+ * bare substring check let any site push images + text into compose.
+ */
+export function isLoomOrigin(origin: string): boolean {
+  if (LOOM_ORIGINS.has(origin)) return true
+  try {
+    const { protocol, hostname: host } = new URL(origin)
+    if (host === 'localhost' || host === '127.0.0.1') return true
+    return protocol === 'https:' && host.endsWith(SUITE_WORKERS_SUFFIX) && host.includes('loom')
+  } catch {
+    return false
+  }
+}
+
 function hostPatternFromOrigin(origin: string): string {
   try {
     return new URL(origin).hostname.replace(/\./g, '\\.')

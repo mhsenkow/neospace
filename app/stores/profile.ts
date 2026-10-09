@@ -9,7 +9,7 @@ import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient } from '~/composables/useMasto'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 import { profileFieldLimit } from '~/utils/profileSources'
 import {
   ACCOUNT_STATUS_PAGE_SIZE,

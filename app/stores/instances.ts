@@ -6,7 +6,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { createRestAPIClient, type mastodon } from 'masto'
+import type { mastodon } from 'masto'
 import {
   beginOAuthChallenge,
   consumeOAuthChallenge,
@@ -24,7 +24,7 @@ import {
   resolvePublicInstanceUrl,
 } from '~/utils/instances'
 import { dedupeStatusesByIdentity } from '~/utils/statusIdentity'
-import { clearClientCache, clientFor, publicClient } from '~/composables/useMasto'
+import { clearClientCache, clientFor, createRestClient, publicClient } from '~/composables/useMasto'
 
 export interface ConnectedInstance {
   id: string
@@ -97,6 +97,8 @@ const APP_NAME = 'NeoSpace'
 const SCOPES = 'read write follow push'
 const OAUTH_APP_CACHE_KEY = 'neospace_oauth_apps'
 const OAUTH_FETCH_TIMEOUT_MS = 15_000
+/** Directory / preview / add-server probes — masto has no default timeout */
+const PEEK_TIMEOUT_MS = 8_000
 
 function readCachedOAuthApp(host: string): { clientId: string; clientSecret: string } | null {
   if (typeof localStorage === 'undefined') return null
@@ -165,6 +167,19 @@ const INSTANCE_INFO_TTL_MS = 10 * 60_000
 const INSTANCE_INFO_FAIL_TTL_MS = 120_000
 type InstanceInfoCacheEntry = { at: number; ok: boolean; value: InstanceApiInfo | null }
 const instanceInfoRemoteCache = new Map<string, InstanceInfoCacheEntry>()
+/** Explore / directory browsing can touch hundreds of hosts — keep both caches bounded */
+const INSTANCE_INFO_CACHE_MAX = 200
+const PREVIEW_INFO_MAX = 60
+
+function rememberRemoteInstanceInfo(key: string, entry: InstanceInfoCacheEntry) {
+  instanceInfoRemoteCache.delete(key)
+  instanceInfoRemoteCache.set(key, entry)
+  while (instanceInfoRemoteCache.size > INSTANCE_INFO_CACHE_MAX) {
+    const oldest = instanceInfoRemoteCache.keys().next().value
+    if (oldest === undefined) break
+    instanceInfoRemoteCache.delete(oldest)
+  }
+}
 
 function mapV2InstanceInfo(info: {
   title: string
@@ -669,7 +684,7 @@ export const useInstancesStore = defineStore('instances', {
 
       // Probe first — only persist if the server responds
       try {
-        const client = createRestAPIClient({ url })
+        const client = createRestClient({ url, timeout: PEEK_TIMEOUT_MS })
         const info = await client.v2.instance.fetch()
 
         instance.name = info.title || url.replace(/^https?:\/\//, '')
@@ -753,7 +768,7 @@ export const useInstancesStore = defineStore('instances', {
           instance.clientSecret = null
           stashClientSecret(instanceId, cached.clientSecret)
         } else {
-          const client = createRestAPIClient({ url: instance.url })
+          const client = createRestClient({ url: instance.url, timeout: OAUTH_FETCH_TIMEOUT_MS })
           const app = await client.v1.apps.create({
             clientName: APP_NAME,
             redirectUris: getRedirectUri(),
@@ -879,7 +894,7 @@ export const useInstancesStore = defineStore('instances', {
         const previousToken = instance.accessToken
         if (previousToken && previousToken !== data.access_token && instance.clientId) {
           try {
-            await fetch(`${instance.url}/oauth/revoke`, {
+            await oauthFetch(`${instance.url}/oauth/revoke`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -898,8 +913,9 @@ export const useInstancesStore = defineStore('instances', {
         // Keep secret for logout revoke across tabs/sessions
         persistClientSecret(instanceId, clientSecret)
 
-        const client = createRestAPIClient({
+        const client = createRestClient({
           url: instance.url,
+          timeout: OAUTH_FETCH_TIMEOUT_MS,
           accessToken: instance.accessToken!,
         })
 
@@ -918,7 +934,8 @@ export const useInstancesStore = defineStore('instances', {
         if (typeof window !== 'undefined') {
           sessionStorage.removeItem('neospace_auth_instance_id')
         }
-        clearPendingAuth()
+        // Matched via this tab's sessionStorage → the shared record is another tab's
+        if (challenge.pending) clearPendingAuth()
 
         this.saveToStorage()
         return { instance, pending: challenge.pending ?? null }
@@ -939,7 +956,7 @@ export const useInstancesStore = defineStore('instances', {
       const clientSecret = instance.clientSecret || readClientSecret(instanceId)
       if (instance.accessToken && instance.clientId && clientSecret) {
         try {
-          await fetch(`${instance.url}/oauth/revoke`, {
+          await oauthFetch(`${instance.url}/oauth/revoke`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1327,40 +1344,13 @@ export const useInstancesStore = defineStore('instances', {
       return dedupeStatusesByIdentity(allStatuses).slice(0, Math.max(limit, limit * Math.max(1, authInstances.length)))
     },
 
-    /** Liked posts for the active account (Mastodon favourites). */
-    async fetchFavourites(limit: number = 20, maxId?: string): Promise<ExtendedStatus[]> {
-      const active = this.activeAccount
-      if (!active?.accessToken) {
-        throw new Error('Sign in to view liked posts')
-      }
-      const client = clientFor(active.id)
-      const statuses = await client.v1.favourites.list({
-        limit,
-        ...(maxId ? { maxId } : {}),
-      })
-      return statuses.map((s) => ({
-        ...s,
-        _instanceId: active.id,
-        _instanceUrl: active.url,
-      }))
-    },
-
-    /** Saved posts for the active account (Mastodon bookmarks). */
-    async fetchBookmarks(limit: number = 20, maxId?: string): Promise<ExtendedStatus[]> {
-      const active = this.activeAccount
-      if (!active?.accessToken) {
-        throw new Error('Sign in to view saved posts')
-      }
-      const client = clientFor(active.id)
-      const statuses = await client.v1.bookmarks.list({
-        limit,
-        ...(maxId ? { maxId } : {}),
-      })
-      return statuses.map((s) => ({
-        ...s,
-        _instanceId: active.id,
-        _instanceUrl: active.url,
-      }))
+    /** Insert into the reactive preview map, evicting the oldest hosts past the cap */
+    _rememberPreviewInfo(key: string, info: InstanceApiInfo) {
+      const map = this.previewInstanceInfo
+      delete map[key]
+      map[key] = info
+      const keys = Object.keys(map)
+      for (let i = 0; i < keys.length - PREVIEW_INFO_MAX; i++) delete map[keys[i]!]
     },
 
     async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {
@@ -1374,7 +1364,7 @@ export const useInstancesStore = defineStore('instances', {
         const ttl = cached.ok ? INSTANCE_INFO_TTL_MS : INSTANCE_INFO_FAIL_TTL_MS
         if (Date.now() - cached.at < ttl) {
           if (cached.ok && cached.value) {
-            this.previewInstanceInfo[key] = cached.value
+            this._rememberPreviewInfo(key, cached.value)
           }
           return cached.value
         }
@@ -1382,15 +1372,15 @@ export const useInstancesStore = defineStore('instances', {
 
       try {
         const url = `https://${domain}`
-        const client = createRestAPIClient({ url })
+        const client = createRestClient({ url, timeout: PEEK_TIMEOUT_MS })
         const info = await client.v2.instance.fetch()
         const apiInfo = mapV2InstanceInfo(info)
-        instanceInfoRemoteCache.set(key, { at: Date.now(), ok: true, value: apiInfo })
-        this.previewInstanceInfo[key] = apiInfo
+        rememberRemoteInstanceInfo(key, { at: Date.now(), ok: true, value: apiInfo })
+        this._rememberPreviewInfo(key, apiInfo)
         return apiInfo
       } catch (e) {
         logWarn(`Failed to fetch instance info for ${domain}:`, e)
-        instanceInfoRemoteCache.set(key, { at: Date.now(), ok: false, value: null })
+        rememberRemoteInstanceInfo(key, { at: Date.now(), ok: false, value: null })
         return null
       }
     },
@@ -1404,11 +1394,11 @@ export const useInstancesStore = defineStore('instances', {
 
       try {
         const url = `https://${domain}`
-        const client = createRestAPIClient({ url })
+        const client = createRestClient({ url, timeout: PEEK_TIMEOUT_MS })
 
         const info = await client.v2.instance.fetch()
         if (this.previewingInstance !== ticket) return
-        this.previewInstanceInfo[domain] = mapV2InstanceInfo(info)
+        this._rememberPreviewInfo(domain, mapV2InstanceInfo(info))
 
         try {
           const timeline = await client.v1.timelines.public.list({

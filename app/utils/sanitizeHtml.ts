@@ -26,13 +26,24 @@ const SAFE_EMOJI_CLASSES = new Set([
   'quote-inline',
   'bbcode-spoiler',
   'spoiler-text',
+  'emoji',
+  'custom-emoji',
 ])
 
-let linkHookInstalled = false
+let hooksInstalled = false
 
-function ensureLinkHook() {
-  if (linkHookInstalled || typeof window === 'undefined') return
-  linkHookInstalled = true
+function ensureHooks() {
+  if (hooksInstalled || typeof window === 'undefined') return
+  hooksInstalled = true
+  // Filter class tokens on the attribute itself — a regex over serialized HTML
+  // also rewrote ` class="…"` inside text (e.g. HTML snippets in <code>).
+  DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+    if (data.attrName !== 'class') return
+    // Exact names only — a prefix match would let remote HTML borrow future app classes
+    const kept = data.attrValue.split(/\s+/).filter((c) => SAFE_EMOJI_CLASSES.has(c))
+    if (kept.length) data.attrValue = kept.join(' ')
+    else data.keepAttr = false
+  })
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement) && node.nodeName !== 'A') return
     const el = node as HTMLAnchorElement
@@ -46,18 +57,13 @@ function purifyWithSafeClasses(dirty: string, tags: string[], attr: string[]): s
   if (typeof window === 'undefined') {
     return dirty.replace(/<[^>]*>/g, '')
   }
-  ensureLinkHook()
+  ensureHooks()
   return DOMPurify.sanitize(dirty, {
     ALLOWED_TAGS: tags,
     ALLOWED_ATTR: [...attr, 'class'],
     ALLOW_DATA_ATTR: false,
     ADD_ATTR: ['target', 'rel'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-  }).replace(/\sclass="([^"]*)"/gi, (_m, classes: string) => {
-    const kept = classes
-      .split(/\s+/)
-      .filter((c) => SAFE_EMOJI_CLASSES.has(c) || /^custom-emoji/.test(c) || /^emoji/.test(c))
-    return kept.length ? ` class="${kept.join(' ')}"` : ''
   })
 }
 
@@ -115,6 +121,3 @@ export function sanitizeDisplayName(
 export function sanitizeFieldHtml(html: string): string {
   return purifyWithSafeClasses(html, STATUS_TAGS, STATUS_ATTR)
 }
-
-/** Strip all tags → plain text (no innerHTML assignment) */
-export { stripHtml } from './stripHtml'

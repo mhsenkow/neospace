@@ -2,6 +2,8 @@
 
 const isDev = import.meta.dev
 const RING_SIZE = 80
+/** One stringified store/response shouldn't pin megabytes in the ring */
+const MAX_MESSAGE_CHARS = 4_000
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -27,8 +29,27 @@ function formatArgs(args: unknown[]): string {
     .join(' ')
 }
 
+const SECRET_PARAM =
+  /([?&#;](?:access_token|refresh_token|id_token|token|code|code_verifier|client_secret|state)=)[^&#\s"'<>]+/gi
+const SECRET_JSON_KEY =
+  /("(?:access_?token|accessToken|refresh_?token|refreshToken|token|client_?secret|clientSecret|code_?verifier|codeVerifier|authorization|password)"\s*:\s*)"(?:[^"\\]|\\.)*"/gi
+const BEARER = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi
+
+/**
+ * Scrub credentials before a message enters the ring — it is attached to
+ * public GitHub issues by Leave-a-note. Streaming URLs carry `?access_token=`,
+ * the OAuth callback carries `?code=`, and stores get JSON-stringified.
+ */
+export function redactSecrets(message: string): string {
+  return message
+    .replace(SECRET_PARAM, '$1[redacted]')
+    .replace(SECRET_JSON_KEY, '$1"[redacted]"')
+    .replace(BEARER, '$1 [redacted]')
+}
+
 function sink(level: LogLevel, args: unknown[]) {
-  const message = formatArgs(args)
+  // Redact before clipping so a cut can't leave half a token behind
+  const message = redactSecrets(formatArgs(args)).slice(0, MAX_MESSAGE_CHARS)
   ring.push({ level, ts: Date.now(), message })
   if (ring.length > RING_SIZE) ring.shift()
 

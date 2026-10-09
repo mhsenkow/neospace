@@ -5,10 +5,9 @@
 import { logError } from '~/utils/log'
 
 export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.vueApp.config.errorHandler = (err, _instance, info) => {
-    logError('[vue:error]', info, err)
-  }
-
+  // No config.errorHandler override: it replaced Nuxt's boot handler (errors
+  // before suspense resolves → error page) and double-logged every component
+  // error, since NuxtRoot's onErrorCaptured already fires `vue:error`.
   nuxtApp.hook('vue:error', (err, _instance, info) => {
     logError('[vue:error]', info, err)
   })
