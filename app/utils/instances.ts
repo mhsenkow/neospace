@@ -63,6 +63,12 @@ export function normalizeServer(raw: string): string | null {
     return null
   }
 
+  // A server entry is a public hostname. IPv4 literals (incl. 127.0.0.1 /
+  // 10.x / 169.254.x — every all-numeric TLD) and loopback/LAN-only names would
+  // point OAuth + API traffic (and tokens) at the user's own network.
+  if (/\.\d+$/.test(value)) return null
+  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(value)) return null
+
   return `https://${value}`
 }
 

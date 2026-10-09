@@ -80,6 +80,15 @@ export function clearPendingAuth() {
 export function sanitizeReturnTo(raw: string | null | undefined): string | null {
   if (!raw || typeof raw !== 'string') return null
   if (!raw.startsWith('/') || raw.startsWith('//')) return null
+  // Browsers read `/\host` as `//host` and drop tab/newline before parsing,
+  // so `/\evil.example` or `/\t/evil.example` would leave the origin
+  if (/[\\\0-\x1f\x7f]/.test(raw) || /%(?:0[9ad]|5c)/i.test(raw)) return null
+  try {
+    const base = 'https://neospace.invalid'
+    if (new URL(raw, base).origin !== base) return null
+  } catch {
+    return null
+  }
   return raw
 }
 
@@ -124,23 +133,30 @@ export function consumeOAuthChallenge(stateFromQuery: string | null): {
   if (typeof sessionStorage === 'undefined' && !pending) {
     return { ok: false, codeVerifier: null, error: 'No session storage' }
   }
-  const expected =
-    pending?.state ||
-    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(AUTH_STATE_KEY) : null)
-  const verifier =
-    pending?.verifier ||
-    (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(AUTH_VERIFIER_KEY) : null)
+  const sessionState =
+    typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(AUTH_STATE_KEY) : null
+  const sessionVerifier =
+    typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(AUTH_VERIFIER_KEY) : null
   if (typeof sessionStorage !== 'undefined') {
     sessionStorage.removeItem(AUTH_STATE_KEY)
     sessionStorage.removeItem(AUTH_VERIFIER_KEY)
   }
-  if (!expected || !stateFromQuery || expected !== stateFromQuery) {
+  if (!stateFromQuery) {
     return { ok: false, codeVerifier: null, error: 'Invalid OAuth state' }
   }
-  if (!verifier) {
-    return { ok: false, codeVerifier: null, error: 'Missing PKCE verifier' }
+  // The shared localStorage record belongs to whichever tab started sign-in
+  // last; this tab's own sessionStorage pair still counts — but then the
+  // record (instance, returnTo) is the other tab's and must not be used.
+  if (pending && pending.state === stateFromQuery) {
+    return { ok: true, codeVerifier: pending.verifier, pending }
   }
-  return { ok: true, codeVerifier: verifier, pending }
+  if (sessionState && sessionState === stateFromQuery) {
+    if (!sessionVerifier) {
+      return { ok: false, codeVerifier: null, error: 'Missing PKCE verifier' }
+    }
+    return { ok: true, codeVerifier: sessionVerifier, pending: null }
+  }
+  return { ok: false, codeVerifier: null, error: 'Invalid OAuth state' }
 }
 
 /**

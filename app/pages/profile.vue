@@ -15,8 +15,8 @@ import type { mastodon } from 'masto'
 import {
   sanitizeDisplayName,
   sanitizeStatusHtml,
-  stripHtml,
 } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { emojiUrlSet, emojify } from '~/utils/emojify'

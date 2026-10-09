@@ -6,8 +6,19 @@
 import { createRestAPIClient, type mastodon } from 'masto'
 import { useInstancesStore } from '~/stores/instances'
 import { resolvePublicInstanceUrl } from '~/utils/instances'
+import { guardMastoClient } from '~/utils/mastoGuard'
 
 export type { mastodon }
+
+/**
+ * The only way to build a masto REST client in the app: every client gets the
+ * `$select` path-segment guard (see utils/mastoGuard).
+ */
+export function createRestClient(
+  config: Parameters<typeof createRestAPIClient>[0],
+): mastodon.rest.Client {
+  return guardMastoClient(createRestAPIClient(config))
+}
 
 const clientCache = new Map<string, mastodon.rest.Client>()
 
@@ -44,7 +55,7 @@ function cachedClient(url: string, accessToken?: string | null): mastodon.rest.C
     clientCache.set(key, client)
     return client
   }
-  client = createRestAPIClient({
+  client = createRestClient({
     url: normalized,
     accessToken: accessToken || undefined,
   })
