@@ -6,12 +6,12 @@
 
 import {
   useComposeHandoffStore,
-  LOOM_ORIGINS,
   clearPersistedLoomShare,
   persistLoomShare,
   peekPersistedLoomShare,
 } from '~/stores/composeHandoff'
 import { BRUH_ORIGINS, bruhShareText, isBruhOrigin, isBruhShare } from '~/utils/bruhHandoff'
+import { LOOM_ORIGINS, isLoomOrigin } from '~/utils/loomHandoff'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useInstancesStore } from '~/stores/instances'
 
@@ -24,19 +24,6 @@ function bufferFromMessage(raw: unknown): ArrayBuffer | null {
     return new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice().buffer
   }
   return null
-}
-
-function isLoomOrigin(origin: string): boolean {
-  if (LOOM_ORIGINS.has(origin)) return true
-  try {
-    const host = new URL(origin).hostname
-    if (host === 'localhost' || host === '127.0.0.1') return true
-    if (host.endsWith('.pages.dev') && host.includes('loom')) return true
-    if (host.endsWith('.workers.dev') && host.includes('loom')) return true
-  } catch {
-    /* ignore */
-  }
-  return false
 }
 
 function hasSharePayload(share: {

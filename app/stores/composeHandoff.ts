@@ -10,7 +10,6 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import {
-  LOOM_ORIGINS,
   STORY_PUBLIC_NOTICE,
   lineageBlurb,
   storyBase,
@@ -318,16 +317,25 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       image?: { name?: string; type?: string; buffer: ArrayBuffer }
       source?: StoredShare['source']
     }) {
-      const imageName = data.image?.name || 'loom-chart.png'
-      const imageType = data.image?.type?.startsWith('image/')
-        ? data.image.type
-        : 'image/png'
+      // postMessage payloads are only origin-checked — hold them to the same
+      // type/size limits as story fetches (no SVG, no 1 GB buffers).
+      const imageType = data.image?.type || 'image/png'
+      const buffer =
+        data.image?.buffer &&
+        data.image.buffer.byteLength > 0 &&
+        data.image.buffer.byteLength <= MAX_HANDOFF_BYTES &&
+        ALLOWED_IMAGE_TYPES.test(imageType)
+          ? data.image.buffer
+          : null
+      const imageName =
+        (data.image?.name || '').replace(/[\\/\0-\x1f]/g, '').trim().slice(0, 120) ||
+        'loom-chart.png'
 
       let imageDataUrl: string | undefined
-      if (data.image?.buffer && data.image.buffer.byteLength > 0) {
+      if (buffer) {
         try {
-          if (data.image.buffer.byteLength < 400_000) {
-            imageDataUrl = bufferToDataUrl(data.image.buffer, imageType)
+          if (buffer.byteLength < 400_000) {
+            imageDataUrl = bufferToDataUrl(buffer, imageType)
           }
         } catch {
           /* ignore */
@@ -343,13 +351,13 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
       }
       persistLoomShare(share)
 
-      if (data.image?.buffer && data.image.buffer.byteLength > 0 && !share.story) {
+      if (buffer && !share.story) {
         const key = storyKey(share)
         if (this._shouldSkipTextOnlyUpdate(key, true)) return true
         this.loading = true
         this.error = null
         try {
-          const file = markRaw(new File([data.image.buffer], imageName, { type: imageType }))
+          const file = markRaw(new File([buffer], imageName, { type: imageType }))
           const text = (share.text || '').trim()
           this._commitDraft(
             key,
@@ -371,5 +379,3 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
     },
   },
 })
-
-export { LOOM_ORIGINS, STORAGE_KEY }

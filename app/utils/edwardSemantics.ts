@@ -3,7 +3,7 @@
  * Pure — no Pinia / DOM.
  */
 
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 import { statusIdentity } from '~/utils/statusIdentity'
 import { faceMoodFor, faceSpecFor, type EdwardFaceMood } from '~/utils/edwardFaces'
 import {

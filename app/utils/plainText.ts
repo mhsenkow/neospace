@@ -7,7 +7,7 @@
  */
 
 import { toRaw } from 'vue'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 
 type HasContent = { content?: string | null }
 

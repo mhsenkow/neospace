@@ -46,7 +46,10 @@ export function emojify(
   }
   if (!byCode.size) return out
 
-  return out.replace(/:([a-zA-Z0-9_]+):/g, (match, code: string) => {
+  // Skip whole tags (quote-aware) so `:code:` inside an attribute — e.g. a link
+  // href in sanitized status HTML — can't have an <img> spliced into it.
+  return out.replace(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)|:([a-zA-Z0-9_]+):/g, (match, tag?: string, code?: string) => {
+    if (tag || !code) return match
     const url = byCode.get(code.toLowerCase())
     if (!url) return match
     const safeSrc = escapeHtml(url)

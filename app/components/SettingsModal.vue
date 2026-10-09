@@ -33,7 +33,7 @@ import {
   type NeoThemeId,
   type NeoUiId,
 } from '~/utils/appearance'
-import { stripHtml } from '~/utils/sanitizeHtml'
+import { stripHtml } from '~/utils/stripHtml'
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
