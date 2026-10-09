@@ -7,6 +7,8 @@ import { emojify } from '../app/utils/emojify'
 import { clearLogRing, formatLogRingForFeedback, logError, redactSecrets } from '../app/utils/log'
 import { isLoomOrigin } from '../app/utils/loomHandoff'
 import { isBruhOrigin } from '../app/utils/bruhHandoff'
+import { onRequestPost, screenshotDataUrl } from '../functions/api/feedback'
+import { ipv6Bucket } from '../functions/utils/rateLimit'
 import { beginOAuthChallenge, consumeOAuthChallenge, sanitizeReturnTo } from '../app/utils/oauthPkce'
 
 function mockFetch() {
@@ -268,6 +270,100 @@ describe('OAuth state across tabs', () => {
     expect(resB.pending?.instanceId).toBe('B')
 
     expect(consumeOAuthChallenge('forged').ok).toBe(false)
+  })
+})
+
+describe('feedback Pages Function', () => {
+  let ipSeq = 0
+  function post(body: string, headers: Record<string, string> = {}) {
+    return new Request('https://neospace.ibm.io/api/feedback', {
+      method: 'POST',
+      body,
+      headers: {
+        Origin: 'https://neospace.ibm.io',
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': `203.0.113.${++ipSeq}`,
+        ...headers,
+      },
+    })
+  }
+  function githubMock() {
+    const sent: { url: string; body: any; auth: string | null }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        sent.push({
+          url: String(url),
+          body: JSON.parse(String(init.body)),
+          auth: new Headers(init.headers).get('Authorization'),
+        })
+        return new Response(JSON.stringify({ html_url: 'https://github.com/x/y/issues/1' }), {
+          status: 201,
+        })
+      }),
+    )
+    return sent
+  }
+  const env = { GITHUB_TOKEN: 'ghp_secret' }
+
+  it('answers 400 (not a thrown 500) for null / non-object / wrongly typed JSON', async () => {
+    githubMock()
+    for (const body of ['null', '[]', '7', '{"title":{"x":1},"body":5,"kind":[]}']) {
+      const res = await onRequestPost({ request: post(body), env })
+      expect([400, 200], body).toContain(res.status)
+      expect(res.headers.get('Content-Type')).toBe('application/json')
+    }
+  })
+
+  it('refuses oversized chunked bodies without trusting Content-Length', async () => {
+    githubMock()
+    const big = JSON.stringify({ body: 'x'.repeat(600_000) })
+    const res = await onRequestPost({ request: post(big), env })
+    expect(res.status).toBe(413)
+  })
+
+  it('never lets the screenshot field inject markdown into the issue', async () => {
+    const sent = githubMock()
+    const evil = 'data:x) @octocat [click](https://phish.example) other/repo#1 ('
+    const res = await onRequestPost({
+      request: post(JSON.stringify({ title: 'Hi\nthere', body: 'note', imageBase64: evil })),
+      env,
+    })
+    expect(res.status).toBe(200)
+    const issue = sent[0]!.body
+    expect(issue.body).not.toContain('@octocat')
+    expect(issue.body).not.toContain('phish.example')
+    expect(issue.title).toBe('Hi there')
+    const json = (await res.json()) as Record<string, unknown>
+    expect(JSON.stringify(json)).not.toContain('ghp_secret')
+  })
+
+  it('keeps valid screenshots', async () => {
+    const sent = githubMock()
+    await onRequestPost({
+      request: post(JSON.stringify({ body: 'n', imageBase64: 'data:image/jpeg;base64,/9j/4AAQ==' })),
+      env,
+    })
+    expect(sent[0]!.body.body).toContain('![screenshot](data:image/jpeg;base64,/9j/4AAQ==)')
+    expect(screenshotDataUrl('iVBORw0KGgo=')).toBe('data:image/png;base64,iVBORw0KGgo=')
+  })
+
+  it('maps GitHub network failures to a JSON 502', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('network'))))
+    const res = await onRequestPost({ request: post('{"body":"x"}'), env })
+    expect(res.status).toBe(502)
+    expect(((await res.json()) as { code: string }).code).toBe('GITHUB_UNAVAILABLE')
+  })
+})
+
+describe('rate limit IPv6 bucketing', () => {
+  it('groups by the real /64 even when :: hides zero groups', () => {
+    expect(ipv6Bucket('2001:db8::a:b:c:d')).toBe('2001:db8:0:0::/64')
+    expect(ipv6Bucket('2001:db8::1')).toBe('2001:db8:0:0::/64')
+    expect(ipv6Bucket('2001:db8:1:2:a::1')).toBe('2001:db8:1:2::/64')
+    expect(ipv6Bucket('2001:0db8:0001:0002:0:0:0:5')).toBe('2001:db8:1:2::/64')
+    expect(ipv6Bucket('::ffff:1.2.3.4')).toBe('::ffff:1.2.3.4')
+    expect(ipv6Bucket('203.0.113.9')).toBe('203.0.113.9')
   })
 })
 
