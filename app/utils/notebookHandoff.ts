@@ -16,16 +16,21 @@ export type NotebookShareMessage = {
   text: string
 }
 
-/** True for allowlisted notebook hosts + local/preview siblings. */
+/** Suite preview workers — subdomains of our account, not anyone's `*.workers.dev` */
+const SUITE_WORKERS_SUFFIX = '.mhsenkow.workers.dev'
+
+/**
+ * True for allowlisted notebook hosts + local/preview siblings. Bare
+ * `*.pages.dev` / `*.workers.dev` name matching would trust anyone who
+ * registers e.g. `evil-notebook.pages.dev`.
+ */
 export function isNotebookOrigin(origin: string): boolean {
   if (NOTEBOOK_ORIGINS.has(origin)) return true
   try {
-    const host = new URL(origin).hostname
+    const { protocol, hostname: host } = new URL(origin)
     if (host === 'localhost' || host === '127.0.0.1') return true
-    if (host.endsWith('.pages.dev') && (host.includes('notebook') || host.includes('throughline'))) {
-      return true
-    }
-    if (host.endsWith('.workers.dev') && (host.includes('notebook') || host.includes('throughline'))) {
+    if (protocol !== 'https:') return false
+    if (host.endsWith(SUITE_WORKERS_SUFFIX) && (host.includes('notebook') || host.includes('throughline'))) {
       return true
     }
     // ibm.io/notebook/ is served from the ibm.io origin
