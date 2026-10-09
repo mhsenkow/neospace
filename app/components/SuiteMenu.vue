@@ -229,7 +229,12 @@ onUnmounted(() => {
   pointer-events: auto;
   margin-bottom: 4px;
   width: min(292px, calc(100vw - 24px));
-  max-height: min(60vh, calc(100dvh - 8rem));
+  // Room above the dock + trigger — a fixed 100dvh - 8rem pushed the panel's
+  // top (and the scrolled tiles) off-screen on short / landscape viewports
+  max-height: min(
+    60vh,
+    calc(var(--neo-app-height, 100dvh) - var(--neo-dock-bottom, 4.5rem) - 44px - 0.75rem)
+  );
   overflow: auto;
   overscroll-behavior: contain;
   padding: 12px 12px 14px;
@@ -344,6 +349,26 @@ onUnmounted(() => {
     color: var(--neo-accent);
     outline: 2px solid var(--neo-accent);
     outline-offset: 2px;
+  }
+}
+
+// Landscape phones / short windows: tighter grid so the last group (edward)
+// isn't buried below the panel's scroll fold
+@media (max-height: 560px) {
+  .suite-menu__panel {
+    width: min(420px, calc(100vw - 24px));
+  }
+
+  .suite-menu__lede {
+    display: none;
+  }
+
+  .suite-menu__grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .suite-menu__tile {
+    min-height: 44px;
   }
 }
 </style>

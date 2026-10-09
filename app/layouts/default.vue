@@ -358,7 +358,13 @@ watch(
 .neo-bottom-dock {
   position: fixed;
   right: max(10px, env(safe-area-inset-right));
-  bottom: calc(var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.65rem);
+  // Exposed so the suite panel can cap its height to the room above the dock.
+  // --neo-feed-tabs-h is the board's pill strip (0 elsewhere / on desktop).
+  --neo-dock-bottom: calc(
+    var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 0px) + env(safe-area-inset-bottom, 0px) +
+      0.65rem
+  );
+  bottom: var(--neo-dock-bottom);
   z-index: var(--neo-z-shell-header, 90);
   display: flex;
   flex-direction: column-reverse;
@@ -367,17 +373,9 @@ watch(
   pointer-events: none;
   max-width: min(22rem, calc(100vw - 20px));
 
-  // Home board: feed strip sits above the tab bar
-  .neo-layout.neo-layout--board & {
-    bottom: calc(
-      var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 48px) + env(safe-area-inset-bottom, 0px) +
-        0.65rem
-    );
-  }
-
   &--subview {
     /* Tab bar hidden on focused mobile screens */
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 0.65rem);
+    --neo-dock-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.65rem);
   }
 
   /* Threads / chats pin a reply bar to the bottom — the waffle sat on Send */
@@ -401,7 +399,7 @@ watch(
 
   @media (min-width: 1024px) {
     right: max(16px, env(safe-area-inset-right));
-    bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+    --neo-dock-bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
   }
 }
 
