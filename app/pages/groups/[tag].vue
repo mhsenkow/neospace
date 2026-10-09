@@ -7,7 +7,7 @@
  */
 
 import type { mastodon } from 'masto'
-import { useGroupsStore } from '~/stores/groups'
+import { useGroupsStore, isGroupTagName } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore } from '~/stores/columns'
 import { categoryColor } from '~/composables/useShellAppearance'
@@ -33,6 +33,8 @@ function normalizeGroupTag(raw: string): string {
 
 // Get the tag from route
 const tag = computed(() => normalizeGroupTag(route.params.tag as string))
+/** Hand-typed / crafted URLs: never send a non-hashtag to the API */
+const tagValid = computed(() => isGroupTagName(tag.value))
 
 // The current group info
 const group = computed(() => groupsStore.getGroup(tag.value))
@@ -98,6 +100,7 @@ const onGroupPosted = (status: mastodon.v1.Status) => {
 }
 
 const loadTimeline = async (newTag: string) => {
+  if (!isGroupTagName(newTag)) return
   const restoredScroll = groupsStore.restoreTimeline(newTag)
   if (restoredScroll != null) {
     await nextTick()
@@ -108,8 +111,10 @@ const loadTimeline = async (newTag: string) => {
 }
 
 onMounted(async () => {
+  // Seeds the curated list synchronously; trends + memberships load alongside
+  // the timeline instead of in front of it
   if (groupsStore.groups.length === 0) {
-    await groupsStore.initializeGroups()
+    void groupsStore.initializeGroups()
   }
   await loadTimeline(tag.value)
 })
@@ -138,6 +143,7 @@ const refocusMembershipButton = async (hadFocus: boolean) => {
 }
 
 const handleJoin = async () => {
+  if (!tagValid.value) return
   if (!instancesStore.isAuthenticated) {
     router.push('/login')
     return
@@ -158,7 +164,7 @@ const handleJoin = async () => {
 
 // Leave immediately, offer Undo to rejoin
 const handleLeave = async () => {
-  if (isLeaving.value) return
+  if (isLeaving.value || !tagValid.value) return
   const leftTag = tag.value
   const hadFocus = !!leaveBtnRef.value && document.activeElement === leaveBtnRef.value
   isLeaving.value = true
@@ -207,6 +213,7 @@ const isOnBoard = computed(() =>
 
 /** Pin this hashtag feed as a board column and jump home */
 const addToBoard = () => {
+  if (!tagValid.value) return
   const id = columnsStore.ensureFocusedView('group', tag.value.toLowerCase())
   if (id) router.push('/')
 }
@@ -226,7 +233,7 @@ useHead({
 <template>
   <div class="group-detail">
     <SubviewChrome :title="displayGroup.name" :back-action="goBack">
-      <template #actions>
+      <template v-if="tagValid" #actions>
         <button
           type="button"
           class="subview-chrome__btn neo-tip group-chrome-board"
@@ -238,6 +245,14 @@ useHead({
       </template>
     </SubviewChrome>
 
+    <div v-if="!tagValid" class="timeline-empty" role="alert">
+      <span class="empty-emoji" aria-hidden="true">🏷️</span>
+      <h2>That’s not a hashtag</h2>
+      <p>Group names use letters, numbers, and underscores.</p>
+      <NuxtLink to="/groups" class="neo-btn neo-btn--ghost">Browse groups</NuxtLink>
+    </div>
+
+    <template v-else>
     <!-- Header -->
     <header class="group-header" :style="{ '--category-color': categoryColor(displayGroup.category) }">
       <div class="group-info">
@@ -397,6 +412,7 @@ useHead({
       <p>Log in to post in this group using <code>#{{ tag }}</code></p>
       <NuxtLink to="/login" class="post-hint__login">Log In</NuxtLink>
     </div>
+    </template>
   </div>
 </template>
 
@@ -896,6 +912,7 @@ useHead({
     }
   }
 
+  h2,
   h3 {
     margin: 0 0 0.375rem;
     font-size: 1.125rem;

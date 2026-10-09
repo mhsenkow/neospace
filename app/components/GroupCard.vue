@@ -23,10 +23,6 @@ const props = withDefaults(defineProps<Props>(), {
   tile: false,
 })
 
-const emit = defineEmits<{
-  view: [tag: string]
-}>()
-
 const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
 const toastStore = useToastStore()
@@ -95,9 +91,8 @@ const handleLeave = async () => {
   }
 }
 
-const handleView = () => {
-  emit('view', props.group.tag)
-}
+/** Server-supplied tag names go into the path — keep `?`/`#`/`/` literal */
+const groupPath = computed(() => `/groups/${encodeURIComponent(props.group.tag)}`)
 
 const catColor = computed(() =>
   categoryColor(props.group.trending ? 'trending' : props.group.category),
@@ -122,11 +117,7 @@ const catTint = computed(() =>
 
     <div class="group-card__content">
       <h3 class="group-card__name">
-        <NuxtLink
-          :to="`/groups/${group.tag}`"
-          class="group-card__name-link"
-          @click="handleView"
-        >
+        <NuxtLink :to="groupPath" class="group-card__name-link">
           {{ group.name }}
         </NuxtLink>
       </h3>
@@ -152,13 +143,13 @@ const catTint = computed(() =>
         type="button"
         class="group-card__btn group-card__btn--leave"
         :disabled="isPending"
-        :aria-pressed="true"
+        :aria-label="isPending ? undefined : `Joined — leave ${group.name}`"
         @click="handleLeave"
       >
         <span v-if="isPending" class="group-card__spinner" aria-hidden="true" />
         <span v-if="isPending" class="sr-only">Leaving…</span>
         <span v-else class="group-card__btn-label">
-          <span class="group-card__btn-joined">{{ tile ? 'Joined' : 'Joined' }}</span>
+          <span class="group-card__btn-joined">Joined</span>
           <span class="group-card__btn-leave">Leave</span>
         </span>
       </button>
@@ -168,7 +159,7 @@ const catTint = computed(() =>
         type="button"
         class="group-card__btn group-card__btn--join"
         :disabled="isPending"
-        :aria-pressed="false"
+        :aria-label="isPending ? undefined : `Join ${group.name}`"
         :title="instancesStore.isAuthenticated ? 'Join this group' : 'Log in to join groups'"
         @click="handleJoin"
       >
@@ -275,6 +266,7 @@ const catTint = computed(() =>
     font-size: 0.9375rem;
     font-weight: 700;
     line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   &__name-link {
@@ -295,6 +287,7 @@ const catTint = computed(() =>
 
   &__description,
   &__tagline {
+    overflow-wrap: anywhere;
     margin: 0.25rem 0 0;
     font-size: 0.8125rem;
     color: var(--neo-text-muted);
@@ -311,7 +304,9 @@ const catTint = computed(() =>
   }
 
   &__tag {
+    min-width: 0;
     color: var(--neo-text-muted);
+    overflow-wrap: anywhere;
   }
 
   &__category {
