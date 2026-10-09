@@ -80,10 +80,12 @@ function downloadCsv(csv: string, filename: string) {
 
 /** Combined fallback when browsers block multiple programmatic downloads. */
 function downloadCombinedCsv(files: LoomExportFile[]) {
+  // trim() also strips each part's \uFEFF — put one BOM back at the very start
+  // so Excel still opens the bundle as UTF-8 (non-ASCII previews otherwise mojibake)
   const parts = files.map(
     (f) => `# ${f.name}\n${f.csv.trim()}\n`,
   )
-  downloadCsv(parts.join('\n'), files[0]?.name.replace(/\.csv$/i, '') + '-bundle.csv')
+  downloadCsv(`\uFEFF${parts.join('\n')}`, files[0]?.name.replace(/\.csv$/i, '') + '-bundle.csv')
 }
 
 export function downloadInsightsCsv(report: InsightsReport) {
