@@ -9,7 +9,7 @@ import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { useThemeStore } from './theme'
-import { activeClient } from '~/composables/useMasto'
+import { activeClient, clientFor } from '~/composables/useMasto'
 import type {
   NeoDensityId,
   NeoFontId,
@@ -134,6 +134,8 @@ interface SettingsState {
   // Modal state
   isOpen: boolean
   activeCategory: string
+  /** Last open() named a category — phones should land on that panel, not the list */
+  openedToCategory: boolean
   searchQuery: string
   
   // Mastodon preferences
@@ -248,10 +250,42 @@ const LOCAL_PREFS_KEY = 'neospace_local_prefs'
 let saveSuccessTimer: ReturnType<typeof setTimeout> | null = null
 const LOCAL_PREFS_VERSION = 1
 
+/**
+ * Parse the stored local-prefs blob. Corrupt JSON or a non-object value is
+ * dropped (returns null) so the caller still applies defaults + suite look
+ * instead of bailing out of appearance setup entirely.
+ */
+export function parseStoredLocalPrefs(saved: string | null): Record<string, unknown> | null {
+  if (!saved) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(saved)
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  // Fields are read individually (parseAppearance etc.) — never spread into state
+  const { v: _v, ...rest } = raw as Record<string, unknown>
+  return rest
+}
+
+function readStoredLocalPrefs(): Record<string, any> | null {
+  try {
+    return parseStoredLocalPrefs(localStorage.getItem(LOCAL_PREFS_KEY))
+  } catch {
+    return null
+  }
+}
+
+/** Active account the loaded `account` / `preferences` / `filters` belong to. */
+let settingsOwnerId: string | null = null
+let settingsLoadSeq = 0
+
 export const useSettingsStore = defineStore('settings', {
   state: (): SettingsState => ({
     isOpen: false,
     activeCategory: 'profile',
+    openedToCategory: false,
     searchQuery: '',
     
     preferences: null,
@@ -355,7 +389,11 @@ export const useSettingsStore = defineStore('settings', {
      * Get authenticated API client
      */
     getClient(): mastodon.rest.Client {
-      return activeClient()
+      // Settings always act on the global active account — never a page's
+      // transient read override (/profile?account=…), or a PATCH could land on
+      // the linked account while the result is filed under the active one.
+      const activeId = useInstancesStore().activeAccountId
+      return activeId ? clientFor(activeId) : activeClient()
     },
     
     /**
@@ -363,6 +401,7 @@ export const useSettingsStore = defineStore('settings', {
      */
     open(category?: string) {
       this.isOpen = true
+      this.openedToCategory = !!category
       if (category) {
         this.activeCategory = category
       }
@@ -395,13 +434,8 @@ export const useSettingsStore = defineStore('settings', {
       if (typeof window === 'undefined') return
       
       try {
-        const saved = localStorage.getItem(LOCAL_PREFS_KEY)
-        if (saved) {
-          const raw = JSON.parse(saved)
-          const parsed =
-            raw && typeof raw === 'object' && typeof raw.v === 'number'
-              ? (({ v: _v, ...rest }) => rest)(raw)
-              : raw
+        const parsed = readStoredLocalPrefs()
+        if (parsed) {
           const vis = parsed.defaultVisibility
           const appearance = parseAppearance(parsed, !!parsed.compactMode)
           this.localPreferences = {
@@ -529,21 +563,33 @@ export const useSettingsStore = defineStore('settings', {
     async loadSettings() {
       const instancesStore = useInstancesStore()
       if (!instancesStore.isAuthenticated) return
-      
+
+      // Never show (or save over) another account's profile while this one loads
+      const ownerId = instancesStore.activeAccountId
+      if (settingsOwnerId !== ownerId) {
+        this.account = null
+        this.preferences = null
+        this.filters = []
+      }
+
+      const seq = ++settingsLoadSeq
       this.isLoading = true
       this.error = null
-      
+
       try {
         const client = this.getClient()
-        
+
         const [prefResult, accountResult, filterResult] = await Promise.allSettled([
           client.v1.preferences.fetch(),
           client.v1.accounts.verifyCredentials(),
-          this.loadFilters(),
+          client.v2.filters.list(),
         ])
+        // Account switched / reloaded mid-flight — a newer load owns state now
+        if (seq !== settingsLoadSeq || instancesStore.activeAccountId !== ownerId) return
 
         if (accountResult.status === 'fulfilled') {
           this.account = accountResult.value
+          settingsOwnerId = ownerId
         } else {
           throw accountResult.reason
         }
@@ -552,30 +598,19 @@ export const useSettingsStore = defineStore('settings', {
         }
         if (filterResult.status === 'fulfilled') {
           this.filters = filterResult.value
+        } else {
+          console.error('Failed to load filters:', filterResult.reason)
         }
         
         // Also load local preferences
         this.loadLocalPreferences()
         
       } catch (e: any) {
-        this.error = e.message || 'Failed to load settings'
+        if (seq !== settingsLoadSeq) return
+        this.error = e?.message || 'Failed to load settings'
         console.error('Settings load error:', e)
       } finally {
-        this.isLoading = false
-      }
-    },
-    
-    /**
-     * Load content filters
-     */
-    async loadFilters(): Promise<mastodon.v2.Filter[]> {
-      try {
-        const client = this.getClient()
-        this.filters = await client.v2.filters.list()
-        return this.filters
-      } catch (e) {
-        console.error('Failed to load filters:', e)
-        return []
+        if (seq === settingsLoadSeq) this.isLoading = false
       }
     },
     
@@ -753,7 +788,9 @@ export const useSettingsStore = defineStore('settings', {
       try {
         const client = this.getClient()
         const instancesStore = useInstancesStore()
-        
+        // The PATCH goes to this account even if the user switches mid-request
+        const ownerId = instancesStore.activeAccountId
+
         const updateData: any = {}
         
         if (data.displayName !== undefined) updateData.displayName = data.displayName
@@ -771,9 +808,9 @@ export const useSettingsStore = defineStore('settings', {
         }
         
         const updated = await client.v1.accounts.updateCredentials(updateData)
-        
-        this.account = updated
-        instancesStore.updateActiveAccount(updated)
+
+        if (ownerId) instancesStore.updateActiveAccount(updated, ownerId)
+        if (instancesStore.activeAccountId === ownerId) this.account = updated
         this.saveSuccess = true
         
         return updated
