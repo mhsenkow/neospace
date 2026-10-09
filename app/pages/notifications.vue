@@ -5,6 +5,7 @@ import { useToastStore } from '~/stores/toast'
 import { clientFor } from '~/composables/useMasto'
 import type { mastodon } from 'masto'
 import { plainTextLowerOf, plainTextOf } from '~/utils/plainText'
+import { clipGraphemes } from '~/utils/stripHtml'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { groupActorLabel } from '~/utils/notifGroup'
@@ -171,12 +172,19 @@ const handleMarkRead = async () => {
   actionsMenuOpen.value = false
 }
 
-const handleDismiss = (notif: { _key: string; _groupedKeys?: string[] }) => {
-  notificationsStore.dismissNotification(notif._key)
-  for (const key of notif._groupedKeys || []) {
-    notificationsStore.dismissNotification(key)
+const handleDismiss = async (notif: { _key: string; _groupedKeys?: string[] }) => {
+  try {
+    // One call for the whole grouped row so a failure restores only what failed
+    await notificationsStore.dismissNotifications([notif._key, ...(notif._groupedKeys || [])])
+  } catch {
+    toastStore.show({ message: 'Couldn’t dismiss notification' })
   }
 }
+
+const dismissLabel = (notif: { _groupCount?: number }) =>
+  (notif._groupCount || 1) > 1
+    ? `Dismiss ${notif._groupCount} notifications`
+    : 'Dismiss notification'
 
 const actorLabel = (notif: {
   account?: { displayName?: string | null; username?: string } | null
@@ -218,7 +226,8 @@ const authorizeFollowRequest = async (notif: ExtendedNotification, e?: Event) =>
   try {
     const client = clientFor(notif._instanceId)
     await client.v1.followRequests.$select(notif.account.id).authorize()
-    notificationsStore.dismissNotification(key)
+    // Accepted either way — a failed row dismiss must not read as a failed accept
+    notificationsStore.dismissNotification(key).catch(() => {})
     toastStore.show({ message: 'Follow request accepted' })
   } catch {
     toastStore.show({ message: 'Couldn’t accept request' })
@@ -237,7 +246,7 @@ const rejectFollowRequest = async (notif: ExtendedNotification, e?: Event) => {
   try {
     const client = clientFor(notif._instanceId)
     await client.v1.followRequests.$select(notif.account.id).reject()
-    notificationsStore.dismissNotification(key)
+    notificationsStore.dismissNotification(key).catch(() => {})
     toastStore.show({ message: 'Follow request rejected' })
   } catch {
     toastStore.show({ message: 'Couldn’t reject request' })
@@ -288,7 +297,8 @@ const previewText = (status?: mastodon.v1.Status | null) => {
   // Memoized per status — called several times per row per render
   const text = plainTextOf(status)
   if (!text) return ''
-  return text.length > 160 ? `${text.slice(0, 160)}…` : text
+  // Grapheme-safe — slice(0, 160) could split an emoji surrogate pair
+  return clipGraphemes(text, 160)
 }
 
 const bindLoadObserver = (el: Element | null) => {
@@ -626,7 +636,7 @@ const chromeTitle = computed(() => {
               <button
                 type="button"
                 class="notif-item__dismiss"
-                aria-label="Dismiss notification"
+                :aria-label="dismissLabel(notif)"
                 title="Dismiss"
                 @click="handleDismiss(notif)"
               >
@@ -1130,6 +1140,8 @@ const chromeTitle = computed(() => {
   &__open-headline {
     flex: 1;
     min-width: 0;
+    // Long unbroken display names / hosts must wrap, not push the row wide
+    overflow-wrap: anywhere;
     padding: 0;
     border: none;
     background: transparent;
@@ -1277,6 +1289,7 @@ const chromeTitle = computed(() => {
     font-size: 0.875rem;
     color: var(--neo-text-primary);
     line-height: 1.45;
+    overflow-wrap: anywhere;
     background: var(--neo-bg-secondary);
     border: 1px solid var(--neo-border-color);
     border-radius: var(--neo-radius-sm, 4px);
