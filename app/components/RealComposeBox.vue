@@ -120,7 +120,8 @@ const onComposeFocus = () => {
 const selectedGroupTag = ref<string | null>(
   props.initialGroupTag ? props.initialGroupTag.replace(/^#/, '') : null,
 )
-const mentionListId = 'compose-mention-list'
+// Unique per composer — the sheet can open over a page composer (groups, thread)
+const mentionListId = `compose-mention-list-${useId()}`
 const counterAnnounce = ref('')
 
 /** Only lock the visibility control when compose started as a DM */
@@ -150,9 +151,14 @@ const showGroupPicker = computed(
 )
 
 const draftKey = computed(() => {
-  if (props.initialVisibility === 'direct') return 'dm'
+  // Per conversation / recipient: one shared 'dm' slot restored Alice's private
+  // draft into a message to Bob.
+  if (props.initialVisibility === 'direct') {
+    const to = props.inReplyToId || (props.initialText || '').trim().toLowerCase()
+    return to ? `dm:${to}` : 'dm'
+  }
   if (props.inReplyToId) return `reply:${props.inReplyToId}`
-  if (props.quoteUrl) return 'quote'
+  if (props.quoteUrl) return `quote:${props.quoteUrl}`
   const tag = props.initialGroupTag?.replace(/^#/, '').trim()
   if (tag) return `group:${tag}`
   return 'new'
@@ -181,7 +187,9 @@ const applyDraft = () => {
 }
 
 const persistDraft = () => {
-  draftText.value = content.value
+  // The prefilled "@handle " alone isn't a draft (and kept a junk key per reply)
+  draftText.value =
+    content.value.trim() === (props.initialText || '').trim() ? '' : content.value
   draftSpoiler.value = showCW.value ? spoilerText.value : ''
   draftVisibility.value = visibility.value
   scheduleDraftSave()
@@ -390,6 +398,14 @@ const {
 const mentionOpen = ref(false)
 const mentionIndex = ref(0)
 const mentionAt = ref(-1)
+/** Only claim "expanded" while the listbox element actually exists */
+const mentionListShown = computed(
+  () => mentionOpen.value && (mentionSearching.value || mentionResults.value.length > 0),
+)
+// Fresh results can be shorter than the old list — keep the highlight on a real row
+watch(mentionResults, (list) => {
+  if (mentionIndex.value >= list.length) mentionIndex.value = 0
+})
 const activeMentionId = computed(() => {
   const pick = mentionResults.value[mentionIndex.value]
   return pick ? `${mentionListId}-${pick.id}` : undefined
@@ -480,7 +496,8 @@ const handlePost = async () => {
           : `${missingAltCount.value} images have no alt text. Post anyway?`,
       confirmLabel: 'Post without alt',
     })
-    if (!ok) return
+    // The world may have moved while the dialog was up (another submit, upload error)
+    if (!ok || !canPost.value) return
   }
 
   isPosting.value = true
@@ -718,6 +735,15 @@ onMounted(() => {
 onUnmounted(() => {
   if (handoffNoticeTimer) clearTimeout(handoffNoticeTimer)
 })
+
+defineExpose({
+  /** Anything the user would lose by closing — own text, CW, or attachments */
+  isDirty: computed(
+    () => hasOwnContent.value || hasMedia.value || (showCW.value && !!spoilerText.value.trim()),
+  ),
+  /** Confirmed "Discard" — drop the saved draft too, or it comes back next open */
+  discardDraft: () => clearDraft(),
+})
 </script>
 
 <template>
@@ -748,7 +774,7 @@ onUnmounted(() => {
       <img
         v-if="instancesStore.userAvatar"
         :src="instancesStore.userAvatar"
-        :alt="instancesStore.userDisplayName"
+        alt=""
         class="compose-avatar neo-avatar"
       />
       <div class="compose-input-wrap compose-input-wrap--send">
@@ -764,9 +790,9 @@ onUnmounted(() => {
           :aria-busy="isPosting || isUploading || props.disabled || undefined"
           role="combobox"
           aria-autocomplete="list"
-          :aria-expanded="mentionOpen"
-          :aria-controls="mentionListId"
-          :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
+          :aria-expanded="mentionListShown"
+          :aria-controls="mentionListShown ? mentionListId : undefined"
+          :aria-activedescendant="mentionListShown ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
           :aria-keyshortcuts="compact ? 'Enter' : submitKeyshortcuts"
@@ -812,7 +838,7 @@ onUnmounted(() => {
         <img
           v-if="instancesStore.userAvatar"
           :src="instancesStore.userAvatar"
-          :alt="instancesStore.userDisplayName"
+          alt=""
           class="compose-avatar neo-avatar"
         />
         <div class="compose-heading">
@@ -853,9 +879,9 @@ onUnmounted(() => {
           :aria-busy="isPosting || isUploading || props.disabled || undefined"
           role="combobox"
           aria-autocomplete="list"
-          :aria-expanded="mentionOpen"
-          :aria-controls="mentionListId"
-          :aria-activedescendant="mentionOpen ? activeMentionId : undefined"
+          :aria-expanded="mentionListShown"
+          :aria-controls="mentionListShown ? mentionListId : undefined"
+          :aria-activedescendant="mentionListShown ? activeMentionId : undefined"
           :aria-invalid="isOverLimit"
           :aria-label="composeAriaLabel"
           :aria-keyshortcuts="submitKeyshortcuts"
@@ -904,7 +930,7 @@ onUnmounted(() => {
         class="compose-cw-input neo-input"
         placeholder="Content warning"
         aria-label="Content warning"
-        :disabled="isPosting"
+        :readonly="isPosting"
       />
     </div>
 
@@ -1634,9 +1660,17 @@ onUnmounted(() => {
     color: var(--neo-text-primary);
     font-weight: 600;
   }
+
+  // Long remote handles wrap at 320px instead of widening the composer
+  strong,
+  span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 .compose-quote__text {
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: 0.8125rem;
   line-height: 1.35;
@@ -1648,6 +1682,7 @@ onUnmounted(() => {
 }
 
 .compose-language-select {
+  min-height: 24px;
   font-size: 0.75rem;
   padding: 0.2rem 0.35rem;
   border-radius: var(--neo-radius-sm, 6px);

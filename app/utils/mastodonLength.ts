@@ -9,11 +9,28 @@ const URL_WEIGHT = 23
 const TOKEN_RE =
   /https?:\/\/[^\s<>"'()]+|@[a-zA-Z0-9_]+(?:@[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?)?/g
 
+/** Built once — this runs on every keystroke, several times per call */
+let segmenter: Intl.Segmenter | null | undefined
+
+function getSegmenter(): Intl.Segmenter | null {
+  if (segmenter === undefined) {
+    try {
+      segmenter =
+        typeof Intl !== 'undefined' && 'Segmenter' in Intl
+          ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+          : null
+    } catch {
+      segmenter = null
+    }
+  }
+  return segmenter
+}
+
 function graphemeLength(str: string): number {
   if (!str) return 0
   try {
-    if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    const seg = getSegmenter()
+    if (seg) {
       let n = 0
       for (const _ of seg.segment(str)) n += 1
       return n
@@ -42,13 +59,16 @@ export function mastodonLength(text: string): number {
     if (m.index > last) {
       count += graphemeLength(text.slice(last, m.index))
     }
-    const token = m[0]
+    let token = m[0]
     if (token.startsWith('http')) {
+      // Sentence punctuation after a link isn't part of it ("see https://x.co.")
+      token = token.replace(/[.,:;!?]+$/, '')
       count += URL_WEIGHT
     } else {
       count += mentionWeight(token)
     }
     last = m.index + token.length
+    TOKEN_RE.lastIndex = last
   }
   if (last < text.length) {
     count += graphemeLength(text.slice(last))
