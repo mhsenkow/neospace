@@ -22,7 +22,7 @@ const CATEGORY_KEYWORDS: Array<{ category: GroupCategoryGuess; words: string[] }
   {
     category: 'creative',
     words: [
-      'art', 'photo', 'music', 'book', 'write', 'poem', 'design', 'film', 'movie', 'craft',
+      'art', 'photo', 'photography', 'music', 'book', 'write', 'poem', 'design', 'film', 'movie', 'craft',
       'draw', 'paint', 'illustration', 'animation', 'mastoart', 'nature', 'landscape',
     ],
   },
@@ -43,13 +43,24 @@ const CATEGORY_KEYWORDS: Array<{ category: GroupCategoryGuess; words: string[] }
   },
 ]
 
+/**
+ * Plural / -ing forms of a keyword ("cats", "books", "cooking", "writing") —
+ * token-exact alone sent most real tags to Other. Short words (ai, ml, ios)
+ * stay exact so they can't pick up stray suffixes.
+ */
+function tokenMatches(token: string, word: string): boolean {
+  if (token === word) return true
+  if (word.length < 3) return false
+  if (token === `${word}s` || token === `${word}es` || token === `${word}ing`) return true
+  return word.endsWith('e') && token === `${word.slice(0, -1)}ing`
+}
+
 /** Tokenize so 'ai' does not match rain/Taiwan/mail, 'cat' does not match education */
 export function guessCategory(tag: string): GroupCategoryGuess {
   const lower = tag.toLowerCase()
   const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean)
-  const tokenSet = new Set(tokens)
   for (const bucket of CATEGORY_KEYWORDS) {
-    if (bucket.words.some((w) => tokenSet.has(w))) {
+    if (bucket.words.some((w) => tokens.some((t) => tokenMatches(t, w)))) {
       return bucket.category
     }
   }

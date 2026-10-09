@@ -151,14 +151,25 @@ const searchStatusText = computed(() => {
   return ''
 })
 
+const showStatusHint = computed(
+  () => !!searchStatusText.value && !customError.value && !searchError.value,
+)
+
 const syncFromRoute = () => {
-  const q = route.query.q
-  if (typeof q === 'string') query.value = q
+  // Leaving the page also changes the route — don't reset state on the way out
+  if (route.path !== '/explore') return
+  const q = typeof route.query.q === 'string' ? route.query.q : ''
+  // persistRoute stores the trimmed query; echoing that back would eat the
+  // space someone just typed ("hello " → "hello" mid-word)
+  if (q !== query.value.trim()) query.value = q
 
   const t = route.query.tab
   const allowed = TABS.map((x) => x.id)
   if (typeof t === 'string' && (allowed as string[]).includes(t)) {
     tab.value = t as ExploreTab
+  } else if (t == null) {
+    // Bare /explore (nav link while already here) → back to the default tab
+    tab.value = 'all'
   }
 }
 
@@ -236,6 +247,10 @@ const lookUpCustom = async () => {
 const onSearchEnter = () => {
   // Touch: drop the keyboard so the results aren't hidden behind it
   if (!window.matchMedia('(pointer: fine)').matches) searchInputRef.value?.blur()
+  // A pending debounce would fire a plain search after this one and replace it
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = null
+  persistRoute()
   if (tab.value === 'servers' || (tab.value === 'all' && looksLikeHostname(query.value))) {
     void lookUpCustom()
     return
@@ -249,11 +264,16 @@ const looksLikeHostname = (raw: string) => {
 }
 
 const applyTopic = (tag: string) => {
-  if (searchTimer) clearTimeout(searchTimer)
   query.value = tag
   if (tab.value === 'servers') tab.value = 'all'
   persistRoute()
   void runFediverseSearch(tag)
+  // The query watcher (pre-flush) has queued its debounce by now — drop it so
+  // the topic isn't searched twice
+  void nextTick(() => {
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = null
+  })
   refocusSearch()
 }
 
@@ -310,13 +330,10 @@ watch([loadMoreSentinel, isMobileShell], ([el]) => {
   loadMoreObserver.observe(el)
 }, { flush: 'post' })
 
+// useFediverseSearch re-runs the search on tab / sign-in changes itself —
+// doing it here too sent every request twice
 watch(tab, () => {
   persistRoute()
-  if (hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
-})
-
-watch(isSignedIn, (ok) => {
-  if (ok && hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
 })
 
 onMounted(async () => {
@@ -330,9 +347,12 @@ onMounted(async () => {
     if (!hasQuery.value || window.matchMedia('(pointer: fine)').matches) {
       searchInputRef.value?.focus()
     }
-    // Route sync already set query/tab; the query watcher + tab watcher cover search
+    // Route sync already set query/tab. Skip the query debounce and search now —
+    // unless a ?tab= change already started one via useFediverseSearch
     if (searchTimer) clearTimeout(searchTimer)
-    if (hasQuery.value && tab.value !== 'servers') void runFediverseSearch(query.value)
+    if (hasQuery.value && tab.value !== 'servers' && !searchBusy.value) {
+      void runFediverseSearch(query.value)
+    }
   })
 })
 
@@ -417,14 +437,14 @@ onUnmounted(() => {
       :aria-busy="searchBusy"
     >
     <!-- Result count reads at the top; it doesn't need to ride in the sticky bar -->
+    <!-- Always mounted: a live region inserted along with its text is often not announced -->
     <p
-      v-if="searchStatusText && !customError && !searchError"
       class="explore-hint explore-hint--status"
+      :class="{ 'sr-only': !showStatusHint }"
       role="status"
       aria-live="polite"
-      :aria-busy="searchBusy"
     >
-      {{ searchStatusText }}
+      {{ showStatusHint ? searchStatusText : '' }}
     </p>
     <div v-if="!isSignedIn" class="explore-cta-row">
       <a
@@ -521,7 +541,8 @@ onUnmounted(() => {
           </button>
         </nav>
 
-        <section class="explore-grid">
+        <section class="explore-grid" aria-labelledby="explore-servers-heading">
+          <h2 id="explore-servers-heading" class="sr-only">Servers</h2>
           <TransitionGroup name="card">
             <InstanceCard
               v-for="instance in filteredInstances"
@@ -555,7 +576,8 @@ onUnmounted(() => {
       <template v-else>
         <section v-if="showPeople" class="explore-people">
           <h2 class="explore-section-title">People</h2>
-          <article
+          <ul class="explore-results-list">
+          <li
             v-for="acct in accounts"
             :key="acct.id"
             class="explore-person-row"
@@ -587,12 +609,14 @@ onUnmounted(() => {
                     : 'Follow'
               }}
             </button>
-          </article>
+          </li>
+          </ul>
         </section>
 
         <section v-if="showTags" class="explore-tags">
           <h2 class="explore-section-title">Tags</h2>
-          <article
+          <ul class="explore-results-list">
+          <li
             v-for="tag in hashtags"
             :key="tag.name"
             class="explore-tag-row"
@@ -613,7 +637,8 @@ onUnmounted(() => {
             >
               {{ followedTags.has(tag.name.toLowerCase()) ? 'Following' : 'Follow tag' }}
             </button>
-          </article>
+          </li>
+          </ul>
         </section>
 
         <section v-if="showPosts" class="explore-posts">
@@ -641,7 +666,7 @@ onUnmounted(() => {
           <button
             v-if="tab === 'all'"
             type="button"
-            class="neo-btn neo-btn--ghost"
+            class="neo-btn neo-btn--ghost explore-wrap-btn"
             :disabled="customBusy"
             @click="lookUpCustom"
           >
@@ -935,6 +960,17 @@ onUnmounted(() => {
   }
 }
 
+.explore-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.explore-wrap-btn {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .explore-person-row,
 .explore-tag-row {
   display: flex;
@@ -966,6 +1002,7 @@ onUnmounted(() => {
   strong {
     display: block;
     color: var(--neo-accent);
+    overflow-wrap: anywhere;
   }
 
   &__meta {
@@ -1118,6 +1155,7 @@ onUnmounted(() => {
 
 .explore-hint {
   margin: 0 0 1rem;
+  overflow-wrap: anywhere;
   font-size: 0.875rem;
   color: var(--neo-text-muted);
 
@@ -1177,6 +1215,8 @@ onUnmounted(() => {
     flex-direction: column;
     gap: 0.1rem;
     min-width: 0;
+    // Long display names / @user@very.long.host handles at 320px
+    overflow-wrap: anywhere;
 
     strong {
       font-size: 0.9375rem;
@@ -1239,6 +1279,13 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 0.75rem;
+  // Echoes the raw query — an unbroken paste must not widen the page
+  overflow-wrap: anywhere;
+
+  > *,
+  &__actions > * {
+    max-width: 100%;
+  }
 
   &__actions {
     display: flex;

@@ -20,6 +20,24 @@ import { cursorPage } from '~/utils/linkHeader'
 let groupsInitPromise: Promise<void> | null = null
 const GROUPS_INIT_TTL_MS = 5 * 60 * 1000
 let groupsInitializedAt = 0
+/** Account the memberships were loaded for — a switch must not reuse them */
+let groupsInitializedFor: string | null = null
+
+/**
+ * Hashtag names as Mastodon accepts them: word characters (any script), `_`,
+ * middle dot and ZWNJ. Anything else (`/`, `?`, `#`, `.`, `%`) can't be a tag
+ * and must not reach an API path — `/groups/..%2Faccounts%2F1%2Ffollow%3F`
+ * would otherwise turn Join into an authenticated POST elsewhere.
+ */
+const GROUP_TAG_RE = /^[\p{L}\p{M}\p{N}_\u00b7\u200c]+$/u
+export const GROUP_TAG_MAX = 100
+
+export function isGroupTagName(tag: string): boolean {
+  return !!tag && tag.length <= GROUP_TAG_MAX && GROUP_TAG_RE.test(tag)
+}
+
+/** Path segment for `$select` — masto.js joins it into the URL unescaped */
+const tagPath = (tag: string) => encodeURIComponent(tag)
 
 export type GroupCategory =
   | 'tech'
@@ -562,9 +580,11 @@ export const useGroupsStore = defineStore('groups', {
      * Single-flight so home + columns + menu can't race and double-push tags.
      */
     async initializeGroups(force = false) {
+      const accountKey = useInstancesStore().activeAccountId || null
       if (
         !force &&
         groupsInitializedAt &&
+        groupsInitializedFor === accountKey &&
         Date.now() - groupsInitializedAt < GROUPS_INIT_TTL_MS
       ) {
         return
@@ -605,6 +625,7 @@ export const useGroupsStore = defineStore('groups', {
           ])
           this.dedupeGroups()
           groupsInitializedAt = Date.now()
+          groupsInitializedFor = accountKey
         } catch (e: any) {
           this.error = e.message || 'Failed to initialize groups'
           logError('Groups init error:', e)
@@ -729,6 +750,7 @@ export const useGroupsStore = defineStore('groups', {
       const instancesStore = useInstancesStore()
       if (!instancesStore.isAuthenticated) return
 
+      const accountId = instancesStore.activeAccountId
       try {
         this.followedTagsError = null
         const client = this.getClient()
@@ -747,15 +769,22 @@ export const useGroupsStore = defineStore('groups', {
           if (!page.nextMaxId || page.nextMaxId === maxId) break
           maxId = page.nextMaxId
         }
+        // Switched accounts mid-fetch — these memberships belong to the old one
+        if (instancesStore.activeAccountId !== accountId) return
         this.followedTags = tags
 
         // Update membership status for known groups
         const followedTagNames = new Set(tags.map(t => t.name.toLowerCase()))
-        
-        this.groups = this.groups.map(group => ({
-          ...group,
-          isMember: followedTagNames.has(group.tag.toLowerCase())
-        }))
+
+        // A join/leave still in flight was sent after this list was read —
+        // keep its optimistic state instead of flipping the button back
+        this.groups = this.groups.map(group => {
+          const key = group.tag.toLowerCase()
+          return {
+            ...group,
+            isMember: this.pendingTags[key] ? group.isMember : followedTagNames.has(key),
+          }
+        })
 
         // Add any followed tags that aren't in our featured list
         for (const tag of tags) {
@@ -793,18 +822,19 @@ export const useGroupsStore = defineStore('groups', {
       const key = tag.toLowerCase()
       this.pendingTags = { ...this.pendingTags, [key]: true }
 
-      const groupIndex = this.groups.findIndex((g) => g.tag.toLowerCase() === key)
-      const wasMember = groupIndex !== -1 ? this.groups[groupIndex]!.isMember : false
-      if (groupIndex !== -1) {
-        this.groups[groupIndex]!.isMember = true
-      }
+      // Look the group up again after each await — init/dedupe replace `groups`
+      const findGroup = () => this.groups.find((g) => g.tag.toLowerCase() === key)
+      const before = findGroup()
+      const wasMember = before ? before.isMember : false
+      if (before) before.isMember = true
 
       try {
         const client = this.getClient()
-        const result = await client.v1.tags.$select(tag).follow()
+        const result = await client.v1.tags.$select(tagPath(tag)).follow()
 
-        if (groupIndex !== -1) {
-          this.groups[groupIndex]!.isMember = true
+        const current = findGroup()
+        if (current) {
+          current.isMember = true
         } else {
           // Add as new group
           this.groups.push({
@@ -824,9 +854,8 @@ export const useGroupsStore = defineStore('groups', {
 
         return result
       } catch (e: any) {
-        if (groupIndex !== -1) {
-          this.groups[groupIndex]!.isMember = wasMember
-        }
+        const current = findGroup()
+        if (current) current.isMember = wasMember
         logError('Failed to join group:', e)
         throw e
       } finally {
@@ -847,22 +876,23 @@ export const useGroupsStore = defineStore('groups', {
 
       const key = tag.toLowerCase()
       this.pendingTags = { ...this.pendingTags, [key]: true }
-      const groupIndex = this.groups.findIndex((g) => g.tag.toLowerCase() === key)
-      const wasMember = groupIndex !== -1 ? this.groups[groupIndex]!.isMember : true
-      if (groupIndex !== -1) {
-        this.groups[groupIndex]!.isMember = false
-      }
-      const prevFollowed = this.followedTags
+      const findGroup = () => this.groups.find((g) => g.tag.toLowerCase() === key)
+      const before = findGroup()
+      const wasMember = before ? before.isMember : true
+      if (before) before.isMember = false
+      const removed = this.followedTags.find((t) => t.name.toLowerCase() === key)
       this.followedTags = this.followedTags.filter((t) => t.name.toLowerCase() !== key)
 
       try {
         const client = this.getClient()
-        await client.v1.tags.$select(tag).unfollow()
+        await client.v1.tags.$select(tagPath(tag)).unfollow()
       } catch (e: any) {
-        if (groupIndex !== -1) {
-          this.groups[groupIndex]!.isMember = wasMember
+        const current = findGroup()
+        if (current) current.isMember = wasMember
+        // Put back only this tag — a whole-list snapshot would undo other joins
+        if (removed && !this.followedTags.some((t) => t.name.toLowerCase() === key)) {
+          this.followedTags = [...this.followedTags, removed]
         }
-        this.followedTags = prevFollowed
         logError('Failed to leave group:', e)
         throw e
       } finally {
@@ -894,7 +924,7 @@ export const useGroupsStore = defineStore('groups', {
         const fetchAccount =
           instancesStore.activeAccount ||
           instancesStore.instances.find((i) => i.accessToken)
-        const statuses = await client.v1.timelines.tag.$select(tag).list({
+        const statuses = await client.v1.timelines.tag.$select(tagPath(tag)).list({
           limit: 20
         })
 
@@ -939,7 +969,7 @@ export const useGroupsStore = defineStore('groups', {
         const fetchAccount =
           instancesStore.activeAccount ||
           instancesStore.instances.find((i) => i.accessToken)
-        const statuses = await client.v1.timelines.tag.$select(tag).list({
+        const statuses = await client.v1.timelines.tag.$select(tagPath(tag)).list({
           maxId: this.maxId,
           limit: 20
         })
@@ -1044,6 +1074,9 @@ export const useGroupsStore = defineStore('groups', {
 
     cacheTimeline(tag: string, scrollY = 0) {
       const key = tag.toLowerCase()
+      // Only snapshot a loaded feed for this tag — caching a still-loading
+      // (empty) or another tag's timeline would restore as "No posts yet"
+      if (!this.groupTimeline.length || this.currentGroupTag?.toLowerCase() !== key) return
       const next = { ...this.timelineCache }
       // Re-insert to mark most recent; evict least-recent beyond the cap
       delete next[key]
@@ -1069,6 +1102,10 @@ export const useGroupsStore = defineStore('groups', {
       const cached = this.timelineCache[key]
       if (!cached) return null
       cached.cachedAt = ++timelineCacheClock
+      // Supersede any fetch still in flight for the tag we're leaving
+      timelineRequestId++
+      this.isLoadingTimeline = false
+      this.isLoadingMore = false
       this.groupTimeline = [...cached.timeline]
       this.maxId = cached.maxId
       this.hasMore = cached.hasMore
