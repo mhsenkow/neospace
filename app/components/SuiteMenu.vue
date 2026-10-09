@@ -198,7 +198,8 @@ onUnmounted(() => {
   background: transparent;
   color: inherit;
   cursor: pointer;
-  opacity: 0.72;
+  // ≥3:1 for the glyph (the only cue for this control) — 0.72 read ~2.9:1
+  opacity: 0.88;
   transition: opacity 0.2s ease, color 0.2s ease, background 0.2s ease;
   touch-action: manipulation;
 
@@ -321,7 +322,6 @@ onUnmounted(() => {
 
 .suite-menu__tile-blurb {
   font-size: 0.625rem;
-  opacity: 0.75;
   line-height: 1.3;
 }
 

@@ -374,6 +374,7 @@ onUnmounted(() => {
             ref="turnstileRef"
             class="notes-turnstile"
             :class="{ 'notes-turnstile--compact': keyboardOpen }"
+            role="group"
             aria-label="Bot verification"
           />
 
@@ -641,7 +642,8 @@ onUnmounted(() => {
   font-size: max(16px, 1rem);
   color: var(--neo-text-primary);
   background: var(--neo-bg-primary);
-  border: 1px solid var(--neo-border-color-dark);
+  // Form edge ≥3:1 (WCAG 1.4.11) — the rule tone was ~1.5:1 on light themes
+  border: 1px solid var(--neo-input-border, var(--neo-border-color-dark));
   border-radius: 6px;
   box-sizing: border-box;
 

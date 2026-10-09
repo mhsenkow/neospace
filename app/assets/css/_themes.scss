@@ -46,7 +46,9 @@
   --neo-text-primary: #{$ink};
   --neo-text-secondary: #{$mute};
   --neo-text-tertiary: color-mix(in srgb, #{$mute} 88%, #{$ink});
-  --neo-text-quaternary: color-mix(in srgb, #{$mute} 55%, #{$bg});
+  // Quaternary carries real text (hints, counters, timestamps, labels) — the old
+  // 55% mute/bg mix read ~2.2–3:1. Same AA floor as muted; disabled stays faint.
+  --neo-text-quaternary: var(--neo-text-secondary);
   --neo-text-muted: var(--neo-text-secondary);
   --neo-text-disabled: color-mix(in srgb, #{$mute} 55%, #{$bg});
   --neo-text-inverse: #{$bg};
@@ -78,7 +80,8 @@
   --neo-border-color-light: #{$hair};
   --neo-border-color-dark: #{$rule};
   // Form-control edge — hairlines are ~1.2:1; inputs need ≥3:1 (WCAG 1.4.11)
-  --neo-input-border: color-mix(in srgb, #{$mute} 72%, #{$bg});
+  // (80%: 72% read 2.95:1 against the light page bg)
+  --neo-input-border: color-mix(in srgb, #{$mute} 80%, #{$bg});
 
   // Per-scheme shadows — light defaults live in :root; dark themes need deeper lifts
   @if $scheme == dark {
@@ -113,7 +116,8 @@
     #161616,
     #1c1c1c,
     #f0f0ee,
-    #8a8a8a,
+    // mute: #8a8a8a read 4.2:1 on the #2a2a2a hover / tertiary panels
+    #939393,
     #3a3a3a,
     #2a2a2a,
     #e07a45,
@@ -137,6 +141,9 @@
     dark
   );
   --neo-border-width: 2px;
+  // Hair (#666) stays the border; as a fill it put muted text at 2.6:1
+  --neo-bg-tertiary: #262626;
+  --neo-bg-hover: #262626;
   --neo-text-inverse: #000000;
   --neo-text-on-accent: #000000;
   --neo-accent-soft: color-mix(in srgb, #ffff00 22%, transparent);
@@ -171,7 +178,8 @@
     #c5d0e0,
     #d6deeb,
     #7c3aed,
-    #dc2626,
+    // mark: #dc2626 read 4.1:1 as error text on the blue-grey page
+    #c81e1e,
     light
   );
   --neo-bg-secondary: rgba(255, 255, 255, 0.78);
