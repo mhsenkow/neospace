@@ -1422,8 +1422,8 @@ useHead({ title: 'Home | NeoSpace' })
             v-model:open="addMenuOpen"
             class="add-column-neo add-column-neo--mobile"
             align="end"
-            teleport
-            panel-class="add-column-menu-panel"
+            sheet
+            panel-class="add-column-menu-panel add-column-menu-panel--sheet"
             :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -3159,5 +3159,34 @@ useHead({ title: 'Home | NeoSpace' })
   border-radius: 12px;
   box-shadow: var(--neo-shadow-xl);
   padding: 0.5rem;
+}
+
+.add-column-menu-panel--sheet.neo-menu__panel {
+  width: 100%;
+  max-width: 100%;
+  max-height: min(78dvh, 36rem);
+  border-radius: 16px 16px 0 0;
+  box-shadow: none;
+  padding: 0.35rem 0.65rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+
+  .add-column-menu__title {
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    padding: 0.15rem 0.85rem 0.55rem;
+  }
+
+  .add-column-menu__item--group {
+    min-height: 48px;
+  }
+
+  .add-column-menu__filter-input {
+    min-height: 44px;
+    font-size: 16px; /* avoid iOS zoom */
+  }
+
+  .add-column-menu__hint {
+    padding-top: 0.5rem;
+    padding-bottom: 0.25rem;
+  }
 }
 </style>

@@ -179,6 +179,8 @@
   --neo-mobile-chrome-top: 0px;
   --neo-mobile-nav-h: 56px;
   --neo-subview-chrome-height: 44px;
+  // Board's bottom feed-pill dock (0 off the board / on desktop)
+  --neo-feed-tabs-h: 0px;
   
   --neo-container-sm: #{vars.$container-sm};
   --neo-container-md: #{vars.$container-md};
@@ -213,6 +215,14 @@
   --neo-chaos-stop-2: #{vars.$chaos-stop-2};
   --neo-chaos-stop-3: #{vars.$chaos-stop-3};
   --neo-chaos-fg: #{vars.$chaos-fg};
+}
+
+// Published on <html> (layout toggles the class) so body-teleported FABs and
+// toasts clear the pills-only strip above the mobile tab bar on the board.
+@media (max-width: 1023px) {
+  html.neo-route-board {
+    --neo-feed-tabs-h: 48px;
+  }
 }
 
 // Sticky secondary chrome (search / filters) inside #main-content.

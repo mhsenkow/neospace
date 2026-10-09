@@ -29,9 +29,10 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - **Refs:** `useComposeMedia.ts`, audit UX·M·M
 
 ### 4. Compose: polls + scheduling
+- **Status:** Scheduling done (`datetime-local` → `scheduledAt` on create; toast only — no scheduled list UI). Polls still open.
 - **Why:** Missing Mastodon posting features
 - **Scope:** Poll editor (options, expires, multiple); schedule picker; API fields on create
-- **Size:** L
+- **Size:** L (polls remaining)
 - **Refs:** `RealComposeBox.vue`, audit UX·M·L
 
 ### 5. Trusted Types + token isolation
@@ -96,7 +97,8 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - [ ] Self-host Google Fonts
 - [ ] Compose `#` / `:` autocomplete
 - [ ] Compose upload progress + cancel UI
-- [ ] Compose polls + scheduling
+- [x] Compose scheduling (`scheduledAt` picker)
+- [ ] Compose polls
 - [ ] Trusted Types + token isolation + CSP harden
 - [ ] Split `instances` store
 - [ ] Settings mobile drill-down

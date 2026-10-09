@@ -109,6 +109,9 @@ watchEffect(() => {
   const root = document.documentElement.style
   if (showMobileNav.value) root.removeProperty('--neo-bottom-chrome-h')
   else root.setProperty('--neo-bottom-chrome-h', '0px')
+  // Body-teleported FAB / toasts can't inherit --neo-feed-tabs-h from the layout —
+  // publish the board's pill dock on <html> (_structural.scss sizes it)
+  document.documentElement.classList.toggle('neo-route-board', isBoardRoute.value)
 })
 
 onMounted(async () => {
@@ -137,6 +140,7 @@ onMounted(async () => {
   onUnmounted(() => {
     for (const fn of cleanups) fn()
     stopShellLiveRefresh()
+    document.documentElement.classList.remove('neo-route-board')
   })
 
   loadSidebarRail()

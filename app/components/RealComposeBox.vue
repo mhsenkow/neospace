@@ -65,6 +65,13 @@ const props = withDefaults(
     acceptHandoff?: boolean
     /** Soft-disable (reply dock resolving, etc.) — keeps layout, blocks input/submit */
     disabled?: boolean
+    /**
+     * Handles to mention on send (not shown in the field) — Threads-style reply /
+     * ChatComposer pattern so the field stays empty and readable.
+     */
+    mentionAccts?: string[]
+    /** Hide the footer Post button — parent shows it in sheet header instead */
+    submitInHeader?: boolean
   }>(),
   {
     placeholder: "What's new?",
@@ -73,6 +80,7 @@ const props = withDefaults(
     lockGroup: false,
     acceptHandoff: true,
     disabled: false,
+    submitInHeader: false,
   },
 )
 
@@ -91,6 +99,8 @@ const spoilerText = ref('')
 const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
   props.initialVisibility || settingsStore.defaultVisibility,
 )
+/** datetime-local value (local wall clock); empty = post now */
+const scheduledLocal = ref('')
 const showCW = ref(false)
 const markSensitive = ref(settingsStore.defaultSensitive)
 const postLanguage = ref(settingsStore.defaultLanguage)
@@ -133,12 +143,38 @@ const composeAriaLabel = computed(() => {
   return props.title || props.placeholder || 'Write a post'
 })
 
+const hasSchedule = computed(() => !!scheduledLocal.value.trim())
+
 const submitAriaLabel = computed(() => {
-  if (isPosting.value) return props.inReplyToId ? 'Sending reply' : 'Posting'
+  if (isPosting.value) {
+    if (hasSchedule.value) return 'Scheduling'
+    return props.inReplyToId ? 'Sending reply' : 'Posting'
+  }
   if (isUploading.value) return 'Uploading attachments'
+  if (hasSchedule.value) return 'Schedule post'
   if (props.compact) return props.inReplyToId ? 'Send reply' : 'Post'
   return props.inReplyToId ? 'Reply' : 'Post'
 })
+
+/** Mastodon requires ≥5 minutes ahead — expose a floor for the picker */
+const scheduleMinLocal = computed(() => {
+  const d = new Date(Date.now() + 5 * 60 * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+})
+
+const scheduledAtIso = computed(() => {
+  const local = scheduledLocal.value.trim()
+  if (!local) return undefined
+  const when = new Date(local)
+  if (!Number.isFinite(when.getTime())) return undefined
+  return when.toISOString()
+})
+
+const isScheduledResult = (
+  result: mastodon.v1.Status | mastodon.v1.ScheduledStatus,
+): result is mastodon.v1.ScheduledStatus =>
+  'scheduledAt' in result && typeof (result as mastodon.v1.ScheduledStatus).scheduledAt === 'string' && !('account' in result)
 
 /** Current post is a private mention/DM (locked or user-chosen) */
 const isDirectCompose = computed(
@@ -256,6 +292,27 @@ const groupTagSuffix = computed(() => {
 })
 
 const effectiveMaxLength = computed(() => maxLength.value - groupTagSuffix.value.length)
+/** Mentions added on send (not shown) still count toward the limit */
+const mentionPrefixLen = computed(() => {
+  let scratch = content.value.trim()
+  let added = 0
+  for (const raw of props.mentionAccts || []) {
+    const acct = raw.replace(/^@/, '').trim()
+    if (!acct) continue
+    const mention = `@${acct}`
+    const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const already = new RegExp(
+      `(?:^|[\\s\\u200B])${escaped}(?=$|[\\s\\u200B]|[^\\w.])`,
+      'i',
+    ).test(` ${scratch} `)
+    if (!already) {
+      added += mastodonLength(mention) + (scratch ? 1 : 0)
+      scratch = scratch ? `${mention} ${scratch}` : mention
+    }
+  }
+  return added
+})
+
 /** Count status body + quote URL + CW the way Mastodon weighs characters */
 const characterCount = computed(() => {
   let body = content.value
@@ -264,7 +321,7 @@ const characterCount = computed(() => {
     body = `${body.trim()}${body.trim() ? '\n\n' : ''}${quote}`
   }
   const cw = showCW.value ? spoilerText.value : ''
-  return mastodonLength(body) + (cw ? mastodonLength(cw) : 0)
+  return mastodonLength(body) + mentionPrefixLen.value + (cw ? mastodonLength(cw) : 0)
 })
 const isOverLimit = computed(() => characterCount.value > effectiveMaxLength.value)
 const isNearLimit = computed(
@@ -372,12 +429,28 @@ const resetForm = () => {
   showCW.value = false
   markSensitive.value = settingsStore.defaultSensitive
   visibility.value = props.initialVisibility || settingsStore.defaultVisibility
+  scheduledLocal.value = ''
   selectedGroupTag.value = props.initialGroupTag
     ? props.initialGroupTag.replace(/^#/, '')
     : null
   clearAttachments()
   error.value = null
   closeMentions()
+}
+
+const clearSchedule = () => {
+  scheduledLocal.value = ''
+}
+
+const formatScheduleAnnounce = (iso: string) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(iso))
+  } catch {
+    return iso
+  }
 }
 
 /** @-mention autocomplete */
@@ -468,6 +541,23 @@ watch(
   },
 )
 
+const prependMentions = (text: string) => {
+  let body = text.trim()
+  const accts = (props.mentionAccts || [])
+    .map((a) => a.replace(/^@/, '').trim())
+    .filter(Boolean)
+  for (const acct of accts) {
+    const mention = `@${acct}`
+    const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const already = new RegExp(
+      `(?:^|[\\s\\u200B])${escaped}(?=$|[\\s\\u200B]|[^\\w.])`,
+      'i',
+    ).test(` ${body} `)
+    if (!already) body = body ? `${mention} ${body}` : mention
+  }
+  return body
+}
+
 const handlePost = async () => {
   if (!canPost.value) return
 
@@ -487,7 +577,7 @@ const handlePost = async () => {
   error.value = null
 
   try {
-    let body = content.value
+    let body = prependMentions(content.value)
     const quote = props.quoteUrl?.trim()
     if (quote && !body.includes(quote)) {
       body = `${body.trim()}\n\n${quote}`
@@ -505,7 +595,11 @@ const handlePost = async () => {
         ? 'direct'
         : visibility.value
 
-    const status = await statusStore.postStatus(body, {
+    if (hasSchedule.value && !scheduledAtIso.value) {
+      throw new Error('Pick a valid schedule time')
+    }
+
+    const result = await statusStore.postStatus(body, {
       visibility: postVisibility,
       spoilerText: showCW.value ? spoilerText.value : undefined,
       mediaIds: mediaIds.value,
@@ -513,11 +607,16 @@ const handlePost = async () => {
       inReplyToId: props.inReplyToId,
       language: postLanguage.value || undefined,
       quotedStatusId: props.quoteContext?.id || undefined,
+      scheduledAt: scheduledAtIso.value,
     })
     clearDraft()
     resetForm()
-    emit('posted', status)
-    announcePosted(props.inReplyToId ? 'Reply posted' : 'Posted')
+    if (isScheduledResult(result)) {
+      announcePosted(`Scheduled for ${formatScheduleAnnounce(result.scheduledAt)}`)
+    } else {
+      emit('posted', result)
+      announcePosted(props.inReplyToId ? 'Reply posted' : 'Posted')
+    }
     nextTick(() => {
       textareaRef.value?.focus()
       if (props.initialText && content.value === props.initialText) {
@@ -534,6 +633,25 @@ const handlePost = async () => {
     isPosting.value = false
   }
 }
+
+const submitLabel = computed(() => {
+  if (isPosting.value) {
+    if (hasSchedule.value) return 'Scheduling…'
+    return props.inReplyToId ? 'Sending…' : 'Posting…'
+  }
+  if (isUploading.value) return 'Uploading…'
+  if (hasSchedule.value) return 'Schedule'
+  if (props.inReplyToId) return 'Reply'
+  if (isDirectCompose.value) return 'Send'
+  return 'Post'
+})
+
+defineExpose({
+  submit: handlePost,
+  canPost,
+  isPosting,
+  submitLabel,
+})
 
 const cwInputRef = ref<HTMLInputElement | null>(null)
 
@@ -700,7 +818,9 @@ const dismissHandoffNotice = () => {
 onMounted(() => {
   restoreDraft()
   applyDraft()
-  if (props.inReplyToId && props.initialText) {
+  // Compact reply dock: don't auto-focus (avoids keyboard jump on open).
+  // Full reply compose with prefill: caret after mentions.
+  if (props.inReplyToId && props.initialText && !props.compact) {
     nextTick(() => {
       const ta = textareaRef.value
       if (!ta) return
@@ -727,6 +847,7 @@ onUnmounted(() => {
       'compose--dragging': isDragging,
       'compose--compact': compact,
       'compose--expanded': compactExpanded,
+      'compose--header-submit': submitInHeader,
     }"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
@@ -1010,16 +1131,17 @@ onUnmounted(() => {
           type="button"
           class="compose-tool"
           :class="{ 'compose-tool--active': showCW }"
-          aria-label="CW: content warning"
+          aria-label="Content warning"
           title="Content warning"
           :aria-pressed="showCW"
           :disabled="isPosting"
           @click="toggleCW"
         >
-          CW
+          <span aria-hidden="true">CW</span>
         </button>
 
-        <div v-if="!isLockedDirect" class="compose-visibility">
+        <!-- Compact replies inherit parent visibility — don't crowd the dock -->
+        <div v-if="!isLockedDirect && !compact" class="compose-visibility">
           <select
             v-model="visibility"
             class="compose-visibility-select"
@@ -1031,12 +1153,43 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
-        <span v-else class="compose-visibility-lock" title="Only mentioned people can see this">
+        <span
+          v-else-if="isLockedDirect && !compact"
+          class="compose-visibility-lock"
+          title="Only mentioned people can see this"
+        >
           <NeoIcon name="message" :size="14" :stroke="2" />
           Direct
         </span>
 
-        <label v-if="!isDirectCompose" class="compose-language">
+        <!-- Place this cell in time — Mastodon scheduled_at (≥5 min) -->
+        <div v-if="!compact" class="compose-schedule">
+          <label class="compose-schedule__field">
+            <span class="sr-only">Schedule for</span>
+            <input
+              v-model="scheduledLocal"
+              type="datetime-local"
+              class="compose-schedule-input"
+              :min="scheduleMinLocal"
+              :disabled="isPosting"
+              :aria-label="hasSchedule ? 'Scheduled post time' : 'Schedule post for later'"
+              title="Schedule — place this cell in time"
+            />
+          </label>
+          <button
+            v-if="hasSchedule"
+            type="button"
+            class="compose-schedule__clear"
+            :disabled="isPosting"
+            aria-label="Clear schedule — post now"
+            title="Post now"
+            @click="clearSchedule"
+          >
+            ×
+          </button>
+        </div>
+
+        <label v-if="!isDirectCompose && !compact" class="compose-language">
           <span class="sr-only">Post language</span>
           <select
             v-model="postLanguage"
@@ -1062,7 +1215,7 @@ onUnmounted(() => {
         </span>
       </div>
 
-      <div v-if="!compact" class="compose-actions">
+      <div class="compose-actions">
         <span
           class="sr-only"
           aria-live="polite"
@@ -1071,8 +1224,9 @@ onUnmounted(() => {
         <span
           class="compose-counter"
           :class="{
-            'compose-counter--warning': characterCount > effectiveMaxLength * 0.9,
+            'compose-counter--warning': isNearLimit,
             'compose-counter--error': isOverLimit,
+            'compose-counter--quiet': !isNearLimit && !isOverLimit && (compact || submitInHeader),
           }"
           aria-hidden="true"
         >
@@ -1080,28 +1234,18 @@ onUnmounted(() => {
         </span>
 
         <button
+          v-if="!compact && !submitInHeader"
           type="button"
           class="compose-submit neo-btn neo-btn--primary"
           :disabled="!canPost"
+          :aria-label="submitAriaLabel"
           :title="submitShortcutTitle"
           :aria-keyshortcuts="submitKeyshortcuts"
           @click="handlePost"
         >
-          <span v-if="isPosting">{{ isDirectCompose ? 'Sending…' : 'Posting…' }}</span>
-          <span v-else-if="isUploading">Uploading…</span>
-          <span v-else>{{ isDirectCompose ? 'Send' : 'Post' }}</span>
+          {{ submitLabel }}
         </button>
       </div>
-      <span
-        v-else
-        class="compose-counter"
-        :class="{
-          'compose-counter--warning': characterCount > effectiveMaxLength * 0.9,
-          'compose-counter--error': isOverLimit,
-        }"
-      >
-        {{ characterCount }}/{{ effectiveMaxLength }}
-      </span>
     </div>
   </div>
 </template>
@@ -1686,20 +1830,35 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
   flex-shrink: 0;
   margin-top: auto;
   padding-top: 0.35rem;
   border-top: 1px solid var(--neo-border-color);
   cursor: default;
+
+  /* Threads sheet: tools left, counter right — Post lives in the header */
+  .compose--header-submit & {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
 }
 
 .compose-tools {
   display: flex;
   align-items: center;
   gap: 0.15rem;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .compose-file {
@@ -1777,6 +1936,62 @@ onUnmounted(() => {
   }
 }
 
+.compose-schedule {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: 0.25rem;
+  flex-shrink: 0;
+}
+
+.compose-schedule-input {
+  max-width: 11.5rem;
+  padding: 0.3rem 0.35rem;
+  font-family: var(--neo-font-family-ui);
+  font-size: 0.6875rem;
+  background-color: var(--neo-bg-tertiary);
+  color: var(--neo-text-primary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
+  color-scheme: inherit;
+
+  &:focus {
+    outline: none;
+    border-color: var(--neo-accent);
+  }
+
+  &:not(:placeholder-shown),
+  &:valid:not([value='']) {
+    border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
+  }
+}
+
+.compose-schedule__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--neo-radius-sm);
+  background: transparent;
+  color: var(--neo-text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--neo-text-primary);
+    background: var(--neo-bg-tertiary);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
 .compose-media-count {
   margin-left: 0.35rem;
   font-size: 0.6875rem;
@@ -1787,13 +2002,16 @@ onUnmounted(() => {
 .compose-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  flex-shrink: 0;
 }
 
 .compose-counter {
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 
   &--warning {
     color: var(--neo-warning);
@@ -1803,10 +2021,16 @@ onUnmounted(() => {
     color: var(--neo-danger);
     font-weight: 600;
   }
+
+  /* Quiet until you're near the limit — less chrome in reply docks / sheet footers */
+  &--quiet {
+    opacity: 0.55;
+  }
 }
 
 .compose-submit {
-  min-width: 5.5rem;
+  min-width: 4.5rem;
+  flex-shrink: 0;
 }
 
 .compose-submit:disabled {

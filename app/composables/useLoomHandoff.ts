@@ -12,6 +12,12 @@ import {
   peekPersistedLoomShare,
 } from '~/stores/composeHandoff'
 import { BRUH_ORIGINS, bruhShareText, isBruhOrigin, isBruhShare } from '~/utils/bruhHandoff'
+import {
+  NOTEBOOK_ORIGINS,
+  isNotebookOrigin,
+  isNotebookShare,
+  notebookShareText,
+} from '~/utils/notebookHandoff'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useInstancesStore } from '~/stores/instances'
 
@@ -79,6 +85,7 @@ export function useLoomHandoff() {
   /** Per-source accept flags — bruh upgrades must not lock out a later Loom share. */
   let loomShareAccepted = false
   let bruhShareAccepted = false
+  let notebookShareAccepted = false
   let bruhUpgradeTimer: number | null = null
 
   const ackLoom = (origin: string) => {
@@ -101,6 +108,16 @@ export function useLoomHandoff() {
     }
   }
 
+  const ackNotebook = (origin: string) => {
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'neospace-notebook-ack', v: 1 }, origin)
+      }
+    } catch {
+      /* opener may be gone */
+    }
+  }
+
   const pingSuiteReady = () => {
     try {
       if (typeof window === 'undefined' || !window.opener || window.opener.closed) return
@@ -109,6 +126,9 @@ export function useLoomHandoff() {
       }
       for (const origin of BRUH_ORIGINS) {
         window.opener.postMessage({ type: 'neospace-bruh-ready', v: 1 }, origin)
+      }
+      for (const origin of NOTEBOOK_ORIGINS) {
+        window.opener.postMessage({ type: 'neospace-notebook-ready', v: 1 }, origin)
       }
     } catch {
       /* cross-origin opener may throw */
@@ -129,7 +149,7 @@ export function useLoomHandoff() {
     share: {
       story: string
       text: string
-      source: 'loom' | 'bruh'
+      source: 'loom' | 'bruh' | 'notebook'
       imageDataUrl?: string
       imageName?: string
     },
@@ -167,9 +187,26 @@ export function useLoomHandoff() {
     })()
   }
 
+  /** Throughline → compose: text-only cell / note. */
+  const onNotebookMessage = (e: MessageEvent) => {
+    if (!isNotebookOrigin(e.origin) || !isNotebookShare(e.data)) return
+    ackNotebook(e.origin)
+    const text = notebookShareText(e.data)
+    if (!text) return
+    const already = notebookShareAccepted
+    notebookShareAccepted = true
+    void (async () => {
+      await deliverShare({ story: '', text, source: 'notebook' }, { open: !already })
+    })()
+  }
+
   const onLoomMessage = (e: MessageEvent) => {
     if (isBruhOrigin(e.origin)) {
       onBruhMessage(e)
+      return
+    }
+    if (isNotebookOrigin(e.origin)) {
+      onNotebookMessage(e)
       return
     }
     if (!isLoomOrigin(e.origin)) return
@@ -229,12 +266,13 @@ export function useLoomHandoff() {
     pingSuiteReady()
 
     const composeFrom = String(route.query.compose || '')
-    const fromQuery = composeFrom === 'loom' || composeFrom === 'bruh'
+    const fromQuery =
+      composeFrom === 'loom' || composeFrom === 'bruh' || composeFrom === 'notebook'
     if (fromQuery) {
       const share = {
         story: typeof route.query.story === 'string' ? route.query.story : '',
         text: typeof route.query.text === 'string' ? route.query.text : '',
-        source: composeFrom as 'loom' | 'bruh',
+        source: composeFrom as 'loom' | 'bruh' | 'notebook',
       }
       // Drop compose params so refresh / back doesn't re-fire the handoff.
       await router.replace({ path: route.path === '/login' ? '/login' : '/', query: {} })
@@ -246,13 +284,21 @@ export function useLoomHandoff() {
         await deliverShare(share)
         if (composeFrom === 'loom') loomShareAccepted = composeHandoff.hasPending
         if (composeFrom === 'bruh') markBruhAcceptedSoon()
+        if (composeFrom === 'notebook') notebookShareAccepted = true
       }
       return
     }
 
     // Give optional postMessage a short window when we weren't opened via query
     await new Promise((r) => setTimeout(r, 1200))
-    if (composeHandoff.hasPending || loomShareAccepted || bruhShareAccepted) return
+    if (
+      composeHandoff.hasPending ||
+      loomShareAccepted ||
+      bruhShareAccepted ||
+      notebookShareAccepted
+    ) {
+      return
+    }
     const persisted = peekPersistedLoomShare()
     if (!hasSharePayload(persisted) || !persisted) return
     if (!instancesStore.isAuthenticated) {

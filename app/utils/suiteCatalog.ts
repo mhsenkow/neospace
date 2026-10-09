@@ -61,7 +61,7 @@ export function suiteGroups(opts?: {
         mark('notebook', {
           id: 'notebook',
           label: 'notebook',
-          blurb: 'cells · teach',
+          blurb: 'note · cells',
           href: SUITE_URLS.notebook,
         }),
         mark('wordcount', {
