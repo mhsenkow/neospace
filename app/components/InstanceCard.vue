@@ -2,6 +2,7 @@
 import type { CuratedInstance } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
+import { getMainScroller } from '~/utils/pageScroll'
 
 const props = defineProps<{
   instance: CuratedInstance
@@ -56,7 +57,9 @@ onMounted(() => {
         observer.disconnect()
       }
     },
-    { rootMargin: '120px' },
+    // Mobile shell scrolls #main-content — margin on the viewport root never
+    // reaches past that clip, so prefetch against the real scroller
+    { root: getMainScroller(), rootMargin: '120px' },
   )
   observer.observe(el)
   onUnmounted(() => observer.disconnect())
@@ -135,6 +138,7 @@ const handleSignIn = async () => {
         class="instance-card__btn instance-card__btn--primary"
         :disabled="isSigningIn"
         :aria-busy="isSigningIn"
+        :aria-label="isSigningIn ? undefined : `Sign in to ${instance.domain}`"
         @click="handleSignIn"
       >
         <span v-if="isSigningIn" class="instance-card__spinner" aria-hidden="true" />
@@ -150,6 +154,7 @@ const handleSignIn = async () => {
         class="instance-card__btn"
         :disabled="isAdding"
         :aria-busy="isAdding"
+        :aria-label="isAdding ? undefined : `Watch ${instance.domain}`"
         :title="isGated ? 'You can still watch — public posts may need sign-in' : 'Browse public posts without an account'"
         @click="handleWatch"
       >
@@ -164,7 +169,12 @@ const handleSignIn = async () => {
         tabindex="-1"
       >Watching</span>
 
-      <button type="button" class="instance-card__btn instance-card__btn--ghost" @click="handleVisit">
+      <button
+        type="button"
+        class="instance-card__btn instance-card__btn--ghost"
+        :aria-label="`Preview ${instance.domain}`"
+        @click="handleVisit"
+      >
         Preview
       </button>
     </footer>
@@ -200,6 +210,7 @@ const handleSignIn = async () => {
 
 .instance-card__titles {
   min-width: 0;
+  overflow-wrap: anywhere;
 
   h3 {
     margin: 0;

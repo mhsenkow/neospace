@@ -106,6 +106,18 @@ const runPeek = async () => {
   }
 }
 
+/** Persistent polite region — the peek box mounts with its text, which SRs skip */
+const peekAnnouncement = computed(() => {
+  if (!peekHost.value) return ''
+  if (peekLoading.value) return `Checking ${peekHost.value}…`
+  if (!peekTitle.value) return ''
+  const bits = [peekTitle.value]
+  if (peekUsers.value != null) bits.push(`${peekUsers.value.toLocaleString()} monthly active`)
+  if (peekOpen.value === true) bits.push('registrations open')
+  else if (peekOpen.value === false) bits.push('registrations closed')
+  return bits.join(', ')
+})
+
 watch(query, () => {
   localError.value = null
   if (showCustom.value) schedulePeek()
@@ -157,6 +169,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (peekTimer) clearTimeout(peekTimer)
+  peekRace.abort()
 })
 </script>
 
@@ -196,7 +209,8 @@ onUnmounted(() => {
         </p>
 
         <!-- Live peek -->
-        <div v-if="peekHost && (peekLoading || peekTitle || peekFailed)" class="server-picker__peek" aria-live="polite">
+        <p class="sr-only" role="status">{{ peekAnnouncement }}</p>
+        <div v-if="peekHost && (peekLoading || peekTitle || peekFailed)" class="server-picker__peek">
           <div v-if="peekLoading" class="server-picker__peek-loading">Checking {{ peekHost }}…</div>
           <div v-else-if="peekFailed" class="server-picker__peek-error" role="alert">
             Couldn’t reach {{ peekHost }}
