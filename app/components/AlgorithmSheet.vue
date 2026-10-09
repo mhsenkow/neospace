@@ -8,6 +8,7 @@ import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useColumnsStore } from '~/stores/columns'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
+import { useOverlayStore } from '~/stores/overlay'
 import {
   ALGORITHM_SENTENCE_EXAMPLES,
   ALGORITHM_SOURCES,
@@ -22,6 +23,8 @@ const algorithms = useAlgorithmsStore()
 const columnsStore = useColumnsStore()
 const instancesStore = useInstancesStore()
 const toast = useToastStore()
+// Resolve in setup — composables that inject() aren't reliable from a click handler
+const router = useRouter()
 
 const open = computed({
   get: () => algorithms.editorOpen,
@@ -208,7 +211,6 @@ async function save(andOpen: boolean) {
     }
     if (andOpen) {
       columnsStore.ensureFocusedView('algorithm', recipe.id)
-      const router = useRouter()
       if (router.currentRoute.value.path !== '/') {
         await router.push('/')
       }
@@ -267,9 +269,22 @@ async function copyShareLink() {
   }
 }
 
-function removeRecipe() {
+async function removeRecipe() {
   if (!editing.value || editing.value.builtin) return
   const id = editing.value.id
+  const usedBy = columnsStore.columns.filter(
+    (c) => c.feedType === 'algorithm' && c.algorithmId === id,
+  ).length
+  // No undo for the recipe itself (column toasts can't bring it back) — confirm first
+  const ok = await useOverlayStore().openConfirm({
+    title: `Delete ${editing.value.name}?`,
+    body: usedBy
+      ? `This also removes its ${usedBy === 1 ? 'column' : `${usedBy} columns`} from your board. Share links you sent keep working.`
+      : 'Share links you sent keep working.',
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok || algorithms.editingId !== id) return
   algorithms.remove(id)
   for (const col of [...columnsStore.columns]) {
     if (col.feedType === 'algorithm' && col.algorithmId === id) {
@@ -346,7 +361,7 @@ function removeRecipe() {
               />
             </label>
 
-            <div class="algo-sheet__examples" aria-label="Try an example">
+            <div class="algo-sheet__examples" role="group" aria-label="Try an example">
               <button
                 v-for="ex in ALGORITHM_SENTENCE_EXAMPLES"
                 :key="ex"
