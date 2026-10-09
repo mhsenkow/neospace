@@ -15,7 +15,7 @@ import { activeClient } from '~/composables/useMasto'
 import { sanitizeDisplayName, sanitizeStatusHtml, stripHtml } from '~/utils/sanitizeHtml'
 import { emojify, emojiUrlSet } from '~/utils/emojify'
 import { faceSpecFor, MOOD_GLYPH } from '~/utils/edwardFaces'
-import { accountLooksBot, statusKind } from '~/utils/edwardSemantics'
+import { accountLooksBot, lookupAcctFor, statusKind } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
 
 const props = defineProps<{
@@ -134,12 +134,24 @@ const followLabel = computed(() => {
   return 'follow'
 })
 
+/** acct as your server knows it — see lookupAcctFor */
+const lookupAcct = () =>
+  lookupAcctFor(
+    acct.value,
+    body.value.account?.url,
+    props.status._instanceUrl,
+    instancesStore.activeAccount?.url,
+  )
+
 const refreshRelationship = async () => {
   if (!canAuth.value || !acct.value) return
+  const postId = props.status.id
   try {
     const client = activeClient()
-    const found = await client.v1.accounts.lookup({ acct: acct.value })
+    const found = await client.v1.accounts.lookup({ acct: lookupAcct() })
     const rels = await client.v1.accounts.relationships.fetch({ id: [found.id] })
+    // Swapped to another post meanwhile — don't paint its follow button with this one
+    if (props.status.id !== postId) return
     const rel = rels[0]
     following.value = !!rel?.following
     followRequested.value = !!rel?.requested
@@ -153,7 +165,7 @@ const handleFollow = async () => {
   followBusy.value = true
   try {
     const client = activeClient()
-    const found = await client.v1.accounts.lookup({ acct: acct.value })
+    const found = await client.v1.accounts.lookup({ acct: lookupAcct() })
     if (following.value || followRequested.value) {
       await client.v1.accounts.$select(found.id).unfollow()
       following.value = false
@@ -790,6 +802,9 @@ watch(
   letter-spacing: 0.06em;
   text-transform: lowercase;
   cursor: pointer;
+  // "join #areallylonghashtag…" must wrap inside the panel, not widen it
+  max-width: 100%;
+  overflow-wrap: anywhere;
 
   &:hover:not(:disabled),
   &:focus-visible {
