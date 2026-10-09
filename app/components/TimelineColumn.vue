@@ -19,6 +19,7 @@ import {
   statusListKey,
 } from '~/utils/statusIdentity'
 import { statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
+import { useRankedFeed } from '~/composables/useRankedFeed'
 import { useSettingsStore } from '~/stores/settings'
 import { idLess } from '~/utils/compareId'
 import { httpStatusFrom, mapErrorToMessage } from '~/utils/friendlyError'
@@ -111,6 +112,21 @@ const loadAlgorithmPage = async (limit = 20, continueFrom?: string | null) => {
   }
   if (recipe.source === 'home' && !instancesStore.hasAuthenticatedInstance) {
     throw new Error('Sign in to run algorithms that use your home feed')
+  }
+
+  // X / Facebook / TikTok-style: ranked pages from a multi-source pool
+  if (recipe.ranker) {
+    const out: ExtendedStatus[] = []
+    let done = false
+    for (let round = 0; out.length < limit && round < 4; round++) {
+      const page = await rankedFeed.nextPage(recipe.ranker, !continueFrom && round === 0)
+      for (const s of page.statuses) if (statusMatchesRecipe(s, recipe)) out.push(s)
+      if (page.exhausted) {
+        done = true
+        break
+      }
+    }
+    return { statuses: out, nextCursor: done ? null : 'ranked', exhausted: done }
   }
 
   const collected: ExtendedStatus[] = []
@@ -219,6 +235,8 @@ const groupsStore = useGroupsStore()
 const columnsStore = useColumnsStore()
 const algorithmsStore = useAlgorithmsStore()
 algorithmsStore.hydrate()
+/** Session state for ranked recipes (pool, served posts, source cursors) */
+const rankedFeed = useRankedFeed()
 
 /**
  * Shallow: only whole-array replacements trigger. Cards make their own status

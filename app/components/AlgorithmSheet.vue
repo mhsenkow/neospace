@@ -4,6 +4,7 @@
  * Tabs: Describe (NL sentence) · Rules (manual).
  */
 
+import { RANKERS, type RankerId } from '~/utils/rankers'
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useColumnsStore } from '~/stores/columns'
 import { useInstancesStore } from '~/stores/instances'
@@ -52,6 +53,13 @@ const name = ref('')
 const description = ref('')
 const source = ref<AlgorithmSource>('home')
 const mediaOnly = ref(false)
+/** '' = newest first (filters only); otherwise a big-platform ranker */
+const ranker = ref<RankerId | ''>('')
+const rankerOptions = computed(() =>
+  (Object.keys(RANKERS) as RankerId[])
+    .filter((id) => !RANKERS[id].needsAuth || instancesStore.hasAuthenticatedInstance)
+    .map((id) => ({ value: id, label: RANKERS[id].short, hint: RANKERS[id].description })),
+)
 const noReblogs = ref(false)
 const noReplies = ref(false)
 const includeTags = ref('')
@@ -90,6 +98,7 @@ const liveSummary = computed(() =>
     excludeTags: excludeTags.value.split(/[\s,]+/).filter(Boolean).map((t) => t.replace(/^#/, '')),
     includeKeywords: includeKeywords.value.split(/,/).map((k) => k.trim()).filter(Boolean),
     excludeKeywords: excludeKeywords.value.split(/,/).map((k) => k.trim()).filter(Boolean),
+    ranker: ranker.value || undefined,
     createdAt: 0,
     updatedAt: 0,
   }),
@@ -140,6 +149,7 @@ function resetFromRecipe() {
     description.value = ''
     source.value = instancesStore.hasAuthenticatedInstance ? 'home' : 'local'
     mediaOnly.value = false
+    ranker.value = ''
     noReblogs.value = false
     noReplies.value = false
     includeTags.value = ''
@@ -152,6 +162,7 @@ function resetFromRecipe() {
   description.value = r.description || ''
   source.value = r.source
   mediaOnly.value = !!r.mediaOnly
+  ranker.value = r.ranker || ''
   noReblogs.value = !!r.noReblogs
   noReplies.value = !!r.noReplies
   includeTags.value = (r.includeTags || []).map((t) => `#${t}`).join(' ')
@@ -204,6 +215,7 @@ async function save(andOpen: boolean) {
       excludeTags: excludeTags.value,
       includeKeywords: includeKeywords.value,
       excludeKeywords: excludeKeywords.value,
+      ranker: ranker.value || undefined,
     })
     if (!recipe) {
       toast.show({ message: 'Couldn’t save — too many custom algorithms?' })
@@ -240,6 +252,7 @@ async function copyShareLink() {
     excludeTags: excludeTags.value,
     includeKeywords: includeKeywords.value,
     excludeKeywords: excludeKeywords.value,
+    ranker: ranker.value || undefined,
   })
   if (!recipe) {
     toast.show({ message: 'Couldn’t prepare share link' })
@@ -444,6 +457,37 @@ async function removeRecipe() {
                   {{ opt.label.replace(' (home)', '') }}
                 </label>
               </div>
+            </fieldset>
+
+            <fieldset class="algo-sheet__sources">
+              <legend>Ranking</legend>
+              <div class="algo-sheet__source-pills">
+                <label class="algo-sheet__pill" :class="{ 'algo-sheet__pill--on': !ranker }" title="Newest first">
+                  <input v-model="ranker" type="radio" value="" class="sr-only" @change="onRulesManualEdit">
+                  <NeoIcon v-if="!ranker" name="check" :size="14" :stroke="2.25" class="algo-sheet__check" />
+                  Newest
+                </label>
+                <label
+                  v-for="opt in rankerOptions"
+                  :key="opt.value"
+                  class="algo-sheet__pill"
+                  :class="{ 'algo-sheet__pill--on': ranker === opt.value }"
+                  :title="opt.hint"
+                >
+                  <input v-model="ranker" type="radio" :value="opt.value" class="sr-only" @change="onRulesManualEdit">
+                  <NeoIcon
+                    v-if="ranker === opt.value"
+                    name="check"
+                    :size="14"
+                    :stroke="2.25"
+                    class="algo-sheet__check"
+                  />
+                  {{ opt.label }}-style
+                </label>
+              </div>
+              <p v-if="ranker" class="algo-sheet__rank-hint">
+                {{ RANKERS[ranker].description }} Pulls from {{ RANKERS[ranker].sources.join(', ') }} — Source above is ignored.
+              </p>
             </fieldset>
 
             <div class="algo-sheet__toggles" role="group" aria-label="Filters">
@@ -812,6 +856,13 @@ async function removeRecipe() {
     font-weight: 600;
     color: var(--neo-text-muted);
   }
+}
+
+.algo-sheet__rank-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--neo-text-muted);
 }
 
 .algo-sheet__source-pills {

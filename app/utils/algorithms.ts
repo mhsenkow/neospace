@@ -4,6 +4,7 @@
  */
 
 import type { mastodon } from 'masto'
+import { RANKERS, type RankerId } from '~/utils/rankers'
 
 export type AlgorithmSource = 'home' | 'local' | 'federated'
 
@@ -19,6 +20,11 @@ export interface AlgorithmRecipe {
   excludeTags?: string[]
   includeKeywords?: string[]
   excludeKeywords?: string[]
+  /**
+   * Rank instead of reverse-chron: X / Facebook / TikTok-style ranking over
+   * a multi-source candidate pool (filters above still apply).
+   */
+  ranker?: RankerId
   /** Curator attribution (set when sharing / importing) */
   authorAcct?: string
   authorName?: string
@@ -41,9 +47,13 @@ export type AlgorithmSharePayload = {
   et?: string[]
   ik?: string[]
   ek?: string[]
+  /** ranker */
+  r?: RankerId
   a?: string
   an?: string
 }
+
+export const isRankerId = (v: unknown): v is RankerId => v === 'x' || v === 'facebook' || v === 'tiktok'
 
 export const ALGORITHM_SOURCES: { value: AlgorithmSource; label: string; needsAuth: boolean }[] = [
   { value: 'home', label: 'For You (home)', needsAuth: true },
@@ -157,6 +167,7 @@ export function recipeToSharePayload(recipe: AlgorithmRecipe): AlgorithmSharePay
   if (recipe.excludeTags?.length) payload.et = recipe.excludeTags
   if (recipe.includeKeywords?.length) payload.ik = recipe.includeKeywords
   if (recipe.excludeKeywords?.length) payload.ek = recipe.excludeKeywords
+  if (recipe.ranker) payload.r = recipe.ranker
   if (recipe.authorAcct) payload.a = recipe.authorAcct.slice(0, 80)
   if (recipe.authorName) payload.an = recipe.authorName.slice(0, 80)
   return payload
@@ -202,6 +213,7 @@ export function decodeAlgorithmShare(raw: string): AlgorithmSharePayload | null 
     for (const key of ['d', 'a', 'an'] as const) {
       if (parsed[key] !== undefined && typeof parsed[key] !== 'string') delete parsed[key]
     }
+    if (parsed.r !== undefined && !isRankerId(parsed.r)) delete parsed.r
     return parsed
   } catch {
     return null
@@ -222,6 +234,7 @@ export function sharePayloadToRecipe(payload: AlgorithmSharePayload, id?: string
     excludeTags: normalizeTagList(payload.et),
     includeKeywords: normalizeKeywordList(payload.ik),
     excludeKeywords: normalizeKeywordList(payload.ek),
+    ranker: isRankerId(payload.r) ? payload.r : undefined,
     // Encode caps these at 80; a hand-built link may not
     authorAcct: payload.a?.trim().slice(0, 80) || undefined,
     authorName: payload.an?.trim().slice(0, 80) || undefined,
@@ -237,9 +250,11 @@ export function buildShareUrl(origin: string, recipe: AlgorithmRecipe): string {
 
 export function recipeSummary(recipe: AlgorithmRecipe): string {
   const bits: string[] = []
-  bits.push(
-    recipe.source === 'home' ? 'For You' : recipe.source === 'local' ? 'Local' : 'Federated',
-  )
+  if (recipe.ranker) bits.push(`${RANKERS[recipe.ranker].short}-style ranking`)
+  else
+    bits.push(
+      recipe.source === 'home' ? 'For You' : recipe.source === 'local' ? 'Local' : 'Federated',
+    )
   if (recipe.mediaOnly) bits.push('media')
   if (recipe.noReblogs) bits.push('no boosts')
   if (recipe.noReplies) bits.push('no replies')
@@ -271,6 +286,19 @@ export function builtinRecipes(): AlgorithmRecipe[] {
       createdAt: now,
       updatedAt: now,
     },
+    ...(['x', 'facebook', 'tiktok'] as RankerId[]).map(
+      (id): AlgorithmRecipe => ({
+        id: `builtin-${id}`,
+        name: RANKERS[id].label,
+        description: RANKERS[id].description,
+        // TikTok-style works signed out (interest + popularity); X / Facebook lean on your network
+        source: RANKERS[id].needsAuth ? 'home' : 'federated',
+        ranker: id,
+        builtin: true,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ),
   ]
 }
 

@@ -166,6 +166,8 @@ const accountHandle = computed(() => {
 // useId: the same post can render in several board columns at once
 const cardLabelId = `status-author-${useId()}`
 const isReblog = computed(() => !!props.status.reblog)
+/** Set by ranked algorithm feeds (useRankedFeed) */
+const rankWhy = computed(() => (props.status as { _rankWhy?: string })._rankWhy || '')
 const reblogger = computed(() => (isReblog.value ? props.status.account : null))
 const collapsedRebloggers = computed(
   () => (props.status as CollapsedReblogStatus)._collapsedRebloggers,
@@ -748,6 +750,12 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     tabindex="0"
     @keydown="onCardKeydown"
   >
+    <!-- Ranked algorithm feeds say why this post is here -->
+    <p v-if="rankWhy && !isFlip" class="status-rank-why">
+      <NeoIcon name="sort" :size="12" :stroke="1.85" />
+      <span>{{ rankWhy }}</span>
+    </p>
+
     <!-- Reblog indicator -->
     <div v-if="isReblog && !isFlip" class="status-reblog">
       <NeoIcon name="reblog" :size="14" :stroke="2" />
@@ -1483,6 +1491,22 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 }
 
 // Reblog indicator
+.status-rank-why {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.35rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-tertiary);
+
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
 .status-reblog {
   display: flex;
   align-items: center;

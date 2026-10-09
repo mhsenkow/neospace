@@ -6,6 +6,7 @@
 import { defineStore } from 'pinia'
 import {
   builtinRecipes,
+  isRankerId,
   decodeAlgorithmShare,
   encodeAlgorithmShare,
   normalizeKeywordList,
@@ -15,6 +16,7 @@ import {
   type AlgorithmSource,
   type AlgorithmSharePayload,
 } from '~/utils/algorithms'
+import type { RankerId } from '~/utils/rankers'
 import { useInstancesStore } from './instances'
 
 const STORAGE_KEY = 'neospace_algorithms_v1'
@@ -57,6 +59,7 @@ function loadRecipes(): AlgorithmRecipe[] {
         excludeTags: normalizeTagList(c.excludeTags),
         includeKeywords: normalizeKeywordList(c.includeKeywords),
         excludeKeywords: normalizeKeywordList(c.excludeKeywords),
+        ranker: isRankerId(c.ranker) ? c.ranker : undefined,
         builtin: false,
       })
     }
@@ -126,6 +129,7 @@ export const useAlgorithmsStore = defineStore('algorithms', {
       excludeTags?: string | string[]
       includeKeywords?: string | string[]
       excludeKeywords?: string | string[]
+      ranker?: RankerId
       authorAcct?: string
       authorName?: string
     }): AlgorithmRecipe | null {
@@ -149,6 +153,7 @@ export const useAlgorithmsStore = defineStore('algorithms', {
           excludeTags: normalizeTagList(input.excludeTags),
           includeKeywords: normalizeKeywordList(input.includeKeywords),
           excludeKeywords: normalizeKeywordList(input.excludeKeywords),
+          ranker: isRankerId(input.ranker) ? input.ranker : undefined,
           authorAcct: input.authorAcct,
           authorName: input.authorName,
           createdAt: now,
@@ -171,6 +176,7 @@ export const useAlgorithmsStore = defineStore('algorithms', {
         existing.excludeTags = normalizeTagList(input.excludeTags)
         existing.includeKeywords = normalizeKeywordList(input.includeKeywords)
         existing.excludeKeywords = normalizeKeywordList(input.excludeKeywords)
+        existing.ranker = isRankerId(input.ranker) ? input.ranker : undefined
         if (input.authorAcct !== undefined) existing.authorAcct = input.authorAcct
         if (input.authorName !== undefined) existing.authorName = input.authorName
         existing.updatedAt = now
@@ -191,6 +197,7 @@ export const useAlgorithmsStore = defineStore('algorithms', {
         excludeTags: normalizeTagList(input.excludeTags),
         includeKeywords: normalizeKeywordList(input.includeKeywords),
         excludeKeywords: normalizeKeywordList(input.excludeKeywords),
+        ranker: isRankerId(input.ranker) ? input.ranker : undefined,
         authorAcct: input.authorAcct,
         authorName: input.authorName,
         createdAt: now,
