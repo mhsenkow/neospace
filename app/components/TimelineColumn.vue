@@ -1941,6 +1941,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.125rem;
+  // Title area owns the free space, so focus / close stay pinned right even
+  // when the hover-only reorder arrows (their old margin-left: auto) are hidden
+  flex: 1 1 auto;
   min-width: 0;
   border-radius: var(--neo-radius-md);
   user-select: none;
