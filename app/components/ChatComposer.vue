@@ -137,6 +137,10 @@ const {
   flushAltDescriptions,
   altMax,
   uploadAnnounce,
+  mediaStorageHost,
+  mediaOptimizeSummary,
+  peerTubeHint,
+  dismissPeerTubeHint,
   onPaste,
   onDragEnter,
   onDragLeave,
@@ -323,7 +327,37 @@ onMounted(() => {
         />
       </div>
 
-      <div v-if="attachments.length" class="chat-composer__media">
+      <aside v-if="peerTubeHint" class="chat-composer__peertube">
+        <p class="chat-composer__peertube-text">{{ peerTubeHint }}</p>
+        <div class="chat-composer__peertube-actions">
+          <a
+            class="chat-composer__peertube-link"
+            href="https://joinpeertube.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Find a PeerTube host</a>
+          <button
+            type="button"
+            class="chat-composer__peertube-dismiss"
+            aria-label="Dismiss PeerTube tip"
+            @click="dismissPeerTubeHint"
+          >
+            Dismiss
+          </button>
+        </div>
+      </aside>
+
+      <div v-if="attachments.length" class="chat-composer__media-block">
+        <p v-if="mediaStorageHost || mediaOptimizeSummary" class="chat-composer__commons">
+          <span v-if="mediaOptimizeSummary">{{ mediaOptimizeSummary }}</span>
+          <span
+            v-if="mediaOptimizeSummary && mediaStorageHost"
+            class="chat-composer__commons-sep"
+            aria-hidden="true"
+          >·</span>
+          <span v-if="mediaStorageHost">Stored on {{ mediaStorageHost }}</span>
+        </p>
+        <div class="chat-composer__media">
         <div
           v-for="(item, idx) in attachments"
           :key="item.localId"
@@ -384,6 +418,7 @@ onMounted(() => {
               @input="setDescription(item.localId, ($event.target as HTMLInputElement).value)"
             />
           </label>
+        </div>
         </div>
       </div>
 
@@ -523,8 +558,11 @@ onMounted(() => {
       display: none;
     }
 
-    .chat-composer__media {
+    .chat-composer__media-block {
       padding-bottom: 0.35rem;
+    }
+
+    .chat-composer__media {
       gap: 0.4rem;
     }
 
@@ -558,11 +596,71 @@ onMounted(() => {
   pointer-events: auto;
 }
 
+.chat-composer__media-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0 0.15rem 0.65rem;
+}
+
+.chat-composer__peertube {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--neo-border-color) 70%, var(--neo-accent));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--neo-bg-secondary) 88%, var(--neo-accent) 12%);
+}
+
+.chat-composer__peertube-text {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--neo-text-primary);
+}
+
+.chat-composer__peertube-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.chat-composer__peertube-link {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-accent);
+  text-decoration: none;
+}
+
+.chat-composer__peertube-dismiss {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.6875rem;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+}
+
+.chat-composer__commons {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--neo-text-tertiary);
+}
+
+.chat-composer__commons-sep {
+  margin: 0 0.3em;
+}
+
 .chat-composer__media {
   display: flex;
   gap: 0.65rem;
   overflow-x: auto;
-  padding: 0 0.15rem 0.65rem;
+  padding: 0;
   scrollbar-width: none;
 }
 

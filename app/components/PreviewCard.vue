@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { mastodon } from 'masto'
+import { resolvePeerTubeEmbed } from '~/utils/peertube'
 
 const props = defineProps<{
   card: mastodon.v1.PreviewCard
@@ -14,10 +15,84 @@ const hostname = computed(() => {
 })
 
 const hasImage = computed(() => !!props.card.image)
+
+const embedSrc = computed(() => resolvePeerTubeEmbed(props.card))
+
+const playing = ref(false)
+
+watch(
+  () => props.card.url,
+  () => {
+    playing.value = false
+  },
+)
+
+const startPlayback = () => {
+  if (!embedSrc.value) return
+  playing.value = true
+}
 </script>
 
 <template>
+  <div v-if="embedSrc" class="preview-card preview-card--video">
+    <div v-if="!playing" class="preview-card__poster">
+      <button
+        type="button"
+        class="preview-card__play-hit"
+        :aria-label="card.title ? `Play ${card.title}` : 'Play video'"
+        @click="startPlayback"
+      >
+        <span v-if="hasImage" class="preview-card__media preview-card__media--poster">
+          <img
+            :src="card.image!"
+            alt=""
+            class="preview-card__image"
+            loading="lazy"
+            decoding="async"
+          />
+        </span>
+        <span v-else class="preview-card__media preview-card__media--empty" aria-hidden="true" />
+        <span class="preview-card__play" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+            <path d="M8 5.5v13l11-6.5-11-6.5z" />
+          </svg>
+        </span>
+      </button>
+      <a
+        class="preview-card__body preview-card__body--link"
+        :href="card.url"
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        :aria-label="card.title ? `${card.title} — ${hostname}` : hostname || card.url"
+      >
+        <p v-if="hostname" class="preview-card__host">{{ hostname }}</p>
+        <p v-if="card.title" class="preview-card__title">{{ card.title }}</p>
+        <p v-if="card.description" class="preview-card__desc">{{ card.description }}</p>
+      </a>
+    </div>
+    <div v-else class="preview-card__embed-wrap">
+      <iframe
+        class="preview-card__embed"
+        :src="embedSrc"
+        :title="card.title || 'PeerTube video'"
+        allow="fullscreen; picture-in-picture"
+        allowfullscreen
+        loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin"
+      />
+      <a
+        class="preview-card__open"
+        :href="card.url"
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+      >
+        Open on {{ hostname || 'PeerTube' }}
+      </a>
+    </div>
+  </div>
+
   <a
+    v-else
     class="preview-card"
     :href="card.url"
     target="_blank"
@@ -25,20 +100,20 @@ const hasImage = computed(() => !!props.card.image)
     :aria-label="card.title ? `${card.title} — ${hostname}` : hostname || card.url"
   >
     <div class="preview-card__inner">
-    <div v-if="hasImage" class="preview-card__media">
-      <img
-        :src="card.image!"
-        alt=""
-        class="preview-card__image"
-        loading="lazy"
-        decoding="async"
-      />
-    </div>
-    <div class="preview-card__body">
-      <p v-if="hostname" class="preview-card__host">{{ hostname }}</p>
-      <p v-if="card.title" class="preview-card__title">{{ card.title }}</p>
-      <p v-if="card.description" class="preview-card__desc">{{ card.description }}</p>
-    </div>
+      <div v-if="hasImage" class="preview-card__media">
+        <img
+          :src="card.image!"
+          alt=""
+          class="preview-card__image"
+          loading="lazy"
+          decoding="async"
+        />
+      </div>
+      <div class="preview-card__body">
+        <p v-if="hostname" class="preview-card__host">{{ hostname }}</p>
+        <p v-if="card.title" class="preview-card__title">{{ card.title }}</p>
+        <p v-if="card.description" class="preview-card__desc">{{ card.description }}</p>
+      </div>
     </div>
   </a>
 </template>
@@ -62,6 +137,15 @@ const hasImage = computed(() => !!props.card.image)
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));
     border-color: color-mix(in srgb, var(--neo-border-color) 70%, var(--neo-accent));
   }
+
+  &--video {
+    text-decoration: none;
+
+    &:hover {
+      background: var(--neo-bg-secondary);
+      border-color: var(--neo-border-color);
+    }
+  }
 }
 
 .preview-card__inner {
@@ -72,6 +156,28 @@ const hasImage = computed(() => !!props.card.image)
   @container (min-width: 360px) {
     flex-direction: row;
     align-items: stretch;
+  }
+}
+
+.preview-card__poster {
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-card__play-hit {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--neo-bg-tertiary);
+  cursor: pointer;
+  color: inherit;
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: -2px;
   }
 }
 
@@ -90,6 +196,23 @@ const hasImage = computed(() => !!props.card.image)
     max-height: none;
     min-height: 5.5rem;
   }
+
+  &--poster {
+    aspect-ratio: 16 / 9;
+    max-height: none;
+
+    @container (min-width: 360px) {
+      width: 100%;
+      min-height: 0;
+    }
+  }
+
+  &--empty {
+    aspect-ratio: 16 / 9;
+    max-height: none;
+    min-height: 7rem;
+    background: color-mix(in srgb, var(--neo-bg-tertiary) 80%, var(--neo-accent) 20%);
+  }
 }
 
 .preview-card__image {
@@ -99,12 +222,39 @@ const hasImage = computed(() => !!props.card.image)
   object-fit: cover;
 }
 
+.preview-card__play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+
+  svg {
+    width: 3rem;
+    height: 3rem;
+    padding: 0.55rem 0.55rem 0.55rem 0.7rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, #000 55%, transparent);
+    color: #fff;
+    box-shadow: 0 2px 10px color-mix(in srgb, #000 35%, transparent);
+  }
+}
+
 .preview-card__body {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
   min-width: 0;
   padding: 0.65rem 0.75rem;
+
+  &--link {
+    color: inherit;
+    text-decoration: none;
+
+    &:hover .preview-card__title {
+      color: var(--neo-accent);
+    }
+  }
 }
 
 .preview-card__host {
@@ -142,5 +292,32 @@ const hasImage = computed(() => !!props.card.image)
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.preview-card__embed-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #000;
+}
+
+.preview-card__embed {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  background: #000;
+}
+
+.preview-card__open {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  background: var(--neo-bg-secondary);
+  text-decoration: none;
+
+  &:hover {
+    color: var(--neo-accent);
+  }
 }
 </style>

@@ -246,6 +246,10 @@ const {
   clearAttachments,
   clearHandoffAttachments,
   uploadAnnounce,
+  mediaStorageHost,
+  mediaOptimizeSummary,
+  peerTubeHint,
+  dismissPeerTubeHint,
   retryUpload,
   setDescription,
   flushAltDescriptions,
@@ -1069,8 +1073,37 @@ defineExpose({
       />
     </div>
 
+    <aside v-if="peerTubeHint" class="compose-peertube" @click.stop>
+      <p class="compose-peertube__text">{{ peerTubeHint }}</p>
+      <div class="compose-peertube__actions">
+        <a
+          class="compose-peertube__link"
+          href="https://joinpeertube.org/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Find a PeerTube host</a>
+        <button
+          type="button"
+          class="compose-peertube__dismiss"
+          aria-label="Dismiss PeerTube tip"
+          @click="dismissPeerTubeHint"
+        >
+          Dismiss
+        </button>
+      </div>
+    </aside>
+
     <!-- Media previews -->
     <div v-if="attachments.length" ref="composeMediaRef" class="compose-media" @click.stop>
+      <p v-if="mediaStorageHost || mediaOptimizeSummary" class="compose-media__commons">
+        <span v-if="mediaOptimizeSummary">{{ mediaOptimizeSummary }}</span>
+        <span
+          v-if="mediaOptimizeSummary && mediaStorageHost"
+          class="compose-media__commons-sep"
+          aria-hidden="true"
+        >·</span>
+        <span v-if="mediaStorageHost">Stored on {{ mediaStorageHost }}</span>
+      </p>
       <div
         v-for="(item, mediaIndex) in attachments"
         :key="item.localId"
@@ -1603,10 +1636,72 @@ defineExpose({
   }
 }
 
+.compose-peertube {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0.15rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--neo-border-color) 70%, var(--neo-accent));
+  border-radius: var(--neo-radius-md, 10px);
+  background: color-mix(in srgb, var(--neo-bg-secondary) 88%, var(--neo-accent) 12%);
+}
+
+.compose-peertube__text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--neo-text-primary);
+}
+
+.compose-peertube__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.compose-peertube__link {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-accent);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.compose-peertube__dismiss {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--neo-text-primary);
+  }
+}
+
 .compose-media {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.compose-media__commons {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--neo-text-tertiary);
+}
+
+.compose-media__commons-sep {
+  margin: 0 0.3em;
 }
 
 .compose-media__item {

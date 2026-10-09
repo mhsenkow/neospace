@@ -169,6 +169,11 @@ interface SettingsState {
     postingDefaultsTouched: boolean
     /** Collapse consecutive reblogs of the same post in Home ("A and N others reposted") */
     collapseReblogs: boolean
+    /**
+     * Client-side photo prep before upload to the posting instance.
+     * efficient = smallest · balanced = default · original = near-full file
+     */
+    mediaUploadQuality: 'efficient' | 'balanced' | 'original'
   }
   
   // Filters
@@ -308,6 +313,7 @@ export const useSettingsStore = defineStore('settings', {
       defaultSensitive: null,
       postingDefaultsTouched: false,
       collapseReblogs: true,
+      mediaUploadQuality: 'balanced',
     },
     
     filters: [],
@@ -453,6 +459,12 @@ export const useSettingsStore = defineStore('settings', {
                 ? parsed.defaultSensitive
                 : null,
             collapseReblogs: parsed.collapseReblogs !== false,
+            mediaUploadQuality:
+              parsed.mediaUploadQuality === 'efficient' ||
+              parsed.mediaUploadQuality === 'original' ||
+              parsed.mediaUploadQuality === 'balanced'
+                ? parsed.mediaUploadQuality
+                : 'balanced',
           }
         }
         // Suite look (wordcount / bruh / loom) wins when hopping instruments —

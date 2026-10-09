@@ -15,7 +15,15 @@ export const COMPOSE_IMAGE_ACCEPT =
 export const COMPOSE_MEDIA_ACCEPT =
   'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime'
 
+/** Hard ceiling used by the “original” upload preset (extreme phone/raw edges). */
 export const COMPOSE_MAX_IMAGE_DIMENSION = 4096
+
+export type { MediaUploadQuality } from '~/utils/prepareComposeImage'
+export {
+  formatByteSize,
+  normalizeMediaUploadQuality,
+  prepareComposeImage,
+} from '~/utils/prepareComposeImage'
 
 /** Scale upload timeout from file size (big videos need more than 25s). */
 export function uploadTimeoutForBytes(
