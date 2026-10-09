@@ -35,6 +35,8 @@ export type EdwardBallDescriptor = {
   inReplyToId: string | null
   mediaUrl: string | null
   engagement: number
+  /** Per-kind engagement for previews (♥ / ↻ / ↩) */
+  counts?: { fav: number; boost: number; reply: number }
   createdAt: number
   topTag: string | null
   hasCard: boolean
@@ -275,6 +277,7 @@ export function statusToEdwardBall(
     inReplyToId: status.inReplyToId || body.inReplyToId || null,
     mediaUrl,
     engagement,
+    counts: { fav: favourites, boost: reblogs, reply: replies },
     createdAt: Number.isFinite(created) ? created : Date.now(),
     topTag,
     hasCard: !!body.card?.url,

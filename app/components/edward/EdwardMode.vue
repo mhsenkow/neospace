@@ -13,10 +13,22 @@ import type { ExtendedStatus } from '~/stores/instances'
 import {
   EDWARD_EXPLORE_CHIPS,
   EDWARD_EXPLORE_PLACEHOLDERS,
+  EDWARD_SORT_HINTS,
   EDWARD_SORT_LABELS,
+  EDWARD_SORT_ORDER,
   describeEdwardExplore,
   parseEdwardExplore,
+  type EdwardSortMode,
 } from '~/utils/edwardExplore'
+import {
+  EDWARD_SPEEDS,
+  edwardBallCap,
+  edwardDeckColumn,
+  edwardDeckTrailCount,
+  pickTourCandidate,
+  speedMeta,
+  type EdwardSpeed,
+} from '~/utils/edwardPace'
 import { dialectForHost } from '~/utils/edwardServers'
 import NeoIcon from '~/components/NeoIcon.vue'
 import type { NeoIconName } from '~/utils/neoIcons'
@@ -29,14 +41,23 @@ import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 const CHIP_ICONS: Record<string, NeoIconName> = {
   'no bots': 'ban',
   you: 'user',
+  quiet: 'eye-off',
   media: 'image',
+  words: 'edit',
   anger: 'alert',
   love: 'heart',
   replies: 'message',
   asks: 'mention',
+  links: 'share',
+  polls: 'poll',
   bots: 'servers',
-  near: 'sparkle',
-  loud: 'zap',
+}
+
+const SPEED_ICONS: Record<EdwardSpeed, NeoIconName> = {
+  still: 'pause',
+  drift: 'play',
+  flow: 'play',
+  rush: 'zap',
 }
 
 function chipIcon(label: string): NeoIconName | null {
@@ -53,6 +74,18 @@ type WatchCard = {
   media: string | null
   moodGlyph: string
   accent: string
+  age: string
+  tag: string | null
+  why: string
+  counts: { fav: number; boost: number; reply: number } | null
+}
+
+const ageLabel = (createdAt: number) => {
+  const s = Math.max(0, (Date.now() - createdAt) / 1000)
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
 }
 
 const edward = useEdwardStore()
@@ -72,6 +105,19 @@ watch(exploreEl, (el) => {
     exploreH.value = Math.round(el.getBoundingClientRect().height)
   })
   exploreRo.observe(el)
+})
+/** Header height → CSS var, so the desktop deck starts right under it */
+const headerEl = ref<HTMLElement | null>(null)
+const headerH = ref(0)
+let headerRo: ResizeObserver | null = null
+watch(headerEl, (el) => {
+  headerRo?.disconnect()
+  headerRo = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  headerRo = new ResizeObserver(() => {
+    headerH.value = Math.round(el.getBoundingClientRect().height)
+  })
+  headerRo.observe(el)
 })
 const visible = ref(false)
 
@@ -103,7 +149,13 @@ const exploreCrumb = computed(() => {
     exploreSummary.value.total,
   )
 })
-const cardFromStatus = (status: ExtendedStatus, identity: string, offset: number, current: boolean): WatchCard => {
+const cardFromStatus = (
+  status: ExtendedStatus,
+  identity: string,
+  offset: number,
+  current: boolean,
+  textMax = current ? 180 : 72,
+): WatchCard => {
   const body = status.reblog || status
   const ball = edwardBallFor(status, edward.affinity)
   let host: string | null = null
@@ -123,10 +175,14 @@ const cardFromStatus = (status: ExtendedStatus, identity: string, offset: number
     current,
     name: ball.label,
     host,
-    text: stripHtml(body.content || '').slice(0, current ? 180 : 72) || '···',
+    text: (ball.badges.includes('cw') ? `CW · ${body.spoilerText || 'sensitive'}` : stripHtml(body.content || '').slice(0, textMax)) || '···',
     media,
     moodGlyph: MOOD_GLYPH[ball.mood] || '◉‿◉',
     accent: dialect.accent,
+    age: ageLabel(ball.createdAt),
+    tag: ball.topTag,
+    why: ball.moodWhy,
+    counts: ball.counts ?? null,
   }
 }
 
@@ -150,6 +206,92 @@ const watchStatus = computed((): ExtendedStatus | null => {
   if (!id) return null
   return edward.statuses.find((s) => statusIdentity(s) === id) || null
 })
+
+/** Desktop deck: the hero gets the long text; earlier posts stack below it */
+const viewportH = ref(typeof window !== 'undefined' ? window.innerHeight : 900)
+const viewportW = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
+const onViewportResize = () => {
+  viewportH.value = window.innerHeight
+  viewportW.value = window.innerWidth
+}
+const deckHero = computed((): WatchCard | null => {
+  const status = watchStatus.value
+  const cur = watchCurrent.value
+  if (!status || !cur) return null
+  return cardFromStatus(status, cur.identity, 0, true, 420)
+})
+const deckRecent = computed((): WatchCard[] => {
+  if (edward.focusMode === 'off') return []
+  const n = edwardDeckTrailCount(viewportH.value)
+  const out: WatchCard[] = []
+  for (const id of edward.watchRecent) {
+    if (out.length >= n) break
+    const status = edward.statuses.find((s) => statusIdentity(s) === id)
+    if (status) out.push(cardFromStatus(status, id, -1, false, 140))
+  }
+  return out
+})
+const deckWidth = computed(() => edwardDeckColumn(viewportW.value))
+
+// ── Pace + tour ──────────────────────────────────────────────────────────
+const speed = computed(() => edward.speed)
+const speedLabel = computed(() => speedMeta(edward.speed).label)
+const touring = computed(() => edward.touring)
+const captionsOn = computed(() => edward.captions)
+let lastMovingSpeed: EdwardSpeed = 'flow'
+const setSpeed = (s: EdwardSpeed) => {
+  if (s !== 'still') lastMovingSpeed = s
+  edward.setSpeed(s)
+}
+/** Space / the still button: freeze, and un-freeze to wherever you were */
+const toggleStill = () => setSpeed(edward.speed === 'still' ? lastMovingSpeed : 'still')
+const cycleSpeedCompact = () => {
+  const i = EDWARD_SPEEDS.findIndex((x) => x.id === edward.speed)
+  setSpeed(EDWARD_SPEEDS[(i + 1) % EDWARD_SPEEDS.length]!.id)
+}
+const toggleTour = () => edward.setTouring(!edward.touring)
+const toggleCaptions = () => edward.setCaptions(!edward.captions)
+
+let tourTimer: ReturnType<typeof setTimeout> | null = null
+const tourStep = () => {
+  tourTimer = null
+  if (!edward.touring) return
+  const busy = edward.selectedIdentity || edward.recessed || edward.watchHold || edward.watchScrubbing
+  if (!busy) {
+    const recent = new Set(edward.watchHistory.slice(-24))
+    const id = pickTourCandidate(edward.visibleBalls.slice(0, edwardBallCap()), recent, edward.focusedIdentity)
+    if (id) edward.tourTo(id)
+  }
+  scheduleTour()
+}
+const scheduleTour = () => {
+  if (tourTimer) clearTimeout(tourTimer)
+  tourTimer = edward.touring ? setTimeout(tourStep, speedMeta(edward.speed).tourMs) : null
+}
+watch(
+  () => edward.touring,
+  (on) => {
+    if (tourTimer) clearTimeout(tourTimer)
+    tourTimer = null
+    // Turning it on shows something right away; the timer takes it from there
+    if (on) tourStep()
+  },
+)
+watch(() => edward.speed, () => edward.touring && scheduleTour())
+// Filters changed what's on stage — tour within the new set promptly
+watch(
+  () => [edward.exploreQuery, edward.exploreSort] as const,
+  () => {
+    if (edward.touring) {
+      if (tourTimer) clearTimeout(tourTimer)
+      tourTimer = setTimeout(tourStep, 900)
+    }
+  },
+)
+
+const setSort = (mode: EdwardSortMode) => edward.setExploreSort(mode)
+const sortActive = (mode: EdwardSortMode) =>
+  (parseEdwardExplore(edward.exploreQuery).sort || edward.exploreSort) === mode
 
 const watchScrubbing = computed(() => edward.watchScrubbing)
 const watchDeckShown = computed(() => !!watchCurrent.value && !selected.value && !recessed.value)
@@ -291,10 +433,6 @@ const cycleFocus = () => {
   edward.cycleFocusMode()
 }
 
-const cycleSort = () => {
-  edward.cycleExploreSort()
-}
-
 const toggleChip = (query: string) => {
   edward.toggleExploreChip(query)
 }
@@ -419,6 +557,37 @@ const onKey = (e: KeyboardEvent) => {
     return
   }
 
+  const plain = !typing && !e.metaKey && !e.ctrlKey && !e.altKey
+
+  // Space freezes / unfreezes the stream (not while a control has focus)
+  if (e.key === ' ' && plain && !(target && target.closest('button, a, [role="button"]'))) {
+    e.preventDefault()
+    toggleStill()
+    return
+  }
+  // - / = step the pace down / up
+  if (plain && (e.key === '-' || e.key === '_')) {
+    e.preventDefault()
+    edward.stepSpeed(-1)
+    return
+  }
+  if (plain && (e.key === '=' || e.key === '+')) {
+    e.preventDefault()
+    edward.stepSpeed(1)
+    return
+  }
+  // T tours (lean back); C toggles the bubble captions
+  if (plain && (e.key === 't' || e.key === 'T')) {
+    e.preventDefault()
+    toggleTour()
+    return
+  }
+  if (plain && (e.key === 'c' || e.key === 'C')) {
+    e.preventDefault()
+    toggleCaptions()
+    return
+  }
+
   // L cycles the lens shape (bar → square → circle → off)
   if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'l' || e.key === 'L')) {
     e.preventDefault()
@@ -494,7 +663,10 @@ onMounted(() => {
   sessionTimer = setInterval(() => {
     tickNow.value = Date.now()
   }, 1000)
+  window.addEventListener('resize', onViewportResize, { passive: true })
   void stream.start()
+  // Tour remembered from last time — start once the first bubbles are up
+  if (edward.touring) tourTimer = setTimeout(tourStep, 2500)
 })
 
 onUnmounted(() => {
@@ -503,6 +675,7 @@ onUnmounted(() => {
   // exit the *next* session
   if (exitTimer) clearTimeout(exitTimer)
   exploreRo?.disconnect()
+  headerRo?.disconnect()
   if (holdReleaseTimer) clearTimeout(holdReleaseTimer)
   document.removeEventListener('keydown', onKey)
   document.removeEventListener('keydown', onEscapeKey, true)
@@ -510,6 +683,8 @@ onUnmounted(() => {
   if (blinkTimer) clearInterval(blinkTimer)
   if (placeholderTimer) clearInterval(placeholderTimer)
   if (sessionTimer) clearInterval(sessionTimer)
+  if (tourTimer) clearTimeout(tourTimer)
+  window.removeEventListener('resize', onViewportResize)
   stream.stop()
   document.body.classList.remove('edward-active')
 })
@@ -524,7 +699,11 @@ onUnmounted(() => {
         'is-visible': visible,
         'is-recessed': recessed,
       }"
-      :style="exploreH ? { '--edward-explore-h': `${exploreH}px` } : undefined"
+      :style="{
+        '--edward-deck-w': `${deckWidth}px`,
+        ...(headerH ? { '--edward-header-h': `${headerH}px` } : {}),
+        ...(exploreH ? { '--edward-explore-h': `${exploreH}px` } : {}),
+      }"
       role="dialog"
       aria-modal="true"
       aria-label="Edward mode session"
@@ -536,7 +715,7 @@ onUnmounted(() => {
       <div class="edward-mode__scan" aria-hidden="true" />
 
       <!-- Not a live region: the clock ticks every second and coins every poll -->
-      <header class="edward-mode__header">
+      <header ref="headerEl" class="edward-mode__header">
         <div class="edward-mode__header-row">
           <div class="edward-mode__brand">
             <span class="edward-mode__session">
@@ -566,6 +745,29 @@ onUnmounted(() => {
           </div>
 
           <div class="edward-mode__header-actions">
+            <!-- Narrow screens: pace + tour live up here (desktop has the right rail) -->
+            <template v-if="!isWideDesk">
+              <button
+                type="button"
+                class="edward-mode__focus-btn edward-mode__pace-btn"
+                :aria-label="`Stream pace ${speedLabel}. Tap to change`"
+                @click="cycleSpeedCompact"
+              >
+                <NeoIcon :name="SPEED_ICONS[speed]" :size="13" :stroke="1.85" :filled="speed !== 'still'" />
+                <span>{{ speedLabel }}</span>
+              </button>
+              <button
+                type="button"
+                class="edward-mode__focus-btn edward-mode__pace-btn"
+                :class="{ 'is-on': touring }"
+                :aria-pressed="touring"
+                aria-label="Tour — posts drift into the lens on their own"
+                @click="toggleTour"
+              >
+                <NeoIcon name="sparkle" :size="13" :stroke="1.85" />
+                <span>tour</span>
+              </button>
+            </template>
             <button
               type="button"
               class="edward-mode__focus-btn"
@@ -617,8 +819,117 @@ onUnmounted(() => {
         </div>
       </header>
 
+      <!-- Desktop deck: big hero + earlier posts stacked below (five previews) -->
       <aside
-        v-if="watchCurrent && watchDeckShown"
+        v-if="deckHero && watchDeckShown && isWideDesk"
+        class="edward-mode__deck"
+        :class="{ 'is-scrubbing': watchScrubbing, 'is-touring': touring }"
+        :style="{ '--srv': deckHero.accent }"
+        aria-label="Watched post"
+        @pointerenter="holdWatch(true)"
+        @pointerleave="onWatchPointerLeave"
+        @focusin="holdWatch(true)"
+        @focusout="onWatchFocusOut"
+      >
+        <div class="edward-mode__watch-nav">
+          <button
+            type="button"
+            class="edward-mode__watch-step"
+            :disabled="!canPrev"
+            aria-label="Previous watched post"
+            @click="watchPrev"
+          >
+            <NeoIcon name="chevron-left" :size="16" :stroke="2" />
+          </button>
+          <span class="edward-mode__watch-label">
+            <NeoIcon
+              :name="watchScrubbing ? 'pause' : touring ? 'sparkle' : 'play'"
+              :size="12"
+              :stroke="1.85"
+              :filled="!watchScrubbing && !touring"
+            />
+            {{
+              watchScrubbing
+                ? 'paused · scrub'
+                : edward.watchHold
+                  ? 'held'
+                  : touring
+                    ? `touring · ${speedLabel}`
+                    : `watching · ${speedLabel}`
+            }}
+          </span>
+          <button
+            type="button"
+            class="edward-mode__watch-step"
+            :disabled="!canNext"
+            aria-label="Next watched post"
+            @click="watchNext"
+          >
+            <NeoIcon name="chevron-right" :size="16" :stroke="2" />
+          </button>
+          <button
+            v-if="watchScrubbing"
+            type="button"
+            class="edward-mode__watch-live"
+            @click="resumeLive"
+          >
+            <NeoIcon name="play" :size="12" :stroke="2" filled />
+            live
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="edward-mode__deck-hero"
+          :aria-label="`Open post by ${deckHero.name}`"
+          @click="openCard(deckHero.identity)"
+        >
+          <div v-if="deckHero.media" class="edward-mode__deck-media">
+            <img :src="deckHero.media" alt="" loading="lazy" />
+          </div>
+          <div class="edward-mode__deck-head">
+            <span class="edward-mode__deck-face" aria-hidden="true">{{ deckHero.moodGlyph }}</span>
+            <span class="edward-mode__deck-who">
+              <strong>{{ deckHero.name }}</strong>
+              <span>{{ deckHero.host }} · {{ deckHero.age }}</span>
+            </span>
+          </div>
+          <span class="edward-mode__deck-text">{{ deckHero.text }}</span>
+          <span class="edward-mode__deck-meta">
+            <span v-if="deckHero.counts?.fav">♥ {{ deckHero.counts.fav }}</span>
+            <span v-if="deckHero.counts?.boost">↻ {{ deckHero.counts.boost }}</span>
+            <span v-if="deckHero.counts?.reply">↩ {{ deckHero.counts.reply }}</span>
+            <span v-if="deckHero.tag" class="edward-mode__deck-tag">#{{ deckHero.tag }}</span>
+            <span class="edward-mode__deck-why">{{ deckHero.why }}</span>
+          </span>
+        </button>
+
+        <template v-if="deckRecent.length">
+          <p class="edward-mode__deck-label">earlier in the lens</p>
+          <ol class="edward-mode__deck-recent">
+            <li v-for="card in deckRecent" :key="card.identity">
+              <button
+                type="button"
+                class="edward-mode__deck-row"
+                :style="{ '--srv': card.accent }"
+                @click="jumpFilm(card.identity)"
+              >
+                <img v-if="card.media" :src="card.media" alt="" class="edward-mode__deck-thumb" loading="lazy" />
+                <span v-else class="edward-mode__deck-thumb edward-mode__deck-thumb--face" aria-hidden="true">{{
+                  card.moodGlyph
+                }}</span>
+                <span class="edward-mode__deck-row-copy">
+                  <strong>{{ card.name }} <em>{{ card.age }}</em></strong>
+                  <span>{{ card.text }}</span>
+                </span>
+              </button>
+            </li>
+          </ol>
+        </template>
+      </aside>
+
+      <aside
+        v-if="watchCurrent && watchDeckShown && !isWideDesk"
         class="edward-mode__watch"
         :class="{ 'is-scrubbing': watchScrubbing, 'is-held': edward.watchHold }"
         aria-label="Watched post"
@@ -768,6 +1079,53 @@ onUnmounted(() => {
         <EdwardWatchActions :status="watchStatus" variant="rail" />
       </aside>
 
+      <!-- Desktop: quiet pace controls, bottom right — set it and just watch -->
+      <div
+        v-if="isWideDesk && !recessed"
+        class="edward-mode__pace"
+        role="group"
+        aria-label="Stream pace"
+      >
+        <div class="edward-mode__pace-row">
+          <button
+            v-for="sp in EDWARD_SPEEDS"
+            :key="sp.id"
+            type="button"
+            class="edward-mode__pace-opt"
+            :class="{ 'is-on': speed === sp.id }"
+            :aria-pressed="speed === sp.id"
+            :title="sp.hint"
+            @click="setSpeed(sp.id)"
+          >
+            {{ sp.label }}
+          </button>
+        </div>
+        <div class="edward-mode__pace-row">
+          <button
+            type="button"
+            class="edward-mode__pace-opt edward-mode__pace-opt--wide"
+            :class="{ 'is-on': touring }"
+            :aria-pressed="touring"
+            title="Posts drift into the lens on their own (T)"
+            @click="toggleTour"
+          >
+            <NeoIcon name="sparkle" :size="11" :stroke="1.85" />
+            tour
+          </button>
+          <button
+            type="button"
+            class="edward-mode__pace-opt edward-mode__pace-opt--wide"
+            :class="{ 'is-on': captionsOn }"
+            :aria-pressed="captionsOn"
+            title="Names + first words under the bubbles (C)"
+            @click="toggleCaptions"
+          >
+            <NeoIcon name="edit" :size="11" :stroke="1.85" />
+            words
+          </button>
+        </div>
+      </div>
+
       <p v-if="error" class="edward-mode__error" role="alert">
         {{ error }}
       </p>
@@ -796,15 +1154,6 @@ onUnmounted(() => {
             aria-label="Search filter and sort the thought stream"
           />
           <button
-            type="button"
-            class="edward-mode__explore-sort"
-            :aria-label="`Cycle sort, currently ${sortLabel}`"
-            @click="cycleSort"
-          >
-            <NeoIcon name="sort" :size="13" :stroke="1.85" />
-            {{ sortLabel }}
-          </button>
-          <button
             v-if="exploreSummary.active"
             type="button"
             class="edward-mode__explore-clear"
@@ -812,6 +1161,25 @@ onUnmounted(() => {
             @click="clearExplore"
           >
             <NeoIcon name="x" :size="13" :stroke="2" />
+          </button>
+        </div>
+        <div class="edward-mode__sorts" role="group" aria-label="Sort">
+          <span class="edward-mode__sorts-label" aria-hidden="true">
+            <NeoIcon name="sort" :size="11" :stroke="1.85" />
+          </span>
+          <button
+            v-for="mode in EDWARD_SORT_ORDER"
+            :key="mode"
+            type="button"
+            class="edward-mode__sort"
+            :class="{ 'is-on': sortActive(mode) }"
+            :aria-pressed="sortActive(mode)"
+            :title="EDWARD_SORT_HINTS[mode]"
+            @click="setSort(mode)"
+          >
+            <NeoIcon v-if="mode === 'gems'" name="sparkle" :size="11" :stroke="1.85" />
+            <NeoIcon v-else-if="mode === 'shuffle'" name="refresh" :size="11" :stroke="1.85" />
+            {{ EDWARD_SORT_LABELS[mode] }}
           </button>
         </div>
         <div class="edward-mode__explore-chips" role="group" aria-label="Quick filters">
@@ -854,7 +1222,9 @@ onUnmounted(() => {
         <p class="sr-only" role="status" aria-live="polite">{{ exploreAnnounce }}</p>
         <p class="edward-mode__explore-crumb">
           {{ exploreCrumb }}
-          <span class="edward-mode__explore-hint"> · / search · ←→ scrub · ⏎ open · L lens · esc clears</span>
+          <span class="edward-mode__explore-hint">
+            · / search · space still · −/= pace · T tour · C words · ←→ scrub · ⏎ open · L lens · esc</span
+          >
         </p>
       </div>
 
@@ -1452,7 +1822,7 @@ onUnmounted(() => {
   left: 50%;
   z-index: 4;
   transform: translateX(-50%);
-  width: min(640px, calc(100vw - 1.5rem));
+  width: min(700px, calc(100vw - 1.5rem));
   padding: 0.55rem 0.65rem 0.45rem;
   border: 2px solid #ffe566;
   border-radius: 4px;
@@ -1957,6 +2327,383 @@ onUnmounted(() => {
 
 /* Desktop action rail — right edge, clear of the lens (EdwardCanvas reserves
  * DESK_RAIL_COLUMN for it). Same chrome language as the watch deck. */
+/* ── Desktop deck: hero + earlier posts, a column on the left ── */
+.edward-mode__deck {
+  position: absolute;
+  left: max(0.75rem, env(safe-area-inset-left));
+  top: calc(var(--edward-header-h, 96px) + 0.75rem);
+  // Hug the content; only cap it so it never runs under the console
+  max-height: calc(
+    100% - var(--edward-header-h, 96px) - var(--edward-explore-h, 112px) - max(0.75rem, env(safe-area-inset-bottom)) -
+      1.5rem
+  );
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: calc(var(--edward-deck-w, 452px) - 1.5rem);
+  padding: 0.55rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 2px solid #ffe566;
+  border-radius: 4px;
+  background: color-mix(in srgb, #12081c 95%, transparent);
+  color: #fff8d6;
+  box-shadow: 4px 4px 0 #ff7eb3;
+
+  &.is-scrubbing {
+    border-color: #ff7eb3;
+    box-shadow: 4px 4px 0 #59d1e0;
+  }
+
+  &.is-touring {
+    box-shadow: 4px 4px 0 #59d1e0, 0 0 32px color-mix(in srgb, #59d1e0 22%, transparent);
+  }
+
+  .edward-mode__watch-nav {
+    margin-bottom: 0;
+  }
+}
+
+.edward-mode__deck-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  flex-shrink: 1;
+  min-height: 0;
+  padding: 0 0 0.55rem;
+  border: 2px solid var(--srv, #ffe566);
+  border-radius: 3px;
+  background: #1a1420;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--srv, #ff7eb3) 70%, transparent);
+
+  &:focus-visible {
+    outline: 2px solid #59d1e0;
+    outline-offset: 2px;
+  }
+
+  > :not(.edward-mode__deck-media) {
+    margin: 0 0.65rem;
+  }
+}
+
+.edward-mode__deck-media {
+  flex-shrink: 1;
+  min-height: 90px;
+  max-height: 34vh;
+  background: #0a0614;
+  overflow: hidden;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: 34vh;
+    object-fit: cover;
+  }
+}
+
+.edward-mode__deck-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.55rem !important;
+}
+
+.edward-mode__deck-face {
+  display: grid;
+  flex: 0 0 2.25rem;
+  place-items: center;
+  height: 2.25rem;
+  font-size: 0.75rem;
+  color: #ffe566;
+  border: 1px solid var(--srv, #ffe566);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--srv, #ff7eb3) 20%, #1a1420);
+}
+
+.edward-mode__deck-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  strong {
+    overflow: hidden;
+    font-size: 0.9375rem;
+    color: #ffe566;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  span {
+    overflow: hidden;
+    font-size: 0.625rem;
+    letter-spacing: 0.05em;
+    color: #59d1e0;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.edward-mode__deck-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 9;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, #fff8d6 92%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.edward-mode__deck-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.6875rem;
+  color: #ffe566;
+  font-variant-numeric: tabular-nums;
+}
+
+.edward-mode__deck-tag {
+  color: #ff7eb3;
+}
+
+.edward-mode__deck-why {
+  color: color-mix(in srgb, #59d1e0 80%, transparent);
+}
+
+.edward-mode__deck-label {
+  margin: 0.15rem 0 -0.15rem;
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, #ff7eb3 85%, transparent);
+}
+
+.edward-mode__deck-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-height: 0;
+}
+
+.edward-mode__deck-row {
+  display: flex;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--srv, #ffe566) 45%, transparent);
+  border-radius: 3px;
+  background: #1a1420;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.82;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    opacity: 1;
+    border-color: var(--srv, #ffe566);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #59d1e0;
+    outline-offset: 1px;
+  }
+}
+
+.edward-mode__deck-thumb {
+  flex: 0 0 3.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: 2px;
+  background: #0a0614;
+
+  &--face {
+    display: grid;
+    place-items: center;
+    font-size: 0.75rem;
+    color: #ffe566;
+    background: color-mix(in srgb, var(--srv, #ff7eb3) 18%, #1a1420);
+  }
+}
+
+.edward-mode__deck-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+
+  strong {
+    overflow: hidden;
+    font-size: 0.6875rem;
+    color: #ffe566;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+
+    em {
+      font-style: normal;
+      font-weight: 400;
+      color: color-mix(in srgb, #fff8d6 55%, transparent);
+    }
+  }
+
+  span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.6875rem;
+    line-height: 1.35;
+    color: color-mix(in srgb, #fff8d6 82%, transparent);
+  }
+}
+
+/* ── Pace dock: tertiary, bottom right — set it and lean back ── */
+.edward-mode__pace {
+  position: absolute;
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 11rem;
+  padding: 0.4rem;
+  border: 1px solid color-mix(in srgb, #59d1e0 30%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, #12081c 70%, transparent);
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+
+  &:hover,
+  &:focus-within {
+    opacity: 1;
+  }
+}
+
+.edward-mode__pace-row {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.edward-mode__pace-opt {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 1.6rem;
+  padding: 0.15rem 0.2rem;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: color-mix(in srgb, #fff8d6 62%, transparent);
+  font-family: inherit;
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: #fff8d6;
+    border-color: color-mix(in srgb, #59d1e0 50%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #59d1e0;
+    outline-offset: 1px;
+  }
+
+  &.is-on {
+    color: #59d1e0;
+    border-color: color-mix(in srgb, #59d1e0 60%, transparent);
+    background: color-mix(in srgb, #59d1e0 12%, transparent);
+  }
+}
+
+.edward-mode__pace-btn.is-on {
+  background: color-mix(in srgb, #59d1e0 22%, #1a1420);
+  color: #fff8d6;
+}
+
+/* ── Sort row in the console ── */
+.edward-mode__sorts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 0.4rem;
+}
+
+// Phones: one sideways-scrolling line, like the chips below it
+@media (max-width: 639px) {
+  .edward-mode__sorts {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    margin-inline: -0.5rem;
+    padding-inline: 0.5rem;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    > * {
+      flex-shrink: 0;
+    }
+  }
+}
+
+.edward-mode__sorts-label {
+  display: inline-flex;
+  margin-right: 0.15rem;
+  color: #ff7eb3;
+}
+
+.edward-mode__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  min-height: 22px;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, #59d1e0 80%, transparent);
+  font-family: inherit;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: color-mix(in srgb, #59d1e0 55%, transparent);
+    color: #59d1e0;
+  }
+
+  &.is-on {
+    border-color: #59d1e0;
+    background: color-mix(in srgb, #59d1e0 18%, transparent);
+    color: #fff8d6;
+  }
+}
+
 .edward-mode__actions-rail {
   position: absolute;
   top: 50%;

@@ -16,6 +16,14 @@ import {
 } from '~/utils/edwardFaces'
 import { dialectForHost, paintServerDialect } from '~/utils/edwardServers'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
+import {
+  EDWARD_RAIL_COLUMN,
+  EDWARD_WIDE_MIN,
+  edwardBallCap,
+  edwardDeckColumn,
+  edwardIsCompact,
+  speedMeta,
+} from '~/utils/edwardPace'
 
 const emit = defineEmits<{
   pick: [identity: string]
@@ -33,9 +41,23 @@ const hoverCard = shallowRef<{
   glyph: string
   tag: string | null
   affinity: number
+  media: string | null
+  handle: string
+  age: string
+  counts: { fav: number; boost: number; reply: number } | null
+  accent: string
+  /** Flip the card left / up when it would leave the screen */
+  flipX: boolean
+  flipY: boolean
   x: number
   y: number
 } | null>(null)
+
+/** Readable name + snippet under the most prominent balls (DOM = crisp text) */
+const captions = shallowRef<
+  { id: string; name: string; text: string; accent: string; x: number; y: number; o: number }[]
+>([])
+let captionTick = 0
 
 const bubbles = shallowRef<
   { id: string; text: string; x: number; y: number; scale: number }[]
@@ -61,6 +83,8 @@ type BallRuntime = {
   x: number
   y: number
   z: number
+  /** Lane x before the wide-stage spread is applied */
+  laneBaseX: number
   /** Soft spring home (lane / affinity pack) */
   homeX: number
   homeZ: number
@@ -85,18 +109,18 @@ type BallRuntime = {
   isShort: boolean
   shortText: string | null
   mediaUrl: string | null
+  acct: string
+  host: string | null
+  createdAt: number
+  engagement: number
+  counts: { fav: number; boost: number; reply: number } | null
 }
 
 const STREAM_BOTTOM = -18
 const STREAM_TOP = 18
 const STREAM_SPAN = STREAM_TOP - STREAM_BOTTOM
-const MAX_BALLS = 72
-/** Phones: fewer, readable faces (and far less GPU) than the desktop swarm */
-const MAX_BALLS_COMPACT = 38
-const isCompact = () =>
-  typeof window !== 'undefined' &&
-  (window.innerWidth < 640 || window.matchMedia('(pointer: coarse)').matches)
-const maxBalls = () => (isCompact() ? MAX_BALLS_COMPACT : MAX_BALLS)
+const isCompact = edwardIsCompact
+const maxBalls = edwardBallCap
 /** DPR 2 + transmission glass melts phone GPUs — 1.5 still looks crisp */
 const pixelRatio = () => Math.min(window.devicePixelRatio || 1, isCompact() ? 1.5 : 2)
 
@@ -221,6 +245,90 @@ const paintMediaPeek = (
   ctx.stroke()
 }
 
+const RIM_FONT = '"Courier New", ui-monospace, monospace'
+
+/** What rides the rim: opening words (with the tag up front), or a hint for CW / pictures */
+const rimTextFor = (d: EdwardBallDescriptor): string => {
+  if (d.badges.includes('cw')) return '· content warning ·'
+  const words = d.preview.replace(/\s+/g, ' ').trim()
+  const tag = d.topTag && !words.toLowerCase().includes(`#${d.topTag.toLowerCase()}`) ? `#${d.topTag} ` : ''
+  const base = `${tag}${words}`.trim()
+  if (!base) return d.mediaUrl ? '· picture ·' : ''
+  return base.length > 20 ? `${base.slice(0, 19).trimEnd()}…` : base
+}
+
+/**
+ * Opening words curved along the top of the coin, on a dark band so they read
+ * on any candy fill. Big enough to catch on near / large bubbles; the DOM
+ * captions carry the readable version.
+ */
+const paintRimText = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor) => {
+  const text = rimTextFor(d)
+  if (!text) return
+  const cx = 256
+  const cy = 248
+  const r = 172
+  const maxSpan = Math.PI * 0.8
+  const chars = [...text]
+  let size = 40
+  ctx.save()
+  ctx.font = `700 ${size}px ${RIM_FONT}`
+  let widths = chars.map((ch) => ctx.measureText(ch).width)
+  let span = widths.reduce((a, w) => a + w, 0) / r
+  if (span > maxSpan) {
+    size = Math.max(26, Math.floor(size * (maxSpan / span)))
+    ctx.font = `700 ${size}px ${RIM_FONT}`
+    widths = chars.map((ch) => ctx.measureText(ch).width)
+    span = widths.reduce((a, w) => a + w, 0) / r
+  }
+  const start = -Math.PI / 2 - span / 2
+  ctx.strokeStyle = 'rgba(26,20,32,0.74)'
+  ctx.lineWidth = size * 1.4
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, start - 0.04, start + span + 0.04)
+  ctx.stroke()
+  ctx.fillStyle = '#fff8d6'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  let a = start
+  chars.forEach((ch, i) => {
+    const w = widths[i]!
+    const mid = a + w / 2 / r
+    ctx.save()
+    ctx.translate(cx + r * Math.cos(mid), cy + r * Math.sin(mid))
+    ctx.rotate(mid + Math.PI / 2)
+    ctx.fillText(ch, 0, 0)
+    ctx.restore()
+    a += w / r
+  })
+  ctx.restore()
+}
+
+/** Tiny engagement pip (♥ ↻) low on the left — the media peek owns the right */
+const paintPips = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor) => {
+  const c = d.counts
+  if (!c || c.fav + c.boost <= 0) return
+  const parts: string[] = []
+  if (c.fav) parts.push(`♥${compact(c.fav)}`)
+  if (c.boost) parts.push(`↻${compact(c.boost)}`)
+  const text = parts.join(' ')
+  ctx.save()
+  ctx.font = `700 26px ${RIM_FONT}`
+  const w = ctx.measureText(text).width + 22
+  ctx.fillStyle = 'rgba(26,20,32,0.78)'
+  ctx.beginPath()
+  roundChip(ctx, 150, 372, w, 36)
+  ctx.fill()
+  ctx.fillStyle = '#ffe566'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, 150, 373)
+  ctx.restore()
+}
+
+const compact = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
+
 const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTexture']> => {
   const canvas = document.createElement('canvas')
   canvas.width = 512
@@ -238,6 +346,8 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
   const seed = hash01(d.identity)
   drawEmoticoin(ctx, spec, seed)
   paintServerDialect(ctx, dialect, seed)
+  paintRimText(ctx, d)
+  paintPips(ctx, d)
   paintAuthorChip(ctx, d)
 
   const tex = new THREE!.CanvasTexture(canvas)
@@ -254,7 +364,9 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
       if (disposed || identityToBall.get(d.identity)?.texture !== tex) return
       drawEmoticoin(ctx, spec, seed)
       paintServerDialect(ctx, dialect, seed)
+      paintRimText(ctx, d)
       paintMediaPeek(ctx, img)
+      paintPips(ctx, d)
       paintAuthorChip(ctx, d)
       tex.needsUpdate = true
     }
@@ -286,6 +398,12 @@ const roundChip = (
  * Lane layout — affinity + explore-sort rank pull bubbles closer / center.
  * rankNorm 1 = top of current sort (loud/near/new/you).
  */
+/**
+ * Wide stages spread the swarm sideways (it was a narrow tower in the middle
+ * of a 1600px screen). Set from the measured stage in measureLens.
+ */
+let laneSpread = 1
+
 const laneFor = (identity: string, affinity = 0, rankNorm = 0) => {
   const a = hash01(identity)
   const b = hash01(identity + ':z')
@@ -442,10 +560,11 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     speed: 0.65 + hash01(d.identity + ':s') * 0.95 - d.affinity * 0.12,
     size,
     spin: (hash01(d.identity + ':spin') - 0.5) * 0.45,
-    x: lane.x,
+    x: lane.x * laneSpread,
     y: ySeed,
     z: lane.z,
-    homeX: lane.x,
+    laneBaseX: lane.x,
+    homeX: lane.x * laneSpread,
     homeZ: lane.z,
     vx: (hash01(d.identity + ':vx') - 0.5) * 0.4,
     vy: 0.35 + hash01(d.identity + ':vy') * 0.55,
@@ -467,13 +586,19 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     isShort: d.isShort,
     shortText: d.shortText,
     mediaUrl: d.mediaUrl,
+    acct: d.acct,
+    host: d.instanceHost,
+    createdAt: d.createdAt,
+    engagement: d.engagement,
+    counts: d.counts ?? null,
   }
 }
 
 const applyAffinityLayout = (b: BallRuntime, d: EdwardBallDescriptor) => {
   const lane = laneFor(d.identity, d.affinity, d.exploreRankNorm)
   // Retarget spring home — don't teleport, let physics drift over
-  b.homeX = lane.x
+  b.laneBaseX = lane.x
+  b.homeX = lane.x * laneSpread
   b.homeZ = lane.z
   b.affinity = d.affinity
   b.isShort = d.isShort
@@ -555,10 +680,26 @@ const ballWorldPos = (b: BallRuntime, _t?: number) => ({
  * Light bubble dynamics — springs + buoyancy every frame,
  * soft collide only every few ticks (keeps foam feel without melting the CPU).
  */
-const integrateBubblePhysics = (t: number, dt: number) => {
+/** Tour subject glides to just in front of the stage center (where the lens is) */
+const TOUR_PULL = 9
+const tourTarget = { x: 0, y: 0, z: 0 }
+
+/**
+ * `t` / `dt` run on the speed-scaled simulation clock (0 when still);
+ * `realDt` drives the toured post's glide so a frozen stream can still be toured.
+ */
+const integrateBubblePhysics = (t: number, dt: number, realDt = dt) => {
   const n = balls.length
   if (!n) return
   physicsTick++
+  const tourId = edward.touring ? edward.focusedIdentity : null
+  if (tourId && camera) {
+    const c = camera.position
+    const len = Math.hypot(c.x, c.y, c.z) || 1
+    tourTarget.x = (c.x / len) * 4
+    tourTarget.y = (c.y / len) * 4
+    tourTarget.z = (c.z / len) * 4
+  }
 
   // Reduced motion: a still field — no rising, no drift. Bubbles settle into
   // their lane; ones spawned off-stage get a fixed slot. Only user scrubs move them.
@@ -578,8 +719,18 @@ const integrateBubblePhysics = (t: number, dt: number) => {
 
   // Integrate motion cheaply
   const damp = Math.exp(-2.2 * dt)
+  const tourDamp = Math.exp(-6 * realDt)
   for (let i = 0; i < n; i++) {
     const b = balls[i]!
+    if (b.identity === tourId) {
+      b.vx = (b.vx + (tourTarget.x - b.x) * TOUR_PULL * realDt) * tourDamp
+      b.vy = (b.vy + (tourTarget.y - b.y) * TOUR_PULL * realDt) * tourDamp
+      b.vz = (b.vz + (tourTarget.z - b.z) * TOUR_PULL * realDt) * tourDamp
+      b.x += b.vx * realDt
+      b.y += b.vy * realDt
+      b.z += b.vz * realDt
+      continue
+    }
     const ax =
       (b.homeX - b.x) * 2.1 + Math.sin(t * b.speed * 0.85 + b.phase) * 0.28
     const az =
@@ -743,19 +894,29 @@ const projectScreen = (
 type Lens = { mode: 'bar' | 'square' | 'circle'; cx: number; cy: number; w: number; h: number }
 const PHONE_MAX_W = 640
 /** Below this the watch deck docks on the console (EdwardMode CSS) */
-const DOCKED_DECK_MAX_W = 1100
+const DOCKED_DECK_MAX_W = EDWARD_WIDE_MIN
 const PHONE_DECK_RESERVE = 188
 /** Keep in sync with EdwardMode's (max-height: 519px) deck */
 const SHORT_DECK_RESERVE = 84
-/** Wide screens: the deck is a fixed left column — keep the lens right of it */
-const DESK_DECK_COLUMN = 452
-/** …and the action rail on the right (EdwardMode .edward-mode__actions-rail) */
-const DESK_RAIL_COLUMN = 204
+/** Wide screens: the deck is a left column (width grows with the screen) and
+ * actions + speed sit in a right rail — keep the lens between them */
+const deskDeckColumn = (W: number) => edwardDeckColumn(W)
+const DESK_RAIL_COLUMN = EDWARD_RAIL_COLUMN
 const lens = ref<Lens | null>(null)
 let lensTick = 0
 /** Open stage (px) between header and console — speech bubbles stay inside it */
 let stageTop = 0
 let stageBottom = Number.POSITIVE_INFINITY
+
+/** Swarm width follows the open stage: ~¾ of it, never narrower than the phone layout */
+const updateLaneSpread = (W: number, H: number) => {
+  const stageW = W - (W >= DOCKED_DECK_MAX_W ? deskDeckColumn(W) + DESK_RAIL_COLUMN : 0)
+  const pxPerUnit = H / (2 * 0.4877 * Math.max(1, camDist))
+  const next = Math.min(2.3, Math.max(1, (stageW * 0.75) / pxPerUnit / 8))
+  if (Math.abs(next - laneSpread) / laneSpread < 0.04) return
+  laneSpread = next
+  for (const b of balls) b.homeX = b.laneBaseX * laneSpread
+}
 
 const measureLens = () => {
   const mode = edward.focusMode
@@ -766,6 +927,7 @@ const measureLens = () => {
   const host = hostEl.value.getBoundingClientRect()
   const W = host.width
   const H = host.height
+  updateLaneSpread(W, H)
   const header = document.querySelector('.edward-mode__header')
   const explore = document.querySelector('.edward-mode__explore')
   let top = (header ? header.getBoundingClientRect().bottom - host.top : 0) + 12
@@ -775,7 +937,7 @@ const measureLens = () => {
   if (mode === 'off') {
     lens.value = null
     centerSwarmOn(
-      W / 2 + (W >= DOCKED_DECK_MAX_W ? (DESK_DECK_COLUMN - DESK_RAIL_COLUMN) / 2 : 0),
+      W / 2 + (W >= DOCKED_DECK_MAX_W ? (deskDeckColumn(W) - DESK_RAIL_COLUMN) / 2 : 0),
       top + (bottom - top) / 2,
       W,
       H,
@@ -793,7 +955,7 @@ const measureLens = () => {
   }
   const stageH = bottom - top
   // Horizontal stage: full width, or right of the desktop deck column
-  const left = W >= DOCKED_DECK_MAX_W ? DESK_DECK_COLUMN : 0
+  const left = W >= DOCKED_DECK_MAX_W ? deskDeckColumn(W) : 0
   const right = W >= DOCKED_DECK_MAX_W ? DESK_RAIL_COLUMN : 0
   const stageW = W - left - right
   const cx = left + stageW / 2
@@ -862,7 +1024,52 @@ const _wobbleQ: { q: InstanceType<ThreeMod['Quaternion']> | null; e: InstanceTyp
   e: null,
 }
 
-const updateBalls = (t: number, dt: number) => {
+const CAPTION_W = 184
+const CAPTION_H = 36
+
+/**
+ * Greedy, biggest-first: a caption under each prominent ball that fits the
+ * open stage without overlapping another caption or a speech bubble.
+ */
+const placeCaptions = (
+  cands: { b: BallRuntime; x: number; y: number; r: number }[],
+  taken: { x: number; y: number }[],
+) => {
+  const max = hostW < PHONE_MAX_W ? 4 : 11
+  const wide = hostW >= DOCKED_DECK_MAX_W
+  const minX = (wide ? deskDeckColumn(hostW) : 0) + CAPTION_W / 2 + 6
+  const maxX = hostW - (wide ? DESK_RAIL_COLUMN : 0) - CAPTION_W / 2 - 6
+  const rects: { l: number; t: number; r: number; b: number }[] = taken.map((t) => ({
+    l: t.x - 6,
+    t: t.y - 6,
+    r: t.x + Math.min(200, hostW * 0.42) + 18,
+    b: t.y + 48,
+  }))
+  const out: { id: string; name: string; text: string; accent: string; x: number; y: number; o: number }[] = []
+  cands.sort((a, b) => b.r - a.r)
+  for (const c of cands) {
+    if (out.length >= max) break
+    const x = Math.min(maxX, Math.max(minX, c.x))
+    const y = c.y + c.r * 0.92 + 4
+    if (y < stageTop || y + CAPTION_H > stageBottom || minX > maxX) continue
+    const box = { l: x - CAPTION_W / 2, t: y, r: x + CAPTION_W / 2, b: y + CAPTION_H }
+    if (rects.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) continue
+    rects.push(box)
+    const cw = c.b.badges.includes('cw')
+    out.push({
+      id: c.b.identity,
+      name: c.b.label,
+      text: cw ? 'content warning' : c.b.preview || (c.b.mediaUrl ? 'picture' : '…'),
+      accent: dialectForHost(c.b.host).accent,
+      x,
+      y,
+      o: Math.min(1, 0.55 + (c.r - 30) / 60),
+    })
+  }
+  if (out.length || captions.value.length) captions.value = out
+}
+
+const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
   if (!camera || !THREE || !hostEl.value) return
   hostW = Math.max(1, hostEl.value.clientWidth)
   hostH = Math.max(1, hostEl.value.clientHeight)
@@ -874,8 +1081,10 @@ const updateBalls = (t: number, dt: number) => {
   let currentStillInLens = false
   let bestFocus: { id: string; score: number } | null = null
   const nextBubbles: { id: string; text: string; x: number; y: number; scale: number }[] = []
+  const doCaptions = edward.captions && captionTick++ % 2 === 0
+  const captionCands: { b: BallRuntime; x: number; y: number; r: number }[] = []
 
-  integrateBubblePhysics(t, dt)
+  integrateBubblePhysics(simT, simDt, dt)
   updateBubbleOptics(t)
 
   for (const b of balls) {
@@ -909,7 +1118,8 @@ const updateBalls = (t: number, dt: number) => {
     if (!screen || screen.behind) continue
     const nx = screen.x / hostW
 
-    const isWatched = edward.focusedIdentity === b.identity && edward.watchScrubbing
+    const isWatched =
+      edward.focusedIdentity === b.identity && (edward.watchScrubbing || edward.touring)
 
     if (focus && inFocusZone(screen.x, screen.y)) {
       if (b.identity === edward.focusedIdentity) currentStillInLens = true
@@ -926,6 +1136,12 @@ const updateBalls = (t: number, dt: number) => {
       b.root.scale.setScalar(b.size)
     }
 
+    if (doCaptions && !(focus && inFocusZone(screen.x, screen.y)) && b.identity !== hoverIdentity) {
+      const top = projectScreen(p.x, p.y + b.size, p.z)
+      const r = top && !top.behind ? Math.abs(screen.y - top.y) : 0
+      if (r >= (hostW < PHONE_MAX_W ? 26 : 30)) captionCands.push({ b, x: screen.x, y: screen.y, r })
+    }
+
     const bubbleY = screen.y - 36 - b.size * 10
     if (
       b.isShort &&
@@ -940,12 +1156,16 @@ const updateBalls = (t: number, dt: number) => {
       // The lens subject is already in the watch deck; don't bury it in text
       !(focus && inFocusZone(screen.x, screen.y))
     ) {
-      // Keep the whole speech bubble on screen (max-width min(200px, 42vw))
+      // Keep the whole speech bubble on the open stage (max-width min(200px, 42vw)) —
+      // clear of the desktop deck and the right rail too
       const bubbleW = Math.min(200, hostW * 0.42) + 12
+      const wideStage = hostW >= DOCKED_DECK_MAX_W
+      const minBx = wideStage ? deskDeckColumn(hostW) + 8 : 8
+      const maxBx = hostW - bubbleW - 8 - (wideStage ? DESK_RAIL_COLUMN : 0)
       nextBubbles.push({
         id: b.identity,
         text: b.shortText,
-        x: Math.min(Math.max(8, screen.x), hostW - bubbleW - 8),
+        x: Math.min(Math.max(minBx, screen.x), maxBx),
         y: bubbleY,
         scale: 0.85 + Math.min(0.4, b.affinity * 0.3),
       })
@@ -954,6 +1174,9 @@ const updateBalls = (t: number, dt: number) => {
 
   // Don't re-render the overlay every frame just to keep it empty
   if (nextBubbles.length || bubbles.value.length) bubbles.value = nextBubbles
+
+  if (doCaptions) placeCaptions(captionCands, nextBubbles)
+  else if (!edward.captions && captions.value.length) captions.value = []
 
   // Sticky focus: let the reader finish — swap only once the watched post
   // drifts out of the lens (it used to flip to every slightly-closer ball)
@@ -973,6 +1196,14 @@ const applyCamera = () => {
   camera.lookAt(0, 0, 0)
 }
 
+const ageLabel = (createdAt: number) => {
+  const s = Math.max(0, (Date.now() - createdAt) / 1000)
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}
+
 const projectHover = (b: BallRuntime) => {
   if (!camera || !hostEl.value || !THREE) return
   const t = (performance.now() - clockStart) / 1000
@@ -984,17 +1215,27 @@ const projectHover = (b: BallRuntime) => {
     return
   }
   const rect = hostEl.value.getBoundingClientRect()
+  const x = (v.x * 0.5 + 0.5) * rect.width
+  const y = (-v.y * 0.5 + 0.5) * rect.height
+  const cw = b.badges.includes('cw')
   hoverCard.value = {
     name: b.label,
-    preview: b.badges.includes('cw') ? '··· content warning ···' : b.preview || '…',
+    preview: cw ? '··· content warning ···' : b.preview || '…',
     kind: b.kind,
     mood: b.mood,
     why: b.moodWhy,
     glyph: MOOD_GLYPH[b.mood] || '◉‿◉',
     tag: b.topTag,
     affinity: b.affinity,
-    x: (v.x * 0.5 + 0.5) * rect.width,
-    y: (-v.y * 0.5 + 0.5) * rect.height,
+    media: cw ? null : b.mediaUrl,
+    handle: b.acct ? `@${b.acct}${b.host && !b.acct.includes('@') ? `@${b.host}` : ''}` : b.host || '',
+    age: ageLabel(b.createdAt),
+    counts: b.counts,
+    accent: dialectForHost(b.host).accent,
+    flipX: x > rect.width - 300,
+    flipY: y > rect.height - 260,
+    x,
+    y,
   }
 }
 
@@ -1217,6 +1458,8 @@ const onResize = () => {
 
 let lastFrameT = 0
 let filamentTick = 0
+/** Simulation clock — advances at the chosen speed (still = frozen) */
+let simT = 0
 
 const frame = () => {
   if (disposed || !renderer || !scene || !camera) return
@@ -1226,11 +1469,14 @@ const frame = () => {
   lastFrameT = now
 
   if (!reducedMotion) {
-    camYaw += 0.00015
+    // The slow camera orbit is part of the current — still means still
+    camYaw += 0.00015 * speedMeta(edward.speed).mul
     applyCamera()
   }
   applyEdgeHoverScroll(dt)
-  updateBalls(t, dt)
+  const simDt = dt * speedMeta(edward.speed).mul
+  simT += simDt
+  updateBalls(t, dt, simT, simDt)
 
   if (++filamentTick % 30 === 0) rebuildFilaments()
 
@@ -1621,19 +1867,46 @@ onUnmounted(() => {
     </div>
 
     <div
+      v-for="c in captions"
+      :key="c.id"
+      class="edward-canvas__caption"
+      :style="{
+        transform: `translate(${c.x}px, ${c.y}px) translateX(-50%)`,
+        opacity: c.o,
+        '--srv': c.accent,
+      }"
+    >
+      <strong>{{ c.name }}</strong>
+      <span>{{ c.text }}</span>
+    </div>
+
+    <div
       v-if="hoverCard"
       class="edward-canvas__hover"
-      :style="{ transform: `translate(${hoverCard.x}px, ${hoverCard.y}px)` }"
+      :class="{ 'is-flip-x': hoverCard.flipX, 'is-flip-y': hoverCard.flipY }"
+      :style="{ transform: `translate(${hoverCard.x}px, ${hoverCard.y}px)`, '--srv': hoverCard.accent }"
     >
       <div class="edward-canvas__hover-top">
         <span class="edward-canvas__hover-glyph" aria-hidden="true">{{ hoverCard.glyph }}</span>
         <span class="edward-canvas__hover-kind">{{ hoverCard.why }} · {{ hoverCard.mood }}</span>
+        <span class="edward-canvas__hover-age">{{ hoverCard.age }}</span>
       </div>
-      <strong class="edward-canvas__hover-name">{{ hoverCard.name }}</strong>
-      <p class="edward-canvas__hover-preview">{{ hoverCard.preview }}</p>
-      <span v-if="hoverCard.tag" class="edward-canvas__hover-tag">#{{ hoverCard.tag }}</span>
-      <span v-if="hoverCard.affinity > 0.35" class="edward-canvas__hover-you">related to you</span>
-      <span class="edward-canvas__hover-go">click!! heart · reply · follow · thread</span>
+      <div class="edward-canvas__hover-body">
+        <img v-if="hoverCard.media" :src="hoverCard.media" alt="" class="edward-canvas__hover-media" />
+        <div class="edward-canvas__hover-copy">
+          <strong class="edward-canvas__hover-name">{{ hoverCard.name }}</strong>
+          <span v-if="hoverCard.handle" class="edward-canvas__hover-handle">{{ hoverCard.handle }}</span>
+          <p class="edward-canvas__hover-preview">{{ hoverCard.preview }}</p>
+        </div>
+      </div>
+      <div class="edward-canvas__hover-meta">
+        <span v-if="hoverCard.counts?.fav">♥ {{ hoverCard.counts.fav }}</span>
+        <span v-if="hoverCard.counts?.boost">↻ {{ hoverCard.counts.boost }}</span>
+        <span v-if="hoverCard.counts?.reply">↩ {{ hoverCard.counts.reply }}</span>
+        <span v-if="hoverCard.tag" class="edward-canvas__hover-tag">#{{ hoverCard.tag }}</span>
+        <span v-if="hoverCard.affinity > 0.35" class="edward-canvas__hover-you">related to you</span>
+      </div>
+      <span class="edward-canvas__hover-go">click to open · heart · reply · follow</span>
     </div>
   </div>
 </template>
@@ -1790,6 +2063,115 @@ onUnmounted(() => {
   font-size: 0.625rem;
   letter-spacing: 0.08em;
   color: #59d1e0;
+}
+
+// Keep the card on screen near the right / bottom edges
+.edward-canvas__hover.is-flip-x {
+  translate: calc(-100% - 36px) 0;
+}
+
+.edward-canvas__hover.is-flip-y {
+  translate: 0 calc(-100% + 24px);
+}
+
+.edward-canvas__hover.is-flip-x.is-flip-y {
+  translate: calc(-100% - 36px) calc(-100% + 24px);
+}
+
+.edward-canvas__hover {
+  border-color: var(--srv, #ffe566);
+}
+
+.edward-canvas__hover-age {
+  margin-left: auto;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, #fff8d6 60%, transparent);
+}
+
+.edward-canvas__hover-body {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.edward-canvas__hover-media {
+  flex: 0 0 76px;
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border: 1px solid var(--srv, #ffe566);
+  border-radius: 3px;
+  background: #0a0614;
+}
+
+.edward-canvas__hover-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.edward-canvas__hover-handle {
+  display: block;
+  margin: -2px 0 4px;
+  overflow: hidden;
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #59d1e0;
+}
+
+.edward-canvas__hover-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.7rem;
+  margin-bottom: 4px;
+  font-size: 0.6875rem;
+  color: #ffe566;
+  font-variant-numeric: tabular-nums;
+
+  .edward-canvas__hover-tag,
+  .edward-canvas__hover-you {
+    margin: 0;
+  }
+}
+
+/* Name + snippet under prominent bubbles — quiet, readable, never interactive */
+.edward-canvas__caption {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  width: 184px;
+  padding: 3px 7px 4px;
+  pointer-events: none;
+  font-family: 'Courier New', ui-monospace, monospace;
+  background: color-mix(in srgb, #12081c 78%, transparent);
+  border-left: 2px solid var(--srv, #ffe566);
+  border-radius: 2px;
+  transition: opacity 0.3s ease;
+
+  strong,
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  strong {
+    font-size: 0.625rem;
+    letter-spacing: 0.03em;
+    color: #ffe566;
+  }
+
+  span {
+    font-size: 0.625rem;
+    line-height: 1.35;
+    color: color-mix(in srgb, #fff8d6 86%, transparent);
+  }
 }
 
 .edward-canvas__focus {

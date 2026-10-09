@@ -22,6 +22,12 @@ import {
 } from '~/utils/edwardExplore'
 import { dialectForHost, type EdwardServerDialect } from '~/utils/edwardServers'
 import { edwardActive } from '~/utils/edwardShell'
+import {
+  readEdwardPrefs,
+  stepSpeed,
+  writeEdwardPrefs,
+  type EdwardSpeed,
+} from '~/utils/edwardPace'
 
 export const EDWARD_MAX_BALLS = 280
 
@@ -94,6 +100,14 @@ interface EdwardState {
   /** How many servers the firehose is watching */
   sourceCount: number
   affinity: EdwardAffinityContext
+  /** Simulation pace — still / drift / flow / rush (remembered per device) */
+  speed: EdwardSpeed
+  /** Tour: posts float into the lens on a timer — lean back and watch */
+  touring: boolean
+  /** Seed for sort:shuffle — a new one reshuffles */
+  shuffleSeed: number
+  /** Name + snippet captions under the most prominent bubbles */
+  captions: boolean
 }
 
 export const useEdwardStore = defineStore('edward', {
@@ -115,6 +129,10 @@ export const useEdwardStore = defineStore('edward', {
     streamStartedAt: null,
     sourceCount: 0,
     affinity: emptyAffinityContext(),
+    speed: 'flow',
+    touring: false,
+    shuffleSeed: 1,
+    captions: true,
   }),
 
   getters: {
@@ -124,7 +142,12 @@ export const useEdwardStore = defineStore('edward', {
 
     /** One filter + sort pass shared by the canvas and the HUD summary */
     exploreResult(): { balls: EdwardBallDescriptor[]; sort: EdwardSortMode } {
-      const { balls, sort } = filterAndSortBalls(this.balls, this.exploreQuery, this.exploreSort)
+      const { balls, sort } = filterAndSortBalls(
+        this.balls,
+        this.exploreQuery,
+        this.exploreSort,
+        this.shuffleSeed,
+      )
       return { balls, sort }
     },
 
@@ -217,6 +240,22 @@ export const useEdwardStore = defineStore('edward', {
       return out
     },
 
+    /**
+     * Earlier posts in the lens, newest first, excluding the one on deck —
+     * the desktop deck stacks these under the hero.
+     */
+    watchRecent(state): string[] {
+      const hist = state.watchHistory
+      const end = state.watchScrubbing ? Math.max(0, state.watchCursor) : hist.length
+      const out: string[] = []
+      for (let i = end - 1; i >= 0 && out.length < 6; i--) {
+        const id = hist[i]!
+        if (id === state.focusedIdentity || out.includes(id)) continue
+        out.push(id)
+      }
+      return out
+    },
+
     ballCount(state): number {
       return state.statuses.length
     },
@@ -256,6 +295,11 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     enter() {
+      const prefs = readEdwardPrefs()
+      this.speed = prefs.speed
+      this.touring = prefs.touring
+      this.captions = prefs.captions
+      this.shuffleSeed = Math.floor(Math.random() * 1e9)
       this.active = true
       edwardActive.value = true
       this.recessed = false
@@ -301,7 +345,48 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     setExploreSort(mode: EdwardSortMode) {
+      // Picking shuffle again is the reshuffle gesture
+      if (mode === 'shuffle' && this.exploreSort === 'shuffle') this.reshuffle()
       this.exploreSort = mode
+    },
+
+    reshuffle() {
+      this.shuffleSeed = (this.shuffleSeed * 1103515245 + 12345) % 2147483647 || 1
+    },
+
+    setSpeed(speed: EdwardSpeed) {
+      this.speed = speed
+      this.savePrefs()
+    },
+
+    savePrefs() {
+      writeEdwardPrefs({ speed: this.speed, touring: this.touring, captions: this.captions })
+    },
+
+    setCaptions(on: boolean) {
+      this.captions = on
+      this.savePrefs()
+    },
+
+    stepSpeed(dir: 1 | -1) {
+      this.setSpeed(stepSpeed(this.speed, dir))
+    },
+
+    setTouring(on: boolean) {
+      this.touring = on
+      if (on) {
+        this.resumeWatchLive()
+        // The deck is the tour's screen — it needs a lens to show in
+        if (this.focusMode === 'off') this.focusMode = 'bar'
+      }
+      this.savePrefs()
+    },
+
+    /** Tour step: put a post on deck without entering scrub mode */
+    tourTo(identity: string) {
+      if (!identity || this.watchScrubbing || this.watchHold) return
+      this.pushWatchHistory(identity)
+      this.focusedIdentity = identity
     },
 
     cycleExploreSort() {
@@ -317,16 +402,17 @@ export const useEdwardStore = defineStore('edward', {
       if (idx >= 0) {
         parts.splice(idx, 1)
       } else {
-        // bot show/hide are mutually exclusive
+        // A token and its negation are mutually exclusive (bot / -bot, media / -media)
         const hideBot = new Set(['-bot', '-bots', 'nobot', 'nobots', 'humans'])
-        if (key === 'bot') {
-          for (let i = parts.length - 1; i >= 0; i--) {
-            if (hideBot.has(parts[i]!.toLowerCase())) parts.splice(i, 1)
-          }
-        } else if (hideBot.has(key)) {
-          for (let i = parts.length - 1; i >= 0; i--) {
-            if (parts[i]!.toLowerCase() === 'bot') parts.splice(i, 1)
-          }
+        const opposite = (p: string) => {
+          const l = p.toLowerCase()
+          if (key === 'bot') return hideBot.has(l)
+          if (hideBot.has(key)) return l === 'bot'
+          if (key.startsWith('-')) return l === key.slice(1)
+          return l === `-${key}`
+        }
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (opposite(parts[i]!)) parts.splice(i, 1)
         }
         parts.push(token)
       }
@@ -346,8 +432,9 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     setFocusedIdentity(id: string | null) {
-      // Live autofocus must not clobber a scrub session or a reach for the deck
-      if (this.watchScrubbing || this.watchHold) return
+      // Live autofocus must not clobber a scrub session, a reach for the deck,
+      // or a tour (which picks what's on deck itself)
+      if (this.watchScrubbing || this.watchHold || this.touring) return
       if (id && id !== this.focusedIdentity) this.pushWatchHistory(id)
       this.focusedIdentity = id
     },

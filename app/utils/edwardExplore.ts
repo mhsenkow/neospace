@@ -6,7 +6,7 @@
 import type { EdwardBallDescriptor, EdwardBadge, EdwardKind } from '~/utils/edwardSemantics'
 import type { EdwardFaceMood } from '~/utils/edwardFaces'
 
-export type EdwardSortMode = 'stream' | 'near' | 'new' | 'loud' | 'you'
+export type EdwardSortMode = 'stream' | 'near' | 'new' | 'loud' | 'you' | 'gems' | 'shuffle'
 
 export type EdwardExploreParsed = {
   /** Free-text tokens (match preview / author / tag) */
@@ -22,6 +22,8 @@ export type EdwardExploreParsed = {
   servers: Set<string>
   /** Affinity threshold — "you" / "related" */
   minAffinity: number
+  /** "quiet" — only posts almost nobody has engaged with yet */
+  maxEngagement: number | null
   /** Explicit sort from query, if any */
   sort: EdwardSortMode | null
   /** Raw leftover for display */
@@ -103,6 +105,12 @@ const SORT_ALIASES: Record<string, EdwardSortMode> = {
   you: 'you',
   related: 'you',
   affinity: 'you',
+  gems: 'gems',
+  gem: 'gems',
+  hidden: 'gems',
+  shuffle: 'shuffle',
+  random: 'shuffle',
+  surprise: 'shuffle',
 }
 
 export const EDWARD_SORT_LABELS: Record<EdwardSortMode, string> = {
@@ -111,6 +119,21 @@ export const EDWARD_SORT_LABELS: Record<EdwardSortMode, string> = {
   new: 'newest',
   loud: 'loudest',
   you: 'related',
+  gems: 'hidden gems',
+  shuffle: 'shuffle',
+}
+
+/** Sort row order in the console (stream first = no reordering) */
+export const EDWARD_SORT_ORDER: EdwardSortMode[] = ['stream', 'gems', 'shuffle', 'you', 'new', 'loud', 'near']
+
+export const EDWARD_SORT_HINTS: Record<EdwardSortMode, string> = {
+  stream: 'as it arrives',
+  gems: 'thoughtful posts nobody has noticed yet',
+  shuffle: 'random order — tap again to reshuffle',
+  you: 'closest to who and what you follow',
+  new: 'freshest first',
+  loud: 'most engagement first',
+  near: 'related and big, pulled close',
 }
 
 export const EDWARD_EXPLORE_CHIPS: {
@@ -120,14 +143,16 @@ export const EDWARD_EXPLORE_CHIPS: {
 }[] = [
   { label: 'no bots', query: '-bot', hint: 'hide marked & obvious bots' },
   { label: 'you', query: 'you', hint: 'related to you' },
+  { label: 'quiet', query: 'quiet', hint: 'barely noticed yet' },
   { label: 'media', query: 'media', hint: 'pics & video' },
-  { label: 'anger', query: 'mood:anger', hint: 'mad faces' },
-  { label: 'love', query: 'mood:love', hint: 'heart energy' },
-  { label: 'replies', query: 'kind:reply', hint: 'conversations' },
+  { label: 'words', query: '-media', hint: 'text only, no pictures' },
   { label: 'asks', query: 'mood:ask', hint: 'questions' },
+  { label: 'links', query: 'link', hint: 'articles & link cards' },
+  { label: 'polls', query: 'poll', hint: 'polls' },
+  { label: 'replies', query: 'kind:reply', hint: 'conversations' },
+  { label: 'love', query: 'mood:love', hint: 'heart energy' },
+  { label: 'anger', query: 'mood:anger', hint: 'mad faces' },
   { label: 'bots', query: 'bot', hint: 'only bot accounts' },
-  { label: 'near', query: 'sort:near', hint: 'pull close' },
-  { label: 'loud', query: 'sort:loud', hint: 'viral first' },
 ]
 
 /** Rotating placeholders — teach the grammar by example */
@@ -149,6 +174,7 @@ const emptyParsed = (raw: string): EdwardExploreParsed => ({
   authors: new Set(),
   servers: new Set(),
   minAffinity: 0,
+  maxEngagement: null,
   sort: null,
   raw,
 })
@@ -166,6 +192,11 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
 
     if (lower === 'you' || lower === 'related' || lower === 'mine') {
       out.minAffinity = Math.max(out.minAffinity, 0.28)
+      continue
+    }
+
+    if (lower === 'quiet' || lower === 'unseen' || lower === 'overlooked') {
+      out.maxEngagement = 2
       continue
     }
 
@@ -248,7 +279,7 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
       out.badges.add(badge)
       continue
     }
-    if (SORT_ALIASES[lower] && (lower === 'near' || lower === 'loud' || lower === 'new')) {
+    if (SORT_ALIASES[lower] && ['near', 'loud', 'new', 'gems', 'shuffle', 'surprise'].includes(lower)) {
       out.sort = SORT_ALIASES[lower]!
       continue
     }
@@ -266,6 +297,7 @@ export function ballMatchesExplore(
   if (!q.raw) return true
 
   if (q.minAffinity > 0 && ball.affinity < q.minAffinity) return false
+  if (q.maxEngagement !== null && ball.engagement > q.maxEngagement) return false
 
   if (q.moods.size && !q.moods.has(ball.mood)) return false
   if (q.kinds.size && !q.kinds.has(ball.kind)) return false
@@ -324,12 +356,44 @@ export function ballMatchesExplore(
   return true
 }
 
+/**
+ * Hidden-gem score: substance (length, an original thought, a picture) over
+ * attention (engagement). Bots and content-warned posts sink.
+ */
+export function gemScore(b: EdwardBallDescriptor): number {
+  const substance = Math.min(1, b.preview.length / 180)
+  const quiet = 1 / (1 + b.engagement)
+  let s = substance * 1.2 + quiet
+  if (b.kind === 'original') s += 0.25
+  if (b.kind === 'boost') s -= 0.3
+  if (b.mediaUrl && !b.badges.includes('cw')) s += 0.2
+  if (b.isBot) s -= 1.2
+  if (b.badges.includes('cw')) s -= 0.3
+  if (b.preview.length < 24 && !b.mediaUrl) s -= 0.6
+  return s
+}
+
+const seededRank = (identity: string, seed: number) => {
+  let h = 2166136261 ^ seed
+  for (let i = 0; i < identity.length; i++) {
+    h ^= identity.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0) / 4294967295
+}
+
 export function sortEdwardBalls(
   balls: EdwardBallDescriptor[],
   mode: EdwardSortMode,
+  shuffleSeed = 0,
 ): EdwardBallDescriptor[] {
   const list = [...balls]
   switch (mode) {
+    case 'gems':
+      return list.sort((a, b) => gemScore(b) - gemScore(a))
+    case 'shuffle':
+      // Stable per seed — the stream re-sorts every poll; a reshuffle is a new seed
+      return list.sort((a, b) => seededRank(a.identity, shuffleSeed) - seededRank(b.identity, shuffleSeed))
     case 'near':
       return list.sort((a, b) => b.affinity * 2 + b.size - (a.affinity * 2 + a.size))
     case 'new':
@@ -348,11 +412,12 @@ export function filterAndSortBalls(
   balls: EdwardBallDescriptor[],
   query: string,
   sortFallback: EdwardSortMode,
+  shuffleSeed = 0,
 ): { balls: EdwardBallDescriptor[]; parsed: EdwardExploreParsed; sort: EdwardSortMode } {
   const parsed = parseEdwardExplore(query)
   const sort = parsed.sort || sortFallback
   const filtered = balls.filter((b) => ballMatchesExplore(b, parsed))
-  const sorted = sortEdwardBalls(filtered, sort)
+  const sorted = sortEdwardBalls(filtered, sort, shuffleSeed)
   const n = Math.max(1, sorted.length - 1)
   // Stamp rank so the canvas can pull top results closer / bigger
   const ranked = sorted.map((b, i) => ({
@@ -368,7 +433,7 @@ export function filterAndSortBalls(
 }
 
 export function cycleEdwardSort(current: EdwardSortMode): EdwardSortMode {
-  const order: EdwardSortMode[] = ['stream', 'near', 'new', 'loud', 'you']
+  const order = EDWARD_SORT_ORDER
   const i = order.indexOf(current)
   return order[(i + 1) % order.length]!
 }
@@ -391,6 +456,7 @@ export function describeEdwardExplore(
   if (parsed.authors.size) bits.push([...parsed.authors].map((a) => `@${a}`).join(' '))
   if (parsed.servers.size) bits.push([...parsed.servers].map((s) => `srv:${s}`).join(' '))
   if (parsed.minAffinity > 0) bits.push('you')
+  if (parsed.maxEngagement !== null) bits.push('quiet')
   if (parsed.text.length) bits.push(`“${parsed.text.join(' ')}”`)
   const filter = bits.length ? bits.join(' · ') : 'all'
   return `${matched}/${total} · ${filter} · ${EDWARD_SORT_LABELS[sort]}`
