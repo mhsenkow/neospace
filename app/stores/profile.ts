@@ -10,6 +10,7 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient } from '~/composables/useMasto'
 import { stripHtml } from '~/utils/sanitizeHtml'
+import { profileFieldLimit } from '~/utils/profileSources'
 import {
   ACCOUNT_STATUS_PAGE_SIZE,
   accountStatusHasMore,
@@ -108,6 +109,11 @@ export const useProfileStore = defineStore('profile', {
     /**
      * Extract custom CSS from profile fields
      */
+    /** Profile metadata slots the active instance accepts (Mastodon default 4). */
+    maxProfileFields(): number {
+      return profileFieldLimit(useInstancesStore().activeAccount?.instanceInfo?.maxProfileFields)
+    },
+
     profileCustomCSS(): string {
       if (!this.viewedProfile?.fields) return ''
       const cssField = this.viewedProfile.fields.find(field =>
@@ -143,8 +149,7 @@ export const useProfileStore = defineStore('profile', {
           : await client.v1.accounts.verifyCredentials()
         if (seq !== profileSeq) return
 
-        this.viewedProfile = account
-        this.initEditForm()
+        this.setViewedProfile(account)
 
         await Promise.all([
           this.fetchStatuses(true, { excludeReplies: true }),
@@ -186,8 +191,7 @@ export const useProfileStore = defineStore('profile', {
         if (seq !== profileSeq) return
 
         if (account) {
-          this.viewedProfile = account
-          this.initEditForm()
+          this.setViewedProfile(account)
           await Promise.all([
             this.fetchStatuses(true, { excludeReplies: true }),
             this.fetchPinnedStatuses(),
@@ -270,6 +274,16 @@ export const useProfileStore = defineStore('profile', {
       }
     },
 
+    /** Swap the viewed profile; an open editor never carries over to someone else. */
+    setViewedProfile(account: mastodon.v1.Account) {
+      if (this.viewedProfile?.id !== account.id) {
+        this.isEditing = false
+        this.saveError = null
+      }
+      this.viewedProfile = account
+      this.initEditForm()
+    },
+
     /**
      * Initialize edit form with current profile data
      */
@@ -298,7 +312,7 @@ export const useProfileStore = defineStore('profile', {
      * Add a new profile field
      */
     addField() {
-      if (this.editForm.fields.length < 4) {
+      if (this.editForm.fields.length < this.maxProfileFields) {
         this.editForm.fields.push({ name: '', value: '' })
       }
     },
@@ -325,9 +339,13 @@ export const useProfileStore = defineStore('profile', {
       try {
         const client = this.getClient()
 
-        // Always send 4 slots (padded empty) so cleared fields actually delete on the server
+        // Always send every slot (padded empty) so cleared fields actually delete on
+        // the server. Cap at the instance's limit, not a hard-coded 4 — servers that
+        // allow more (and the profile page's presence merge) would lose fields.
+        const maxFields = this.maxProfileFields
+        const ownerId = instancesStore.activeAccountId
         const slots = [...this.editForm.fields]
-        while (slots.length < 4) slots.push({ name: '', value: '' })
+        while (slots.length < maxFields) slots.push({ name: '', value: '' })
 
         // Build the update payload
         const updateData: mastodon.rest.v1.UpdateCredentialsParams = {
@@ -336,7 +354,7 @@ export const useProfileStore = defineStore('profile', {
           locked: this.editForm.locked,
           bot: this.editForm.bot,
           discoverable: this.editForm.discoverable,
-          fieldsAttributes: slots.slice(0, 4).map((f) => ({
+          fieldsAttributes: slots.slice(0, maxFields).map((f) => ({
             name: f.name,
             value: f.value,
           })),
@@ -348,9 +366,10 @@ export const useProfileStore = defineStore('profile', {
         // Update the profile
         const updated = await client.v1.accounts.updateCredentials(updateData)
 
-        // Update local state
+        // Update local state (the PATCH went to ownerId even if the user switched since)
+        if (ownerId) instancesStore.updateActiveAccount(updated, ownerId)
+        if (this.viewedProfile?.id !== updated.id) return updated
         this.viewedProfile = updated
-        instancesStore.updateActiveAccount(updated)
         
         // Exit edit mode
         this.isEditing = false
@@ -375,12 +394,14 @@ export const useProfileStore = defineStore('profile', {
     async followUser() {
       if (!this.viewedProfile || this.isOwnProfile) return
 
+      const targetId = this.viewedProfile.id
       try {
         const client = this.getClient()
-        const relationship = await client.v1.accounts.$select(this.viewedProfile.id).follow()
+        const relationship = await client.v1.accounts.$select(targetId).follow()
         
-        // Only bump the count when follow succeeded (not a pending request)
-        if (this.viewedProfile && relationship.following) {
+        // Only bump the count when follow succeeded (not a pending request) — and
+        // only on the same profile (A→B navigation mid-request)
+        if (this.viewedProfile?.id === targetId && relationship.following) {
           this.viewedProfile = {
             ...this.viewedProfile,
             followersCount: (this.viewedProfile.followersCount || 0) + 1,
@@ -400,12 +421,13 @@ export const useProfileStore = defineStore('profile', {
     async unfollowUser() {
       if (!this.viewedProfile || this.isOwnProfile) return
 
+      const targetId = this.viewedProfile.id
       try {
         const client = this.getClient()
-        const relationship = await client.v1.accounts.$select(this.viewedProfile.id).unfollow()
+        const relationship = await client.v1.accounts.$select(targetId).unfollow()
         
-        // Update follower count optimistically
-        if (this.viewedProfile) {
+        // Update follower count (same profile only — A→B navigation mid-request)
+        if (this.viewedProfile?.id === targetId) {
           this.viewedProfile = {
             ...this.viewedProfile,
             followersCount: Math.max(0, (this.viewedProfile.followersCount || 0) - 1),

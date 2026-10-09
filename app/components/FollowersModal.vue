@@ -10,9 +10,19 @@ import type { mastodon } from 'masto'
 import { activeClient } from '~/composables/useMasto'
 import { usePager } from '~/composables/usePager'
 import { cursorPage } from '~/utils/linkHeader'
+import { formatDateOnly } from '~/utils/insights'
+import { mapErrorToMessage } from '~/utils/friendlyError'
+import { useToastStore } from '~/stores/toast'
 
 const instancesStore = useInstancesStore()
 const overlayStore = useOverlayStore()
+const toastStore = useToastStore()
+
+const reportActionError = (e: unknown, fallback: string) => {
+  console.error(fallback, e)
+  const friendly = mapErrorToMessage(e)
+  toastStore.show({ message: friendly.detail || friendly.title || fallback, duration: 4200 })
+}
 
 const props = defineProps<{
   accountId?: string
@@ -93,10 +103,12 @@ useFocusTrap(modalRef, isOpen, {
 })
 
 const open = (tab?: 'followers' | 'following') => {
-  if (tab) activeTab.value = tab
-  else if (props.initialTab) activeTab.value = props.initialTab
+  const next = tab || props.initialTab || activeTab.value
+  const tabChanged = next !== activeTab.value
+  activeTab.value = next
   isOpen.value = true
-  void loadAccounts()
+  // A tab change already reloads via the activeTab watcher — don't fetch twice
+  if (!tabChanged) void loadAccounts()
 }
 
 const loadAccounts = async () => {
@@ -110,16 +122,9 @@ const loadMore = async () => {
   await pager.loadMore()
 }
 
-const formatLastActive = (iso?: string | null) => {
-  if (!iso) return null
-  try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return null
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-  } catch {
-    return null
-  }
-}
+/** last_status_at is a calendar date ("2024-05-02") — not a UTC instant */
+const formatLastActive = (iso?: string | null) =>
+  formatDateOnly(iso, { month: 'short', day: 'numeric', year: 'numeric' })
 
 const handleFollow = async (accountId: string) => {
   loadingActions.value[accountId] = true
@@ -127,7 +132,8 @@ const handleFollow = async (accountId: string) => {
     const client = getClient()
     const rel = relationships.value[accountId]
 
-    if (rel?.following) {
+    // "Requested" is a pending follow — tapping it again withdraws the request
+    if (rel?.following || rel?.requested) {
       const updated = await client.v1.accounts.$select(accountId).unfollow()
       relationships.value[accountId] = updated
     } else {
@@ -135,7 +141,7 @@ const handleFollow = async (accountId: string) => {
       relationships.value[accountId] = updated
     }
   } catch (e) {
-    console.error('Follow action failed:', e)
+    reportActionError(e, 'Follow action failed')
   } finally {
     loadingActions.value[accountId] = false
   }
@@ -155,7 +161,7 @@ const handleMute = async (accountId: string) => {
       relationships.value[accountId] = updated
     }
   } catch (e) {
-    console.error('Mute action failed:', e)
+    reportActionError(e, 'Mute action failed')
   } finally {
     loadingActions.value[accountId] = false
   }
@@ -176,7 +182,7 @@ const handleBlock = async (accountId: string) => {
     await client.v1.accounts.$select(accountId).block()
     accounts.value = accounts.value.filter((a) => a.id !== accountId)
   } catch (e) {
-    console.error('Block action failed:', e)
+    reportActionError(e, 'Block action failed')
   } finally {
     loadingActions.value[accountId] = false
   }
@@ -197,7 +203,7 @@ const handleRemoveFollower = async (accountId: string) => {
     await client.v1.accounts.$select(accountId).removeFromFollowers()
     accounts.value = accounts.value.filter((a) => a.id !== accountId)
   } catch (e) {
-    console.error('Remove follower failed:', e)
+    reportActionError(e, 'Remove follower failed')
   } finally {
     loadingActions.value[accountId] = false
   }
@@ -306,6 +312,7 @@ defineExpose({ open, close })
 
                   <div class="account-actions">
                     <button
+                      type="button"
                       class="action-btn"
                       :class="{
                         'action-btn--following': relationships[account.id]?.following,
@@ -365,6 +372,7 @@ defineExpose({ open, close })
 
               <button
                 v-if="hasMore"
+                type="button"
                 class="load-more-btn"
                 :disabled="isLoading || isLoadingMore"
                 @click="loadMore"
@@ -561,7 +569,8 @@ defineExpose({ open, close })
   font-weight: 600;
   cursor: pointer;
 
-  &--following {
+  &--following,
+  &--requested {
     background: transparent;
     color: var(--neo-text-primary);
   }
