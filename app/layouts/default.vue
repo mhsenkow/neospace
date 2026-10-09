@@ -140,6 +140,7 @@ onMounted(async () => {
   onUnmounted(() => {
     for (const fn of cleanups) fn()
     stopShellLiveRefresh()
+    document.documentElement.classList.remove('neo-route-board')
   })
 
   loadSidebarRail()

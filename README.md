@@ -34,7 +34,7 @@ A holistic UX / design / a11y / security audit ([744 items](docs/AUDIT-2026-10.m
 |----------|------|
 | 1 | Settings mobile drill-down nav |
 | 2 | Compose upload progress + cancel |
-| 3–4 | Compose `#`/`:emoji:` autocomplete; polls + scheduling |
+| 3–4 | Compose `#`/`:emoji:` autocomplete; polls (scheduling done) |
 | 5 | Split `SettingsModal` into panels |
 | 6 | Split `instances` store |
 | 7 | Self-host Google Fonts |
@@ -109,7 +109,7 @@ See [docs/STATUS.md](docs/STATUS.md) for the full picture.
 ### Not yet (deferred)
 - Hashtag / emoji autocomplete in compose
 - Upload progress bars and cancel UI
-- Polls and scheduled posts in compose
+- Scheduled posts in compose (polls still open)
 - Self-hosted fonts (Google Fonts still loaded at runtime)
 - Fork-specific settings deep links
 - Playwright e2e / axe CI gate

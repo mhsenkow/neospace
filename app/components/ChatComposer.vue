@@ -204,13 +204,17 @@ const postBody = async (body: string, ids: string[]) => {
   isSending.value = true
   error.value = null
   try {
-    const status = await statusStore.postStatus(body, {
+    const result = await statusStore.postStatus(body, {
       visibility: 'direct',
       inReplyToId: props.inReplyToId,
       mediaIds: ids,
     })
+    // DMs never pass scheduledAt — create always returns a live Status
+    if (!('account' in result)) {
+      throw new Error('Unexpected response from server')
+    }
     pendingSend.value = null
-    emit('posted', status)
+    emit('posted', result)
     textareaRef.value?.focus()
   } catch (e: unknown) {
     error.value = mapComposeError(e, {

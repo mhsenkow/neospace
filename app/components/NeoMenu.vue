@@ -2,9 +2,10 @@
 /**
  * Accessible menu button + popup (APG menu pattern, lightweight).
  * Optional teleport + placement for clipped parents (e.g. sidebar).
+ * `sheet`: mobile bottom-sheet (backdrop + slide-up) for dense pickers like Add Feed.
  */
 
-import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { typeaheadMatch } from '~/utils/typeahead'
 
 const props = withDefaults(
@@ -17,8 +18,13 @@ const props = withDefaults(
     placement?: 'bottom' | 'end'
     /** Extra class on the panel (needed when teleported — parent :deep() no longer reaches it). */
     panelClass?: string
+    /**
+     * Bottom-sheet presentation (mobile Add Feed, etc.).
+     * Uses a backdrop + max-height panel; always teleports.
+     */
+    sheet?: boolean
   }>(),
-  { align: 'end', teleport: false, placement: 'bottom' },
+  { align: 'end', teleport: false, placement: 'bottom', sheet: false },
 )
 
 /** Optional controlled open state for parents that style from it */
@@ -28,6 +34,7 @@ const triggerRef = ref<HTMLButtonElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
 const panelStyle = ref<Record<string, string>>({})
 const menuId = `neo-menu-${Math.random().toString(36).slice(2, 9)}`
+const usePortal = computed(() => props.teleport || props.sheet)
 
 const ITEM_SEL =
   '[role="menuitem"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled]), [role="menuitemradio"]:not([disabled]), button:not([disabled]), input:not([disabled]):not([type="hidden"])'
@@ -56,7 +63,7 @@ function toggle() {
 }
 
 function updatePanelPos(remeasure = true) {
-  if (!props.teleport || !triggerRef.value) return
+  if (!usePortal.value || props.sheet || !triggerRef.value) return
   const rect = triggerRef.value.getBoundingClientRect()
   const base =
     props.placement === 'end'
@@ -89,20 +96,22 @@ function updatePanelPos(remeasure = true) {
 }
 
 async function onOpen() {
-  if (props.teleport) updatePanelPos()
+  if (usePortal.value && !props.sheet) updatePanelPos()
   await nextTick()
   const list = items()
-  list[0]?.focus({ preventScroll: true })
+  // Prefer filter input when present (Add Feed groups), else first item
+  const filter = menuRef.value?.querySelector<HTMLElement>('input[type="search"], input:not([type="hidden"])')
+  ;(filter || list[0])?.focus({ preventScroll: true })
 }
 
 watch(open, (v) => {
   if (v) void onOpen()
-})
+}, { flush: 'post' })
 
 watch(
   () => props.placement,
   () => {
-    if (open.value && props.teleport) updatePanelPos()
+    if (open.value && usePortal.value && !props.sheet) updatePanelPos()
   },
 )
 
@@ -220,7 +229,7 @@ function onMenuFocusOut(e: FocusEvent) {
 }
 
 function onDocPointer(e: MouseEvent | PointerEvent) {
-  if (!open.value) return
+  if (!open.value || props.sheet) return
   const root = rootRef.value
   const menu = menuRef.value
   const t = e.target as Node
@@ -229,7 +238,12 @@ function onDocPointer(e: MouseEvent | PointerEvent) {
 }
 
 function onScrollOrResize() {
-  if (open.value && props.teleport) updatePanelPos()
+  if (open.value && usePortal.value && !props.sheet) updatePanelPos()
+}
+
+function onBodyScrollLock(on: boolean) {
+  if (!props.sheet || typeof document === 'undefined') return
+  document.documentElement.classList.toggle('neo-menu-sheet-open', on)
 }
 
 // Global listeners only while open — every post card has a menu, so binding
@@ -240,7 +254,7 @@ function listen(on: boolean) {
   listening = on
   if (on) {
     document.addEventListener('pointerdown', onDocPointer, true)
-    if (props.teleport) {
+    if (usePortal.value && !props.sheet) {
       window.addEventListener('scroll', onScrollOrResize, true)
       window.addEventListener('resize', onScrollOrResize)
     }
@@ -251,9 +265,13 @@ function listen(on: boolean) {
   }
 }
 
-watch(open, (v) => listen(v), { immediate: true })
+watch(open, (v) => {
+  listen(v)
+  onBodyScrollLock(v && props.sheet)
+}, { immediate: true })
 onUnmounted(() => {
   listen(false)
+  onBodyScrollLock(false)
   if (typeTimer) clearTimeout(typeTimer)
 })
 
@@ -264,7 +282,14 @@ defineExpose({ open, close, toggle })
   <div
     ref="rootRef"
     class="neo-menu"
-    :class="[`neo-menu--align-${align}`, { 'neo-menu--open': open, 'neo-menu--teleport': teleport }]"
+    :class="[
+      `neo-menu--align-${align}`,
+      {
+        'neo-menu--open': open,
+        'neo-menu--teleport': usePortal,
+        'neo-menu--sheet': sheet,
+      },
+    ]"
   >
     <button
       ref="triggerRef"
@@ -273,22 +298,49 @@ defineExpose({ open, close, toggle })
       :aria-label="label"
       :aria-expanded="open"
       :aria-controls="menuId"
-      aria-haspopup="menu"
+      :aria-haspopup="sheet ? 'dialog' : 'menu'"
       @click="toggle"
       @keydown="onTriggerKeydown"
     >
       <slot />
     </button>
-    <Teleport to="body" :disabled="!teleport">
+    <Teleport to="body" :disabled="!usePortal">
       <div
+        v-if="sheet && open"
+        class="neo-menu__sheet-root"
+        role="presentation"
+      >
+        <button
+          type="button"
+          class="neo-menu__sheet-backdrop"
+          tabindex="-1"
+          aria-hidden="true"
+          @click="close(false)"
+        />
+        <div
+          :id="menuId"
+          ref="menuRef"
+          class="neo-menu__panel neo-menu__panel--sheet"
+          :class="panelClass"
+          role="menu"
+          :aria-label="label"
+          @keydown="onMenuKeydown"
+          @click="onPanelClick"
+        >
+          <div class="neo-menu__sheet-handle" aria-hidden="true" />
+          <slot name="items" />
+        </div>
+      </div>
+      <div
+        v-else-if="!sheet"
         v-show="open"
         :id="menuId"
         ref="menuRef"
         class="neo-menu__panel"
-        :class="[{ 'neo-menu__panel--portal': teleport }, panelClass]"
+        :class="[{ 'neo-menu__panel--portal': usePortal }, panelClass]"
         role="menu"
         :aria-label="label"
-        :style="teleport ? panelStyle : undefined"
+        :style="usePortal ? panelStyle : undefined"
         @keydown="onMenuKeydown"
         @focusout="onMenuFocusOut"
         @click="onPanelClick"
@@ -341,14 +393,78 @@ defineExpose({ open, close, toggle })
   top: auto;
 }
 
-.neo-menu--align-start .neo-menu__panel:not(.neo-menu__panel--portal) {
+.neo-menu--align-start .neo-menu__panel:not(.neo-menu__panel--portal):not(.neo-menu__panel--sheet) {
   left: 0;
   right: auto;
 }
 
-.neo-menu--align-end .neo-menu__panel:not(.neo-menu__panel--portal) {
+.neo-menu--align-end .neo-menu__panel:not(.neo-menu__panel--portal):not(.neo-menu__panel--sheet) {
   right: 0;
   left: auto;
+}
+
+.neo-menu__sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--neo-z-popover, 1060);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  animation: neo-menu-sheet-in 160ms ease-out;
+}
+
+.neo-menu__sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: var(--neo-bg-overlay, rgba(0, 0, 0, 0.45));
+  cursor: pointer;
+}
+
+.neo-menu__panel--sheet {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(78dvh, 36rem);
+  margin: 0;
+  padding: 0.35rem 0.65rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  border: none;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--neo-bg-secondary, var(--neo-bg-card));
+}
+
+.neo-menu__sheet-handle {
+  width: 36px;
+  height: 4px;
+  margin: 0.2rem auto 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-muted) 45%, transparent);
+}
+
+@keyframes neo-menu-sheet-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neo-menu__sheet-root {
+    animation: none;
+  }
 }
 
 .neo-menu__panel :deep([role='menuitem']),
@@ -379,5 +495,21 @@ defineExpose({ open, close, toggle })
     outline: 2px solid var(--neo-focus, var(--neo-accent));
     outline-offset: -2px;
   }
+}
+
+/* Sheet: larger touch targets */
+.neo-menu__panel--sheet :deep([role='menuitem']),
+.neo-menu__panel--sheet :deep(button.add-column-menu__item),
+.neo-menu__panel--sheet :deep(button.add-column-menu__section-toggle) {
+  min-height: 44px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.9375rem;
+  touch-action: manipulation;
+}
+</style>
+
+<style lang="scss">
+html.neo-menu-sheet-open {
+  overflow: hidden;
 }
 </style>

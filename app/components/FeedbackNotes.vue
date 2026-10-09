@@ -420,15 +420,15 @@ onUnmounted(() => {
 .notes-fab {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
-  /* Sit just above tab bar + feed pills — a hair higher so it doesn’t kiss the chrome */
+  /* Mirror neo-bottom-dock / suite waffle — same row above the feed-pill line */
   bottom: calc(
     var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 0px) + env(safe-area-inset-bottom, 0px) +
-      1.25rem
+      0.65rem
   );
   z-index: var(--neo-z-shell-header, 90);
   display: grid;
   place-items: center;
-  // 44px touch target
+  // 44px touch target — matches suite waffle
   width: 2.75rem;
   height: 2.75rem;
   color: var(--neo-text-muted);

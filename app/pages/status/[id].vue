@@ -204,12 +204,11 @@ const replyTarget = computed(() => {
   return focusStatus.value
 })
 
-const replyPrefill = computed(() => {
-  if (!isDirectThread.value) {
-    const acct = focusStatus.value?.account?.acct
-    return acct ? `@${acct} ` : ''
-  }
-  return recipientAccts.value.map((a) => `@${a}`).join(' ') + (recipientAccts.value.length ? ' ' : '')
+/** Mentions prepended on send — keep the reply field empty (Threads / ChatComposer) */
+const replyMentionAccts = computed(() => {
+  if (isDirectThread.value) return recipientAccts.value
+  const acct = focusStatus.value?.account?.acct
+  return acct ? [acct] : []
 })
 
 const dayLabelFor = (status: mastodon.v1.Status, index: number) => {
@@ -682,7 +681,7 @@ useHead({
     </SubviewChrome>
 
     <div
-      v-if="focusStatus && !isLoading && !error"
+      v-if="focusStatus && !isLoading && !error && !keyboardOpen"
       class="thread-search neo-sticky-bar neo-sticky-bar--under-chrome"
     >
       <label class="thread-search__field">
@@ -844,7 +843,7 @@ useHead({
             :accept-handoff="false"
             :disabled="replyResolving || !publicReplyId"
             :in-reply-to-id="publicReplyId || focusStatus.id"
-            :initial-text="replyPrefill"
+            :mention-accts="replyMentionAccts"
             :initial-visibility="focusStatus.visibility === 'direct' ? 'direct' : focusStatus.visibility"
             :placeholder="`Reply to @${focusStatus.account.acct}…`"
             title="Reply"

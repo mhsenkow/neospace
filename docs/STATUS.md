@@ -83,7 +83,7 @@ From [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md), in **suggested priority
 | 7 | Settings mobile drill-down nav | M | Phone settings is an unlabelled icon rail — needs list → panel + back chrome |
 | 3 | Compose upload progress + cancel | M–L | Upload shows "Uploading…" with no progress or abort UI |
 | 2 | Compose `#` / `:emoji:` autocomplete | L | Only `@` mentions autocomplete today |
-| 4 | Compose polls + scheduling | L | Mastodon API supports these; UI doesn't |
+| 4 | Compose polls (+ scheduling done) | L | Schedule picker ships; poll editor still open |
 | 9 | Split SettingsModal into panels | L | ~2.2k lines; do after mobile nav (#7) |
 | 6 | Split `instances` store | L | ~870 lines mixing OAuth, persistence, timelines, preview |
 | 1 | Self-host Google Fonts | L | FOUT + IP leak; fonts load after JS today |
@@ -97,7 +97,8 @@ From [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md), in **suggested priority
 - [ ] Self-host Google Fonts
 - [ ] Compose `#` / `:` autocomplete
 - [ ] Compose upload progress + cancel UI
-- [ ] Compose polls + scheduling
+- [x] Compose scheduling (`scheduledAt` picker)
+- [ ] Compose polls
 - [ ] Trusted Types + token isolation + CSP harden
 - [ ] Split `instances` store
 - [ ] Settings mobile drill-down
@@ -150,7 +151,7 @@ Docker serves the static SPA only — **no `/api/feedback`**. Use Cloudflare Pag
 ## Known limitations (honest)
 
 - Fonts load from Google at runtime (deferred #1)
-- Compose lacks hashtag/emoji autocomplete, upload progress, polls, scheduling
+- Compose lacks hashtag/emoji autocomplete, upload progress, polls (scheduling ships; no scheduled-list UI yet)
 - Settings deep links assume Mastodon web UI paths
 - `npm run typecheck:app` has pre-existing masto typing gaps — CI uses `generate` as the main app gate
 - No automated axe/Playwright CI yet

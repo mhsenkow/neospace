@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
  * Full-screen / bottom compose sheet for mobile (+ tab) and DM recipient pick.
+ * Threads-style: Post lives in the header; footer keeps tools + counter.
  */
 
 import { useComposeSheetStore } from '~/stores/composeSheet'
@@ -8,11 +9,12 @@ import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
 import { emitComposedStatus } from '~/composables/useComposedStatus'
 import type { mastodon } from 'masto'
+import type RealComposeBox from '~/components/RealComposeBox.vue'
 
 const sheet = useComposeSheetStore()
 const overlayStore = useOverlayStore()
 const panelRef = ref<HTMLElement | null>(null)
-const composeRef = ref<{ isDirty: boolean; discardDraft: () => void } | null>(null)
+const composeRef = ref<InstanceType<typeof RealComposeBox> | null>(null)
 const sheetOpen = computed(() => sheet.open)
 
 const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(sheetOpen, {
@@ -52,6 +54,39 @@ const sheetTitleId = 'compose-sheet-title'
 const contextExpanded = ref(false)
 
 const isPicking = ref(false)
+
+const headerCanPost = ref(false)
+const headerSubmitLabel = ref('Post')
+const headerPosting = ref(false)
+
+const syncHeaderActions = () => {
+  const box = composeRef.value as
+    | {
+        canPost?: boolean
+        submitLabel?: string
+        isPosting?: boolean
+      }
+    | null
+  headerCanPost.value = !!box?.canPost
+  headerSubmitLabel.value = box?.submitLabel || 'Post'
+  headerPosting.value = !!box?.isPosting
+}
+
+watch(
+  () => [
+    composeRef.value?.canPost,
+    composeRef.value?.submitLabel,
+    composeRef.value?.isPosting,
+    sheet.open,
+    sheet.instanceKey,
+  ],
+  syncHeaderActions,
+  { flush: 'post' },
+)
+
+const onHeaderPost = () => {
+  void composeRef.value?.submit()
+}
 
 const onPick = async (account: mastodon.v1.Account) => {
   if (isPicking.value) return
@@ -111,7 +146,19 @@ const onPick = async (account: mastodon.v1.Account) => {
           :title-id="sheetTitleId"
           :title-sr-only="keyboardOpen"
           @cancel="requestClose"
-        />
+        >
+          <template #trailing>
+            <button
+              type="button"
+              class="compose-sheet__header-post neo-btn neo-btn--primary neo-btn--sm"
+              :disabled="!headerCanPost"
+              :aria-busy="headerPosting || undefined"
+              @click="onHeaderPost"
+            >
+              {{ headerSubmitLabel }}
+            </button>
+          </template>
+        </NeoSheetHeader>
         <div
           class="compose-sheet__body"
           data-keyboard-scroll
@@ -149,6 +196,7 @@ const onPick = async (account: mastodon.v1.Account) => {
           <RealComposeBox
             ref="composeRef"
             :key="sheet.instanceKey"
+            submit-in-header
             :initial-text="sheet.initialText || undefined"
             :initial-visibility="sheet.initialVisibility || undefined"
             :initial-group-tag="sheet.groupTag || undefined"
@@ -159,6 +207,7 @@ const onPick = async (account: mastodon.v1.Account) => {
             :quote-context="sheet.contextPost && sheet.quoteUrl ? sheet.contextPost : undefined"
             :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
             @posted="onPosted"
+            @vue:updated="syncHeaderActions"
           />
         </div>
       </template>
@@ -176,6 +225,18 @@ const onPick = async (account: mastodon.v1.Account) => {
   height: 100%;
   min-height: inherit;
   overflow: hidden;
+}
+
+.compose-sheet__header-post {
+  min-width: 4.25rem;
+  min-height: 36px;
+  padding-inline: 0.9rem;
+  font-weight: 700;
+  touch-action: manipulation;
+
+  &:disabled {
+    opacity: 0.45;
+  }
 }
 
 .compose-sheet__inner--keyboard {

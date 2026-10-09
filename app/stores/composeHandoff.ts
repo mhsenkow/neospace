@@ -32,8 +32,8 @@ type StoredShare = {
   /** data URL for the chart image (optional; story fetch is preferred) */
   imageDataUrl?: string
   imageName?: string
-  /** Which suite tool sent this. Text-only tools (bruh) never carry an image. */
-  source?: 'loom' | 'bruh'
+  /** Which suite tool sent this. Text-only tools (bruh / notebook) never carry an image. */
+  source?: 'loom' | 'bruh' | 'notebook'
 }
 
 type StoryPhase = 'idle' | 'loading' | 'ready' | 'error'
@@ -52,6 +52,7 @@ function storyKey(share: StoredShare): string {
   // bruh upgrades (query caption → caption + page link) must share one key so the
   // fuller postMessage replaces the short draft instead of forking a second ingest.
   if (share.source === 'bruh') return 'local:bruh'
+  if (share.source === 'notebook') return 'local:notebook'
   return share.story || `local:${share.text}|${share.imageName || ''}`
 }
 
@@ -108,6 +109,9 @@ function bufferToDataUrl(buffer: ArrayBuffer, type: string): string {
 function handoffNotice(hasImage: boolean, source: StoredShare['source'] = 'loom'): string {
   if (source === 'bruh') {
     return 'Page excerpt + link from bruh. Anyone with the link can read the page.'
+  }
+  if (source === 'notebook') {
+    return 'Cell from Throughline. Edit, schedule, or post — AI stays in the notebook.'
   }
   if (!hasImage) {
     return 'Caption ready — chart image missing; try Post to NeoSpace again from Loom'

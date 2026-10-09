@@ -48,8 +48,10 @@ export const useStatusStore = defineStore('status', {
         sensitive?: boolean
         language?: string
         quotedStatusId?: string
+        /** ISO 8601 — must be ≥5 minutes ahead; returns ScheduledStatus */
+        scheduledAt?: string
       } = {},
-    ) {
+    ): Promise<mastodon.v1.Status | mastodon.v1.ScheduledStatus> {
       const instances = useInstancesStore()
       if (!instances.isAuthenticated) {
         throw new Error('Not authenticated')
@@ -59,6 +61,17 @@ export const useStatusStore = defineStore('status', {
       const mediaIds = options.mediaIds?.filter(Boolean) ?? []
       if (!text && mediaIds.length === 0) {
         throw new Error('Write something or add a photo')
+      }
+
+      const scheduledAt = options.scheduledAt?.trim() || undefined
+      if (scheduledAt) {
+        const when = Date.parse(scheduledAt)
+        if (!Number.isFinite(when)) {
+          throw new Error('Pick a valid schedule time')
+        }
+        if (when < Date.now() + 5 * 60 * 1000) {
+          throw new Error('Schedule at least 5 minutes from now')
+        }
       }
 
       const client = this.getClient()
@@ -78,6 +91,15 @@ export const useStatusStore = defineStore('status', {
         ? { ...base, status: text || undefined, mediaIds }
         : { ...base, status: text }
       // masto v7 only forwards headers via meta.requestInit
+      if (scheduledAt) {
+        const scheduled: mastodon.rest.v1.CreateScheduledStatusParams = {
+          ...params,
+          scheduledAt,
+        }
+        return await client.v1.statuses.create(scheduled, {
+          requestInit: { headers: { 'Idempotency-Key': idempotencyKey } },
+        })
+      }
       return await client.v1.statuses.create(params, {
         requestInit: { headers: { 'Idempotency-Key': idempotencyKey } },
       })

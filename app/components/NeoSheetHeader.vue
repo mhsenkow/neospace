@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * Minimal sheet chrome — icon close + short title.
+ * Minimal sheet chrome — icon close + short title (+ optional trailing action).
  * Mobile: icon-only close. Desktop (≥1024px): icon + “Cancel”.
+ * Trailing slot: Threads-style Post / Send in the header.
  */
 withDefaults(
   defineProps<{
@@ -39,6 +40,9 @@ defineEmits<{
     >
       {{ title }}
     </h2>
+    <div v-if="$slots.trailing" class="neo-sheet-header__trailing">
+      <slot name="trailing" />
+    </div>
   </header>
 </template>
 
@@ -114,5 +118,14 @@ defineEmits<{
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.neo-sheet-header__trailing {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  padding-right: 0.15rem;
 }
 </style>
