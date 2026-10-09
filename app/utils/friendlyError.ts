@@ -110,7 +110,11 @@ export function mapErrorToMessage(err: unknown): FriendlyError {
 /** Compose / DM post failures — match status + context, never regex alone. */
 export function mapComposeError(
   err: unknown,
-  ctx?: { inReplyToId?: string | null; hasMedia?: boolean },
+  ctx?: {
+    inReplyToId?: string | null
+    quotedStatusId?: string | null
+    hasMedia?: boolean
+  },
 ): string {
   const status = httpStatusFrom(err)
   const friendly = mapErrorToMessage(err)
@@ -124,6 +128,9 @@ export function mapComposeError(
   if (status === 404) {
     if (ctx?.inReplyToId) {
       return 'That post isn’t on your account’s server — try opening the thread and replying there.'
+    }
+    if (ctx?.quotedStatusId) {
+      return 'Couldn’t attach that quote on your server. Try again — the link will still be included.'
     }
     return friendly.detail
   }

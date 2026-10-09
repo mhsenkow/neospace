@@ -626,6 +626,8 @@ watch(
   flex-direction: column;
   align-items: stretch;
   padding: 0.85rem 0.65rem 0.85rem;
+  // Home-screen iPad: status bar/date overlays the top of the fixed sidebar
+  padding-top: max(0.85rem, var(--neo-safe-top, env(safe-area-inset-top, 0px)));
   // Landscape notches / home indicator on iPad-class devices
   padding-bottom: max(0.85rem, env(safe-area-inset-bottom));
   padding-left: max(0.65rem, env(safe-area-inset-left));

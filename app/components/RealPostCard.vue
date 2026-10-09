@@ -460,12 +460,22 @@ const openQuoteComposer = async () => {
   if (!requireAuth()) return
   const url = statusUrl.value
   if (!url) return
+  // Same as replies: multi-account / remote ids 404 on create unless resolved
+  // on the active posting account. URL-only quotes still work without an id.
+  const ext = displayStatus.value as ExtendedStatus
+  const quoteId = await statusStore.resolveReplyId({
+    id: displayStatus.value.id,
+    url,
+    sourceInstanceUrl: ext._instanceUrl || null,
+  })
+  const contextPost = contextFromStatus()
+  contextPost.id = quoteId || undefined
   composeSheet.show({
     title: 'Quote',
     placeholder: 'Add a comment…',
     initialText: '',
     quoteUrl: url,
-    contextPost: contextFromStatus(),
+    contextPost,
   })
 }
 
@@ -2032,18 +2042,18 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     cursor: not-allowed;
   }
 
-  // Liked = Braun accent (not X pink)
+  // Liked = theme's like color (Braun accent unless a theme sets --neo-like)
   &--liked {
-    color: var(--neo-accent);
+    color: var(--neo-like, var(--neo-accent));
 
     svg {
-      stroke: var(--neo-accent);
-      fill: var(--neo-accent);
+      stroke: var(--neo-like, var(--neo-accent));
+      fill: var(--neo-like, var(--neo-accent));
     }
 
     @include hover(':not(:disabled)') {
-      background: var(--neo-accent-soft);
-      color: var(--neo-accent);
+      background: color-mix(in srgb, var(--neo-like, var(--neo-accent)) 12%, transparent);
+      color: var(--neo-like, var(--neo-accent));
     }
   }
 
@@ -2075,7 +2085,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       }
 
       &.status-action--liked {
-        color: var(--neo-accent);
+        color: var(--neo-like, var(--neo-accent));
       }
     }
 
@@ -2098,15 +2108,15 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 
   &--boosted {
-    color: var(--neo-success);
+    color: var(--neo-boost, var(--neo-success));
 
     svg {
-      stroke: var(--neo-success);
+      stroke: var(--neo-boost, var(--neo-success));
     }
 
     @include hover(':not(:disabled)') {
-      background: var(--neo-success-soft);
-      color: var(--neo-success);
+      background: color-mix(in srgb, var(--neo-boost, var(--neo-success)) 12%, transparent);
+      color: var(--neo-boost, var(--neo-success));
     }
   }
 

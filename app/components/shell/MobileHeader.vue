@@ -65,11 +65,11 @@ const openSearch = () => {
   position: relative;
   flex-shrink: 0;
   width: 100%;
-  height: calc(44px + env(safe-area-inset-top, 0px));
+  height: calc(44px + var(--neo-safe-top, env(safe-area-inset-top, 0px)));
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: env(safe-area-inset-top, 0px) 0.35rem 0;
+  padding: var(--neo-safe-top, env(safe-area-inset-top, 0px)) 0.35rem 0;
   // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);

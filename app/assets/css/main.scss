@@ -658,16 +658,35 @@ body.chaos-active::after {
   }
 }
 
-// Installed PWA (Pixel home screen / Chrome app window)
-@media (display-mode: standalone), (display-mode: minimal-ui) {
+// Safe-area token — chrome uses --neo-safe-top so iPad home-screen apps
+// still clear the status bar/date when env(safe-area-inset-top) reports 0.
+:root {
+  --neo-safe-top: env(safe-area-inset-top, 0px);
+}
+
+// Installed PWA (home screen / Chrome app window / iOS standalone)
+@media (display-mode: standalone), (display-mode: minimal-ui), (display-mode: fullscreen) {
   html {
-    // Status bar sits over content; chrome already uses safe-area insets
+    // Status bar sits over content with black-translucent + viewport-fit=cover
     min-height: 100dvh;
+    // Floor: iPad standalone often reports 0 inset while the clock still overlays
+    --neo-safe-top: max(env(safe-area-inset-top, 0px), 24px);
   }
 
   body {
     min-height: 100dvh;
     // Prevent rubber-band revealing browser chrome that isn't there
+    overscroll-behavior-y: none;
+  }
+}
+
+// Class mirror for iOS `navigator.standalone` (set by useStandaloneShell)
+html.neo-standalone {
+  min-height: 100dvh;
+  --neo-safe-top: max(env(safe-area-inset-top, 0px), 24px);
+
+  body {
+    min-height: 100dvh;
     overscroll-behavior-y: none;
   }
 }

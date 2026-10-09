@@ -6,7 +6,7 @@
     var map = { hc: 'contrast', electric: 'frost', forest: 'tank' }
     var t = p.theme || 'auto'
     if (map[t]) t = map[t]
-    var ok = ["light","dark","contrast","paper","glass","frost","brutal","loom","tank","nes"]
+    var ok = ["light","dark","contrast","paper","glass","frost","brutal","loom","tank","nes","beta","y"]
     if (t === 'auto' || ok.indexOf(t) < 0) {
       if (window.matchMedia && window.matchMedia('(prefers-contrast: more)').matches) t = 'contrast'
       else

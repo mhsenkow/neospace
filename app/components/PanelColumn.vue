@@ -15,9 +15,7 @@ import { useStatusStore } from '~/stores/status'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useLinkedProfileFeed } from '~/composables/useLinkedProfileFeed'
-import { sanitizeStatusHtml } from '~/utils/sanitizeHtml'
 import { stripHtml } from '~/utils/stripHtml'
-import { emojify } from '~/utils/emojify'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { participantLabel } from '~/utils/dmHelpers'
 import { useColumnDnd } from '~/composables/useColumnDnd'
@@ -136,14 +134,6 @@ const profileHost = (url?: string | null) => {
   }
 }
 
-const profileHandle = computed(() => {
-  const acct = profileAccount.value?.acct
-  if (!acct) return ''
-  if (acct.includes('@')) return `@${acct}`
-  const host = profileHost(profilePeekInstance.value?.url)
-  return host ? `@${acct}@${host}` : `@${acct}`
-})
-
 const openFullProfile = () => {
   if (props.column.profileAcct) {
     router.push({ path: '/profile', query: { user: props.column.profileAcct } })
@@ -177,22 +167,6 @@ const remoteLoadingStatuses = ref(false)
 const remoteError = ref<string | null>(null)
 const remoteMaxId = ref<string | null>(null)
 const remoteHasMore = ref(true)
-
-const remoteHandle = computed(() => {
-  const acct = remoteAccount.value?.acct || props.column.profileAcct || ''
-  return acct ? `@${acct.replace(/^@/, '')}` : ''
-})
-
-const safeRemoteBio = computed(() => {
-  const note = remoteAccount.value?.note || ''
-  const emojis = remoteAccount.value?.emojis || []
-  return emojify(sanitizeStatusHtml(note), emojis, { escape: false })
-})
-const safeProfileBio = computed(() => {
-  const note = profileAccount.value?.note || ''
-  const emojis = profileAccount.value?.emojis || []
-  return emojify(sanitizeStatusHtml(note), emojis, { escape: false })
-})
 
 const onProfilePeekKeydown = (e: KeyboardEvent) => {
   const list = profileLinkedAccounts.value
@@ -602,34 +576,11 @@ onUnmounted(() => {
           </div>
 
           <template v-else-if="remoteAccount">
-            <div class="profile-card">
-              <img
-                :src="remoteAccount.avatar"
-                :alt="remoteAccount.displayName || remoteAccount.username"
-                class="profile-card__avatar"
-              />
-              <div class="profile-card__meta">
-                <h3 class="profile-card__name">
-                  {{ remoteAccount.displayName || remoteAccount.username }}
-                </h3>
-                <p class="profile-card__acct">{{ remoteHandle }}</p>
-                <div
-                  v-if="safeRemoteBio"
-                  class="profile-card__bio"
-                  v-html="safeRemoteBio"
-                />
-                <p class="profile-card__followers">
-                  <strong>{{ remoteAccount.followersCount?.toLocaleString() }}</strong> followers
-                </p>
-                <button
-                  type="button"
-                  class="neo-btn neo-btn--secondary profile-card__open"
-                  @click="openFullProfile"
-                >
-                  Open profile
-                </button>
-              </div>
-            </div>
+            <ProfilePeekCard
+              :account="remoteAccount"
+              open-label="Open profile"
+              @open="openFullProfile"
+            />
 
             <p v-if="remoteError" class="panel-hint panel-hint--err">{{ remoteError }}</p>
 
@@ -707,34 +658,11 @@ onUnmounted(() => {
           </div>
 
           <template v-else-if="profileAccount">
-            <div class="profile-card">
-              <img
-                :src="profileAccount.avatar"
-                :alt="profileAccount.displayName || profileAccount.username"
-                class="profile-card__avatar"
-              />
-              <div class="profile-card__meta">
-                <h3 class="profile-card__name">
-                  {{ profileAccount.displayName || profileAccount.username }}
-                </h3>
-                <p class="profile-card__acct">{{ profileHandle }}</p>
-                <div
-                  v-if="safeProfileBio"
-                  class="profile-card__bio"
-                  v-html="safeProfileBio"
-                />
-                <p class="profile-card__followers">
-                  <strong>{{ profileAccount.followersCount?.toLocaleString() }}</strong> followers
-                </p>
-                <button
-                  type="button"
-                  class="neo-btn neo-btn--secondary profile-card__open"
-                  @click="openFullProfile"
-                >
-                  Open profile
-                </button>
-              </div>
-            </div>
+            <ProfilePeekCard
+              :account="profileAccount"
+              open-label="Open profile"
+              @open="openFullProfile"
+            />
 
             <p v-if="profileError" class="panel-hint panel-hint--err">{{ profileError }}</p>
 
@@ -1451,92 +1379,6 @@ onUnmounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-}
-
-.profile-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.75rem;
-  box-sizing: border-box;
-  width: 100%;
-  padding: 0.75rem 0.5rem 0.85rem;
-  margin: 0;
-  border-bottom: 1px solid var(--neo-border-color);
-
-  &__avatar {
-    width: 72px;
-    height: 72px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 1px solid var(--neo-border-color);
-    flex-shrink: 0;
-  }
-
-  &__meta {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.25rem;
-    width: 100%;
-    min-width: 0;
-  }
-
-  &__name {
-    margin: 0;
-    font-size: 1.05rem;
-    font-weight: 700;
-  }
-
-  &__acct {
-    margin: 0;
-    font-size: 0.875rem;
-    color: var(--neo-text-tertiary);
-  }
-
-  &__bio {
-    margin: 0.35rem 0 0;
-    font-size: 0.8125rem;
-    color: var(--neo-text-secondary);
-    line-height: 1.45;
-    display: -webkit-box;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-
-    :deep(p) {
-      margin: 0;
-    }
-
-    :deep(a) {
-      color: var(--neo-accent);
-      text-decoration: none;
-    }
-
-    :deep(img.emoji),
-    :deep(img.custom-emoji) {
-      width: 1.1em;
-      height: 1.1em;
-      vertical-align: -0.15em;
-    }
-  }
-
-  &__followers {
-    margin: 0.35rem 0 0;
-    font-size: 0.875rem;
-    color: var(--neo-text-muted);
-
-    strong {
-      color: var(--neo-text-primary);
-      font-weight: 600;
-    }
-  }
-
-  &__open {
-    margin-top: 0.5rem;
-    width: 100%;
-    justify-content: center;
   }
 }
 

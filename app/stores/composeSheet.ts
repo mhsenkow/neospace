@@ -9,7 +9,8 @@ import type { mastodon } from 'masto'
 export type ComposeVisibility = 'public' | 'unlisted' | 'private' | 'direct'
 
 export interface ComposeContextPost {
-  id: string
+  /** Local id on the posting account — omit when unresolved (URL-only quote) */
+  id?: string
   name: string
   handle: string
   avatar?: string | null

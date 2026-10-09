@@ -65,7 +65,8 @@ const goBack = () => {
   gap: 0.25rem;
   min-height: var(--neo-subview-chrome-height, 44px);
   padding: 0.2rem 0.35rem;
-  padding-top: max(0.2rem, env(safe-area-inset-top, 0px));
+  /* Always honor notch / iPad status bar — --neo-safe-top floors standalone PWAs */
+  padding-top: max(0.2rem, var(--neo-safe-top, env(safe-area-inset-top, 0px)));
   padding-bottom: 0.2rem;
   overflow: visible;
   /* Solid fill — backdrop-filter flashes black on iOS Safari */
@@ -73,12 +74,19 @@ const goBack = () => {
   border-bottom: 1px solid var(--neo-border-color);
 
   @media (min-width: 1024px) {
-    margin: 0 -0.5rem;
+    /* Bleed into main’s horizontal pad so the bar spans the content column */
+    margin: 0 -1.25rem;
     min-height: 48px;
-    padding-left: 0.25rem;
-    padding-right: 0.25rem;
-    padding-top: 0.35rem;
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+    padding-top: max(0.35rem, var(--neo-safe-top, env(safe-area-inset-top, 0px)));
     padding-bottom: 0.35rem;
+  }
+
+  @media (min-width: 1200px) {
+    margin: 0 -2rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
   }
 }
 

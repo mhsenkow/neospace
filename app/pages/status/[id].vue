@@ -12,11 +12,17 @@ import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel, safeHttpUrl } from '~/utils/dmHelpers'
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
-import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
+import {
+  activeClient,
+  clearReadAccountOverride,
+  setReadAccountOverride,
+} from '~/composables/useMasto'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
+import { useMobileViewport } from '~/composables/useBreakpoint'
 import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
-import { getMainScroller } from '~/utils/pageScroll'
+import { getMainScroller, getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
+type DmContextPane = 'chat' | 'profile'
 
 const route = useRoute()
 const router = useRouter()
@@ -61,6 +67,12 @@ const originalUrl = computed(
   () => safeHttpUrl(focusStatus.value?.url) || safeHttpUrl(queryUrl.value),
 )
 const isDirectThread = computed(() => focusStatus.value?.visibility === 'direct')
+
+/** Honor OS + in-app reduced motion for JS-driven scrolling / pane flips */
+const preferReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+    document.documentElement.classList.contains('reduce-motion'))
 
 /** Chronological chat messages */
 const chatMessages = computed(() => {
@@ -126,6 +138,8 @@ type ChatPerson = {
   username?: string
   displayName?: string | null
   avatar?: string | null
+  followersCount?: number | null
+  statusesCount?: number | null
 }
 
 /**
@@ -146,6 +160,8 @@ const otherParticipants = computed((): ChatPerson[] => {
       username: a.username,
       displayName: a.displayName || a.username,
       avatar: a.avatar,
+      followersCount: a.followersCount,
+      statusesCount: a.statusesCount,
     })
   }
   // Mentioned people who haven't written yet are in the audience too (Mastodon
@@ -168,6 +184,204 @@ const otherParticipants = computed((): ChatPerson[] => {
 })
 
 const otherParticipant = computed((): ChatPerson | null => otherParticipants.value[0] || null)
+
+/** Mobile DM: Sniffies-style chat ↔ profile flip under the composer */
+const isMobile = useMobileViewport()
+const showDmContextChrome = computed(
+  () => isDirectThread.value && isMobile.value && otherParticipants.value.length > 0,
+)
+const dmPane = ref<DmContextPane>('chat')
+const peekAccountId = ref<string | null>(null)
+const peekAccount = ref<mastodon.v1.Account | null>(null)
+const peekLoading = ref(false)
+const peekError = ref<string | null>(null)
+const peekStatuses = ref<mastodon.v1.Status[]>([])
+const peekStatusesLoading = ref(false)
+const peekStatusesError = ref<string | null>(null)
+const peekMaxId = ref<string | null>(null)
+const peekHasMore = ref(true)
+const peekRace = createRaceGuard()
+const peekStatusesRace = createRaceGuard()
+const chatBottomStackEl = ref<HTMLElement | null>(null)
+const chatBottomH = ref(0)
+let chatBottomRo: ResizeObserver | null = null
+let savedChatScroll = 0
+
+const peekSeed = computed((): ChatPerson | null => {
+  const people = otherParticipants.value
+  if (!people.length) return null
+  return people.find((p) => p.id && p.id === peekAccountId.value) || people[0] || null
+})
+
+watch(
+  otherParticipants,
+  (people) => {
+    if (!people.length) {
+      peekAccountId.value = null
+      return
+    }
+    if (!peekAccountId.value || !people.some((p) => p.id === peekAccountId.value)) {
+      peekAccountId.value = people[0]?.id || null
+    }
+  },
+  { immediate: true },
+)
+
+const resetPeekStatuses = () => {
+  peekStatusesRace.next()
+  peekStatuses.value = []
+  peekMaxId.value = null
+  peekHasMore.value = true
+  peekStatusesError.value = null
+  peekStatusesLoading.value = false
+}
+
+const loadPeekStatuses = async (refresh = false) => {
+  const account = peekAccount.value
+  if (!account || !instancesStore.isAuthenticated) return
+  if (refresh) {
+    peekStatuses.value = []
+    peekMaxId.value = null
+    peekHasMore.value = true
+    peekStatusesError.value = null
+  }
+  if (!peekHasMore.value && !refresh) return
+  const ticket = peekStatusesRace.next()
+  peekStatusesLoading.value = true
+  try {
+    const client = activeClient()
+    const page = await client.v1.accounts.$select(account.id).statuses.list({
+      limit: 20,
+      maxId: peekMaxId.value || undefined,
+      excludeReplies: true,
+    })
+    if (!ticket.isCurrent()) return
+    peekStatuses.value = refresh ? page : [...peekStatuses.value, ...page]
+    if (page.length > 0) peekMaxId.value = page[page.length - 1]!.id
+    peekHasMore.value = page.length === 20
+  } catch (e: unknown) {
+    if (!ticket.isCurrent()) return
+    peekStatusesError.value = e instanceof Error ? e.message : 'Couldn’t load posts'
+  } finally {
+    if (ticket.isCurrent()) peekStatusesLoading.value = false
+  }
+}
+
+const loadPeekAccount = async () => {
+  const seed = peekSeed.value
+  if (!seed?.acct || !instancesStore.isAuthenticated) {
+    peekAccount.value = null
+    peekError.value = null
+    peekLoading.value = false
+    resetPeekStatuses()
+    return
+  }
+  const ticket = peekRace.next()
+  peekLoading.value = true
+  peekError.value = null
+  resetPeekStatuses()
+  try {
+    const client = activeClient()
+    let account: mastodon.v1.Account | null = null
+    if (seed.id) {
+      try {
+        account = await client.v1.accounts.$select(seed.id).fetch()
+      } catch {
+        /* fall through to lookup */
+      }
+    }
+    if (!account) {
+      try {
+        account = await client.v1.accounts.lookup({ acct: seed.acct.replace(/^@/, '') })
+      } catch {
+        const id = await statusStore.resolveAccount(seed.acct)
+        if (id) account = await client.v1.accounts.$select(id).fetch()
+      }
+    }
+    if (!ticket.isCurrent()) return
+    peekAccount.value = account
+    if (!account) {
+      peekError.value = 'Couldn’t load profile'
+      return
+    }
+    void loadPeekStatuses(true)
+  } catch (e: unknown) {
+    if (!ticket.isCurrent()) return
+    peekError.value = e instanceof Error ? e.message : 'Couldn’t load profile'
+    peekAccount.value = null
+  } finally {
+    if (ticket.isCurrent()) peekLoading.value = false
+  }
+}
+
+watch(
+  () =>
+    [
+      showDmContextChrome.value,
+      peekSeed.value?.id || '',
+      peekSeed.value?.acct || '',
+    ] as const,
+  ([show]) => {
+    if (show) void loadPeekAccount()
+    else {
+      peekRace.next()
+      peekAccount.value = null
+      peekError.value = null
+      peekLoading.value = false
+      resetPeekStatuses()
+    }
+  },
+  { immediate: true },
+)
+
+const selectPeekPerson = (id: string) => {
+  if (!id || id === peekAccountId.value) return
+  peekAccountId.value = id
+}
+
+const dmPaneAnimating = ref(false)
+let dmPaneAnimTimer: ReturnType<typeof setTimeout> | null = null
+
+const flashDmPaneMotion = () => {
+  if (preferReducedMotion()) return
+  dmPaneAnimating.value = false
+  nextTick(() => {
+    dmPaneAnimating.value = true
+    if (dmPaneAnimTimer) clearTimeout(dmPaneAnimTimer)
+    dmPaneAnimTimer = setTimeout(() => {
+      dmPaneAnimating.value = false
+    }, 200)
+  })
+}
+
+const setDmPane = (pane: DmContextPane) => {
+  if (pane === dmPane.value) return
+  if (dmPane.value === 'chat' && pane === 'profile') {
+    savedChatScroll = getPageScrollTop()
+  }
+  dmPane.value = pane
+  flashDmPaneMotion()
+  if (pane === 'chat') {
+    nextTick(() => scrollPageTo(savedChatScroll, 'auto'))
+  } else {
+    nextTick(() => scrollPageTo(0, preferReducedMotion() ? 'auto' : 'smooth'))
+  }
+}
+
+watch(chatBottomStackEl, (el) => {
+  chatBottomRo?.disconnect()
+  chatBottomRo = null
+  if (!el || typeof ResizeObserver === 'undefined') {
+    chatBottomH.value = 0
+    return
+  }
+  const measure = () => {
+    chatBottomH.value = Math.ceil(el.getBoundingClientRect().height)
+  }
+  measure()
+  chatBottomRo = new ResizeObserver(measure)
+  chatBottomRo.observe(el)
+})
 
 const recipientAccts = computed(() => otherParticipants.value.map((p) => p.acct).filter(Boolean))
 /** Leading-mention stripping in bubbles: incoming DMs open with "@me" */
@@ -344,11 +558,6 @@ const threadSearchStatus = computed(() => {
 /** Keep public reply dock / DM bar above the soft keyboard */
 const { insetStyle: replyDockStyle, keyboardOpen } = useKeyboardBottomInset()
 
-const preferReducedMotion = () =>
-  typeof window !== 'undefined' &&
-  (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
-    document.documentElement.classList.contains('reduce-motion'))
-
 /** Reader is at (or very near) the latest message — page scroller aware (mobile `main`) */
 const isNearPageBottom = (slack = 200) => {
   if (typeof window === 'undefined') return true
@@ -382,7 +591,14 @@ const onThreadSearchFocus = () => {
 
 // Android: when the keyboard opens, keep the latest message above the composer
 watch(keyboardOpen, (open) => {
-  if (open && keyboardFollowsChat) void scrollChatToEnd()
+  if (!open) return
+  // Typing while the profile pane is up → back to the conversation, at the latest message
+  if (dmPane.value === 'profile') {
+    dmPane.value = 'chat'
+    void scrollChatToEnd()
+    return
+  }
+  if (keyboardFollowsChat) void scrollChatToEnd()
 })
 
 const syncDmLiveRefresh = (isDm: boolean) => {
@@ -545,10 +761,17 @@ const onMessageDeleted = (statusId: string) => {
 }
 
 const goProfile = () => {
-  const acct = otherParticipant.value?.acct
+  const person = peekSeed.value || otherParticipant.value
+  const acct = person?.acct
   if (!acct) return
+  if (showDmContextChrome.value) {
+    if (person?.id) peekAccountId.value = person.id
+    setDmPane('profile')
+    return
+  }
   router.push({ path: '/profile', query: { user: acct } })
 }
+
 
 const stopThreadPoll = () => {
   if (threadPoll) {
@@ -573,6 +796,11 @@ onMounted(() => {
 onUnmounted(() => {
   stopThreadPoll()
   loadRace.abort()
+  peekRace.abort()
+  peekStatusesRace.abort()
+  chatBottomRo?.disconnect()
+  chatBottomRo = null
+  if (dmPaneAnimTimer) clearTimeout(dmPaneAnimTimer)
   syncDmLiveRefresh(false)
 })
 
@@ -584,13 +812,21 @@ watch(() => [route.params.id, route.query.url], () => {
   if (own) return
   stopThreadPoll()
   resolvedThreadId = null
+  dmPane.value = 'chat'
   void loadThread().then(() => startThreadPoll())
 })
 
 watch(isDirectThread, (dm) => {
   syncDmLiveRefresh(dm)
   if (dm) startThreadPoll()
-  else stopThreadPoll()
+  else {
+    stopThreadPoll()
+    dmPane.value = 'chat'
+  }
+})
+
+watch(showDmContextChrome, (show) => {
+  if (!show) dmPane.value = 'chat'
 })
 
 useHead({
@@ -609,97 +845,108 @@ useHead({
       'thread-page--can-reply': canReply && focusStatus,
       'thread-page--signin-hint': !canReply && focusStatus && !isLoading && !error,
       'thread-page--dm': isDirectThread,
+      'thread-page--dm-context': showDmContextChrome,
+      'thread-page--dm-profile': showDmContextChrome && dmPane === 'profile',
     }"
+    :style="
+      showDmContextChrome && chatBottomH
+        ? { '--neo-chat-bottom-h': `${chatBottomH}px` }
+        : undefined
+    "
   >
-    <!-- DM header: person, not “Open original” -->
-    <SubviewChrome
-      v-if="isDirectThread && focusStatus"
-      class="thread-subview"
-      :back-action="() => router.push('/messages')"
-    >
-      <template #title>
-        <!-- The person button replaces SubviewChrome's h1 — keep a page heading -->
-        <h1 class="sr-only">Conversation with {{ threadTitle }}</h1>
-        <button type="button" class="chat-header__person" @click="goProfile">
-          <div class="chat-header__avatars">
-            <img
-              v-for="(p, i) in otherParticipants.slice(0, 2)"
-              :key="p.id || p.acct"
-              v-show="p.avatar"
-              :src="p.avatar || undefined"
-              alt=""
-              class="chat-header__avatar"
-              :class="{ 'chat-header__avatar--stack': i > 0 }"
-            />
-            <span
-              v-if="!otherParticipants.some((p) => p.avatar)"
-              class="chat-header__avatar chat-header__avatar--placeholder"
-              aria-hidden="true"
-            >
-              {{ (threadTitle || '?').slice(0, 1).toUpperCase() }}
+    <!-- Chrome + search stick as one unit so tall DM headers / iPad safe-area
+         don’t leave the find bar overlapping the person row. -->
+    <div class="thread-top-stack">
+      <!-- DM header: person, not “Open original” -->
+      <SubviewChrome
+        v-if="isDirectThread && focusStatus"
+        class="thread-subview"
+        :back-action="() => router.push('/messages')"
+      >
+        <template #title>
+          <!-- The person button replaces SubviewChrome's h1 — keep a page heading -->
+          <h1 class="sr-only">Conversation with {{ threadTitle }}</h1>
+          <button type="button" class="chat-header__person" @click="goProfile">
+            <div class="chat-header__avatars">
+              <img
+                v-for="(p, i) in otherParticipants.slice(0, 2)"
+                :key="p.id || p.acct"
+                v-show="p.avatar"
+                :src="p.avatar || undefined"
+                alt=""
+                class="chat-header__avatar"
+                :class="{ 'chat-header__avatar--stack': i > 0 }"
+              />
+              <span
+                v-if="!otherParticipants.some((p) => p.avatar)"
+                class="chat-header__avatar chat-header__avatar--placeholder"
+                aria-hidden="true"
+              >
+                {{ (threadTitle || '?').slice(0, 1).toUpperCase() }}
+              </span>
+            </div>
+            <span class="chat-header__text">
+              <span class="chat-header__name">{{ threadTitle }}</span>
+              <span v-if="threadSubtitle" class="chat-header__handle">{{ threadSubtitle }}</span>
             </span>
-          </div>
-          <span class="chat-header__text">
-            <span class="chat-header__name">{{ threadTitle }}</span>
-            <span v-if="threadSubtitle" class="chat-header__handle">{{ threadSubtitle }}</span>
+          </button>
+        </template>
+        <template #actions>
+          <button
+            type="button"
+            class="subview-chrome__btn"
+            title="Refresh"
+            aria-label="Refresh conversation"
+            :disabled="isRefreshing"
+            @click="loadThread({ quiet: true })"
+          >
+            <FunLoader v-if="isRefreshing" variant="seed" :size="22" label="Refreshing" />
+            <NeoIcon v-else name="refresh" :size="16" :stroke="2" />
+          </button>
+          <span class="chat-header__lock" title="Private message">
+            <NeoIcon name="lock" :size="16" :stroke="2" aria-hidden="true" />
+            <span class="sr-only">Private message</span>
           </span>
-        </button>
-      </template>
-      <template #actions>
-        <button
-          type="button"
-          class="subview-chrome__btn"
-          title="Refresh"
-          aria-label="Refresh conversation"
-          :disabled="isRefreshing"
-          @click="loadThread({ quiet: true })"
-        >
-          <FunLoader v-if="isRefreshing" variant="seed" :size="22" label="Refreshing" />
-          <NeoIcon v-else name="refresh" :size="16" :stroke="2" />
-        </button>
-        <span class="chat-header__lock" title="Private message">
-          <NeoIcon name="lock" :size="16" :stroke="2" aria-hidden="true" />
-          <span class="sr-only">Private message</span>
-        </span>
-      </template>
-    </SubviewChrome>
+        </template>
+      </SubviewChrome>
 
-    <SubviewChrome v-else class="thread-subview" :title="threadTitle || 'Thread'">
-      <template #actions>
-        <a
-          v-if="originalUrl"
-          class="subview-chrome__btn"
-          :href="originalUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open original"
-          aria-label="Open original"
-        >
-          <NeoIcon name="globe" :size="18" :stroke="1.75" />
-        </a>
-      </template>
-    </SubviewChrome>
+      <SubviewChrome v-else class="thread-subview" :title="threadTitle || 'Thread'">
+        <template #actions>
+          <a
+            v-if="originalUrl"
+            class="subview-chrome__btn"
+            :href="originalUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open original"
+            aria-label="Open original"
+          >
+            <NeoIcon name="globe" :size="18" :stroke="1.75" />
+          </a>
+        </template>
+      </SubviewChrome>
 
-    <div
-      v-if="focusStatus && !isLoading && !error && !keyboardOpen"
-      class="thread-search neo-sticky-bar neo-sticky-bar--under-chrome"
-    >
-      <label class="thread-search__field">
-        <span class="sr-only">{{ isDirectThread ? 'Search conversation' : 'Search thread' }}</span>
-        <NeoIcon name="search" :size="16" :stroke="1.75" class="thread-search__icon" aria-hidden="true" />
-        <input
-          v-model="threadQuery"
-          type="search"
-          class="thread-search__input"
-          :placeholder="isDirectThread ? 'Search conversation…' : 'Search thread…'"
-          autocomplete="off"
-          enterkeyhint="search"
-          @focus="onThreadSearchFocus"
-        />
-      </label>
-      <p v-if="threadSearchStatus" class="thread-search__status" role="status" aria-live="polite">
-        {{ threadSearchStatus }}
-      </p>
+      <div
+        v-if="focusStatus && !isLoading && !error && !keyboardOpen"
+        class="thread-search neo-sticky-bar neo-sticky-bar--under-chrome"
+      >
+        <label class="thread-search__field">
+          <span class="sr-only">{{ isDirectThread ? 'Search conversation' : 'Search thread' }}</span>
+          <NeoIcon name="search" :size="16" :stroke="1.75" class="thread-search__icon" aria-hidden="true" />
+          <input
+            v-model="threadQuery"
+            type="search"
+            class="thread-search__input"
+            :placeholder="isDirectThread ? 'Search conversation…' : 'Search thread…'"
+            autocomplete="off"
+            enterkeyhint="search"
+            @focus="onThreadSearchFocus"
+          />
+        </label>
+        <p v-if="threadSearchStatus" class="thread-search__status" role="status" aria-live="polite">
+          {{ threadSearchStatus }}
+        </p>
+      </div>
     </div>
 
     <div v-if="isLoading" class="thread-loading" aria-busy="true">
@@ -719,44 +966,160 @@ useHead({
     <!-- Chat view -->
     <template v-else-if="isDirectThread">
       <div
-        class="chat-stream"
-        role="log"
-        :aria-live="threadFindQuery.trim() ? 'off' : 'polite'"
-        aria-relevant="additions"
-        aria-label="Conversation messages"
+        id="dm-context-panel"
+        class="dm-context-panel"
+        role="tabpanel"
+        :aria-labelledby="
+          showDmContextChrome
+            ? dmPane === 'chat'
+              ? 'dm-context-tab-chat'
+              : 'dm-context-tab-profile'
+            : undefined
+        "
       >
-        <p v-if="!threadFindQuery.trim() && chatMessages.length <= 1" class="chat-empty">
-          Private conversation — everyone mentioned can see these messages.
-        </p>
-        <p v-else-if="!threadFindQuery.trim() && chatMessages.length >= 40" class="chat-empty chat-empty--soft">
-          Older messages may be truncated by your server’s context limit.
-        </p>
-        <p v-else-if="threadFindQuery.trim() && !visibleChatMessages.length" class="chat-empty">
-          No messages match “{{ threadFindQuery.trim() }}”.
-        </p>
-
-        <template v-for="(status, index) in visibleChatMessages" :key="status.id">
-          <div
-            v-if="dayLabelFor(status, index)"
-            class="chat-day-separator"
-            role="separator"
-            :aria-label="dayLabelFor(status, index) || undefined"
+        <div
+          v-show="!showDmContextChrome || dmPane === 'chat'"
+          class="chat-stream"
+          :class="{ 'dm-pane-enter': dmPaneAnimating && dmPane === 'chat' }"
+          role="log"
+          :aria-live="
+            threadFindQuery.trim() || (showDmContextChrome && dmPane === 'profile')
+              ? 'off'
+              : 'polite'
+          "
+          aria-relevant="additions"
+          aria-label="Conversation messages"
+        >
+          <p v-if="!threadFindQuery.trim() && chatMessages.length <= 1" class="chat-empty">
+            Private conversation — everyone mentioned can see these messages.
+          </p>
+          <p
+            v-else-if="!threadFindQuery.trim() && chatMessages.length >= 40"
+            class="chat-empty chat-empty--soft"
           >
-            <span>{{ dayLabelFor(status, index) }}</span>
+            Older messages may be truncated by your server’s context limit.
+          </p>
+          <p v-else-if="threadFindQuery.trim() && !visibleChatMessages.length" class="chat-empty">
+            No messages match “{{ threadFindQuery.trim() }}”.
+          </p>
+
+          <template v-for="(status, index) in visibleChatMessages" :key="status.id">
+            <div
+              v-if="dayLabelFor(status, index)"
+              class="chat-day-separator"
+              role="separator"
+              :aria-label="dayLabelFor(status, index) || undefined"
+            >
+              <span>{{ dayLabelFor(status, index) }}</span>
+            </div>
+            <MessageBubble
+              :status="status"
+              :mine="isMine(status)"
+              :show-meta="showBubbleMeta(status, index)"
+              :participant-accts="bubbleMentionAccts"
+              @deleted="onMessageDeleted"
+            />
+          </template>
+          <div ref="chatEndEl" class="chat-end" />
+        </div>
+
+        <div
+          v-show="showDmContextChrome && dmPane === 'profile'"
+          class="dm-profile-peek"
+          :class="{ 'dm-pane-enter': dmPaneAnimating && dmPane === 'profile' }"
+          :aria-label="
+            peekSeed
+              ? `Profile of ${peekSeed.displayName || peekSeed.username || peekSeed.acct}`
+              : 'Profile'
+          "
+        >
+          <div
+            v-if="otherParticipants.length > 1"
+            class="dm-profile-peek__chips"
+            role="radiogroup"
+            aria-label="People in this conversation"
+          >
+            <button
+              v-for="p in otherParticipants"
+              :key="p.id || p.acct"
+              type="button"
+              class="dm-profile-peek__chip"
+              :class="{ 'dm-profile-peek__chip--active': p.id === peekSeed?.id }"
+              role="radio"
+              :aria-checked="p.id === peekSeed?.id"
+              @click="p.id && selectPeekPerson(p.id)"
+            >
+              <img
+                v-if="p.avatar"
+                :src="p.avatar"
+                alt=""
+                class="dm-profile-peek__chip-avatar"
+              />
+              <span
+                v-else
+                class="dm-profile-peek__chip-avatar dm-profile-peek__chip-avatar--placeholder"
+                aria-hidden="true"
+              >
+                {{ (p.displayName || p.username || p.acct || '?').slice(0, 1).toUpperCase() }}
+              </span>
+              <span class="dm-profile-peek__chip-name">
+                {{ p.displayName || p.username || p.acct }}
+              </span>
+            </button>
           </div>
-          <MessageBubble
-            :status="status"
-            :mine="isMine(status)"
-            :show-meta="showBubbleMeta(status, index)"
-            :participant-accts="bubbleMentionAccts"
-            @deleted="onMessageDeleted"
-          />
-        </template>
-        <div ref="chatEndEl" class="chat-end" />
+
+          <div v-if="peekLoading && !peekAccount" class="thread-loading" aria-busy="true">
+            <FunLoader variant="region" label="Loading profile" />
+          </div>
+          <template v-else-if="peekAccount">
+            <ProfilePeekCard
+              :account="peekAccount"
+              hide-open
+              full-bio
+            />
+            <div
+              v-if="peekStatusesLoading && !peekStatuses.length"
+              class="thread-loading"
+              aria-busy="true"
+            >
+              <FunLoader variant="region" label="Loading posts" />
+            </div>
+            <div v-else-if="peekStatuses.length" class="dm-profile-peek__posts">
+              <RealPostCard
+                v-for="status in peekStatuses"
+                :key="status.id"
+                :status="status"
+              />
+              <button
+                v-if="peekHasMore"
+                type="button"
+                class="neo-btn neo-btn--secondary dm-profile-peek__more"
+                :disabled="peekStatusesLoading"
+                @click="loadPeekStatuses(false)"
+              >
+                {{ peekStatusesLoading ? 'Loading…' : 'Load more' }}
+              </button>
+            </div>
+            <p
+              v-else-if="!peekStatusesLoading && !peekStatusesError"
+              class="dm-profile-peek__error"
+            >
+              No posts yet.
+            </p>
+            <p v-if="peekStatusesError" class="dm-profile-peek__error" role="alert">
+              {{ peekStatusesError }}
+            </p>
+          </template>
+          <p v-else-if="peekError" class="dm-profile-peek__error" role="alert">
+            {{ peekError }}
+          </p>
+          <p v-else class="dm-profile-peek__error">No profile to show.</p>
+        </div>
       </div>
 
+      <!-- Desktop / tablet: fixed composer (unchanged) -->
       <ChatComposer
-        v-if="canReply && replyTarget"
+        v-if="!showDmContextChrome && canReply && replyTarget"
         :key="chatThreadKey"
         :in-reply-to-id="replyTarget.id"
         :recipient-accts="recipientAccts"
@@ -764,8 +1127,45 @@ useHead({
         @posted="onReplyPosted"
         @focusin="onReplyFieldFocus"
       />
-      <div v-else class="thread-signin-hint">
+      <div
+        v-else-if="!showDmContextChrome && !canReply"
+        class="thread-signin-hint"
+      >
         <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in to reply</NuxtLink>
+      </div>
+
+      <!-- Mobile: composer + context sub-footer stack -->
+      <div
+        v-if="showDmContextChrome"
+        ref="chatBottomStackEl"
+        class="chat-bottom-stack"
+        data-keyboard-fixed
+        :style="replyDockStyle"
+      >
+        <ChatComposer
+          v-if="dmPane === 'chat' && canReply && replyTarget"
+          :key="chatThreadKey"
+          embedded
+          :in-reply-to-id="replyTarget.id"
+          :recipient-accts="recipientAccts"
+          placeholder="Message…"
+          @posted="onReplyPosted"
+          @focusin="onReplyFieldFocus"
+        >
+          <template #trailing>
+            <DmContextFooter :pane="dmPane" @update:pane="setDmPane" />
+          </template>
+        </ChatComposer>
+        <div
+          v-else-if="dmPane === 'chat' && !canReply"
+          class="thread-signin-hint thread-signin-hint--inline"
+        >
+          <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in to reply</NuxtLink>
+          <DmContextFooter :pane="dmPane" @update:pane="setDmPane" />
+        </div>
+        <div v-else class="chat-bottom-stack__profile-bar">
+          <DmContextFooter :pane="dmPane" @update:pane="setDmPane" />
+        </div>
       </div>
     </template>
 
@@ -860,6 +1260,37 @@ useHead({
 </template>
 
 <style lang="scss" scoped>
+.thread-top-stack {
+  position: sticky;
+  top: 0;
+  z-index: var(--neo-z-shell-header, 40);
+  background: var(--neo-bg-primary);
+
+  /* Inner chrome is in-flow inside the sticky stack (variable DM header height) */
+  :deep(.subview-chrome) {
+    position: relative;
+    top: auto;
+    z-index: auto;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  @media (min-width: 1024px) {
+    margin: 0 -1.25rem;
+    padding: 0 1.25rem;
+    border-bottom: 1px solid var(--neo-border-color);
+
+    :deep(.subview-chrome) {
+      border-bottom: none;
+    }
+  }
+
+  @media (min-width: 1200px) {
+    margin: 0 -2rem;
+    padding: 0 2rem;
+  }
+}
+
 .thread-search {
   margin: 0 0.5rem 0.5rem;
   padding: 0.45rem 0 0.55rem;
@@ -869,6 +1300,11 @@ useHead({
   .thread-page--dm & {
     margin-left: 0.75rem;
     margin-right: 0.75rem;
+  }
+
+  .thread-top-stack & {
+    margin-bottom: 0;
+    border-bottom: none;
   }
 
   &__field {
@@ -942,10 +1378,176 @@ useHead({
       6.5rem + env(safe-area-inset-bottom, 0px) + var(--neo-keyboard-inset, 0px)
     );
   }
+
+  &--dm-context {
+    /* Measured chat-bottom-stack (composer + sub-footer) */
+    padding-bottom: calc(
+      var(--neo-chat-bottom-h, 7.5rem) + 0.5rem + var(--neo-keyboard-inset, 0px)
+    );
+  }
+
+  &--dm-profile {
+    /* Profile pane: sub-footer only (no composer) */
+    padding-bottom: calc(
+      var(--neo-chat-bottom-h, 4.25rem) + 0.5rem + var(--neo-keyboard-inset, 0px)
+    );
+  }
+}
+
+.dm-context-panel {
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-bottom-stack {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0 1rem calc(0.45rem + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--neo-bg-primary) 96%, transparent);
+  border-top: 1px solid var(--neo-border-color);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-sizing: border-box;
+
+  html[data-keyboard-open] & {
+    padding-bottom: 0.35rem;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  &__profile-bar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    max-width: 36rem;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0.35rem 0.1rem 0.15rem;
+    box-sizing: border-box;
+  }
+}
+
+.dm-profile-peek {
+  width: 100%;
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 0.25rem 0.75rem 1rem;
+  box-sizing: border-box;
+
+  &__posts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0.35rem 0 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+
+    :deep(.status-card) {
+      width: 100%;
+    }
+  }
+
+  &__more {
+    width: 100%;
+    justify-content: center;
+    margin-top: 0.25rem;
+  }
+
+  &__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.65rem;
+    padding: 0.15rem 0;
+  }
+
+  &__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 100%;
+    padding: 0.28rem 0.65rem 0.28rem 0.28rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: 999px;
+    background: var(--neo-bg-tertiary);
+    color: var(--neo-text-secondary);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+
+    &--active {
+      border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
+      background: var(--neo-accent-soft);
+      color: var(--neo-text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-focus, var(--neo-accent));
+      outline-offset: 2px;
+    }
+  }
+
+  &__chip-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--neo-bg-primary);
+
+    &--placeholder {
+      display: grid;
+      place-items: center;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--neo-text-muted);
+    }
+  }
+
+  &__chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__error {
+    margin: 1rem 0.25rem;
+    font-size: 0.875rem;
+    color: var(--neo-text-muted);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.reduce-motion) .dm-pane-enter {
+    animation: dm-pane-in 180ms ease-out;
+  }
+}
+
+@keyframes dm-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .thread-subview {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0;
+
+  .thread-top-stack:not(:has(.thread-search)) & {
+    margin-bottom: 0.35rem;
+  }
 }
 
 .chat-header {
@@ -954,6 +1556,7 @@ useHead({
     align-items: center;
     gap: 0.65rem;
     min-width: 0;
+    max-width: 100%;
     padding: 0.25rem;
     border: none;
     border-radius: 10px;
@@ -1016,6 +1619,23 @@ useHead({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  @media (min-width: 768px) and (max-width: 1023px) {
+    /* iPad portrait: tighter person row so refresh/lock stay visible */
+    &__avatar {
+      width: 32px;
+      height: 32px;
+    }
+
+    &__avatars {
+      width: 32px;
+      height: 32px;
+    }
+
+    &__name {
+      font-size: 0.875rem;
+    }
   }
 
   &__handle {
@@ -1155,6 +1775,22 @@ useHead({
 
   @media (min-width: 1024px) {
     left: var(--neo-sidebar-width, 248px);
+  }
+
+  &--inline {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.55rem 0 0.35rem;
+    border-top: none;
+    background: transparent;
+    backdrop-filter: none;
   }
 }
 

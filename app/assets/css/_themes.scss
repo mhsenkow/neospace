@@ -357,6 +357,69 @@
   --neo-nes-sky: #209cee;
 }
 
+// Beta — Threads' dark palette, colour for colour: #101010 page, #181818
+// surfaces, #f3f5f7 ink, white-on-black primary buttons, #ff3040 hearts.
+[data-theme='beta'] {
+  @include neo-from-braun(
+    #101010,
+    #181818,
+    #f3f5f7,
+    // Threads secondary is #777; #8a8a8a keeps it ≥4.5:1 on the #181818 cards
+    #8a8a8a,
+    #383838,
+    #2a2a2a,
+    #f3f5f7,
+    #ff3040,
+    dark
+  );
+  --neo-text-inverse: #101010;
+  --neo-text-on-accent: #101010;
+  // Monochrome accent — hover/link mixes toward ink would stay white; keep links readable
+  --neo-accent-hover: #ffffff;
+  --neo-text-link: #f3f5f7;
+  --neo-text-link-hover: #ffffff;
+  --neo-accent-soft: rgba(243, 245, 247, 0.08);
+  --neo-accent-soft-hover: rgba(243, 245, 247, 0.12);
+  --neo-accent-light: rgba(243, 245, 247, 0.15);
+  --neo-like: #ff3040;
+  --neo-boost: #f3f5f7;
+  --neo-success: #3fbc6e;
+  --neo-danger: #ff3040;
+  --neo-danger-soft: rgba(255, 48, 64, 0.14);
+  --neo-focus: #f3f5f7;
+}
+
+// Y — X's "Lights out" palette: pure black, #16181c cards, #e7e9ea ink,
+// #71767b secondary, #2f3336 rules, #1d9bf0 blue, #f91880 likes, #00ba7c reposts.
+[data-theme='y'] {
+  @include neo-from-braun(
+    #000000,
+    #16181c,
+    #e7e9ea,
+    // X secondary #71767b is 4.4:1 on #16181c; one step lighter clears AA
+    #7d8287,
+    #2f3336,
+    #202327,
+    #1d9bf0,
+    #f4212e,
+    dark
+  );
+  --neo-bg-card: #000000;
+  --neo-bg-hover: #080808;
+  --neo-bg-tertiary: #16181c;
+  --neo-text-inverse: #0f1419;
+  --neo-text-on-accent: #ffffff;
+  --neo-accent-hover: #1a8cd8;
+  --neo-text-link: #1d9bf0;
+  --neo-text-link-hover: #4cb1f5;
+  --neo-like: #f91880;
+  --neo-boost: #00ba7c;
+  --neo-success: #00ba7c;
+  --neo-success-soft: rgba(0, 186, 124, 0.14);
+  --neo-danger: #f4212e;
+  --neo-danger-soft: rgba(244, 33, 46, 0.14);
+}
+
 // ============================================
 // Chrome (data-ui) — full interface systems
 // Each face owns: UI type, radius, border weight,
@@ -849,7 +912,9 @@ html[data-theme='nes'] {
 [data-theme='contrast'] body,
 [data-theme='frost'] body,
 [data-theme='loom'] body,
-[data-theme='tank'] body {
+[data-theme='tank'] body,
+[data-theme='beta'] body,
+[data-theme='y'] body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

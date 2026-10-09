@@ -217,6 +217,31 @@
   --neo-chaos-fg: #{vars.$chaos-fg};
 }
 
+// Auto-hiding tab bar (useAutoHideNav): floating buttons that sit above it
+// follow it down. `translate` (not transform) so it never fights a component's
+// own transforms; each element declares its own transition.
+@media (max-width: 1023px) {
+  html.neo-nav-hidden {
+    .notes-fab,
+    .neo-bottom-dock {
+      // The bar's height includes the safe area, which the pills keep (below)
+      translate: 0 calc(var(--neo-nav-live-h, 56px) - env(safe-area-inset-bottom, 0px));
+    }
+  }
+
+  // Board pills take over the bottom edge — keep them above the home indicator
+  html.neo-nav-collapsed .mobile-feed-tabs {
+    padding-bottom: calc(0.25rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notes-fab,
+  .neo-bottom-dock {
+    transition-duration: 0s !important;
+  }
+}
+
 // Published on <html> (layout toggles the class) so body-teleported FABs and
 // toasts clear the pills-only strip above the mobile tab bar on the board.
 @media (max-width: 1023px) {
@@ -238,9 +263,10 @@
 
 .neo-sticky-bar--under-chrome {
   @media (max-width: 1023px) {
+    /* --neo-safe-top already resolves env(safe-area-inset-top) (+ standalone floor) */
     top: calc(
-      var(--neo-subview-chrome-height, 52px) + max(0px, env(safe-area-inset-top, 0px) - 0.35rem)
-        - var(--neo-main-pad-top, 0px)
+      var(--neo-subview-chrome-height, 52px) + max(0px, var(--neo-safe-top, 0px) - 0.35rem) -
+        var(--neo-main-pad-top, 0px)
     );
   }
 }

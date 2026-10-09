@@ -16,6 +16,10 @@ const router = useRouter()
 const route = useRoute()
 const { path, isActivity } = useActivityNav()
 
+/** Slides away while reading, back on scroll up */
+const navEl = ref<HTMLElement | null>(null)
+useAutoHideNav(navEl)
+
 const notifBadge = computed(() => notificationsStore.badgeLabel)
 const messagesBadge = computed(() => conversationsStore.badgeLabel)
 
@@ -69,7 +73,7 @@ const openCompose = () => {
 </script>
 
 <template>
-<nav class="mobile-nav" aria-label="Tabs">
+<nav ref="navEl" class="mobile-nav" aria-label="Tabs">
   <button
     type="button"
     class="mobile-nav__item"
@@ -181,6 +185,14 @@ const openCompose = () => {
 </template>
 
 <style lang="scss" scoped>
+// Auto-hide (useAutoHideNav): give the slot back to `main` while hidden.
+// Sticky would pin it inside the shell's bottom edge, so drop to relative.
+// (Whole selector inside :global — `:global(html.x) &` compiles to just `html.x`.)
+:global(html.neo-nav-collapsed .mobile-nav) {
+  position: relative;
+  margin-bottom: calc(-1 * var(--neo-nav-live-h, 56px));
+}
+
 .mobile-nav {
   // In-flow flex child of .neo-layout — fixed chrome was clipped by iOS Safari
   // when the parent used overflow:hidden (DevTools emulation did not reproduce it).

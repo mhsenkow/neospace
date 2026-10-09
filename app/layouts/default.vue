@@ -17,6 +17,7 @@ import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useShellAppearance } from '~/composables/useShellAppearance'
 import { useLoomHandoff } from '~/composables/useLoomHandoff'
 import { useDeskViewport } from '~/composables/useBreakpoint'
+import { useStandaloneShell } from '~/composables/useStandaloneShell'
 import DesktopSidebar from '~/components/shell/DesktopSidebar.vue'
 import MobileHeader from '~/components/shell/MobileHeader.vue'
 import MobileDrawer from '~/components/shell/MobileDrawer.vue'
@@ -57,6 +58,8 @@ const isDesk = useDeskViewport()
 useAppShellHeight()
 // Publish --neo-keyboard-inset for any page (messages list, explore, …)
 useKeyboardBottomInset()
+// html.neo-standalone + --neo-safe-top floor for iPad home-screen apps
+useStandaloneShell()
 
 /** Column board owns its scrollers; every other mobile page scrolls `main`. */
 const isBoardRoute = computed(() => path.value === '/')
@@ -373,6 +376,8 @@ watch(
   gap: 0.5rem;
   pointer-events: none;
   max-width: min(22rem, calc(100vw - 20px));
+  // Rides down with the auto-hiding tab bar (_structural.scss)
+  transition: translate 240ms cubic-bezier(0.22, 1, 0.36, 1);
 
   &--subview {
     /* Tab bar hidden on focused mobile screens */
@@ -481,17 +486,24 @@ watch(
   .neo-layout--thread &,
   .neo-layout--profile &,
   .neo-layout--subview & {
-    /* Nested mobile screens: own top bar, no global header */
+    /* Nested screens: own top bar, no global header — keep pad-top 0 on iPad/desk
+       so SubviewChrome can sit flush (safe-area is on the chrome itself). */
     --neo-main-pad-top: 0px;
     padding-top: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
 
     @media (min-width: 1024px) {
-      padding: 1.25rem;
+      padding-top: 0;
+      padding-left: 1.25rem;
+      padding-right: 1.25rem;
+      padding-bottom: 1.25rem;
     }
 
     @media (min-width: 1200px) {
-      padding: 1.5rem 2rem;
+      padding-top: 0;
+      padding-left: 2rem;
+      padding-right: 2rem;
+      padding-bottom: 1.5rem;
     }
   }
 

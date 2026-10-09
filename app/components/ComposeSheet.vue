@@ -164,7 +164,8 @@ const onPick = async (account: mastodon.v1.Account) => {
           data-keyboard-scroll
           @focusin="onFocusField"
         >
-          <article v-if="sheet.contextPost" class="compose-sheet__context">
+          <!-- Quotes render their card inside RealComposeBox (below the text) -->
+          <article v-if="sheet.contextPost && !sheet.quoteUrl" class="compose-sheet__context">
             <img
               v-if="sheet.contextPost.avatar"
               :src="sheet.contextPost.avatar"

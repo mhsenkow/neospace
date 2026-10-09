@@ -14,7 +14,7 @@ import { useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 import { useOverlayStore } from '~/stores/overlay'
-import { mapComposeError } from '~/utils/friendlyError'
+import { httpStatusFrom, mapComposeError } from '~/utils/friendlyError'
 import type { mastodon } from 'masto'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
@@ -38,9 +38,9 @@ const props = withDefaults(
     inReplyToId?: string
     /** Append this URL when quoting (fediverse-friendly quote) */
     quoteUrl?: string
-    /** Quoted post preview + id for quoted_status_id when supported */
+    /** Quoted post preview + local id for quoted_status_id when supported */
     quoteContext?: {
-      id: string
+      id?: string
       name: string
       handle: string
       avatar?: string | null
@@ -607,7 +607,7 @@ const handlePost = async () => {
     }
 
     await flushAltDescriptions()
-    const postVisibility =
+    const postVisibility: typeof visibility.value =
       props.initialVisibility === 'direct' || visibility.value === 'direct'
         ? 'direct'
         : visibility.value
@@ -616,16 +616,32 @@ const handlePost = async () => {
       throw new Error('Pick a valid schedule time')
     }
 
-    const result = await statusStore.postStatus(body, {
+    const quotedStatusId = props.quoteContext?.id?.trim() || undefined
+    const postOpts = {
       visibility: postVisibility,
       spoilerText: showCW.value ? spoilerText.value : undefined,
       mediaIds: mediaIds.value,
       sensitive: markSensitive.value || undefined,
       inReplyToId: props.inReplyToId,
       language: postLanguage.value || undefined,
-      quotedStatusId: props.quoteContext?.id || undefined,
       scheduledAt: scheduledAtIso.value,
-    })
+    }
+
+    let result: mastodon.v1.Status | mastodon.v1.ScheduledStatus
+    try {
+      result = await statusStore.postStatus(body, {
+        ...postOpts,
+        quotedStatusId,
+      })
+    } catch (e: unknown) {
+      // Native quotes aren't universal — fall back to the URL already in the body
+      const code = httpStatusFrom(e)
+      if (quotedStatusId && (code === 404 || code === 422)) {
+        result = await statusStore.postStatus(body, postOpts)
+      } else {
+        throw e
+      }
+    }
     clearDraft()
     resetForm()
     if (isScheduledResult(result)) {
@@ -644,6 +660,7 @@ const handlePost = async () => {
   } catch (e: unknown) {
     error.value = mapComposeError(e, {
       inReplyToId: props.inReplyToId,
+      quotedStatusId: props.quoteContext?.id,
       hasMedia: mediaIds.value.length > 0,
     })
   } finally {

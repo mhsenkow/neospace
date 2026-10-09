@@ -437,7 +437,10 @@ onUnmounted(() => {
   border-radius: 6px;
   box-shadow: 0 4px 14px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
   cursor: pointer;
-  transition: color var(--neo-transition-fast), border-color var(--neo-transition-fast);
+  transition:
+    color var(--neo-transition-fast),
+    border-color var(--neo-transition-fast),
+    translate 240ms cubic-bezier(0.22, 1, 0.36, 1);
 
   &:hover {
     color: var(--neo-text-primary);

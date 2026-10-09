@@ -14,6 +14,8 @@ export type NeoThemeId =
   | 'loom'
   | 'tank'
   | 'nes'
+  | 'beta'
+  | 'y'
 
 export type NeoUiId =
   | 'braun'
@@ -62,6 +64,8 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { id: 'loom', label: 'Loom', desc: 'Gold on near-black', swatch: '#0a0a0f', ink: '#d4a84b' },
   { id: 'tank', label: 'Tank', desc: 'CRT green field', swatch: '#0b1a22', ink: '#57a253' },
   { id: 'nes', label: 'NES', desc: 'Blue sky, pixel red', swatch: '#209cee', ink: '#e4002b' },
+  { id: 'beta', label: 'Beta', desc: 'Soft black, monochrome', swatch: '#101010', ink: '#f3f5f7' },
+  { id: 'y', label: 'Y', desc: 'Lights out, sky blue', swatch: '#000000', ink: '#1d9bf0' },
 ]
 
 export const UI_OPTIONS: UiOption[] = [

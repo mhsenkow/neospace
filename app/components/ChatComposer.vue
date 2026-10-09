@@ -15,15 +15,23 @@ import { mapComposeError } from '~/utils/friendlyError'
 import { mastodonLength } from '~/utils/mastodonLength'
 import { buildDirectBody, normalizeRecipientAccts } from '~/utils/dmHelpers'
 
-const props = defineProps<{
-  /** Latest status in the thread to reply to */
-  inReplyToId: string
-  /** Other handles without @ — added on send, not shown in the field */
-  recipientAccts?: string[]
-  /** @deprecated single-recipient alias */
-  recipientAcct?: string | null
-  placeholder?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** Latest status in the thread to reply to */
+    inReplyToId: string
+    /** Other handles without @ — added on send, not shown in the field */
+    recipientAccts?: string[]
+    /** @deprecated single-recipient alias */
+    recipientAcct?: string | null
+    placeholder?: string
+    /**
+     * When true, sit inside a parent fixed stack (DM context footer) —
+     * parent owns keyboard inset + bottom positioning.
+     */
+    embedded?: boolean
+  }>(),
+  { embedded: false },
+)
 
 const emit = defineEmits<{
   posted: [status: mastodon.v1.Status]
@@ -137,6 +145,8 @@ const {
 } = useComposeMedia()
 
 const { insetStyle: barStyle, keyboardOpen } = useKeyboardBottomInset()
+/** Parent stack lifts with the keyboard when embedded */
+const composerStyle = computed(() => (props.embedded ? undefined : barStyle.value))
 
 /**
  * Fixed bar already lifts with --neo-keyboard-inset. Document scrollIntoView
@@ -293,9 +303,10 @@ onMounted(() => {
     :class="{
       'chat-composer--dragging': isDragging,
       'chat-composer--keyboard': keyboardOpen,
+      'chat-composer--embedded': embedded,
     }"
-    data-keyboard-fixed
-    :style="barStyle"
+    :data-keyboard-fixed="embedded ? undefined : true"
+    :style="composerStyle"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
     @dragover="onDragOver"
@@ -448,6 +459,9 @@ onMounted(() => {
           />
           <NeoIcon v-else name="send" :size="18" :stroke="2" filled />
         </button>
+        <div v-if="$slots.trailing" class="chat-composer__trailing">
+          <slot name="trailing" />
+        </div>
       </div>
 
       <p v-if="mentionList.length > 1" class="chat-composer__hint">
@@ -475,6 +489,24 @@ onMounted(() => {
   @media (min-width: 1024px) {
     left: var(--neo-sidebar-width, 248px);
     padding: 0.9rem 1.25rem 1rem;
+  }
+
+  &--embedded {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    padding: 0.65rem 0 0.35rem;
+    border-top: none;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+
+    @media (min-width: 1024px) {
+      left: auto;
+      padding: 0.65rem 0 0.35rem;
+    }
   }
 
   &--dragging {
@@ -642,6 +674,14 @@ onMounted(() => {
   display: flex;
   align-items: flex-end;
   gap: 0.45rem;
+}
+
+.chat-composer__trailing {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  margin-left: -0.15rem;
 }
 
 .chat-composer__attach {
