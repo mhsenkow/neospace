@@ -5,6 +5,14 @@ on:
     branches: [main, master]
   pull_request:
 
+# Read-only token — CI only checks; a compromised dependency can't push or comment
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
