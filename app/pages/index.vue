@@ -35,7 +35,7 @@ const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
 const conversationsStore = useConversationsStore()
 const notificationsStore = useNotificationsStore()
-const { setBoardPortal } = useBoardPortal()
+const { boardPortal, setBoardPortal } = useBoardPortal()
 const pendingColumnJump = usePendingColumnJump()
 const activeBoardColumnId = useActiveBoardColumnId()
 const router = useRouter()
@@ -122,6 +122,26 @@ const feedTabs = computed(() =>
     label: columnTabLabels.value[idx] || column.feedType,
   })),
 )
+
+/** Top chrome title — feed name, or the edge portal you’re parked on */
+const activeFeedChromeTitle = computed(() => {
+  switch (boardPortal.value) {
+    case 'settings':
+      return 'Settings'
+    case 'profile':
+      return 'Profile'
+    case 'search':
+      return 'Search'
+    case 'inbox':
+      return 'Messages'
+    case 'activity':
+      return 'Activity'
+    case 'communities':
+      return 'Groups'
+    default:
+      return columnTabLabels.value[activeColumnIndex.value] || 'Feed'
+  }
+})
 
 const isDeskTabs = computed(
   () => columnsStore.deskDensity === 'tabs' && !isMobileUi.value,
@@ -911,7 +931,7 @@ const onCarouselTouchStart = (e: TouchEvent) => {
   // Don't steal taps from column chrome / compose / menus (iPad move/close/focus)
   if (
     target?.closest(
-      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .mobile-feed-tabs, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill, .feed-portal__search, .feed-portal__list',
+      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .mobile-feed-tabs, .mobile-feed-chrome, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill, .feed-portal__search, .feed-portal__list',
     )
   ) {
     return
@@ -1333,6 +1353,198 @@ useHead({ title: 'Home | NeoSpace' })
       </div>
     </nav>
 
+    <!-- Mobile: feed controls up top — Flip / jump / add — so the bottom strip stays thumb-tabs only -->
+    <nav class="mobile-feed-chrome" aria-label="Feed controls">
+      <button
+        type="button"
+        class="mobile-feed-chrome__mode"
+        :class="{ 'mobile-feed-chrome__mode--flip': activeViewMode === 'flip' }"
+        aria-label="Flip view"
+        :aria-pressed="activeViewMode === 'flip'"
+        :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
+        :disabled="!!boardPortal"
+        @click="toggleActiveViewMode"
+      >
+        <span class="mode-glyph" aria-hidden="true">
+          <span class="mode-glyph__flow">
+            <i /><i /><i />
+          </span>
+          <span class="mode-glyph__flip" />
+        </span>
+      </button>
+
+      <p class="mobile-feed-chrome__title" :title="activeFeedChromeTitle">
+        {{ activeFeedChromeTitle }}
+      </p>
+
+      <div class="mobile-feed-chrome__actions">
+        <button
+          v-if="columnsStore.columnCount >= 2 || isMobileUi"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-chrome__jump"
+          aria-label="Previous feed"
+          :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
+          @click="goPrevFeed"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <button
+          v-if="columnsStore.columnCount >= 2 || isMobileUi"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-chrome__jump"
+          aria-label="Next feed"
+          :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
+          @click="goNextFeed"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+
+        <button
+          v-if="columnsStore.canRemoveColumn && !boardPortal"
+          type="button"
+          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-chrome__jump"
+          aria-label="Remove this feed"
+          title="Remove this feed"
+          @click="removeActiveColumn"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+
+        <div v-if="columnsStore.canAddColumn" class="mobile-feed-chrome__add" @click.stop>
+          <NeoMenu
+            v-model:open="addMenuOpen"
+            class="add-column-neo add-column-neo--mobile"
+            align="end"
+            teleport
+            panel-class="add-column-menu-panel"
+            :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <template #items>
+              <span class="add-column-menu__title">Add Feed</span>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
+                <span>Algorithms</span>
+                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addAlgorithmsExpanded">
+                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
+                  Local ({{ localHostLabel }})
+                </button>
+                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
+                <button
+                  v-if="instancesStore.hasAuthenticatedInstance"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('favourites')"
+                >Liked</button>
+                <button
+                  v-if="instancesStore.hasAuthenticatedInstance"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('bookmarks')"
+                >Saved</button>
+                <button
+                  v-for="recipe in algorithmsStore.allRecipes"
+                  :key="recipe.id"
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="addColumn('algorithm', recipe.id)"
+                >{{ recipe.name }}</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="add-column-menu__item"
+                  @click="algorithmsStore.openEditor(); addMenuOpen = false"
+                >Create algorithm…</button>
+              </template>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
+              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('notifications')"
+              >Notifications</button>
+              <button
+                v-if="instancesStore.hasAuthenticatedInstance"
+                type="button"
+                role="menuitem"
+                class="add-column-menu__item"
+                @click="addColumn('messages')"
+              >Messages</button>
+              <div class="add-column-menu__divider" role="separator" />
+              <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
+                <span>Groups</span>
+                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <template v-if="addGroupsExpanded">
+                <div class="add-column-menu__filter" @click.stop>
+                  <input
+                    v-model="addGroupQuery"
+                    type="search"
+                    class="add-column-menu__filter-input"
+                    placeholder="Find News, Dogs…"
+                    aria-label="Filter groups"
+                    @keydown.enter.prevent="addGroupCustomTag ? addGroupAsColumn(addGroupCustomTag) : addableGroups[0] && addGroupAsColumn(addableGroups[0].tag)"
+                  >
+                </div>
+                <div class="add-column-menu__groups">
+                  <button
+                    v-for="group in addableGroups"
+                    :key="group.tag"
+                    type="button"
+                    role="menuitem"
+                    class="add-column-menu__item add-column-menu__item--group"
+                    @click="addGroupAsColumn(group.tag)"
+                  >
+                    <span class="add-column-menu__group-icon" aria-hidden="true">{{ group.icon }}</span>
+                    {{ group.name }}
+                  </button>
+                  <button
+                    v-if="addGroupCustomTag"
+                    type="button"
+                    role="menuitem"
+                    class="add-column-menu__item add-column-menu__item--group"
+                    @click="addGroupAsColumn(addGroupCustomTag)"
+                  >
+                    <span class="add-column-menu__group-icon" aria-hidden="true">🏷️</span>
+                    Add #{{ addGroupCustomTag }}
+                  </button>
+                  <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
+                    No matching groups
+                  </p>
+                </div>
+              </template>
+              <span class="add-column-menu__hint">
+                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} feeds on this device
+              </span>
+            </template>
+          </NeoMenu>
+        </div>
+      </div>
+    </nav>
+
     <div
       ref="columnsContainer"
       id="feed-columns"
@@ -1647,7 +1859,7 @@ useHead({ title: 'Home | NeoSpace' })
 
     </div>
 
-    <!-- Mobile: feed strip + thumb-zone prev/next + add -->
+    <!-- Mobile: thumb-zone feed pills only (controls live in .mobile-feed-chrome above) -->
     <nav class="mobile-feed-tabs" aria-label="Feeds">
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
         <NeoTabs
@@ -1659,192 +1871,6 @@ useHead({ title: 'Home | NeoSpace' })
           :panels="false"
           @update:model-value="(id) => (activeFeedTabId = id)"
         />
-      </div>
-
-      <div class="mobile-feed-tabs__thumb">
-        <!-- Quiet Flow ↔ Flip for the active feed -->
-        <button
-          type="button"
-          class="mobile-feed-tabs__mode"
-          :class="{ 'mobile-feed-tabs__mode--flip': activeViewMode === 'flip' }"
-          aria-label="Flip view"
-          :aria-pressed="activeViewMode === 'flip'"
-          :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
-          @click="toggleActiveViewMode"
-        >
-          <span class="mode-glyph" aria-hidden="true">
-            <span class="mode-glyph__flow">
-              <i /><i /><i />
-            </span>
-            <span class="mode-glyph__flip" />
-          </span>
-        </button>
-
-        <!-- Jump arrows when multi-feed or edge portals exist -->
-        <button
-          v-if="columnsStore.columnCount >= 2"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Previous feed"
-          :disabled="isMobileUi ? carouselSlideIndex <= 0 : activeColumnIndex <= 0"
-          @click="goPrevFeed"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-        <button
-          v-if="columnsStore.columnCount >= 2"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Next feed"
-          :disabled="isMobileUi ? carouselSlideIndex >= slideCount - 1 : activeColumnIndex >= columnsStore.columns.length - 1"
-          @click="goNextFeed"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
-
-        <button
-          v-if="columnsStore.canRemoveColumn"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-tabs__jump"
-          aria-label="Remove this feed"
-          title="Remove this feed"
-          @click="removeActiveColumn"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-
-        <div v-if="columnsStore.canAddColumn" class="mobile-feed-tabs__add" @click.stop>
-          <NeoMenu
-            v-model:open="addMenuOpen"
-            class="add-column-neo add-column-neo--mobile"
-            align="end"
-            teleport
-            panel-class="add-column-menu-panel"
-            :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <template #items>
-              <span class="add-column-menu__title">Add Feed</span>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-                <span>Algorithms</span>
-                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="addAlgorithmsExpanded">
-                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-                  Local ({{ localHostLabel }})
-                </button>
-                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
-                <button
-                  v-if="instancesStore.hasAuthenticatedInstance"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('favourites')"
-                >Liked</button>
-                <button
-                  v-if="instancesStore.hasAuthenticatedInstance"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('bookmarks')"
-                >Saved</button>
-                <button
-                  v-for="recipe in algorithmsStore.allRecipes"
-                  :key="`m-${recipe.id}`"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('algorithm', recipe.id)"
-                >{{ recipe.name }}</button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="algorithmsStore.openEditor(); addMenuOpen = false"
-                >Create algorithm…</button>
-              </template>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('notifications')"
-              >Notifications</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('messages')"
-              >Messages</button>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
-                <span>Groups</span>
-                <svg :class="{ rotated: addGroupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="addGroupsExpanded">
-                <div class="add-column-menu__filter" @click.stop>
-                  <input
-                    v-model="addGroupQuery"
-                    type="search"
-                    class="add-column-menu__filter-input"
-                    placeholder="Find News, Dogs…"
-                    aria-label="Filter groups"
-                    @keydown.enter.prevent="addGroupCustomTag ? addGroupAsColumn(addGroupCustomTag) : addableGroups[0] && addGroupAsColumn(addableGroups[0].tag)"
-                  >
-                </div>
-                <div class="add-column-menu__groups">
-                  <button
-                    v-for="group in addableGroups"
-                    :key="group.tag"
-                    type="button"
-                    role="menuitem"
-                    class="add-column-menu__item add-column-menu__item--group"
-                    @click="addGroupAsColumn(group.tag)"
-                  >
-                    <span class="add-column-menu__group-icon" aria-hidden="true">{{ group.icon }}</span>
-                    {{ group.name }}
-                  </button>
-                  <button
-                    v-if="addGroupCustomTag"
-                    type="button"
-                    role="menuitem"
-                    class="add-column-menu__item add-column-menu__item--group"
-                    @click="addGroupAsColumn(addGroupCustomTag)"
-                  >
-                    <span class="add-column-menu__group-icon" aria-hidden="true">🏷️</span>
-                    Add #{{ addGroupCustomTag }}
-                  </button>
-                  <p v-else-if="addGroupQuery.trim() && !addableGroups.length" class="add-column-menu__empty">
-                    No matching groups
-                  </p>
-                </div>
-              </template>
-              <span class="add-column-menu__hint">
-                {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} feeds on this device
-              </span>
-            </template>
-          </NeoMenu>
-        </div>
       </div>
     </nav>
 
@@ -2060,7 +2086,8 @@ useHead({ title: 'Home | NeoSpace' })
     max-width: 100%;
     margin-inline: 0;
     // Publish for layout dock / FAB (inherits up through main → layout)
-    --neo-feed-tabs-h: 52px;
+    // Slimmer now that thumb controls moved to the top chrome
+    --neo-feed-tabs-h: 48px;
   }
 
   // Single column / focused tab: center the content
@@ -2695,20 +2722,101 @@ useHead({ title: 'Home | NeoSpace' })
 }
 
 // ========================================
-// Mobile feed tabs
+// Mobile feed chrome (top) + feed tabs (bottom)
 // ========================================
+.mobile-feed-chrome {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 44px;
+  padding: 0.15rem 0.3rem 0.15rem 0.25rem;
+  border-bottom: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-primary);
+  position: relative;
+  z-index: var(--neo-z-sticky-bar, 20);
+
+  @media (max-width: 1023px) {
+    display: flex;
+  }
+
+  &__title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0 0.15rem;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--neo-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+
+  &__actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.05rem;
+  }
+
+  &__jump,
+  &__mode {
+    width: 40px;
+    height: 40px;
+  }
+
+  &__jump:disabled,
+  &__mode:disabled {
+    opacity: 0.28;
+  }
+
+  &__add {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  &__mode {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--neo-text-quaternary);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 0.18s ease, background 0.18s ease;
+
+    &:active:not(:disabled) {
+      transform: scale(0.96);
+    }
+
+    &--flip {
+      color: var(--neo-text-tertiary);
+    }
+
+    &:hover:not(:disabled),
+    &:focus-visible:not(:disabled) {
+      color: var(--neo-text-secondary);
+      background: var(--neo-bg-tertiary);
+    }
+  }
+}
+
 .mobile-feed-tabs {
   display: none;
   flex-shrink: 0;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.35rem 0.35rem 0.55rem;
+  gap: 0;
+  padding: 0.25rem 0.55rem;
   border-top: 1px solid var(--neo-border-color);
   border-bottom: none;
   background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  // Sit just above the bottom tab bar (in-flow flex child of .columns-page)
   position: relative;
   z-index: var(--neo-z-sticky-bar, 20);
 
@@ -2727,18 +2835,16 @@ useHead({ title: 'Home | NeoSpace' })
     overscroll-behavior-x: contain;
     touch-action: pan-x;
     scroll-behavior: auto;
+  }
 
-    &::-webkit-scrollbar {
-      display: none;
-    }
+  &__scroller::-webkit-scrollbar {
+    display: none;
   }
 
   &__neo {
     flex: 1;
     min-width: 0;
 
-    // One horizontal scroller only (the outer __scroller). Nested overflow
-    // made syncTabIntoView scroll a list that never overflowed on Android.
     :deep(.neo-tabs__list) {
       display: flex;
       gap: 0.35rem;
@@ -2749,8 +2855,8 @@ useHead({ title: 'Home | NeoSpace' })
     :deep(.neo-tabs__tab) {
       flex-shrink: 0;
       max-width: 11rem;
-      min-height: 44px;
-      padding: 0.5rem 0.9rem;
+      min-height: 40px;
+      padding: 0.4rem 0.85rem;
       font-size: 0.875rem;
       font-weight: 600;
       white-space: nowrap;
@@ -2758,7 +2864,6 @@ useHead({ title: 'Home | NeoSpace' })
       text-overflow: ellipsis;
       border-radius: 8px;
       box-shadow: none;
-      // Column switcher is primary nav on phones — quaternary read ~2:1
       color: var(--neo-text-tertiary);
       transition:
         color 0.16s ease,
@@ -2769,7 +2874,6 @@ useHead({ title: 'Home | NeoSpace' })
       &[aria-selected='true'] {
         color: var(--neo-text-primary);
         background: var(--neo-bg-tertiary);
-        // Android touch often never shows :focus-visible — make selection unmistakable
         box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--neo-accent) 70%, transparent);
       }
 
@@ -2781,52 +2885,6 @@ useHead({ title: 'Home | NeoSpace' })
         outline: 2px solid var(--neo-focus, var(--neo-accent));
         outline-offset: 2px;
       }
-    }
-  }
-
-  // Right-edge thumb cluster: prev / next / add
-  &__thumb {
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 0.15rem;
-  }
-
-  &__jump,
-  &__add-btn,
-  &__mode {
-    width: 44px;
-    height: 44px;
-  }
-
-  &__jump:disabled {
-    opacity: 0.28;
-  }
-
-  // Surreptitious Flow / Flip — reads as chrome until you notice
-  &__mode {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--neo-text-quaternary);
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: color 0.18s ease, background 0.18s ease;
-
-    &:active {
-      transform: scale(0.96);
-    }
-
-    &--flip {
-      color: var(--neo-text-tertiary);
-    }
-
-    &:hover,
-    &:focus-visible {
-      color: var(--neo-text-secondary);
-      background: var(--neo-bg-tertiary);
     }
   }
 }
@@ -2876,7 +2934,8 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
-.mobile-feed-tabs__mode--flip .mode-glyph {
+
+.mobile-feed-chrome__mode--flip .mode-glyph {
   .mode-glyph__flow {
     opacity: 0;
     transform: scale(0.86);
@@ -2885,43 +2944,6 @@ useHead({ title: 'Home | NeoSpace' })
   .mode-glyph__flip {
     opacity: 1;
     transform: scale(1);
-  }
-}
-
-.mobile-feed-tabs {
-  &__add {
-    position: relative;
-    flex-shrink: 0;
-  }
-
-  &__tab {
-    flex-shrink: 0;
-    max-width: 11rem;
-    height: auto;
-    min-height: 44px;
-    padding: 0.5rem 0.9rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    border-radius: 8px;
-
-    &--recessed {
-      color: var(--neo-text-quaternary);
-      background: transparent;
-      border-color: transparent;
-    }
-
-    &--active {
-      color: var(--neo-text-secondary);
-      background: var(--neo-bg-tertiary);
-      border-color: transparent;
-    }
-
-    &:active {
-      transform: scale(0.97);
-    }
   }
 }
 

@@ -88,9 +88,10 @@ function onAction(id: number, fn?: () => void) {
   @media (max-width: 1023px) {
     left: max(0.75rem, env(safe-area-inset-left));
     right: max(0.75rem, env(safe-area-inset-right));
-    // Layout publishes the real bottom chrome height (0 on subview routes without a tab bar)
+    // Tab bar + home feed pills (0 when those strips aren’t shown)
     bottom: calc(
-      var(--neo-bottom-chrome-h, var(--neo-mobile-nav-h, 56px)) + env(safe-area-inset-bottom, 0px) + 0.75rem
+      var(--neo-bottom-chrome-h, var(--neo-mobile-nav-h, 56px)) + var(--neo-feed-tabs-h, 0px) +
+        env(safe-area-inset-bottom, 0px) + 0.75rem
     );
     max-width: none;
   }

@@ -302,7 +302,8 @@ watch(
 
   &--board {
     @media (max-width: 1023px) {
-      --neo-feed-tabs-h: 52px;
+      /* Pills-only strip under the board (controls live in top chrome) */
+      --neo-feed-tabs-h: 48px;
     }
   }
 
@@ -352,7 +353,7 @@ watch(
   // Home board: feed strip sits above the tab bar
   .neo-layout.neo-layout--board & {
     bottom: calc(
-      var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 52px) + env(safe-area-inset-bottom, 0px) +
+      var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 48px) + env(safe-area-inset-bottom, 0px) +
         0.65rem
     );
   }

@@ -419,10 +419,10 @@ onUnmounted(() => {
 .notes-fab {
   position: fixed;
   left: max(0.75rem, env(safe-area-inset-left));
-  /* Sit just above the tab bar — a hair higher so it doesn’t kiss the chrome */
+  /* Sit just above tab bar + feed pills — a hair higher so it doesn’t kiss the chrome */
   bottom: calc(
     var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 0px) + env(safe-area-inset-bottom, 0px) +
-      1.15rem
+      1.25rem
   );
   z-index: var(--neo-z-shell-header, 90);
   display: grid;
