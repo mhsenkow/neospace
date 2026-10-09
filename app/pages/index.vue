@@ -1476,7 +1476,9 @@ useHead({ title: 'Home | NeoSpace' })
           </svg>
         </button>
 
-        <div v-if="columnsStore.canAddColumn" class="mobile-feed-chrome__add" @click.stop>
+        <!-- One Add Feed menu per layout: they share addMenuOpen, and a hidden desktop
+             popup's outside-tap close would shut this sheet on pointerdown -->
+        <div v-if="columnsStore.canAddColumn && isMobileUi" class="mobile-feed-chrome__add" @click.stop>
           <NeoMenu
             v-model:open="addMenuOpen"
             class="add-column-neo add-column-neo--mobile"
@@ -1943,7 +1945,7 @@ useHead({ title: 'Home | NeoSpace' })
 
     <!-- Desktop Add Column Panel -->
     <div
-      v-if="columnsStore.canAddColumn && !isDeskTabs"
+      v-if="columnsStore.canAddColumn && !isDeskTabs && !isMobileUi"
       class="add-column-panel"
       :class="{ 'add-column-panel--expanded': addMenuOpen }"
       @click.stop
