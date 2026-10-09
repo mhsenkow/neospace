@@ -109,6 +109,9 @@ watchEffect(() => {
   const root = document.documentElement.style
   if (showMobileNav.value) root.removeProperty('--neo-bottom-chrome-h')
   else root.setProperty('--neo-bottom-chrome-h', '0px')
+  // Body-teleported FAB / toasts can't inherit --neo-feed-tabs-h from the layout —
+  // publish the board's pill dock on <html> (_structural.scss sizes it)
+  document.documentElement.classList.toggle('neo-route-board', isBoardRoute.value)
 })
 
 onMounted(async () => {
@@ -216,15 +219,14 @@ watch(
 
     <MobileDrawer v-if="!isDesk" v-model:open="mobileMenuOpen" />
 
-    <div
-      v-if="instancesStore.authNotice"
-      class="neo-auth-notice"
-      role="status"
-    >
-      <p>{{ instancesStore.authNotice }}</p>
-      <button type="button" class="neo-auth-notice__dismiss" @click="instancesStore.dismissAuthNotice()">
-        Dismiss
-      </button>
+    <!-- Live region stays mounted so the notice is announced when it appears -->
+    <div class="neo-auth-notice-region" role="status">
+      <div v-if="instancesStore.authNotice" class="neo-auth-notice">
+        <p>{{ instancesStore.authNotice }}</p>
+        <button type="button" class="neo-auth-notice__dismiss" @click="instancesStore.dismissAuthNotice()">
+          Dismiss
+        </button>
+      </div>
     </div>
 
     <main id="main-content" class="main-content" tabindex="-1">
@@ -259,10 +261,23 @@ watch(
 </template>
 
 <style lang="scss" scoped>
-.neo-auth-notice {
+.neo-auth-notice-region {
   position: sticky;
   top: 0;
   z-index: 90;
+  flex-shrink: 0;
+
+  // Desktop row shell: own the full first line beside the fixed sidebar — as a
+  // plain flex item it sat under the sidebar and squeezed `main` sideways
+  @media (min-width: 1024px) {
+    &:not(:empty) {
+      flex: 0 0 calc(100% - var(--neo-sidebar-width, 248px));
+      margin-left: var(--neo-sidebar-width, 248px);
+    }
+  }
+}
+
+.neo-auth-notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -284,7 +299,10 @@ watch(
   border: 1px solid var(--neo-border-color);
   border-radius: 999px;
   background: var(--neo-bg-primary);
+  // Buttons don't inherit color — default ButtonText was black on dark themes
+  color: var(--neo-text-primary);
   padding: 0.25rem 0.65rem;
+  min-height: 24px;
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
@@ -292,7 +310,7 @@ watch(
 
 .neo-layout {
   --neo-sidebar-width: 248px;
-  --neo-feed-tabs-h: 0px;
+  /* --neo-feed-tabs-h comes from html.neo-route-board (_structural.scss) */
   display: flex;
   min-height: 100vh;
   min-height: 100dvh;
@@ -300,11 +318,10 @@ watch(
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
 
-  &--board {
-    @media (max-width: 1023px) {
-      /* Pills-only strip under the board (controls live in top chrome) */
-      --neo-feed-tabs-h: 48px;
-    }
+  @media (min-width: 1024px) {
+    // Auth notice takes its own line above `main`
+    flex-wrap: wrap;
+    align-content: flex-start;
   }
 
   // Mobile: column shell with in-flow header/tabs.

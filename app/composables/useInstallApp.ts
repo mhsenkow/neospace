@@ -3,10 +3,29 @@
  * otherwise a manual “Add to Home screen” path (we can’t force Chrome’s ⋮ menu).
  */
 
+import type { Ref } from 'vue'
+
 const DISMISS_KEY = 'neo-install-dismissed'
+
+const readDismissed = () => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(DISMISS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Shared + read synchronously (client-only SPA). Set per-instance onMounted, the
+ * promo rendered and animated out on every boot for people who had dismissed it,
+ * and a dismiss / clearDismiss from one caller never reached the others.
+ */
+let dismissed: Ref<boolean> | null = null
 
 export function useInstallApp() {
   const { $pwa } = useNuxtApp()
+  dismissed ??= ref(readDismissed())
+  const dismissedRef = dismissed
   const isStandalone = useMediaQuery('(display-mode: standalone)')
 
   const pwa = computed(
@@ -20,15 +39,6 @@ export function useInstallApp() {
           }
         | undefined,
   )
-
-  const dismissed = ref(false)
-  onMounted(() => {
-    try {
-      dismissed.value = localStorage.getItem(DISMISS_KEY) === '1'
-    } catch {
-      dismissed.value = false
-    }
-  })
 
   const isAndroid = computed(() => {
     if (typeof navigator === 'undefined') return false
@@ -48,7 +58,7 @@ export function useInstallApp() {
 
   /** Show promo on Android (and iOS tips) when not already installed / dismissed. */
   const showPromo = computed(() => {
-    if (alreadyInstalled.value || dismissed.value) return false
+    if (alreadyInstalled.value || dismissedRef.value) return false
     return isAndroid.value || isIos.value || canNativeInstall.value
   })
 
@@ -61,7 +71,7 @@ export function useInstallApp() {
   }
 
   const dismissPromo = () => {
-    dismissed.value = true
+    dismissedRef.value = true
     try {
       localStorage.setItem(DISMISS_KEY, '1')
     } catch {
@@ -71,7 +81,7 @@ export function useInstallApp() {
   }
 
   const clearDismiss = () => {
-    dismissed.value = false
+    dismissedRef.value = false
     try {
       localStorage.removeItem(DISMISS_KEY)
     } catch {
