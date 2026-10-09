@@ -243,6 +243,50 @@ const onPick = (identity: string) => {
   edward.selectByIdentity(identity)
 }
 
+/**
+ * Text twin of the canvas (which is aria-hidden): the same filtered + sorted
+ * posts as a list of buttons, so keyboard and screen reader users can browse
+ * and open them. One Tab stop; ↑↓ / Home / End move. Shown as a panel while
+ * it holds focus, visually hidden otherwise.
+ */
+const LIST_MAX = 50
+/** Snapshot while the list holds focus — new posts prepend, which would shove
+ * the focused row out of view mid-read (same idea as the deck's hold) */
+const listHeld = shallowRef<typeof edward.visibleBalls | null>(null)
+const listBalls = computed(() => listHeld.value ?? edward.visibleBalls.slice(0, LIST_MAX))
+const onListFocusIn = () => {
+  if (!listHeld.value) listHeld.value = listBalls.value
+}
+const onListFocusOut = (e: FocusEvent) => {
+  const list = e.currentTarget as HTMLElement | null
+  if (list && e.relatedTarget instanceof Node && list.contains(e.relatedTarget)) return
+  listHeld.value = null
+}
+const listActiveId = ref<string | null>(null)
+const listTabId = computed(() => {
+  const items = listBalls.value
+  return items.some((b) => b.identity === listActiveId.value)
+    ? listActiveId.value
+    : items[0]?.identity ?? null
+})
+const listItemText = (b: { badges: string[]; preview: string }) =>
+  b.badges.includes('cw') ? 'content warning' : b.preview || 'no text'
+const onListKeydown = (e: KeyboardEvent) => {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+  const btns = Array.from(
+    (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('.edward-mode__list-item'),
+  )
+  if (!btns.length) return
+  const cur = btns.indexOf(document.activeElement as HTMLButtonElement)
+  let i = cur
+  if (e.key === 'Home') i = 0
+  else if (e.key === 'End') i = btns.length - 1
+  else if (e.key === 'ArrowDown') i = Math.min(btns.length - 1, cur + 1)
+  else i = Math.max(0, cur - 1)
+  e.preventDefault()
+  btns[i]!.focus()
+}
+
 const cycleFocus = () => {
   edward.cycleFocusMode()
 }
@@ -319,9 +363,12 @@ const openProfile = (acct: string) => {
   leaveTo({ path: '/profile', query })
 }
 
+let exitTimer: ReturnType<typeof setTimeout> | null = null
 const exit = () => {
   visible.value = false
-  window.setTimeout(() => {
+  if (exitTimer) return
+  exitTimer = setTimeout(() => {
+    exitTimer = null
     stream.stop()
     edward.exit()
   }, 220)
@@ -343,7 +390,8 @@ const CHAR_OWNERS =
  * inputs) handle their own keys first; anything they preventDefault is left alone.
  */
 const onKey = (e: KeyboardEvent) => {
-  if (e.defaultPrevented) return
+  // Recessed under the compose sheet: its keys are the sheet's, not ours
+  if (e.defaultPrevented || edward.recessed) return
   if (e.key === 'Escape') return
   const target = e.target as HTMLElement | null
   const typing = !!target?.closest?.(CHAR_OWNERS)
@@ -397,7 +445,9 @@ const onKey = (e: KeyboardEvent) => {
  * Open menus/listboxes keep their own Escape.
  */
 const onEscapeKey = (e: KeyboardEvent) => {
-  if (e.key !== 'Escape' || e.defaultPrevented) return
+  // The compose sheet on top owns Escape — capturing it here used to close the
+  // hidden peek / exit Edward while the reply draft stayed open
+  if (e.key !== 'Escape' || e.defaultPrevented || edward.recessed) return
   const target = e.target as HTMLElement | null
   if (target?.closest?.('[role="menu"], [role="listbox"]')) return
   e.preventDefault()
@@ -449,6 +499,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (announceTimer) clearTimeout(announceTimer)
+  // Unmounted some other way (leaveTo, suite toggle) — a late timer must not
+  // exit the *next* session
+  if (exitTimer) clearTimeout(exitTimer)
   exploreRo?.disconnect()
   if (holdReleaseTimer) clearTimeout(holdReleaseTimer)
   document.removeEventListener('keydown', onKey)
@@ -568,6 +621,7 @@ onUnmounted(() => {
         v-if="watchCurrent && watchDeckShown"
         class="edward-mode__watch"
         :class="{ 'is-scrubbing': watchScrubbing, 'is-held': edward.watchHold }"
+        aria-label="Watched post"
         @pointerenter="holdWatch(true)"
         @pointerleave="onWatchPointerLeave"
         @focusin="holdWatch(true)"
@@ -803,6 +857,31 @@ onUnmounted(() => {
           <span class="edward-mode__explore-hint"> · / search · ←→ scrub · ⏎ open · L lens · esc clears</span>
         </p>
       </div>
+
+      <nav
+        v-if="!recessed && listBalls.length"
+        class="edward-mode__list"
+        aria-label="Posts in the stream"
+        @keydown="onListKeydown"
+        @focusin="onListFocusIn"
+        @focusout="onListFocusOut"
+      >
+        <p class="edward-mode__list-head" aria-hidden="true">posts · ↑↓ move · ⏎ open</p>
+        <ul>
+          <li v-for="b in listBalls" :key="b.identity">
+            <button
+              type="button"
+              class="edward-mode__list-item"
+              :tabindex="b.identity === listTabId ? 0 : -1"
+              @focus="listActiveId = b.identity"
+              @click="onPick(b.identity)"
+            >
+              <strong>{{ b.label }}</strong>
+              <span>{{ listItemText(b) }}</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
 
       <EdwardPostModal
         v-if="selected && !recessed"
@@ -1786,6 +1865,93 @@ onUnmounted(() => {
   .edward-mode__explore-crumb,
   .edward-mode__header-rail {
     display: none;
+  }
+}
+
+/* Post list (text twin of the canvas) — off-screen until it holds focus */
+.edward-mode__list {
+  position: absolute;
+  top: 50%;
+  left: max(0.75rem, env(safe-area-inset-left));
+  z-index: 5;
+  width: min(320px, calc(100vw - 1.5rem));
+  max-height: min(60vh, 28rem);
+  max-height: min(60dvh, 28rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform: translateY(-50%);
+  padding: 0.45rem;
+  border: 2px solid #ffe566;
+  border-radius: 4px;
+  background: color-mix(in srgb, #12081c 97%, transparent);
+  box-shadow: 4px 4px 0 #ff7eb3;
+
+  &:not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    border: 0;
+    white-space: nowrap;
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+}
+
+.edward-mode__list-head {
+  margin: 0 0 0.35rem;
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ff7eb3;
+}
+
+.edward-mode__list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: #fff8d6;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  strong {
+    font-size: 0.75rem;
+    color: #ffe566;
+  }
+
+  span {
+    font-size: 0.6875rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  &:hover,
+  &:focus-visible {
+    border-color: #59d1e0;
+    background: color-mix(in srgb, #59d1e0 14%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #59d1e0;
+    outline-offset: -2px;
   }
 }
 

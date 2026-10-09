@@ -317,9 +317,15 @@ export function buildInsightsReport(opts: {
   }
 }
 
-function escapeCsv(value: string | number): string {
+/**
+ * CSV cell escape. Text cells starting with = + - @ (or tab / CR, which some
+ * spreadsheet apps strip before evaluating) are prefixed with ' so Excel /
+ * Sheets / LibreOffice treat them as text, not formulas (CSV injection).
+ */
+export function escapeCsv(value: string | number): string {
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''
   let s = String(value ?? '')
-  if (/^[=+\-@]/.test(s)) s = `'${s}`
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }
@@ -374,6 +380,22 @@ export function insightHeatmapToCsv(rows: InsightHeatCell[]): string {
     )
     .join('\n')
   return `\uFEFF${header}\n${body}`
+}
+
+/**
+ * Format a Mastodon calendar date ("2024-05-02", e.g. last_status_at) in local
+ * time. `new Date('2024-05-02')` is UTC midnight, which shows as the previous
+ * day anywhere west of Greenwich. Full timestamps are formatted as-is.
+ */
+export function formatDateOnly(
+  value: string | null | undefined,
+  opts?: Intl.DateTimeFormatOptions,
+): string | null {
+  if (!value) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleDateString(undefined, opts)
 }
 
 export function formatCompact(nVal: number): string {

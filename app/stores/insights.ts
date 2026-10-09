@@ -4,8 +4,10 @@
  */
 
 import { defineStore } from 'pinia'
+import { markRaw } from 'vue'
 import type { mastodon } from 'masto'
 import { activeClient } from '~/composables/useMasto'
+import { useInstancesStore } from '~/stores/instances'
 import {
   buildInsightsReport,
   type InsightsReport,
@@ -43,8 +45,26 @@ interface InsightsState {
 
 /** Module-level race + cache (not in Pinia so AbortController isn't serialized). */
 let fetchGen = 0
+let annualGen = 0
 let fetchController: AbortController | null = null
+/**
+ * Keyed by signed-in account + account id: Mastodon ids are per-server, so two
+ * linked accounts on different instances can share an id.
+ */
 const statusCache = new Map<string, CacheEntry>()
+const cacheKey = (accountId: string) =>
+  `${useInstancesStore().activeAccountId || ''}:${accountId}`
+
+/** Wrapstodon share links come from the server — only ever render http(s) */
+function safeHttpUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw) return null
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null
+  } catch {
+    return null
+  }
+}
 
 // masto doesn't re-export AnnualReport from v1 — derive it from the endpoint
 type AnnualReport = Awaited<
@@ -75,7 +95,7 @@ function coerceAnnual(raw: AnnualReport): AnnualLite {
     : []
   return {
     year: raw.year,
-    shareUrl: raw.shareUrl,
+    shareUrl: safeHttpUrl(raw.shareUrl),
     archetype: typeof data.archetype === 'string' ? data.archetype : null,
     topHashtags,
     timeSeries,
@@ -107,6 +127,10 @@ export const useInsightsStore = defineStore('insights', {
       fetchController?.abort()
       fetchController = null
       fetchGen += 1
+      annualGen += 1
+      // The dropped request's finally no longer owns the flags
+      this.isLoading = false
+      this.isLoadingAnnual = false
     },
 
     async fetchInsights(account: mastodon.v1.Account, windowDays?: InsightsWindowDays) {
@@ -122,7 +146,8 @@ export const useInsightsStore = defineStore('insights', {
       const { signal } = fetchController
 
       try {
-        const cached = statusCache.get(account.id)
+        const key = cacheKey(account.id)
+        const cached = statusCache.get(key)
         const fresh =
           cached &&
           Date.now() - cached.fetchedAt < CACHE_TTL_MS &&
@@ -164,7 +189,7 @@ export const useInsightsStore = defineStore('insights', {
           }
 
           if (gen !== fetchGen) return
-          statusCache.set(account.id, {
+          statusCache.set(key, {
             statuses: collected,
             truncated,
             fetchedAt: Date.now(),
@@ -176,12 +201,15 @@ export const useInsightsStore = defineStore('insights', {
         const exportable = collected.filter(
           (s) => s.visibility !== 'direct' && s.visibility !== 'private',
         )
-        this.report = buildInsightsReport({
-          account,
-          statuses: exportable,
-          windowDays: days,
-          truncated,
-        })
+        // Replaced wholesale, never mutated — skip deep proxies over ~500 rows
+        this.report = markRaw(
+          buildInsightsReport({
+            account,
+            statuses: exportable,
+            windowDays: days,
+            truncated,
+          }),
+        )
       } catch (e: any) {
         if (e?.name === 'AbortError' || gen !== fetchGen) return
         console.error('Insights fetch failed:', e)
@@ -196,16 +224,19 @@ export const useInsightsStore = defineStore('insights', {
     },
 
     async fetchAnnualReports() {
+      const gen = ++annualGen
       this.isLoadingAnnual = true
       try {
         const client = activeClient()
         const wrapped = await client.v1.annualReports.list()
+        if (gen !== annualGen) return
         this.annual = (wrapped.annualReports || []).map(coerceAnnual)
       } catch {
+        if (gen !== annualGen) return
         // Optional — many instances / forks omit Wrapstodon
         this.annual = []
       } finally {
-        this.isLoadingAnnual = false
+        if (gen === annualGen) this.isLoadingAnnual = false
       }
     },
 

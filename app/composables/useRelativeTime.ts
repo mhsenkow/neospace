@@ -15,17 +15,40 @@ const FRESH_MS = 15_000
 let subscribers = 0
 let timer: ReturnType<typeof setInterval> | null = null
 
+let visibilityBound = false
+
+function stopTimer() {
+  if (!timer) return
+  clearInterval(timer)
+  timer = null
+}
+
+/** A hidden tab re-rendered every timestamp once a minute for nobody — pause, then catch up on return. */
+function onVisibilityChange() {
+  if (document.hidden) {
+    stopTimer()
+    return
+  }
+  if (subscribers === 0) return
+  now.value = Date.now()
+  ensureTicking()
+}
+
 function ensureTicking() {
   if (typeof window === 'undefined' || timer) return
+  if (!visibilityBound) {
+    visibilityBound = true
+    document.addEventListener('visibilitychange', onVisibilityChange)
+  }
+  if (document.hidden) return
   timer = setInterval(() => {
     now.value = Date.now()
   }, 60_000)
 }
 
 function maybeStop() {
-  if (subscribers > 0 || !timer) return
-  clearInterval(timer)
-  timer = null
+  if (subscribers > 0) return
+  stopTimer()
 }
 
 export function useRelativeTime() {

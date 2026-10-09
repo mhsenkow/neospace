@@ -13,6 +13,7 @@ import { isImeEvent } from '~/composables/useComposerCore'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
 import { mapComposeError } from '~/utils/friendlyError'
 import { mastodonLength } from '~/utils/mastodonLength'
+import { buildDirectBody, normalizeRecipientAccts } from '~/utils/dmHelpers'
 
 const props = defineProps<{
   /** Latest status in the thread to reply to */
@@ -42,6 +43,8 @@ type PendingSend = {
   status: mastodon.v1.Status
   delivery: 'pending' | 'failed'
   body: string
+  /** What the user typed (no added mentions) — restored by "Edit" after a failure */
+  text: string
   mediaIds: string[]
 }
 const pendingSend = ref<PendingSend | null>(null)
@@ -123,7 +126,9 @@ const {
   clearAttachments,
   retryUpload,
   setDescription,
+  flushAltDescriptions,
   altMax,
+  uploadAnnounce,
   onPaste,
   onDragEnter,
   onDragLeave,
@@ -144,42 +149,12 @@ const onComposerFocus = (_e: FocusEvent) => {
 const maxChars = computed(() => instancesStore.statusMaxCharacters || 500)
 const counterAnnounce = ref('')
 
-const mentionList = computed(() => {
-  const raw = [
-    ...(props.recipientAccts || []),
-    props.recipientAcct || '',
-  ]
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const r of raw) {
-    const acct = r.replace(/^@/, '').trim()
-    if (!acct) continue
-    const key = acct.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(acct)
-  }
-  return out
-})
-
-const mentionPrefix = computed(() =>
-  mentionList.value.map((a) => `@${a}`).join(' '),
+const mentionList = computed(() =>
+  normalizeRecipientAccts([...(props.recipientAccts || []), props.recipientAcct]),
 )
 
-const projectedLen = computed(() => {
-  const text = content.value.trim()
-  if (!mentionPrefix.value) return mastodonLength(text)
-  let body = text
-  for (const acct of mentionList.value) {
-    const mention = `@${acct}`
-    const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const already = new RegExp(`(?:^|[\\s\\u200B])${escaped}(?=$|[\\s\\u200B]|[^\\w.])`, 'i').test(
-      ` ${text} `,
-    )
-    if (!already) body = `${mention} ${body}`
-  }
-  return mastodonLength(body)
-})
+/** Mentions are added on send, so they count toward the limit */
+const projectedLen = computed(() => mastodonLength(buildDirectBody(content.value, mentionList.value)))
 
 const remaining = computed(() => maxChars.value - projectedLen.value)
 const overLimit = computed(() => remaining.value < 0)
@@ -225,26 +200,6 @@ watch(keyboardOpen, () => {
   void nextTick(autosize)
 })
 
-const buildBody = () => {
-  let text = content.value.trim()
-  for (const acct of mentionList.value) {
-    const mention = `@${acct}`
-    if (!text) {
-      text = mention
-      continue
-    }
-    // Word-boundary match so @bobby does not count as @bob
-    const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const already = new RegExp(`(?:^|[\\s\\u200B])${escaped}(?=$|[\\s\\u200B]|[^\\w.])`, 'i').test(
-      ` ${text} `,
-    )
-    if (!already) {
-      text = `${mention} ${text}`
-    }
-  }
-  return text
-}
-
 const postBody = async (body: string, ids: string[]) => {
   isSending.value = true
   error.value = null
@@ -272,14 +227,29 @@ const postBody = async (body: string, ids: string[]) => {
 
 const send = async () => {
   if (!canSend.value) return
-  const body = buildBody()
+  // Every participant must be mentioned or the direct post won't reach them
+  const body = buildDirectBody(content.value, mentionList.value)
+  const text = content.value.trim()
   const ids = [...mediaIds.value]
-  const optimistic = makeOptimisticStatus(content.value.trim() || body)
-  pendingSend.value = { status: optimistic, delivery: 'pending', body, mediaIds: ids }
+  const optimistic = makeOptimisticStatus(text || body)
+  // Set synchronously — canSend now blocks a second Enter / tap (double send)
+  pendingSend.value = { status: optimistic, delivery: 'pending', body, text, mediaIds: ids }
   content.value = ''
+  // Alt text typed in the last 450ms is still debounced — clearing would drop it
+  await flushAltDescriptions().catch(() => {})
   clearAttachments()
   await nextTick(autosize)
   await postBody(body, ids)
+}
+
+/** Give up on a failed send: put the text back so it can be edited and resent */
+const editFailed = () => {
+  const pending = pendingSend.value
+  if (!pending || pending.delivery !== 'failed') return
+  if (!content.value.trim()) content.value = pending.text
+  pendingSend.value = null
+  error.value = null
+  void nextTick(() => textareaRef.value?.focus())
 }
 
 const retryPending = async () => {
@@ -334,6 +304,7 @@ onMounted(() => {
           mine
           :delivery="pendingSend.delivery"
           @retry="retryPending"
+          @edit="editFailed"
         />
       </div>
 
@@ -432,6 +403,7 @@ onMounted(() => {
             :readonly="isSending"
             enterkeyhint="send"
             aria-label="Message"
+            aria-describedby="chat-composer-keys"
             :aria-busy="isSending || undefined"
             :aria-invalid="overLimit || undefined"
             @focus="onComposerFocus"
@@ -440,7 +412,11 @@ onMounted(() => {
           />
         </div>
 
+        <span id="chat-composer-keys" class="sr-only">
+          Enter sends. Shift+Enter adds a new line.
+        </span>
         <span class="sr-only" aria-live="polite" aria-atomic="true">{{ counterAnnounce }}</span>
+        <span class="sr-only" aria-live="polite" aria-atomic="true">{{ uploadAnnounce }}</span>
         <span
           class="chat-composer__count"
           :class="{

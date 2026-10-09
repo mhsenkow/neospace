@@ -9,13 +9,14 @@ import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useConversationsStore } from '~/stores/conversations'
-import { dayKey, daySeparatorLabel } from '~/utils/dmHelpers'
+import { dayKey, daySeparatorLabel, safeHttpUrl } from '~/utils/dmHelpers'
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
 import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
+import { getMainScroller } from '~/utils/pageScroll'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,7 +24,8 @@ const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 const conversationsStore = useConversationsStore()
 const loadRace = createRaceGuard()
-let skipNextRouteWatch = false
+/** Id our own canonicalising router.replace lands on — its route change isn't a new load */
+let replacedToId: string | null = null
 let dmRefreshActive = false
 
 let readOverrideOwner = 0
@@ -54,6 +56,10 @@ const queryUrl = computed(() => {
 })
 
 const canReply = computed(() => instancesStore.isAuthenticated)
+/** ?url= is user-controllable — never render a javascript:/data: href from it */
+const originalUrl = computed(
+  () => safeHttpUrl(focusStatus.value?.url) || safeHttpUrl(queryUrl.value),
+)
 const isDirectThread = computed(() => focusStatus.value?.visibility === 'direct')
 
 /** Chronological chat messages */
@@ -87,8 +93,24 @@ const visibleChatMessages = computed(() => {
   return chatMessages.value.filter((s) => statusMatchesQuery(s, q))
 })
 
-const myAcct = computed(() => instancesStore.currentUser?.acct?.toLowerCase() || '')
-const myId = computed(() => instancesStore.currentUser?.id || '')
+/**
+ * Who is reading (and replying): ?account= (opened from another account's
+ * notification) overrides the active account for every client call here, so
+ * "mine" and the recipient list must be judged as that account too.
+ */
+const overrideInstance = computed(() => {
+  const id = route.query.account
+  if (typeof id !== 'string') return null
+  return instancesStore.instances.find((i) => i.id === id && i.accessToken && i.user) || null
+})
+const viewer = computed(() => overrideInstance.value?.user || instancesStore.currentUser)
+/** The global DM inbox (conversations store) is the active account's — leave it alone */
+const readsAsOtherAccount = computed(
+  () => !!overrideInstance.value && overrideInstance.value.id !== instancesStore.activeAccountId,
+)
+
+const myAcct = computed(() => viewer.value?.acct?.toLowerCase() || '')
+const myId = computed(() => viewer.value?.id || '')
 
 const isMine = (status: mastodon.v1.Status) => {
   if (!myId.value && !myAcct.value) return false
@@ -106,10 +128,15 @@ type ChatPerson = {
   avatar?: string | null
 }
 
-/** All other people in this DM (group-aware) */
+/**
+ * All other people in this DM (group-aware). Only direct posts define the
+ * audience — a public ancestor's author (DM started as a private reply to a
+ * public thread) must not be silently mentioned into the conversation.
+ */
 const otherParticipants = computed((): ChatPerson[] => {
   const byId = new Map<string, ChatPerson>()
-  for (const s of chatMessages.value) {
+  const direct = chatMessages.value.filter((s) => s.visibility === 'direct')
+  for (const s of direct) {
     if (isMine(s)) continue
     const a = s.account
     if (!a?.id || byId.has(a.id)) continue
@@ -121,9 +148,9 @@ const otherParticipants = computed((): ChatPerson[] => {
       avatar: a.avatar,
     })
   }
-  // Mentions on our messages may include people who haven't replied yet
-  for (const s of chatMessages.value) {
-    if (!isMine(s)) continue
+  // Mentioned people who haven't written yet are in the audience too (Mastodon
+  // replies keep every mention of the post they answer)
+  for (const s of direct) {
     for (const m of s.mentions || []) {
       if (!m.id || m.id === myId.value) continue
       if (m.acct?.toLowerCase() === myAcct.value) continue
@@ -143,6 +170,12 @@ const otherParticipants = computed((): ChatPerson[] => {
 const otherParticipant = computed((): ChatPerson | null => otherParticipants.value[0] || null)
 
 const recipientAccts = computed(() => otherParticipants.value.map((p) => p.acct).filter(Boolean))
+/** Leading-mention stripping in bubbles: incoming DMs open with "@me" */
+const bubbleMentionAccts = computed(() =>
+  myAcct.value ? [...recipientAccts.value, myAcct.value] : recipientAccts.value,
+)
+/** Stable per conversation — re-keying on every new message wiped the draft and focus */
+const chatThreadKey = computed(() => chatMessages.value[0]?.id || focusStatus.value?.id || '')
 
 const threadTitle = computed(() => {
   if (!focusStatus.value) return 'Thread'
@@ -317,6 +350,15 @@ const preferReducedMotion = () =>
   (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
     document.documentElement.classList.contains('reduce-motion'))
 
+/** Reader is at (or very near) the latest message — page scroller aware (mobile `main`) */
+const isNearPageBottom = (slack = 200) => {
+  if (typeof window === 'undefined') return true
+  const main = getMainScroller()
+  if (main) return main.scrollHeight - main.scrollTop - main.clientHeight <= slack
+  const doc = document.documentElement
+  return doc.scrollHeight - window.scrollY - window.innerHeight <= slack
+}
+
 const scrollChatToEnd = async () => {
   await nextTick()
   chatEndEl.value?.scrollIntoView({
@@ -325,13 +367,27 @@ const scrollChatToEnd = async () => {
   })
 }
 
+/**
+ * Whether the next soft-keyboard open should keep the latest message in view.
+ * Decided when a field gains focus (before the keyboard shrinks the viewport
+ * and skews the measurement): composer focus while reading history, or the
+ * find-in-thread field, must not yank the reader to the bottom.
+ */
+let keyboardFollowsChat = true
+const onReplyFieldFocus = () => {
+  keyboardFollowsChat = isNearPageBottom()
+}
+const onThreadSearchFocus = () => {
+  keyboardFollowsChat = false
+}
+
 // Android: when the keyboard opens, keep the latest message above the composer
 watch(keyboardOpen, (open) => {
-  if (open) void scrollChatToEnd()
+  if (open && keyboardFollowsChat) void scrollChatToEnd()
 })
 
 const syncDmLiveRefresh = (isDm: boolean) => {
-  if (isDm && instancesStore.isAuthenticated) {
+  if (isDm && instancesStore.isAuthenticated && !readsAsOtherAccount.value) {
     if (!dmRefreshActive) {
       conversationsStore.startLiveRefresh()
       dmRefreshActive = true
@@ -376,7 +432,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     resolvedThreadId = resolvedId
 
     if (resolvedId !== paramId.value) {
-      skipNextRouteWatch = true
+      replacedToId = resolvedId
       await router.replace({
         path: `/status/${resolvedId}`,
         // Keep the read-account override (notification from another account)
@@ -390,13 +446,25 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
 
     const thread = await statusStore.fetchThread(resolvedId)
     if (!ticket.isCurrent()) return
+    // Background refresh: follow new messages only if the reader is already at the end
+    const followNew =
+      !!opts.quiet &&
+      thread.status.visibility === 'direct' &&
+      thread.descendants.length > descendants.value.length &&
+      isNearPageBottom()
     focusStatus.value = thread.status
     ancestors.value = thread.ancestors
     descendants.value = thread.descendants
 
     syncDmLiveRefresh(thread.status.visibility === 'direct')
 
-    if (thread.status.visibility === 'direct' && instancesStore.isAuthenticated) {
+    if (followNew) void scrollChatToEnd()
+
+    if (
+      thread.status.visibility === 'direct' &&
+      instancesStore.isAuthenticated &&
+      !readsAsOtherAccount.value
+    ) {
       const statusIds = [
         ...thread.ancestors.map((s) => s.id),
         thread.status.id,
@@ -452,10 +520,29 @@ const onReplyPosted = async (status: mastodon.v1.Status) => {
       behavior: preferReducedMotion() ? 'auto' : 'smooth',
     })
   }
-  // Echo / nesting from the server in the background
+  // Echo / nesting from the server in the background — don't yank a reader
+  // who scrolled up meanwhile
   void loadThread({ quiet: true }).then(() => {
-    if (isDirectThread.value) void scrollChatToEnd()
+    if (isDirectThread.value && isNearPageBottom()) void scrollChatToEnd()
   })
+}
+
+/** A message deleted from its bubble menu — drop it now instead of on the next poll */
+const onMessageDeleted = (statusId: string) => {
+  ancestors.value = ancestors.value.filter((s) => s.id !== statusId)
+  descendants.value = descendants.value.filter((s) => s.id !== statusId)
+  if (focusStatus.value?.id !== statusId) return
+  // The focused post is gone (its context would 404) — move to what's left
+  const rest = [...ancestors.value, ...descendants.value]
+  const next = rest.at(-1)
+  if (next) {
+    // Drop ?url= (it named the deleted post); keep the read-account override
+    const account = route.query.account
+    void router.replace({
+      path: `/status/${next.id}`,
+      query: typeof account === 'string' ? { account } : {},
+    })
+  } else void router.push('/messages')
 }
 
 const goProfile = () => {
@@ -491,10 +578,11 @@ onUnmounted(() => {
 })
 
 watch(() => [route.params.id, route.query.url], () => {
-  if (skipNextRouteWatch) {
-    skipNextRouteWatch = false
-    return
-  }
+  // Skip only the route change our own replace caused — a flag would also
+  // swallow a newer navigation that superseded (aborted) that replace
+  const own = replacedToId !== null && String(route.params.id || '') === replacedToId
+  replacedToId = null
+  if (own) return
   stopThreadPoll()
   resolvedThreadId = null
   void loadThread().then(() => startThreadPoll())
@@ -580,9 +668,9 @@ useHead({
     <SubviewChrome v-else class="thread-subview" :title="threadTitle || 'Thread'">
       <template #actions>
         <a
-          v-if="focusStatus?.url || queryUrl"
+          v-if="originalUrl"
           class="subview-chrome__btn"
-          :href="focusStatus?.url || queryUrl || '#'"
+          :href="originalUrl"
           target="_blank"
           rel="noopener noreferrer"
           title="Open original"
@@ -607,6 +695,7 @@ useHead({
           :placeholder="isDirectThread ? 'Search conversation…' : 'Search thread…'"
           autocomplete="off"
           enterkeyhint="search"
+          @focus="onThreadSearchFocus"
         />
       </label>
       <p v-if="threadSearchStatus" class="thread-search__status" role="status" aria-live="polite">
@@ -660,7 +749,8 @@ useHead({
             :status="status"
             :mine="isMine(status)"
             :show-meta="showBubbleMeta(status, index)"
-            :participant-accts="recipientAccts"
+            :participant-accts="bubbleMentionAccts"
+            @deleted="onMessageDeleted"
           />
         </template>
         <div ref="chatEndEl" class="chat-end" />
@@ -668,11 +758,12 @@ useHead({
 
       <ChatComposer
         v-if="canReply && replyTarget"
-        :key="replyTarget.id + recipientAccts.join(',')"
+        :key="chatThreadKey"
         :in-reply-to-id="replyTarget.id"
         :recipient-accts="recipientAccts"
         placeholder="Message…"
         @posted="onReplyPosted"
+        @focusin="onReplyFieldFocus"
       />
       <div v-else class="thread-signin-hint">
         <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in to reply</NuxtLink>
@@ -744,6 +835,7 @@ useHead({
         }"
         :style="replyDockStyle"
         :aria-busy="replyResolving || !publicReplyId || undefined"
+        @focusin="onReplyFieldFocus"
       >
         <div class="thread-reply-dock__inner">
           <RealComposeBox
@@ -987,6 +1079,9 @@ useHead({
 
 .chat-end {
   height: 1px;
+  /* scrollIntoView({ block: 'end' }) would park the latest message under the
+     fixed composer / reply dock — stop that far above the bottom instead */
+  scroll-margin-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px) + var(--neo-keyboard-inset, 0px));
 }
 
 .thread-state {
@@ -1019,6 +1114,11 @@ useHead({
 
 .thread-post--reply {
   margin-left: calc(var(--thread-depth, 0) * 0.85rem);
+
+  /* 6 levels × 0.85rem ate a third of a 320px screen — narrower steps on phones */
+  @media (max-width: 480px) {
+    margin-left: calc(var(--thread-depth, 0) * 0.4rem);
+  }
 }
 
 .thread-post--nested {

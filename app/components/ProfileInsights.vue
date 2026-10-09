@@ -8,6 +8,7 @@ import { useInsightsStore } from '~/stores/insights'
 import type { mastodon } from 'masto'
 import {
   formatCompact,
+  formatDateOnly,
   type InsightsWindowDays,
 } from '~/utils/insights'
 import { downloadInsightsCsv, exportInsightsToLoom } from '~/utils/loomExport'
@@ -343,7 +344,7 @@ const kpi = computed(() => {
           class="insights__heat"
           role="img"
           :aria-label="heatSummary"
-          aria-describedby="insights-heat-summary insights-heat-legend"
+          aria-describedby="insights-heat-legend"
         >
           <div class="insights__heat-corner" />
           <div
@@ -491,8 +492,8 @@ const kpi = computed(() => {
         Lifetime ·
         {{ formatCompact(report.account.followers) }} followers ·
         {{ formatCompact(report.account.statuses) }} statuses
-        <template v-if="report.account.lastStatusAt">
-          · last active {{ new Date(report.account.lastStatusAt).toLocaleDateString() }}
+        <template v-if="formatDateOnly(report.account.lastStatusAt)">
+          · last active {{ formatDateOnly(report.account.lastStatusAt) }}
         </template>
       </p>
       </div>

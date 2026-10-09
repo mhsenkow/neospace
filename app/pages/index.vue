@@ -204,14 +204,62 @@ const onColumnDrop = (fromColumnId: string, toColumnId: string) => {
   onColumnDragEnd()
 }
 
+/** Polite status for keyboard reorders (drag-and-drop is visual on its own) */
+const columnMoveAnnounce = ref('')
+
+/**
+ * The keyed v-for moves column DOM nodes on reorder, which drops focus from the
+ * Move / drag-handle button that was pressed — and Move left/right disables at
+ * the ends. Put focus back (or on its enabled sibling) and say where it landed.
+ */
+const afterColumnMove = (columnId: string | undefined, prevFocus: Element | null) => {
+  columnMoveAnnounce.value = ''
+  nextTick(() => {
+    const idx = columnsStore.columns.findIndex((c) => c.id === columnId)
+    if (idx < 0) return
+    columnMoveAnnounce.value = `Moved ${columnTabLabels.value[idx] || 'column'} to position ${idx + 1} of ${columnsStore.columns.length}`
+    if (!(prevFocus instanceof HTMLElement) || !prevFocus.isConnected) return
+    if (!columnsContainer.value?.contains(prevFocus)) return
+    let target: HTMLElement | null = prevFocus
+    if ((prevFocus as HTMLButtonElement).disabled) {
+      target = prevFocus.parentElement?.querySelector<HTMLElement>('button:not(:disabled)') ?? null
+    }
+    if (target && document.activeElement !== target) target.focus({ preventScroll: true })
+  })
+}
+
 const moveColumnLeft = (index: number) => {
   if (index <= 0) return
+  const id = columnsStore.columns[index]?.id
+  const prevFocus = document.activeElement
   withActivePreserved(() => columnsStore.moveColumn(index, index - 1))
+  afterColumnMove(id, prevFocus)
 }
 
 const moveColumnRight = (index: number) => {
   if (index >= columnsStore.columns.length - 1) return
+  const id = columnsStore.columns[index]?.id
+  const prevFocus = document.activeElement
   withActivePreserved(() => columnsStore.moveColumn(index, index + 1))
+  afterColumnMove(id, prevFocus)
+}
+
+/**
+ * Column close button: its column (and the focused button) is gone — land
+ * focus on the neighbouring column's header instead of dropping to <body>.
+ */
+const removeColumnAt = (columnId: string) => {
+  const idx = columnsStore.columns.findIndex((c) => c.id === columnId)
+  const hadFocus = !!columnsContainer.value?.contains(document.activeElement)
+  columnsStore.removeColumn(columnId)
+  if (!hadFocus || idx < 0) return
+  nextTick(() => {
+    const col = getColumnEls()[Math.min(idx, columnsStore.columns.length - 1)]
+    const target =
+      col?.querySelector<HTMLElement>('.column-feed-title') ||
+      col?.querySelector<HTMLElement>('.column-header button:not(:disabled)')
+    target?.focus({ preventScroll: true })
+  })
 }
 
 const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
@@ -279,6 +327,16 @@ const getColumnEls = (): HTMLElement[] => {
     el.querySelectorAll<HTMLElement>(':scope > .timeline-column, :scope > .panel-column'),
   )
 }
+
+/**
+ * Mobile carousel: only the parked page is interactive. Off-screen feeds and
+ * edge portals stay rendered for swiping, but leave the tab order and the a11y
+ * tree — otherwise Tab / a screen reader walks into slides you can't see (and
+ * focusing one scrolls the board sideways under the park logic). The feed pills
+ * and Prev / Next move between pages.
+ */
+const slideInert = (slideIndex: number) =>
+  isMobileUi.value && carouselSlideIndex.value !== slideIndex
 
 /** Desktop focus mode: other columns stay mounted (scroll survives) but hidden. */
 const isColumnHidden = (columnId: string) =>
@@ -1277,6 +1335,7 @@ useHead({ title: 'Home | NeoSpace' })
     }"
   >
     <h1 class="sr-only">Home</h1>
+    <p class="sr-only" aria-live="polite" aria-atomic="true">{{ columnMoveAnnounce }}</p>
 
     <!-- Desktop focused-tab mode: one wide feed + tab strip -->
     <nav
@@ -1555,6 +1614,7 @@ useHead({ title: 'Home | NeoSpace' })
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--settings"
+        :inert="slideInert(0)"
         aria-label="Settings"
       >
         <p class="feed-portal__kicker">Edge</p>
@@ -1596,6 +1656,7 @@ useHead({ title: 'Home | NeoSpace' })
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--profile"
+        :inert="slideInert(1)"
         aria-label="Profile"
       >
         <p class="feed-portal__kicker">Edge</p>
@@ -1630,6 +1691,7 @@ useHead({ title: 'Home | NeoSpace' })
         <TimelineColumn
           v-if="isTimelineFeed(column.feedType)"
           :class="{ 'board-col--hidden': isColumnHidden(column.id) }"
+          :inert="slideInert(idx + EDGE_LEFT)"
           :paused="isColumnHidden(column.id)"
           :column="column"
           :is-first="idx === 0"
@@ -1640,7 +1702,7 @@ useHead({ title: 'Home | NeoSpace' })
           :dragging="draggingColumnId === column.id"
           :drop-target="dropTargetColumnId === column.id"
           :focused="columnsStore.focusedColumnId === column.id"
-          @remove="columnsStore.removeColumn(column.id)"
+          @remove="removeColumnAt(column.id)"
           @focus="onColumnFocus(column.id)"
           @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
           @column-drag-start="onColumnDragStart"
@@ -1653,6 +1715,7 @@ useHead({ title: 'Home | NeoSpace' })
         <PanelColumn
           v-else
           :class="{ 'board-col--hidden': isColumnHidden(column.id) }"
+          :inert="slideInert(idx + EDGE_LEFT)"
           :column="column"
           :is-first="idx === 0"
           :is-last="idx === columnsStore.columns.length - 1"
@@ -1662,7 +1725,7 @@ useHead({ title: 'Home | NeoSpace' })
           :dragging="draggingColumnId === column.id"
           :drop-target="dropTargetColumnId === column.id"
           :focused="columnsStore.focusedColumnId === column.id"
-          @remove="columnsStore.removeColumn(column.id)"
+          @remove="removeColumnAt(column.id)"
           @focus="onColumnFocus(column.id)"
           @column-drag-start="onColumnDragStart"
           @column-drag-end="onColumnDragEnd"
@@ -1677,6 +1740,7 @@ useHead({ title: 'Home | NeoSpace' })
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--search"
+        :inert="slideInert(EDGE_LEFT + columnsStore.columns.length)"
         aria-label="Search"
       >
         <p class="feed-portal__kicker">Edge</p>
@@ -1727,6 +1791,7 @@ useHead({ title: 'Home | NeoSpace' })
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--inbox"
+        :inert="slideInert(EDGE_LEFT + columnsStore.columns.length + 1)"
         aria-label="Inbox"
       >
         <p class="feed-portal__kicker">Edge</p>
@@ -1774,6 +1839,7 @@ useHead({ title: 'Home | NeoSpace' })
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--activity"
+        :inert="slideInert(EDGE_LEFT + columnsStore.columns.length + 2)"
         aria-label="Activity"
       >
         <p class="feed-portal__kicker">Edge</p>
@@ -1827,6 +1893,7 @@ useHead({ title: 'Home | NeoSpace' })
       <aside
         v-if="isMobileUi"
         class="feed-portal feed-portal--communities"
+        :inert="slideInert(EDGE_LEFT + columnsStore.columns.length + 3)"
         aria-label="Find communities"
       >
         <p class="feed-portal__kicker">Edge</p>
@@ -2783,7 +2850,8 @@ useHead({ title: 'Home | NeoSpace' })
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    color: var(--neo-text-quaternary);
+    // Tertiary, not quaternary: an icon-only control needs 3:1 against the bar
+    color: var(--neo-text-tertiary);
     background: transparent;
     border: none;
     border-radius: 8px;
@@ -2795,7 +2863,7 @@ useHead({ title: 'Home | NeoSpace' })
     }
 
     &--flip {
-      color: var(--neo-text-tertiary);
+      color: var(--neo-text-secondary);
     }
 
     &:hover:not(:disabled),

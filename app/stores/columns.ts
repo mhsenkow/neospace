@@ -224,31 +224,67 @@ function mergeViewModes(incoming: ColumnConfig[], previous: ColumnConfig[]): Col
   }))
 }
 
-function normalizeColumns(cols: ColumnConfig[]): ColumnConfig[] {
-  return cols.map((c) => ({
-    ...c,
-    viewMode: c.viewMode === 'flip' ? 'flip' : 'flow',
-  }))
+const optionalString = (v: unknown) => (typeof v === 'string' && v ? v : undefined)
+
+/**
+ * Stored layouts are untrusted (older builds, hand edits, other tabs): drop
+ * entries without a known feed type, require the param a group / algorithm
+ * needs, and give duplicate / missing ids a fresh one — ids are v-for keys.
+ */
+function normalizeColumns(cols: unknown[]): ColumnConfig[] {
+  const out: ColumnConfig[] = []
+  const ids = new Set<string>()
+  for (const raw of cols) {
+    if (!raw || typeof raw !== 'object') continue
+    const c = raw as Record<string, unknown>
+    const feedType = c.feedType as ColumnFeedType
+    if (!FEED_TYPES.includes(feedType)) continue
+    const groupTag = optionalString(c.groupTag)
+    const algorithmId = optionalString(c.algorithmId)
+    if (feedType === 'group' && !groupTag) continue
+    if (feedType === 'algorithm' && !algorithmId) continue
+    let id = optionalString(c.id)
+    if (!id || ids.has(id)) id = generateId()
+    ids.add(id)
+    const col: ColumnConfig = {
+      id,
+      feedType,
+      viewMode: c.viewMode === 'flip' ? 'flip' : 'flow',
+    }
+    if (feedType === 'group') col.groupTag = groupTag
+    if (feedType === 'algorithm') col.algorithmId = algorithmId
+    const profileAcct = optionalString(c.profileAcct)
+    if (feedType === 'profile' && profileAcct) col.profileAcct = profileAcct
+    const back = c.returnFeed as Record<string, unknown> | undefined
+    if (back && typeof back === 'object' && FEED_TYPES.includes(back.feedType as ColumnFeedType)) {
+      col.returnFeed = {
+        feedType: back.feedType as ColumnFeedType,
+        groupTag: optionalString(back.groupTag),
+        algorithmId: optionalString(back.algorithmId),
+      }
+    }
+    out.push(col)
+    if (out.length >= MAX_COLUMNS) break
+  }
+  return out
 }
 
-function parseStoredLayout(raw: unknown): StoredLayoutMeta | null {
-  if (Array.isArray(raw) && raw.length > 0 && raw.length <= MAX_COLUMNS) {
-    return {
-      columns: normalizeColumns(raw as ColumnConfig[]),
-      updatedAt: 0,
-      dirty: false,
-    }
-  }
-  if (raw && typeof raw === 'object' && Array.isArray((raw as StoredLayoutMeta).columns)) {
+export function parseStoredLayout(raw: unknown): StoredLayoutMeta | null {
+  let list: unknown[] | null = null
+  let updatedAt = 0
+  let dirty = false
+  if (Array.isArray(raw)) {
+    list = raw
+  } else if (raw && typeof raw === 'object' && Array.isArray((raw as StoredLayoutMeta).columns)) {
     const entry = raw as StoredLayoutMeta
-    if (!entry.columns.length || entry.columns.length > MAX_COLUMNS) return null
-    return {
-      columns: normalizeColumns(entry.columns),
-      updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : 0,
-      dirty: !!entry.dirty,
-    }
+    list = entry.columns
+    updatedAt = typeof entry.updatedAt === 'number' ? entry.updatedAt : 0
+    dirty = !!entry.dirty
   }
-  return null
+  if (!list || !list.length || list.length > MAX_COLUMNS) return null
+  const columns = normalizeColumns(list)
+  if (!columns.length) return null
+  return { columns, updatedAt, dirty }
 }
 
 export const useColumnsStore = defineStore('columns', {
@@ -534,6 +570,7 @@ export const useColumnsStore = defineStore('columns', {
 
       const removed = { ...this.columns[index]! }
       const restoredFocus = this.focusedColumnId === columnId
+      const removedFrom = this.accountKey
       this.columns.splice(index, 1)
       if (restoredFocus) {
         this.focusedColumnId = null
@@ -554,6 +591,8 @@ export const useColumnsStore = defineStore('columns', {
           actionLabel: 'Undo',
           duration: 5000,
           onAction: () => {
+            // Switched account within the toast window — don't drop it into the new layout
+            if (this.accountKey !== removedFrom) return
             if (this.columns.some((c) => c.id === removed.id)) return
             if (this.columns.length >= MAX_COLUMNS) return
             this.columns.splice(Math.min(index, this.columns.length), 0, removed)
@@ -709,12 +748,9 @@ export const useColumnsStore = defineStore('columns', {
 
       // Profile decode regenerates column ids — rematch focus by feed, don't drop it
       if (this.focusedColumnId && !this.columns.some((c) => c.id === this.focusedColumnId)) {
+        // feedKey: an algorithm column must rematch its own recipe, not the first algorithm
         const rematch = prevFocused
-          ? this.columns.find((c) =>
-              prevFocused.feedType === 'group'
-                ? c.feedType === 'group' && c.groupTag === prevFocused.groupTag
-                : c.feedType === prevFocused.feedType,
-            )
+          ? this.columns.find((c) => feedKey(c) === feedKey(prevFocused))
           : null
         this.focusedColumnId = rematch?.id ?? null
         this.saveDeskLayout()
