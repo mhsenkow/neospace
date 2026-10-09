@@ -32,6 +32,21 @@ const localPart = (acct: string) => {
   return i >= 0 ? n.slice(0, i) : n
 }
 
+/**
+ * Local parts of everyone you follow — scoring runs for every post in the
+ * stream, and spreading + scanning the (up to 300) follow set per post was
+ * O(posts × follows). Rebuilt if the set grows (it's filled before use).
+ */
+const localPartsCache = new WeakMap<Set<string>, { size: number; parts: Set<string> }>()
+function followingLocalParts(following: Set<string>): Set<string> {
+  const hit = localPartsCache.get(following)
+  if (hit && hit.size === following.size) return hit.parts
+  const parts = new Set<string>()
+  for (const f of following) parts.add(localPart(f))
+  localPartsCache.set(following, { size: following.size, parts })
+  return parts
+}
+
 export function emptyAffinityContext(): EdwardAffinityContext {
   return {
     selfAcct: null,
@@ -68,7 +83,7 @@ export function affinityScore(
     author &&
     (ctx.following.has(author) ||
       ctx.following.has(authorLocal) ||
-      [...ctx.following].some((f) => localPart(f) === authorLocal && authorLocal.length > 1))
+      (authorLocal.length > 1 && followingLocalParts(ctx.following).has(authorLocal)))
   ) {
     score += 0.38
   } else if (author && ctx.homeAuthors.has(author)) {

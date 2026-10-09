@@ -10,6 +10,7 @@ import {
   type EdwardBallDescriptor,
 } from '~/utils/edwardSemantics'
 import { statusIdentity } from '~/utils/statusIdentity'
+import { compareId } from '~/utils/compareId'
 import {
   emptyAffinityContext,
   type EdwardAffinityContext,
@@ -44,7 +45,22 @@ export function edwardBallFor(
   return ball
 }
 
-export type EdwardFocusMode = 'off' | 'square' | 'bar' | 'circle'
+/**
+ * sinceId cursor per instance: its highest status id. The stream is ordered by
+ * createdAt across servers, so "first seen" isn't the newest id — late-delivered
+ * remote posts sort below newer ids and the poll would refetch the same page.
+ */
+export function newestIdPerInstance(statuses: readonly ExtendedStatus[]): Record<string, string> {
+  const next: Record<string, string> = {}
+  for (const s of statuses) {
+    const id = s._instanceId
+    if (!id) continue
+    if (!next[id] || compareId(s.id, next[id]) > 0) next[id] = s.id
+  }
+  return next
+}
+
+export type EdwardFocusMode ='off' | 'square' | 'bar' | 'circle'
 
 interface EdwardState {
   active: boolean
@@ -254,6 +270,9 @@ export const useEdwardStore = defineStore('edward', {
       this.active = false
       edwardActive.value = false
       this.recessed = false
+      // Up to 280 strangers' posts (+ their memoized descriptors) — don't keep
+      // them alive for the rest of the session; start() reseeds anyway
+      this.statuses = []
       this.selectedIdentity = null
       this.focusedIdentity = null
       this.exploreQuery = ''

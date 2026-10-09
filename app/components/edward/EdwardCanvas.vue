@@ -23,7 +23,8 @@ const emit = defineEmits<{
 
 const edward = useEdwardStore()
 const hostEl = ref<HTMLElement | null>(null)
-const hoverCard = ref<{
+/** shallowRef: replaced wholesale (up to every frame) — no deep proxying */
+const hoverCard = shallowRef<{
   name: string
   preview: string
   kind: string
@@ -36,7 +37,7 @@ const hoverCard = ref<{
   y: number
 } | null>(null)
 
-const bubbles = ref<
+const bubbles = shallowRef<
   { id: string; text: string; x: number; y: number; scale: number }[]
 >([])
 const focusFrame = computed(() => edward.focusMode)
@@ -115,6 +116,8 @@ let sparkGeo: InstanceType<ThreeMod['SphereGeometry']> | null = null
 let torusGeo: InstanceType<ThreeMod['TorusGeometry']> | null = null
 let raycaster: InstanceType<ThreeMod['Raycaster']> | null = null
 let envMap: InstanceType<ThreeMod['Texture']> | null = null
+/** Owns envMap — disposing only the texture leaves the PMREM framebuffer behind */
+let envRt: InstanceType<ThreeMod['WebGLRenderTarget']> | null = null
 let pointerNdc = { x: 0, y: 0 }
 /** Normalized pointer 0–1 in host (for edge zones) */
 let pointerUv = { x: 0.5, y: 0.5 }
@@ -245,8 +248,10 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
   if (d.mediaUrl && !d.badges.includes('cw')) {
     const img = new Image()
     img.crossOrigin = 'anonymous'
+    img.decoding = 'async'
     img.onload = () => {
-      if (disposed) return
+      // Ball evicted (or scene torn down) while the image was in flight
+      if (disposed || identityToBall.get(d.identity)?.texture !== tex) return
       drawEmoticoin(ctx, spec, seed)
       paintServerDialect(ctx, dialect, seed)
       paintMediaPeek(ctx, img)
@@ -644,7 +649,7 @@ const updateBubbleOptics = (t: number) => {
       (_tmpV.y / len) * 0.5 + 0.15,
       Math.max(0.5, (_tmpV.z / len) * 0.45 + 0.55),
     )
-    b.spark.scale.setScalar(0.12 + Math.sin(t * 2.4 + b.phase) * 0.015)
+    b.spark.scale.setScalar(reducedMotion ? 0.12 : 0.12 + Math.sin(t * 2.4 + b.phase) * 0.015)
   }
 
   // Caustic follows highest-affinity ball every ~12 frames
@@ -895,7 +900,7 @@ const updateBalls = (t: number, dt: number) => {
 
     b.spark.quaternion.copy(camera.quaternion)
 
-    if (b.ring) {
+    if (b.ring && !reducedMotion) {
       b.ring.rotation.x = Math.PI / 2.4 + Math.sin(t * 0.5 + b.phase) * 0.12
       b.ring.rotation.z = t * 0.55 + b.phase
     }
@@ -947,7 +952,8 @@ const updateBalls = (t: number, dt: number) => {
     }
   }
 
-  bubbles.value = nextBubbles
+  // Don't re-render the overlay every frame just to keep it empty
+  if (nextBubbles.length || bubbles.value.length) bubbles.value = nextBubbles
 
   // Sticky focus: let the reader finish — swap only once the watched post
   // drifts out of the lens (it used to flip to every slightly-closer ball)
@@ -971,8 +977,8 @@ const projectHover = (b: BallRuntime) => {
   if (!camera || !hostEl.value || !THREE) return
   const t = (performance.now() - clockStart) / 1000
   const p = ballWorldPos(b, t)
-  const v = new THREE.Vector3(p.x, p.y, p.z)
-  v.project(camera)
+  const v = (_projV ||= new THREE.Vector3())
+  v.set(p.x, p.y, p.z).project(camera)
   if (v.z > 1) {
     hoverCard.value = null
     return
@@ -992,9 +998,10 @@ const projectHover = (b: BallRuntime) => {
   }
 }
 
+let _ndcV: InstanceType<ThreeMod['Vector2']> | null = null
 const hitTest = (): BallRuntime | null => {
   if (!raycaster || !camera || !ballGroup || !THREE) return null
-  raycaster.setFromCamera(new THREE.Vector2(pointerNdc.x, pointerNdc.y), camera)
+  raycaster.setFromCamera((_ndcV ||= new THREE.Vector2()).set(pointerNdc.x, pointerNdc.y), camera)
   const meshes = balls.flatMap((b) => [b.shell, b.face])
   const hits = raycaster.intersectObjects(meshes, false)
   if (!hits.length) return null
@@ -1196,6 +1203,8 @@ const onResize = () => {
   if (!hostEl.value || !renderer || !camera) return
   const w = hostEl.value.clientWidth
   const h = hostEl.value.clientHeight
+  // Mid-teardown / display:none — keep the last good size
+  if (!w || !h) return
   camera.aspect = w / Math.max(1, h)
   camera.updateProjectionMatrix()
   renderer.setSize(w, h, false)
@@ -1278,6 +1287,7 @@ const buildEnvMap = () => {
   softbox(0xffe566, -4, 3, 6, 0.7)
 
   const rt = pmrem.fromScene(envScene, 0.04)
+  envRt = rt
   envMap = rt.texture
   scene.environment = envMap
   pmrem.dispose()
@@ -1291,6 +1301,29 @@ const buildEnvMap = () => {
   })
 }
 
+const CONTEXT_LOST_MSG =
+  'Your device paused the 3D view. It resumes when the device allows — or exit and reopen Edward.'
+
+/** Env map lives only in GPU memory — re-render it after a context restore */
+const rebuildEnvMap = () => {
+  // Its GL objects died with the old context — dispose() would only warn
+  // ("object does not belong to this context"); just let it be collected
+  envRt = null
+  envMap = null
+  buildEnvMap()
+  for (const b of balls) {
+    for (const mesh of [b.shell, b.ring]) {
+      if (!mesh) continue
+      const mat = mesh.material as InstanceType<ThreeMod['MeshPhysicalMaterial']>
+      mat.envMap = envMap
+      mat.needsUpdate = true
+    }
+  }
+}
+
+/** Host box, not window: catches orientation settles + any layout change */
+let hostRo: ResizeObserver | null = null
+
 const disposeScene = () => {
   disposed = true
   cancelAnimationFrame(raf)
@@ -1302,6 +1335,8 @@ const disposeScene = () => {
     hostEl.value.removeEventListener('pointerleave', onPointerLeave)
     hostEl.value.removeEventListener('wheel', onWheel)
   }
+  hostRo?.disconnect()
+  hostRo = null
   window.removeEventListener('resize', onResize)
   document.removeEventListener('visibilitychange', onVisibility)
 
@@ -1329,7 +1364,12 @@ const disposeScene = () => {
     })
   }
 
-  envMap?.dispose()
+  // Shared by every ball, so no longer in the scene graph once the balls are gone
+  for (const shared of [sphereGeo, faceGeo, sparkGeo, torusGeo, sharedHaloMat, sharedSparkMat]) {
+    shared?.dispose()
+  }
+  envRt?.dispose()
+  envRt = null
   envMap = null
   sharedHaloMat = null
   sharedSparkMat = null
@@ -1392,7 +1432,16 @@ const init = async () => {
     contextLost = true
     cancelAnimationFrame(raf)
     raf = 0
-    edward.setError('Your device paused the 3D view. Exit and reopen Edward to restart it.')
+    edward.setError(CONTEXT_LOST_MSG)
+  })
+  // three re-creates its GL state on restore and re-uploads textures lazily —
+  // only the env map (rendered on the GPU) must be rebuilt, then resume.
+  renderer.domElement.addEventListener('webglcontextrestored', () => {
+    if (disposed || !contextLost) return
+    contextLost = false
+    rebuildEnvMap()
+    if (edward.error === CONTEXT_LOST_MSG) edward.setError(null)
+    onVisibility()
   })
   renderer.setSize(w, h, false)
   renderer.setPixelRatio(pixelRatio())
@@ -1504,7 +1553,12 @@ const init = async () => {
   hostEl.value.addEventListener('pointercancel', onPointerCancel)
   hostEl.value.addEventListener('pointerleave', onPointerLeave)
   hostEl.value.addEventListener('wheel', onWheel, { passive: false })
-  window.addEventListener('resize', onResize)
+  if (typeof ResizeObserver !== 'undefined') {
+    hostRo = new ResizeObserver(() => onResize())
+    hostRo.observe(hostEl.value)
+  } else {
+    window.addEventListener('resize', onResize)
+  }
   document.addEventListener('visibilitychange', onVisibility)
   // Starts the loop when the tab is visible. (A second unconditional rAF here
   // used to run two loops at once: double-speed physics, every frame drawn twice.)
