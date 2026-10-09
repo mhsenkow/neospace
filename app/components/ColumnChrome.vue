@@ -40,8 +40,11 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
       class="neo-chrome-btn column-drag-handle"
       draggable="true"
       title="Drag to reorder"
-      aria-label="Drag to reorder column"
+      aria-label="Reorder column — drag, or press Left / Right arrow"
+      aria-keyshortcuts="ArrowLeft ArrowRight"
       @click.stop
+      @keydown.left.prevent="!isFirst && emit('move-left')"
+      @keydown.right.prevent="!isLast && emit('move-right')"
       @dragstart="onColumnDragStart"
       @dragend="onColumnDragEnd"
     >
