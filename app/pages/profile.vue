@@ -14,8 +14,8 @@ import { useComposeSheetStore } from '~/stores/composeSheet'
 import type { mastodon } from 'masto'
 import {
   sanitizeDisplayName,
-  sanitizeFieldHtml,
   sanitizeStatusHtml,
+  stripHtml,
 } from '~/utils/sanitizeHtml'
 import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
@@ -87,7 +87,6 @@ const safeProfileNote = computed(() => {
 type ProfileFieldToken = {
   name: string
   plainValue: string
-  safeValue: string
   href: string | null
   verifiedAt: string | null
 }
@@ -97,11 +96,11 @@ const fieldTokens = computed((): ProfileFieldToken[] =>
     .filter((f) => !INTERNAL_FIELD_NAMES.has(normalizeFieldKey(f.name || '')))
     .filter((f) => !isPresenceField(f))
     .map((f) => {
-      const plainValue = (f.value || '').replace(/<[^>]*>/g, '').trim()
+      // stripHtml decodes entities — the regex strip left "Q&amp;A" on screen
+      const plainValue = stripHtml(f.value || '')
       return {
         name: f.name || '',
         plainValue,
-        safeValue: sanitizeFieldHtml(f.value || ''),
         href: extractHttpUrl(f.value || ''),
         verifiedAt: f.verifiedAt || null,
       }
@@ -156,6 +155,7 @@ const startEdit = () => {
 const cancelEdit = () => {
   profileStore.cancelEdit()
   presenceDraft.value = { bluesky: '', seenu: '', website: '' }
+  clearImagePreviews()
 }
 
 const presenceSlotsUsed = computed(
@@ -180,13 +180,32 @@ const fieldLimitMessage = computed(() => {
   return `Your server allows ${cap} profile fields — remove ${used - cap} to save.`
 })
 
+/** blob: previews for not-yet-saved avatar / header picks (revoked on replace/clear) */
 const headerPreviewUrl = ref<string | null>(null)
-const headerObjectUrl = ref<string | null>(null)
+const avatarPreviewUrl = ref<string | null>(null)
+
+const clearImagePreviews = () => {
+  if (headerPreviewUrl.value) URL.revokeObjectURL(headerPreviewUrl.value)
+  if (avatarPreviewUrl.value) URL.revokeObjectURL(avatarPreviewUrl.value)
+  headerPreviewUrl.value = null
+  avatarPreviewUrl.value = null
+}
 
 const profileHeaderUrl = computed(() => {
   if (headerPreviewUrl.value) return headerPreviewUrl.value
   return profileStore.viewedProfile?.header || profileStore.viewedProfile?.headerStatic || null
 })
+
+/** Quoted + escaped so a header URL with `)`, quotes or spaces can't break the declaration */
+const profileHeaderStyle = computed(() =>
+  profileHeaderUrl.value
+    ? { backgroundImage: `url(${JSON.stringify(profileHeaderUrl.value)})` }
+    : undefined,
+)
+
+const profileAvatarUrl = computed(
+  () => avatarPreviewUrl.value || profileStore.viewedProfile?.avatar || '',
+)
 
 const softwareLabel = computed(() => {
   const url = profileStore.viewedProfile?.url || instancesStore.activeAccount?.url || ''
@@ -405,6 +424,9 @@ async function loadProfileFromRoute() {
   if (!ticket.isCurrent()) return
 
   profileTab.value = 'posts'
+  // An unsaved header/avatar pick belongs to the profile it was made on
+  if (!profileStore.isEditing) clearImagePreviews()
+  syncProfileCss()
 
   if (!profileStore.isOwnProfile) {
     const rel = await profileStore.getRelationship()
@@ -413,13 +435,16 @@ async function loadProfileFromRoute() {
   } else {
     relationship.value = null
   }
+}
 
-  if (profileStore.profileCustomCSS && themeStore.isChaosMode && !themeStore.isSafeMode()) {
-    themeStore.setUserCustomCSS(profileStore.profileCustomCSS)
-  } else if (profileStore.isOwnProfile && themeStore.isChaosMode) {
-    // Restore viewer CSS when leaving someone else's profile
-    themeStore.setUserCustomCSS(profileStore.profileCustomCSS || themeStore.userCustomCSS)
-  }
+/**
+ * Chaos Mode: wear the viewed profile's skin, else the viewer's own. Always
+ * re-derive from source — B (with CSS) → C (without) must drop B's skin, and
+ * themeStore.userCustomCSS may still hold the previous profile's CSS.
+ */
+function syncProfileCss() {
+  if (!themeStore.isChaosMode) return
+  themeStore.setUserCustomCSS(profileStore.profileCustomCSS || instancesStore.userCustomCSS)
 }
 
 const profileRouteReady = ref(false)
@@ -455,10 +480,9 @@ watch(
 onUnmounted(() => {
   profileRace.abort()
   statusesRace.abort()
-  if (headerObjectUrl.value) URL.revokeObjectURL(headerObjectUrl.value)
-  if (!profileStore.isOwnProfile && themeStore.isChaosMode) {
-    themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
-  }
+  clearImagePreviews()
+  // Leave with the viewer's own skin, whichever profile was being worn
+  if (themeStore.isChaosMode) themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   profileStore.clear()
 })
 
@@ -482,9 +506,14 @@ const handleFollow = async () => {
 
   isFollowLoading.value = true
   const prev = relationship.value
+  const targetId = profileStore.viewedProfile?.id
+  // Navigated to another profile while the request was in flight — don't paint
+  // this answer onto that profile's Follow button
+  const stillViewing = () => profileStore.viewedProfile?.id === targetId
   try {
     if (relationship.value?.following || relationship.value?.requested) {
-      relationship.value = await profileStore.unfollowUser() || null
+      const rel = await profileStore.unfollowUser()
+      if (stillViewing()) relationship.value = rel || null
     } else {
       // Optimistic “Following” / “Requested” until the server answers
       relationship.value = {
@@ -492,10 +521,11 @@ const handleFollow = async () => {
         following: true,
         requested: false,
       } as mastodon.v1.Relationship
-      relationship.value = await profileStore.followUser() || null
+      const rel = await profileStore.followUser()
+      if (stillViewing()) relationship.value = rel || null
     }
   } catch (e) {
-    relationship.value = prev
+    if (stillViewing()) relationship.value = prev
     const friendly = mapErrorToMessage(e)
     toastStore.show({ message: friendly.detail || friendly.title, duration: 4200 })
   } finally {
@@ -503,27 +533,38 @@ const handleFollow = async () => {
   }
 }
 
-const handleAvatarChange = (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (file) {
-    profileStore.editForm.avatar = file
+const PROFILE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+
+/** Read + validate the picked image; resets the input so re-picking the same file fires change. */
+const takeProfileImage = (event: Event, what: 'Avatar' | 'Header'): File | null => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] || null
+  input.value = ''
+  if (!file) return null
+  if (!file.type.startsWith('image/')) {
+    toastStore.show({ message: `${what} must be an image file` })
+    return null
   }
+  if (file.size > PROFILE_IMAGE_MAX_BYTES) {
+    toastStore.show({ message: `${what} image must be under 8 MB` })
+    return null
+  }
+  return file
+}
+
+const handleAvatarChange = (event: Event) => {
+  const file = takeProfileImage(event, 'Avatar')
+  if (!file) return
+  if (avatarPreviewUrl.value) URL.revokeObjectURL(avatarPreviewUrl.value)
+  avatarPreviewUrl.value = URL.createObjectURL(file)
+  profileStore.editForm.avatar = file
 }
 
 const handleHeaderChange = (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
+  const file = takeProfileImage(event, 'Header')
   if (!file) return
-  if (!file.type.startsWith('image/')) {
-    toastStore.show({ message: 'Header must be an image file' })
-    return
-  }
-  if (file.size > 8 * 1024 * 1024) {
-    toastStore.show({ message: 'Header image must be under 8 MB' })
-    return
-  }
-  if (headerObjectUrl.value) URL.revokeObjectURL(headerObjectUrl.value)
-  headerObjectUrl.value = URL.createObjectURL(file)
-  headerPreviewUrl.value = headerObjectUrl.value
+  if (headerPreviewUrl.value) URL.revokeObjectURL(headerPreviewUrl.value)
+  headerPreviewUrl.value = URL.createObjectURL(file)
   profileStore.editForm.header = file
 }
 
@@ -536,6 +577,8 @@ const handleSaveProfile = async () => {
       maxProfileFields.value,
     )
     await profileStore.updateProfile()
+    // Saved — the server's avatar/header URLs replace the local previews
+    clearImagePreviews()
   } catch {
     profileStore.editForm.fields = prevFields
     // saveError is set in the store — keep the form open
@@ -650,7 +693,7 @@ useHead({
         <div
           v-if="profileHeaderUrl"
           class="profile-header-banner"
-          :style="{ backgroundImage: `url(${profileHeaderUrl})` }"
+          :style="profileHeaderStyle"
           role="img"
           :aria-label="profileStore.isEditing ? 'Profile header preview' : 'Profile header'"
         />
@@ -712,7 +755,7 @@ useHead({
 
           <div class="profile-avatar-wrapper">
             <img
-              :src="profileStore.viewedProfile.avatar"
+              :src="profileAvatarUrl"
               alt=""
               class="profile-avatar"
             />
@@ -768,7 +811,7 @@ useHead({
             <span v-if="field.name" class="profile-token__label">{{ field.name }}</span>
             <span class="profile-token__value">{{ field.plainValue || '—' }}</span>
             <span v-if="field.verifiedAt" class="profile-token__verified" title="Verified">
-              ✓
+              <span aria-hidden="true">✓</span>
               <span class="sr-only">Verified</span>
             </span>
           </component>
@@ -782,6 +825,7 @@ useHead({
               <button
                 type="button"
                 class="profile-social__stat"
+                aria-haspopup="dialog"
                 @click="followersModalRef?.open('followers')"
               >
                 {{ followerCountLabel }}
@@ -789,6 +833,7 @@ useHead({
               <button
                 type="button"
                 class="profile-social__stat"
+                aria-haspopup="dialog"
                 @click="followersModalRef?.open('following')"
               >
                 {{ followingCountLabel }}
@@ -1152,11 +1197,16 @@ useHead({
 }
 
 .profile-handle__acct {
+  min-width: 0;
+  max-width: 100%;
   padding: 0;
   border: none;
   background: transparent;
   font: inherit;
   color: var(--neo-text-muted);
+  text-align: left;
+  // Long remote handles (@someone@very-long-instance.example) must wrap at 320px
+  overflow-wrap: anywhere;
   cursor: pointer;
 
   &:hover {
@@ -1360,12 +1410,14 @@ useHead({
 }
 
 .profile-name {
+  max-width: 100%;
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--neo-text-primary);
   line-height: 1.15;
   letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
 
   :deep(img.emoji) {
     height: 1em;
@@ -1461,6 +1513,8 @@ useHead({
   line-height: 1.45;
   color: var(--neo-text-primary);
   width: 100%;
+  // Bare URLs / hashtags in bios have no break points
+  overflow-wrap: anywhere;
 
   :deep(p) {
     margin: 0 0 0.35rem;
@@ -1515,6 +1569,8 @@ useHead({
     color: var(--neo-text-quaternary);
     font-weight: 600;
     flex-shrink: 0;
+    max-width: 50%;
+    overflow-wrap: anywhere;
   }
 
   &__value {
@@ -1734,11 +1790,14 @@ useHead({
 
 .profile-field-row {
   display: grid;
-  grid-template-columns: 1fr 1.4fr auto;
+  // minmax(0, …): inputs' intrinsic width otherwise overflows a 320px viewport
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
   gap: 0.35rem;
 }
 
 .profile-field-remove {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
   border: none;
   background: transparent;
   color: var(--neo-text-muted);

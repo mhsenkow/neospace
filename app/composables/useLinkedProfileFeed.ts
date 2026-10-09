@@ -45,17 +45,24 @@ export function useLinkedProfileFeed() {
     return !!viewingInstanceId.value
   }
 
-  const fetchAccount = async (instanceId: string) => {
-    const cached = linkedAccounts.value.find((i) => i.id === instanceId)?.user
-    if (cached) account.value = cached
+  /**
+   * Bumped per refresh: picking account A then B quickly must not let A's
+   * slower verifyCredentials land in `account` (B's client would then page
+   * statuses for A's account id).
+   */
+  let refreshGen = 0
+
+  const fetchAccount = async (instanceId: string, gen: number) => {
+    // Never keep showing the previous instance's account while this one loads
+    account.value = linkedAccounts.value.find((i) => i.id === instanceId)?.user || null
 
     try {
       const client = clientFor(instanceId)
       const fresh = await client.v1.accounts.verifyCredentials()
-      account.value = fresh
       instancesStore.updateActiveAccount(fresh, instanceId)
+      if (gen === refreshGen) account.value = fresh
     } catch (e: any) {
-      if (!account.value) {
+      if (gen === refreshGen && !account.value) {
         throw e
       }
     }
@@ -88,6 +95,8 @@ export function useLinkedProfileFeed() {
 
   const refresh = async () => {
     if (!ensureViewingId()) {
+      refreshGen += 1
+      isLoading.value = false
       account.value = null
       statusPager.reset()
       error.value = null
@@ -97,17 +106,20 @@ export function useLinkedProfileFeed() {
     const instanceId = resolvedInstanceId.value
     if (!instanceId) return
 
+    const gen = ++refreshGen
     isLoading.value = true
     error.value = null
     try {
-      await fetchAccount(instanceId)
+      await fetchAccount(instanceId, gen)
+      if (gen !== refreshGen) return
       statusPager.reset()
       await statusPager.loadInitial()
     } catch (e: any) {
+      if (gen !== refreshGen) return
       error.value = e?.message || 'Failed to load profile'
       statusPager.reset()
     } finally {
-      isLoading.value = false
+      if (gen === refreshGen) isLoading.value = false
     }
   }
 
