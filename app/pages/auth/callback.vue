@@ -28,11 +28,12 @@ const scrubUrl = () => {
 }
 
 onMounted(async () => {
-  const code = route.query.code as string
-  const errorParam = route.query.error as string
+  // Repeated params arrive as arrays — only a single string is a real code/state
+  const code = typeof route.query.code === 'string' ? route.query.code : ''
+  const errorParam = route.query.error ? String(route.query.error) : ''
 
   if (errorParam) {
-    error.value = friendlyAuthError(String(route.query.error || errorParam))
+    error.value = friendlyAuthError(errorParam)
     clearPendingAuth()
     scrubUrl()
     await nextTick()
@@ -52,7 +53,8 @@ onMounted(async () => {
   try {
     status.value = 'Finishing up…'
     instancesStore.loadFromStorage()
-    const result = await instancesStore.completeAuth(code, (route.query.state as string) || null)
+    const state = typeof route.query.state === 'string' ? route.query.state : null
+    const result = await instancesStore.completeAuth(code, state)
     const instance = result.instance
     const pending = result.pending
 
@@ -90,8 +92,12 @@ onMounted(async () => {
 })
 
 const handleRetry = () => {
-  const wasAdd =
-    typeof window !== 'undefined' && sessionStorage.getItem('neospace_auth_add') === '1'
+  let wasAdd = false
+  try {
+    wasAdd = sessionStorage.getItem('neospace_auth_add') === '1'
+  } catch {
+    /* storage blocked */
+  }
   router.push(wasAdd ? '/login?add=1' : '/login')
 }
 
