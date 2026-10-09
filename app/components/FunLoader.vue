@@ -217,10 +217,24 @@ const loopWindow = (x: number, center: number, half: number) => {
   return u * u * (3 - 2 * u)
 }
 
+/**
+ * getComputedStyle every frame forces a style recalc per loader while posts are
+ * streaming into the DOM (a board can show several at once). Re-read twice a
+ * second instead — still follows a theme switch mid-load.
+ */
+let inkCache = ''
+let inkReadAt = -Infinity
+const INK_TTL_MS = 500
+
 const inkColor = () => {
   const el = rootRef.value
   if (!el || typeof getComputedStyle === 'undefined') return 'currentColor'
-  return getComputedStyle(el).color || 'currentColor'
+  const now = performance.now()
+  if (!inkCache || now - inkReadAt > INK_TTL_MS) {
+    inkCache = getComputedStyle(el).color || 'currentColor'
+    inkReadAt = now
+  }
+  return inkCache
 }
 
 const reducedMotion = usePrefersReducedMotion()
