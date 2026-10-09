@@ -11,6 +11,8 @@ import { stripHtml } from '~/utils/stripHtml'
 import { statusIdentity } from '~/utils/statusIdentity'
 import type { ExtendedStatus } from '~/stores/instances'
 import {
+  EDWARD_CHANNELS,
+  EDWARD_SOURCE_CHIPS,
   EDWARD_EXPLORE_CHIPS,
   EDWARD_EXPLORE_PLACEHOLDERS,
   EDWARD_SORT_HINTS,
@@ -24,12 +26,13 @@ import {
   EDWARD_SPEEDS,
   edwardBallCap,
   edwardDeckColumn,
-  edwardDeckTrailCount,
   pickTourCandidate,
   speedMeta,
   type EdwardSpeed,
 } from '~/utils/edwardPace'
 import { dialectForHost } from '~/utils/edwardServers'
+import { edQuip } from '~/utils/edwardVoice'
+import type { EdwardReason } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
 import type { NeoIconName } from '~/utils/neoIcons'
 import EdwardCanvas from '~/components/edward/EdwardCanvas.vue'
@@ -78,6 +81,7 @@ type WatchCard = {
   tag: string | null
   why: string
   counts: { fav: number; boost: number; reply: number } | null
+  reasons: EdwardReason[]
 }
 
 const ageLabel = (createdAt: number) => {
@@ -183,6 +187,7 @@ const cardFromStatus = (
     tag: ball.topTag,
     why: ball.moodWhy,
     counts: ball.counts ?? null,
+    reasons: ball.reasons ?? [],
   }
 }
 
@@ -220,9 +225,15 @@ const deckHero = computed((): WatchCard | null => {
   if (!status || !cur) return null
   return cardFromStatus(status, cur.identity, 0, true, 420)
 })
+/**
+ * Earlier posts under the hero. The deck is a fixed height; the list takes
+ * whatever the hero leaves and fades out at the bottom, so a growing or
+ * shrinking hero slides rows in and out instead of resizing the panel.
+ */
+const DECK_ROWS = 10
 const deckRecent = computed((): WatchCard[] => {
   if (edward.focusMode === 'off') return []
-  const n = edwardDeckTrailCount(viewportH.value)
+  const n = DECK_ROWS
   const out: WatchCard[] = []
   for (const id of edward.watchRecent) {
     if (out.length >= n) break
@@ -232,6 +243,85 @@ const deckRecent = computed((): WatchCard[] => {
   return out
 })
 const deckWidth = computed(() => edwardDeckColumn(viewportW.value))
+/** Hero height animates to its content; the rows below glide with it */
+const heroInner = ref<HTMLElement | null>(null)
+const heroH = ref(0)
+let heroRo: ResizeObserver | null = null
+watch(heroInner, (el) => {
+  heroRo?.disconnect()
+  heroRo = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  heroRo = new ResizeObserver(() => {
+    // Only the entering card is in flow (the leaving one is absolute)
+    heroH.value = Math.round(el.getBoundingClientRect().height)
+  })
+  heroRo.observe(el)
+})
+
+// ── Ed's running commentary ───────────────────────────────────────────────
+const quip = ref('')
+const quipShown = ref('')
+let quipTimer: ReturnType<typeof setInterval> | null = null
+let typeTimer: ReturnType<typeof setInterval> | null = null
+const nextQuip = () => {
+  const visibleNow = edward.visibleBalls.slice(0, edwardBallCap())
+  const line = edQuip({
+    speed: edward.speed,
+    touring: edward.touring,
+    scrubbing: edward.watchScrubbing,
+    filtered: edward.exploreSummary.active,
+    matched: edward.exploreSummary.matched,
+    total: edward.exploreSummary.total,
+    backpack: edward.backpack,
+    fromHome: visibleNow.filter((b) => b.source === 'home').length,
+    visible: visibleNow,
+    watching: watchCurrent.value?.name ?? null,
+  })
+  if (line === quip.value) return
+  quip.value = line
+  if (typeTimer) clearInterval(typeTimer)
+  if (reduceMotion.value) {
+    quipShown.value = line
+    return
+  }
+  // Typed out, Ed-at-the-keyboard style
+  const chars = [...line]
+  let i = 0
+  quipShown.value = ''
+  typeTimer = setInterval(() => {
+    i += 1
+    quipShown.value = chars.slice(0, i).join('')
+    if (i >= chars.length && typeTimer) {
+      clearInterval(typeTimer)
+      typeTimer = null
+    }
+  }, 28)
+}
+
+// ── Channels + source / language chips ────────────────────────────────────
+const viewerLang =
+  typeof navigator !== 'undefined' && navigator.language ? navigator.language.split('-')[0]!.toLowerCase() : 'en'
+const channelQuery = (q: string) => q.replace('{lang}', viewerLang)
+const channelActive = (ch: (typeof EDWARD_CHANNELS)[number]) =>
+  edward.exploreQuery.trim() === channelQuery(ch.query) && edward.exploreSort === ch.sort
+const setChannel = (ch: (typeof EDWARD_CHANNELS)[number]) => {
+  if (channelActive(ch)) {
+    edward.clearExplore()
+    return
+  }
+  edward.setExploreQuery(channelQuery(ch.query))
+  edward.setExploreSort(ch.sort)
+}
+const langChip = { label: 'my language', query: `lang:${viewerLang}` }
+/** Secondary chips + servers + language sit behind "more" (active ones always show) */
+const filtersOpen = ref(false)
+const shownChips = computed(() =>
+  EDWARD_EXPLORE_CHIPS.filter((c) => !c.more || filtersOpen.value || chipActive(c.query)),
+)
+const backpackLabel = computed(() => {
+  const b = edward.backpackBySource
+  return `${edward.backpack} waiting · home ${b.home} · tags ${b.tag} · trending ${b.trend} · firehose ${b.firehose}`
+})
 
 // ── Pace + tour ──────────────────────────────────────────────────────────
 const speed = computed(() => edward.speed)
@@ -292,6 +382,14 @@ watch(
 const setSort = (mode: EdwardSortMode) => edward.setExploreSort(mode)
 const sortActive = (mode: EdwardSortMode) =>
   (parseEdwardExplore(edward.exploreQuery).sort || edward.exploreSort) === mode
+
+/** Phone deck: one "why" alongside the host — no extra height */
+const watchCurrentReason = computed(() => {
+  const id = watchCurrent.value?.identity
+  if (!id) return null
+  const status = edward.statuses.find((s) => statusIdentity(s) === id)
+  return status ? (edwardBallFor(status, edward.affinity).reasons?.[0] ?? null) : null
+})
 
 const watchScrubbing = computed(() => edward.watchScrubbing)
 const watchDeckShown = computed(() => !!watchCurrent.value && !selected.value && !recessed.value)
@@ -664,6 +762,8 @@ onMounted(() => {
     tickNow.value = Date.now()
   }, 1000)
   window.addEventListener('resize', onViewportResize, { passive: true })
+  quipTimer = setInterval(nextQuip, 9000)
+  setTimeout(nextQuip, 2200)
   void stream.start()
   // Tour remembered from last time — start once the first bubbles are up
   if (edward.touring) tourTimer = setTimeout(tourStep, 2500)
@@ -684,6 +784,9 @@ onUnmounted(() => {
   if (placeholderTimer) clearInterval(placeholderTimer)
   if (sessionTimer) clearInterval(sessionTimer)
   if (tourTimer) clearTimeout(tourTimer)
+  if (quipTimer) clearInterval(quipTimer)
+  if (typeTimer) clearInterval(typeTimer)
+  heroRo?.disconnect()
   window.removeEventListener('resize', onViewportResize)
   stream.stop()
   document.body.classList.remove('edward-active')
@@ -723,6 +826,10 @@ onUnmounted(() => {
               <span class="edward-mode__uptime">{{ sessionAge }}</span>
             </span>
             <span class="edward-mode__title">EDWARD!! · faces OS</span>
+            <span class="edward-mode__quip" :title="quip">
+              <span class="edward-mode__quip-tag" aria-hidden="true">ed&gt;</span>
+              {{ quipShown }}<span class="edward-mode__quip-caret" aria-hidden="true">▍</span>
+            </span>
           </div>
 
           <div class="edward-mode__stats">
@@ -737,6 +844,15 @@ onUnmounted(() => {
             <span v-if="sourceCount" class="edward-mode__stat">
               <NeoIcon name="servers" :size="12" :stroke="1.75" />
               {{ sourceCount }}
+            </span>
+            <span
+              v-if="edward.backpack"
+              class="edward-mode__stat edward-mode__stat--pack"
+              :title="backpackLabel"
+              :aria-label="backpackLabel"
+            >
+              <NeoIcon name="bookmark" :size="12" :stroke="1.75" />
+              {{ edward.backpack }}
             </span>
             <span class="edward-mode__stat edward-mode__stat--sort">
               <NeoIcon name="sort" :size="12" :stroke="1.75" />
@@ -823,7 +939,7 @@ onUnmounted(() => {
       <aside
         v-if="deckHero && watchDeckShown && isWideDesk"
         class="edward-mode__deck"
-        :class="{ 'is-scrubbing': watchScrubbing, 'is-touring': touring }"
+        :class="{ 'is-scrubbing': watchScrubbing, 'is-touring': touring}"
         :style="{ '--srv': deckHero.accent }"
         aria-label="Watched post"
         @pointerenter="holdWatch(true)"
@@ -878,7 +994,14 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <div
+          class="edward-mode__deck-hero-wrap"
+          :style="heroH ? { height: `${heroH}px` } : undefined"
+        >
+          <div ref="heroInner" class="edward-mode__deck-hero-inner">
+            <Transition name="deck-hero">
         <button
+          :key="deckHero.identity"
           type="button"
           class="edward-mode__deck-hero"
           :aria-label="`Open post by ${deckHero.name}`"
@@ -895,6 +1018,11 @@ onUnmounted(() => {
             </span>
           </div>
           <span class="edward-mode__deck-text">{{ deckHero.text }}</span>
+          <ul v-if="deckHero.reasons.length" class="edward-mode__why">
+            <li v-for="r in deckHero.reasons" :key="r.text" :class="`edward-mode__why--${r.kind}`">
+              <span aria-hidden="true">{{ r.glyph }}</span>{{ r.text }}
+            </li>
+          </ul>
           <span class="edward-mode__deck-meta">
             <span v-if="deckHero.counts?.fav">♥ {{ deckHero.counts.fav }}</span>
             <span v-if="deckHero.counts?.boost">↻ {{ deckHero.counts.boost }}</span>
@@ -903,10 +1031,12 @@ onUnmounted(() => {
             <span class="edward-mode__deck-why">{{ deckHero.why }}</span>
           </span>
         </button>
+            </Transition>
+          </div>
+        </div>
 
-        <template v-if="deckRecent.length">
-          <p class="edward-mode__deck-label">earlier in the lens</p>
-          <ol class="edward-mode__deck-recent">
+        <p v-if="deckRecent.length" class="edward-mode__deck-label">earlier in the lens</p>
+        <TransitionGroup tag="ol" name="deck-row" class="edward-mode__deck-recent">
             <li v-for="card in deckRecent" :key="card.identity">
               <button
                 type="button"
@@ -921,11 +1051,16 @@ onUnmounted(() => {
                 <span class="edward-mode__deck-row-copy">
                   <strong>{{ card.name }} <em>{{ card.age }}</em></strong>
                   <span>{{ card.text }}</span>
+                  <small v-if="card.reasons[0]" class="edward-mode__deck-row-why">
+                    {{ card.reasons[0].glyph }} {{ card.reasons[0].text }}
+                  </small>
                 </span>
               </button>
             </li>
-          </ol>
-        </template>
+        </TransitionGroup>
+        <p v-if="deckRecent.length < 3" class="edward-mode__deck-empty" aria-hidden="true">
+          ed remembers what floats through the lens — it stacks up here ♪
+        </p>
       </aside>
 
       <aside
@@ -1023,9 +1158,11 @@ onUnmounted(() => {
               </div>
               <div class="edward-mode__watch-copy">
                 <strong class="edward-mode__watch-name">{{ watchCurrent.name }}</strong>
-                <span v-if="watchCurrent.host" class="edward-mode__watch-host">{{
-                  watchCurrent.host
-                }}</span>
+                <span v-if="watchCurrent.host" class="edward-mode__watch-host">
+                  {{ watchCurrent.host }}<template v-if="watchCurrentReason">
+                    · {{ watchCurrentReason.glyph }} {{ watchCurrentReason.text }}</template
+                  >
+                </span>
                 <span class="edward-mode__watch-text">{{ watchCurrent.text }}</span>
               </div>
             </button>
@@ -1163,6 +1300,21 @@ onUnmounted(() => {
             <NeoIcon name="x" :size="13" :stroke="2" />
           </button>
         </div>
+        <div class="edward-mode__channels" role="group" aria-label="Ed's channels">
+          <button
+            v-for="ch in EDWARD_CHANNELS"
+            :key="ch.id"
+            type="button"
+            class="edward-mode__channel"
+            :class="{ 'is-on': channelActive(ch) }"
+            :aria-pressed="channelActive(ch)"
+            :title="ch.hint"
+            @click="setChannel(ch)"
+          >
+            <span aria-hidden="true">{{ ch.glyph }}</span>
+            {{ ch.label }}
+          </button>
+        </div>
         <div class="edward-mode__sorts" role="group" aria-label="Sort">
           <span class="edward-mode__sorts-label" aria-hidden="true">
             <NeoIcon name="sort" :size="11" :stroke="1.85" />
@@ -1184,7 +1336,32 @@ onUnmounted(() => {
         </div>
         <div class="edward-mode__explore-chips" role="group" aria-label="Quick filters">
           <button
-            v-for="chip in EDWARD_EXPLORE_CHIPS"
+            v-for="src in EDWARD_SOURCE_CHIPS"
+            :key="src.query"
+            type="button"
+            class="edward-mode__chip edward-mode__chip--src"
+            :class="{ 'is-on': chipActive(src.query) }"
+            :aria-pressed="chipActive(src.query)"
+            :title="`only posts from ${src.label}`"
+            @click="toggleChip(src.query)"
+          >
+            <span aria-hidden="true">{{ src.glyph }}</span>
+            {{ src.label }}
+          </button>
+          <button
+            v-if="filtersOpen || chipActive(langChip.query)"
+            type="button"
+            class="edward-mode__chip"
+            :class="{ 'is-on': chipActive(langChip.query) }"
+            :aria-pressed="chipActive(langChip.query)"
+            title="only posts in your language"
+            @click="toggleChip(langChip.query)"
+          >
+            <span aria-hidden="true">文</span>
+            {{ langChip.label }}
+          </button>
+          <button
+            v-for="chip in shownChips"
             :key="chip.query"
             type="button"
             class="edward-mode__chip"
@@ -1205,7 +1382,7 @@ onUnmounted(() => {
             {{ chip.label }}
           </button>
           <button
-            v-for="srv in servers.slice(0, 4)"
+            v-for="srv in servers.slice(0, 4).filter((x) => filtersOpen || chipActive(x.token))"
             :key="srv.token"
             type="button"
             class="edward-mode__chip edward-mode__chip--srv"
@@ -1217,6 +1394,14 @@ onUnmounted(() => {
           >
             <NeoIcon name="globe" :size="11" :stroke="1.75" />
             {{ srv.short }}
+          </button>
+          <button
+            type="button"
+            class="edward-mode__chip edward-mode__chip--more"
+            :aria-expanded="filtersOpen"
+            @click="filtersOpen = !filtersOpen"
+          >
+            {{ filtersOpen ? 'less' : 'more…' }}
           </button>
         </div>
         <p class="sr-only" role="status" aria-live="polite">{{ exploreAnnounce }}</p>
@@ -1839,6 +2024,19 @@ onUnmounted(() => {
   }
 }
 
+@media (min-width: 1100px) {
+  .edward-mode__explore {
+    // Stage = between the deck column and the right rail (204px)
+    left: calc(var(--edward-deck-w, 452px) + (100vw - var(--edward-deck-w, 452px) - 204px) / 2);
+    width: min(700px, calc(100vw - var(--edward-deck-w, 452px) - 204px - 1.5rem));
+  }
+}
+
+.edward-mode__chip--more {
+  border-style: solid;
+  color: #59d1e0;
+}
+
 .edward-mode__explore-row {
   display: flex;
   align-items: center;
@@ -2332,11 +2530,9 @@ onUnmounted(() => {
   position: absolute;
   left: max(0.75rem, env(safe-area-inset-left));
   top: calc(var(--edward-header-h, 96px) + 0.75rem);
-  // Hug the content; only cap it so it never runs under the console
-  max-height: calc(
-    100% - var(--edward-header-h, 96px) - var(--edward-explore-h, 112px) - max(0.75rem, env(safe-area-inset-bottom)) -
-      1.5rem
-  );
+  // Fixed height — header to console (or to the floor when the centered
+  // console can't reach this column). Content moves inside; the panel doesn't.
+  bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + var(--edward-explore-h, 112px) + 0.75rem);
   z-index: 3;
   display: flex;
   flex-direction: column;
@@ -2360,17 +2556,57 @@ onUnmounted(() => {
     box-shadow: 4px 4px 0 #59d1e0, 0 0 32px color-mix(in srgb, #59d1e0 22%, transparent);
   }
 
+  // Desktop: the console is centered in the stage (not the screen), so the
+  // deck always has the full height to itself
+  @media (min-width: 1100px) {
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
   .edward-mode__watch-nav {
     margin-bottom: 0;
   }
+}
+
+.edward-mode__deck-hero-wrap {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+  // Height follows the current card (measured) — rows below glide with it
+  transition: height 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.edward-mode__deck-hero-inner {
+  position: relative;
+}
+
+.deck-hero-enter-active {
+  transition:
+    opacity 0.34s ease,
+    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.deck-hero-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+// The outgoing card fades in place, out of flow, so only the new one is measured
+.deck-hero-leave-active {
+  position: absolute;
+  inset: 0 0 auto;
+  transition: opacity 0.22s ease;
+}
+
+.deck-hero-leave-to {
+  opacity: 0;
 }
 
 .edward-mode__deck-hero {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  flex-shrink: 1;
-  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
   padding: 0 0 0.55rem;
   border: 2px solid var(--srv, #ffe566);
   border-radius: 3px;
@@ -2393,17 +2629,13 @@ onUnmounted(() => {
 }
 
 .edward-mode__deck-media {
-  flex-shrink: 1;
-  min-height: 90px;
-  max-height: 34vh;
   background: #0a0614;
   overflow: hidden;
 
   img {
     display: block;
     width: 100%;
-    height: 100%;
-    max-height: 34vh;
+    max-height: min(36vh, 380px);
     object-fit: cover;
   }
 }
@@ -2452,7 +2684,7 @@ onUnmounted(() => {
 
 .edward-mode__deck-text {
   display: -webkit-box;
-  -webkit-line-clamp: 9;
+  -webkit-line-clamp: 10;
   -webkit-box-orient: vertical;
   overflow: hidden;
   font-size: 0.8125rem;
@@ -2487,13 +2719,217 @@ onUnmounted(() => {
 }
 
 .edward-mode__deck-recent {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  flex: 1 1 0;
+  min-height: 0;
   margin: 0;
   padding: 0;
   list-style: none;
-  min-height: 0;
+  overflow: hidden;
+  // Rows that don't fit fade out instead of being cut — the list breathes
+  // as the hero above grows and shrinks
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+}
+
+.edward-mode__deck-empty {
+  margin: auto 0 0.25rem;
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: color-mix(in srgb, #59d1e0 55%, transparent);
+}
+
+.deck-row-enter-active,
+.deck-row-move {
+  transition:
+    opacity 0.4s ease,
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.deck-row-enter-from {
+  opacity: 0;
+  transform: translateY(-14px);
+}
+
+.deck-row-leave-active {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transition: opacity 0.25s ease;
+}
+
+.deck-row-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edward-mode__deck-hero-wrap,
+  .deck-hero-enter-active,
+  .deck-hero-leave-active,
+  .deck-row-enter-active,
+  .deck-row-move,
+  .deck-row-leave-active {
+    transition: none;
+  }
+}
+
+/* Why it's here — personal, source, then nuance */
+.edward-mode__why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid color-mix(in srgb, #59d1e0 45%, transparent);
+    border-radius: 999px;
+    font-size: 0.625rem;
+    letter-spacing: 0.03em;
+    color: #59d1e0;
+  }
+
+  .edward-mode__why--you {
+    border-color: color-mix(in srgb, #ff7eb3 60%, transparent);
+    color: #ff7eb3;
+  }
+
+  .edward-mode__why--nuance {
+    border-color: color-mix(in srgb, #ffe566 40%, transparent);
+    color: #ffe566;
+  }
+}
+
+.edward-mode__deck-row-why {
+  overflow: hidden;
+  font-size: 0.5625rem;
+  letter-spacing: 0.03em;
+  color: color-mix(in srgb, #ff7eb3 85%, transparent);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Ed's running commentary, typed out under the title */
+.edward-mode__quip {
+  display: block;
+  // Never widen the header — the line fits whatever room the brand has
+  contain: inline-size;
+  max-width: min(46ch, 60vw);
+  margin-top: 0.15rem;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+  color: color-mix(in srgb, #59d1e0 92%, transparent);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.edward-mode__quip-tag {
+  margin-right: 0.35rem;
+  color: #ff7eb3;
+}
+
+.edward-mode__quip-caret {
+  margin-left: 1px;
+  color: #ffe566;
+  animation: edward-caret 1.06s steps(1) infinite;
+}
+
+@keyframes edward-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edward-mode__quip-caret {
+    animation: none;
+  }
+}
+
+/* Ed's channels — one tap, a whole mood */
+.edward-mode__channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.45rem;
+}
+
+.edward-mode__channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 24px;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid color-mix(in srgb, #ff7eb3 45%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, #ff7eb3 6%, transparent);
+  color: color-mix(in srgb, #fff8d6 85%, transparent);
+  font-family: inherit;
+  font-size: 0.625rem;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+  cursor: pointer;
+
+  > span {
+    color: #ff7eb3;
+  }
+
+  &:hover,
+  &:focus-visible {
+    border-color: #ff7eb3;
+    color: #fff8d6;
+  }
+
+  &.is-on {
+    border-color: #ff7eb3;
+    background: color-mix(in srgb, #ff7eb3 26%, transparent);
+    color: #fff8d6;
+
+    > span {
+      color: #ffe566;
+    }
+  }
+}
+
+@media (max-width: 639px) {
+  // Header is tight on phones — the backpack count lives in the narrator instead
+  .edward-mode__stat--pack {
+    display: none;
+  }
+
+  .edward-mode__channels {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    margin-inline: -0.5rem;
+    padding-inline: 0.5rem;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    > * {
+      flex-shrink: 0;
+    }
+  }
+
+  .edward-mode__quip {
+    max-width: 100%;
+  }
+}
+
+.edward-mode__chip--src > span {
+  color: #59d1e0;
 }
 
 .edward-mode__deck-row {

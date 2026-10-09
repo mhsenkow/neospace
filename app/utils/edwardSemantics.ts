@@ -7,13 +7,31 @@ import { stripHtml } from '~/utils/stripHtml'
 import { statusIdentity } from '~/utils/statusIdentity'
 import { faceMoodFor, faceSpecFor, type EdwardFaceMood } from '~/utils/edwardFaces'
 import {
-  affinityScore,
+  affinityDetail,
   type EdwardAffinityContext,
 } from '~/utils/edwardAffinity'
 
 export type EdwardKind = 'original' | 'reply' | 'boost'
 
 export type EdwardBadge = 'media' | 'poll' | 'cw' | 'link' | 'bot'
+
+/** Which of your feeds brought the post in */
+export type EdwardSource = 'firehose' | 'home' | 'tag' | 'trend'
+
+/** One line of "why is this here / what is it" — shown as chips */
+export type EdwardReason = {
+  glyph: string
+  text: string
+  /** you = personal link, source = which feed, nuance = what the post is like */
+  kind: 'you' | 'source' | 'nuance'
+}
+
+export const EDWARD_SOURCE_GLYPH: Record<EdwardSource, string> = {
+  firehose: '≋',
+  home: '⌂',
+  tag: '#',
+  trend: '↑',
+}
 
 export type EdwardBallDescriptor = {
   identity: string
@@ -44,6 +62,18 @@ export type EdwardBallDescriptor = {
   instanceHost: string | null
   /** 0–1 how much this relates to you — drives size / proximity */
   affinity: number
+  /** Feed it came from (home / followed tag / trending / firehose) */
+  source: EdwardSource
+  /** Followed tag whose timeline brought it in */
+  sourceTag: string | null
+  /** Post language (primary subtag) when the server knows it */
+  language: string | null
+  /** 🧵 / "1/" style thread opener */
+  isThread: boolean
+  /** Rough reading time in minutes (0 for short posts) */
+  readMinutes: number
+  /** Why it's here + what it's like, most personal first (≤ 4) */
+  reasons: EdwardReason[]
   /** Short enough for a thought-bubble overlay */
   isShort: boolean
   shortText: string | null
@@ -90,7 +120,11 @@ export type EdwardStatusLike = {
     username?: string | null
     bot?: boolean | null
   } | null
+  language?: string | null
   _instanceUrl?: string | null
+  /** Set by the Edward stream: which feed fetched it */
+  _edSource?: EdwardSource | null
+  _edTag?: string | null
 }
 
 function resolveBody(status: EdwardStatusLike): EdwardStatusLike {
@@ -183,7 +217,8 @@ export function statusToEdwardBall(
   if (body.card?.url) badges.push('link')
   if (isBot) badges.push('bot')
 
-  const preview = stripHtml(body.content || '').slice(0, 160)
+  const fullText = stripHtml(body.content || '')
+  const preview = fullText.slice(0, 160)
   // Include spoiler text in spicy/mood sniff so CW'd spicy still maps
   const moodText = `${body.spoilerText || ''} ${preview}`.trim()
   // Plain-text contexts (canvas chip, deck) can't show custom emoji — drop the
@@ -206,7 +241,7 @@ export function statusToEdwardBall(
     .map((m) => m?.acct || m?.username || '')
     .filter(Boolean)
 
-  const affinity = affinityScore(
+  const aff = affinityDetail(
     {
       authorAcct: acct,
       mentionAccts,
@@ -216,6 +251,7 @@ export function statusToEdwardBall(
     },
     affinityCtx,
   )
+  const affinity = aff.score
 
   // Engagement + personal affinity → size
   const size = Math.min(
@@ -260,6 +296,29 @@ export function statusToEdwardBall(
   const created = Date.parse(status.createdAt)
   const authorKey = (body.account?.acct || body.account?.username || status.id).toLowerCase()
 
+  const source: EdwardSource = status._edSource || 'firehose'
+  const sourceTag = status._edTag || null
+  const language = (body.language || '').split('-')[0]!.toLowerCase() || null
+  const words = fullText ? fullText.split(/\s+/).filter(Boolean).length : 0
+  const readMinutes = words > 90 ? Math.max(1, Math.round(words / 200)) : 0
+  const isThread = /^\s*(🧵|\(?1\s*\/\s*\d*\)?[\s:.)])/u.test(fullText) || /🧵\s*$/u.test(fullText.trim())
+  const reasons = reasonsFor({
+    aff,
+    acct,
+    source,
+    sourceTag,
+    instanceHost: hostOf(status._instanceUrl) || hostOf(body.url || body.uri),
+    counts: { fav: favourites, boost: reblogs, reply: replies },
+    kind,
+    isBot,
+    mood: faceMoodFor(signals),
+    language,
+    viewerLang: affinityCtx?.viewerLang ?? null,
+    readMinutes,
+    isThread,
+    createdAt: Number.isFinite(created) ? created : Date.now(),
+  })
+
   return {
     identity: statusIdentity(status) || status.id,
     statusId: status.id,
@@ -284,11 +343,87 @@ export function statusToEdwardBall(
     isBot,
     instanceHost: hostOf(status._instanceUrl) || hostOf(body.url || body.uri),
     affinity,
+    source,
+    sourceTag,
+    language,
+    isThread,
+    readMinutes,
+    reasons,
     isShort: preview.length > 0 && preview.length <= 72,
     shortText: preview.length > 0 && preview.length <= 72 ? preview : null,
     exploreRank: -1,
     exploreRankNorm: 0,
   }
+}
+
+const languageName = (code: string): string => {
+  try {
+    const names = new Intl.DisplayNames(
+      [typeof navigator !== 'undefined' ? navigator.language : 'en'],
+      { type: 'language' },
+    )
+    return names.of(code) || code
+  } catch {
+    return code
+  }
+}
+
+/**
+ * Why a post is in your stream, then what it's like — most personal first.
+ * Pure: everything it needs is passed in, so it's cached with the descriptor.
+ */
+export function reasonsFor(x: {
+  aff: ReturnType<typeof affinityDetail>
+  acct: string
+  source: EdwardSource
+  sourceTag: string | null
+  instanceHost: string | null
+  counts: { fav: number; boost: number; reply: number }
+  kind: EdwardKind
+  isBot: boolean
+  mood: EdwardFaceMood
+  language: string | null
+  viewerLang: string | null
+  readMinutes: number
+  isThread: boolean
+  createdAt: number
+  now?: number
+}): EdwardReason[] {
+  const out: EdwardReason[] = []
+  const handle = x.acct.split('@')[0] || x.acct
+  if (x.aff.self) out.push({ glyph: '★', text: 'you posted this', kind: 'you' })
+  if (x.aff.mentionsYou) out.push({ glyph: '@', text: 'mentions you', kind: 'you' })
+  if (x.aff.followsAuthor) out.push({ glyph: '♥', text: `you follow @${handle}`, kind: 'you' })
+  for (const t of x.aff.tagHits.slice(0, 2)) out.push({ glyph: '#', text: `you follow #${t}`, kind: 'you' })
+  if (x.aff.homeAuthor && !x.aff.followsAuthor) {
+    out.push({ glyph: '⌂', text: `@${handle} is around your home`, kind: 'you' })
+  }
+
+  if (x.source === 'home' && !x.aff.followsAuthor && !x.aff.self) {
+    out.push({ glyph: '⌂', text: x.kind === 'boost' ? 'boosted into your home' : 'from your home', kind: 'source' })
+  } else if (x.source === 'tag' && x.sourceTag && !x.aff.tagHits.includes(x.sourceTag)) {
+    out.push({ glyph: '#', text: `from #${x.sourceTag}`, kind: 'source' })
+  } else if (x.source === 'trend') {
+    out.push({ glyph: '↑', text: x.instanceHost ? `trending on ${x.instanceHost}` : 'trending', kind: 'source' })
+  }
+
+  const now = x.now ?? Date.now()
+  const total = x.counts.fav + x.counts.boost + x.counts.reply
+  if (x.isBot) out.push({ glyph: '▣', text: 'a bot', kind: 'nuance' })
+  if (x.counts.reply >= 3 && x.counts.reply >= x.counts.fav) {
+    out.push({ glyph: '↩', text: `sparks talk · ${x.counts.reply} replies`, kind: 'nuance' })
+  } else if (total >= 50) {
+    out.push({ glyph: '✺', text: `loud · ${total} reactions`, kind: 'nuance' })
+  } else if (total === 0 && now - x.createdAt > 10 * 60_000 && !x.isBot) {
+    out.push({ glyph: '✧', text: 'nobody has noticed yet', kind: 'nuance' })
+  }
+  if (x.isThread) out.push({ glyph: '🧵', text: 'a thread', kind: 'nuance' })
+  else if (x.readMinutes) out.push({ glyph: '≡', text: `long read · ~${x.readMinutes} min`, kind: 'nuance' })
+  if (x.mood === 'ask') out.push({ glyph: '?', text: 'asking something', kind: 'nuance' })
+  if (x.language && x.viewerLang && x.language !== x.viewerLang) {
+    out.push({ glyph: '文', text: `in ${languageName(x.language)}`, kind: 'nuance' })
+  }
+  return out.slice(0, 4)
 }
 
 export const EDWARD_LEGEND: { kind: EdwardKind; label: string; swatch: string }[] = [

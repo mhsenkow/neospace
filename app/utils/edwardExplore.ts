@@ -3,7 +3,7 @@
  * against emoticoin ball descriptors.
  */
 
-import type { EdwardBallDescriptor, EdwardBadge, EdwardKind } from '~/utils/edwardSemantics'
+import type { EdwardBallDescriptor, EdwardBadge, EdwardKind, EdwardSource } from '~/utils/edwardSemantics'
 import type { EdwardFaceMood } from '~/utils/edwardFaces'
 
 export type EdwardSortMode = 'stream' | 'near' | 'new' | 'loud' | 'you' | 'gems' | 'shuffle'
@@ -24,6 +24,19 @@ export type EdwardExploreParsed = {
   minAffinity: number
   /** "quiet" — only posts almost nobody has engaged with yet */
   maxEngagement: number | null
+  /** src:home / src:tags / src:trending / src:firehose */
+  sources: Set<EdwardSource>
+  /** lang:xx — and -lang:xx to hide one */
+  languages: Set<string>
+  excludeLanguages: Set<string>
+  /** -mood:anger … */
+  excludeMoods: Set<EdwardFaceMood>
+  /** thread openers only */
+  threads: boolean
+  /** long reads only */
+  long: boolean
+  /** conversations: 3+ replies */
+  talk: boolean
   /** Explicit sort from query, if any */
   sort: EdwardSortMode | null
   /** Raw leftover for display */
@@ -140,6 +153,8 @@ export const EDWARD_EXPLORE_CHIPS: {
   label: string
   query: string
   hint: string
+  /** Behind the "more" toggle unless active */
+  more?: boolean
 }[] = [
   { label: 'no bots', query: '-bot', hint: 'hide marked & obvious bots' },
   { label: 'you', query: 'you', hint: 'related to you' },
@@ -147,12 +162,36 @@ export const EDWARD_EXPLORE_CHIPS: {
   { label: 'media', query: 'media', hint: 'pics & video' },
   { label: 'words', query: '-media', hint: 'text only, no pictures' },
   { label: 'asks', query: 'mood:ask', hint: 'questions' },
-  { label: 'links', query: 'link', hint: 'articles & link cards' },
-  { label: 'polls', query: 'poll', hint: 'polls' },
-  { label: 'replies', query: 'kind:reply', hint: 'conversations' },
-  { label: 'love', query: 'mood:love', hint: 'heart energy' },
-  { label: 'anger', query: 'mood:anger', hint: 'mad faces' },
-  { label: 'bots', query: 'bot', hint: 'only bot accounts' },
+  { label: 'links', query: 'link', hint: 'articles & link cards', more: true },
+  { label: 'polls', query: 'poll', hint: 'polls', more: true },
+  { label: 'threads', query: 'threads', hint: '🧵 thread openers', more: true },
+  { label: 'long', query: 'long', hint: 'long reads', more: true },
+  { label: 'talk', query: 'talk', hint: 'posts sparking conversation' },
+  { label: 'replies', query: 'kind:reply', hint: 'replies in a conversation', more: true },
+  { label: 'love', query: 'mood:love', hint: 'heart energy', more: true },
+  { label: 'anger', query: 'mood:anger', hint: 'mad faces', more: true },
+  { label: 'bots', query: 'bot', hint: 'only bot accounts', more: true },
+]
+
+/** Where posts came from — chips in the console */
+export const EDWARD_SOURCE_CHIPS: { source: EdwardSource; label: string; query: string; glyph: string }[] = [
+  { source: 'home', label: 'home', query: 'src:home', glyph: '⌂' },
+  { source: 'tag', label: 'your tags', query: 'src:tags', glyph: '#' },
+  { source: 'trend', label: 'trending', query: 'src:trending', glyph: '↑' },
+  { source: 'firehose', label: 'firehose', query: 'src:firehose', glyph: '≋' },
+]
+
+/**
+ * Ed's channels — one tap sets a whole mood of filter + sort. `{lang}` is
+ * swapped for the reader's language at runtime.
+ */
+export const EDWARD_CHANNELS: { id: string; label: string; glyph: string; query: string; sort: EdwardSortMode; hint: string }[] = [
+  { id: 'calm', label: 'calm waters', glyph: '〜', query: '-bot -cw -mood:anger -mood:rage', sort: 'gems', hint: 'gentle, no bots, no heat' },
+  { id: 'people', label: 'my people', glyph: '⌂', query: 'src:home', sort: 'you', hint: 'your home and the folks in it' },
+  { id: 'wonder', label: 'wonder', glyph: '✧', query: 'media quiet -bot', sort: 'shuffle', hint: 'unseen pictures, shuffled' },
+  { id: 'chatter', label: 'chatter', glyph: '↩', query: 'talk -bot', sort: 'loud', hint: 'conversations happening now' },
+  { id: 'deep', label: 'deep reads', glyph: '≡', query: 'long -bot', sort: 'gems', hint: 'long posts worth the scroll' },
+  { id: 'far', label: 'far away', glyph: '文', query: '-lang:{lang} -bot', sort: 'shuffle', hint: 'other languages, other places' },
 ]
 
 /** Rotating placeholders — teach the grammar by example */
@@ -161,6 +200,7 @@ export const EDWARD_EXPLORE_PLACEHOLDERS = [
   'tap no bots · hide the ▣▣ faces · ←→ scrub',
   'mood:love · kind:reply · sort:near · lens circle',
   'type a word, #tag, @someone, or srv:instance',
+  'src:home · src:trending · lang:es · -mood:anger',
   'chaos below · filters above · dive when something hits',
 ]
 
@@ -175,9 +215,30 @@ const emptyParsed = (raw: string): EdwardExploreParsed => ({
   servers: new Set(),
   minAffinity: 0,
   maxEngagement: null,
+  sources: new Set(),
+  languages: new Set(),
+  excludeLanguages: new Set(),
+  excludeMoods: new Set(),
+  threads: false,
+  long: false,
+  talk: false,
   sort: null,
   raw,
 })
+
+const SOURCE_ALIASES: Record<string, EdwardSource> = {
+  home: 'home',
+  following: 'home',
+  tag: 'tag',
+  tags: 'tag',
+  groups: 'tag',
+  trend: 'trend',
+  trends: 'trend',
+  trending: 'trend',
+  firehose: 'firehose',
+  fire: 'firehose',
+  public: 'firehose',
+}
 
 export function parseEdwardExplore(input: string): EdwardExploreParsed {
   const raw = input.trim()
@@ -197,6 +258,38 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
 
     if (lower === 'quiet' || lower === 'unseen' || lower === 'overlooked') {
       out.maxEngagement = 2
+      continue
+    }
+
+    if (lower === 'thread' || lower === 'threads') {
+      out.threads = true
+      continue
+    }
+    if (lower === 'long' || lower === 'longread' || lower === 'reads') {
+      out.long = true
+      continue
+    }
+    if (lower === 'talk' || lower === 'chatty' || lower === 'convo') {
+      out.talk = true
+      continue
+    }
+
+    if (lower.startsWith('src:') || lower.startsWith('from:')) {
+      const src = SOURCE_ALIASES[lower.replace(/^src:|^from:/, '')]
+      if (src) out.sources.add(src)
+      continue
+    }
+
+    if (lower.startsWith('lang:') || lower.startsWith('-lang:')) {
+      const neg = lower.startsWith('-')
+      const code = lower.replace(/^-?lang:/, '').split('-')[0]!
+      if (code) (neg ? out.excludeLanguages : out.languages).add(code)
+      continue
+    }
+
+    if (lower.startsWith('-mood:')) {
+      const mood = MOOD_ALIASES[lower.slice(6)]
+      if (mood) out.excludeMoods.add(mood)
       continue
     }
 
@@ -298,6 +391,13 @@ export function ballMatchesExplore(
 
   if (q.minAffinity > 0 && ball.affinity < q.minAffinity) return false
   if (q.maxEngagement !== null && ball.engagement > q.maxEngagement) return false
+  if (q.sources.size && !q.sources.has(ball.source ?? 'firehose')) return false
+  if (q.languages.size && !(ball.language && q.languages.has(ball.language))) return false
+  if (q.excludeLanguages.size && ball.language && q.excludeLanguages.has(ball.language)) return false
+  if (q.excludeMoods.size && q.excludeMoods.has(ball.mood)) return false
+  if (q.threads && !ball.isThread) return false
+  if (q.long && !(ball.readMinutes > 0)) return false
+  if (q.talk && (ball.counts?.reply ?? 0) < 3) return false
 
   if (q.moods.size && !q.moods.has(ball.mood)) return false
   if (q.kinds.size && !q.kinds.has(ball.kind)) return false
@@ -457,6 +557,13 @@ export function describeEdwardExplore(
   if (parsed.servers.size) bits.push([...parsed.servers].map((s) => `srv:${s}`).join(' '))
   if (parsed.minAffinity > 0) bits.push('you')
   if (parsed.maxEngagement !== null) bits.push('quiet')
+  if (parsed.sources.size) bits.push([...parsed.sources].map((s) => `src:${s}`).join(' '))
+  if (parsed.languages.size) bits.push([...parsed.languages].map((l) => `lang:${l}`).join(' '))
+  if (parsed.excludeLanguages.size) bits.push([...parsed.excludeLanguages].map((l) => `-lang:${l}`).join(' '))
+  if (parsed.excludeMoods.size) bits.push([...parsed.excludeMoods].map((m) => `-${m}`).join(' '))
+  if (parsed.threads) bits.push('threads')
+  if (parsed.long) bits.push('long')
+  if (parsed.talk) bits.push('talk')
   if (parsed.text.length) bits.push(`“${parsed.text.join(' ')}”`)
   const filter = bits.length ? bits.join(' · ') : 'all'
   return `${matched}/${total} · ${filter} · ${EDWARD_SORT_LABELS[sort]}`

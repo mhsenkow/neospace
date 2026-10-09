@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   edwardDeckColumn,
-  edwardDeckTrailCount,
   pickTourCandidate,
   stepSpeed,
 } from '../app/utils/edwardPace'
@@ -74,12 +73,6 @@ describe('deck sizing', () => {
     expect(edwardDeckColumn(1100)).toBe(400)
     expect(edwardDeckColumn(1800)).toBe(486)
     expect(edwardDeckColumn(4000)).toBe(560)
-  })
-
-  it('stacks up to four earlier posts on tall screens', () => {
-    expect(edwardDeckTrailCount(700)).toBe(1)
-    expect(edwardDeckTrailCount(900)).toBe(3)
-    expect(edwardDeckTrailCount(1200)).toBe(4)
   })
 })
 

@@ -13,6 +13,8 @@ export type EdwardAffinityContext = {
   tags: Set<string>
   /** Recent home-timeline authors (softer signal than full following) */
   homeAuthors: Set<string>
+  /** Reader's language (BCP 47 primary subtag) — "in Español" is only news if it differs */
+  viewerLang: string | null
 }
 
 export type EdwardAffinityInput = {
@@ -54,7 +56,22 @@ export function emptyAffinityContext(): EdwardAffinityContext {
     following: new Set(),
     tags: new Set(),
     homeAuthors: new Set(),
+    viewerLang:
+      typeof navigator !== 'undefined' && navigator.language
+        ? navigator.language.split('-')[0]!.toLowerCase()
+        : null,
   }
+}
+
+/** Which personal signals fired — the score plus the "why" behind it */
+export type EdwardAffinityDetail = {
+  score: number
+  self: boolean
+  mentionsYou: boolean
+  followsAuthor: boolean
+  homeAuthor: boolean
+  /** Followed tags this post carries */
+  tagHits: string[]
 }
 
 /**
@@ -65,7 +82,22 @@ export function affinityScore(
   input: EdwardAffinityInput,
   ctx: EdwardAffinityContext | null | undefined,
 ): number {
-  if (!ctx) return 0
+  return affinityDetail(input, ctx).score
+}
+
+export function affinityDetail(
+  input: EdwardAffinityInput,
+  ctx: EdwardAffinityContext | null | undefined,
+): EdwardAffinityDetail {
+  const detail: EdwardAffinityDetail = {
+    score: 0,
+    self: false,
+    mentionsYou: false,
+    followsAuthor: false,
+    homeAuthor: false,
+    tagHits: [],
+  }
+  if (!ctx) return detail
   let score = 0
 
   const author = normAcct(input.authorAcct)
@@ -76,6 +108,7 @@ export function affinityScore(
   // You posted it
   if (self && (author === self || authorLocal === selfLocal)) {
     score += 0.55
+    detail.self = true
   }
 
   // Someone you follow
@@ -86,8 +119,10 @@ export function affinityScore(
       (authorLocal.length > 1 && followingLocalParts(ctx.following).has(authorLocal)))
   ) {
     score += 0.38
+    detail.followsAuthor = true
   } else if (author && ctx.homeAuthors.has(author)) {
     score += 0.18
+    detail.homeAuthor = true
   }
 
   // Mentions you
@@ -96,6 +131,7 @@ export function affinityScore(
     if (!mn) continue
     if (self && (mn === self || localPart(mn) === selfLocal)) {
       score += 0.48
+      detail.mentionsYou = true
       break
     }
   }
@@ -106,6 +142,7 @@ export function affinityScore(
     const key = t.replace(/^#/, '').toLowerCase()
     if (key && ctx.tags.has(key)) {
       tagHits++
+      detail.tagHits.push(key)
     }
   }
   if (tagHits) score += Math.min(0.32, 0.16 * tagHits)
@@ -118,5 +155,6 @@ export function affinityScore(
   // Boosts of people you follow already counted via author of body —
   // slight bump if outer is boost of followed (handled by author of body)
 
-  return Math.max(0, Math.min(1, score))
+  detail.score = Math.max(0, Math.min(1, score))
+  return detail
 }

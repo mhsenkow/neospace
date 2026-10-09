@@ -108,6 +108,9 @@ interface EdwardState {
   shuffleSeed: number
   /** Name + snippet captions under the most prominent bubbles */
   captions: boolean
+  /** Posts fetched and waiting to drip onto the stage */
+  backpack: number
+  backpackBySource: { home: number; tag: number; trend: number; firehose: number }
 }
 
 export const useEdwardStore = defineStore('edward', {
@@ -133,6 +136,8 @@ export const useEdwardStore = defineStore('edward', {
     touring: false,
     shuffleSeed: 1,
     captions: true,
+    backpack: 0,
+    backpackBySource: { home: 0, tag: 0, trend: 0, firehose: 0 },
   }),
 
   getters: {
@@ -248,7 +253,7 @@ export const useEdwardStore = defineStore('edward', {
       const hist = state.watchHistory
       const end = state.watchScrubbing ? Math.max(0, state.watchCursor) : hist.length
       const out: string[] = []
-      for (let i = end - 1; i >= 0 && out.length < 6; i--) {
+      for (let i = end - 1; i >= 0 && out.length < 12; i--) {
         const id = hist[i]!
         if (id === state.focusedIdentity || out.includes(id)) continue
         out.push(id)
@@ -329,6 +334,8 @@ export const useEdwardStore = defineStore('edward', {
       this.error = null
       this.streamStartedAt = null
       this.sourceCount = 0
+      this.backpack = 0
+      this.backpackBySource = { home: 0, tag: 0, trend: 0, firehose: 0 }
       this.affinity = emptyAffinityContext()
       if (typeof document !== 'undefined') {
         document.body.classList.remove('edward-active')
@@ -421,6 +428,11 @@ export const useEdwardStore = defineStore('edward', {
 
     setRecessed(v: boolean) {
       this.recessed = v
+    },
+
+    setBackpack(n: number, bySource: EdwardState['backpackBySource']) {
+      this.backpack = n
+      this.backpackBySource = bySource
     },
 
     setSourceCount(n: number) {

@@ -14,6 +14,8 @@ import {
   type EdwardAffinityContext,
 } from '~/utils/edwardAffinity'
 import { httpStatusFrom } from '~/utils/friendlyError'
+import type { EdwardSource } from '~/utils/edwardSemantics'
+import { speedMeta } from '~/utils/edwardPace'
 
 /**
  * Mastodon allows ~300 requests / 5 min per account (and per IP for guests) —
@@ -32,6 +34,21 @@ const FOLLOWING_MAX = 300
 const HOME_SAMPLE = 40
 /** Who-you-follow barely changes between sessions — don't refetch it each time */
 const AFFINITY_TTL_MS = 15 * 60_000
+/** Your feeds, prepped alongside the firehose */
+const HOME_LIMIT = 30
+const TAG_LIMIT = 20
+const TREND_LIMIT = 20
+/** Home every Nth poll, one followed tag per poll, trends rarely (they change slowly) */
+const HOME_EVERY = 2
+const TREND_EVERY = 12
+/** Backpack: what's fetched waits here and drips onto the stage */
+const BACKPACK_MAX = 360
+/** Plenty in the backpack → skip the firehose fetch this poll (rate limits) */
+const BACKPACK_FULL = 90
+/** Seed: how many go straight onto the stage; the rest wait */
+const SEED_STAGE = 90
+/** Release mix — your feeds come up more often than the firehose */
+const SOURCE_WEIGHT: Record<EdwardSource, number> = { home: 3, tag: 2, trend: 1, firehose: 3 }
 let affinityCache: { userKey: string; at: number; ctx: EdwardAffinityContext } | null = null
 
 export function useEdwardStream() {
@@ -48,6 +65,183 @@ export function useEdwardStream() {
   /** Newest status id per instance for sinceId polls */
   let sinceCursors: Record<string, string> = {}
   let affinityLoaded = false
+
+  // ── Backpack (prepped posts waiting to drip in) ──
+  const backpack: Record<EdwardSource, ExtendedStatus[]> = { home: [], tag: [], trend: [], firehose: [] }
+  const backpackKeys = new Set<string>()
+  let dripTimer: ReturnType<typeof setTimeout> | null = null
+  let dripTurn = 0
+  let homeSince: string | null = null
+  const tagSince: Record<string, string> = {}
+  let tagCursor = 0
+
+  const backpackSize = () =>
+    backpack.home.length + backpack.tag.length + backpack.trend.length + backpack.firehose.length
+
+  const syncBackpackCount = () => edward.setBackpack(backpackSize(), {
+    home: backpack.home.length,
+    tag: backpack.tag.length,
+    trend: backpack.trend.length,
+    firehose: backpack.firehose.length,
+  })
+
+  /** Stash fetched posts, skipping anything on stage or already packed */
+  const pack = (list: ExtendedStatus[]) => {
+    const onStage = new Set(edward.statuses.map((s) => statusIdentity(s)))
+    for (const s of list) {
+      const key = statusIdentity(s)
+      if (!key || onStage.has(key) || backpackKeys.has(key)) continue
+      const src = ((s as { _edSource?: EdwardSource })._edSource || 'firehose') as EdwardSource
+      backpackKeys.add(key)
+      backpack[src].push(s)
+    }
+    // Over the cap: shed the oldest firehose first, then the rest
+    for (const src of ['firehose', 'trend', 'tag', 'home'] as EdwardSource[]) {
+      while (backpackSize() > BACKPACK_MAX && backpack[src].length) {
+        const gone = backpack[src].pop()!
+        backpackKeys.delete(statusIdentity(gone))
+      }
+    }
+    syncBackpackCount()
+  }
+
+  /** Weighted round-robin across sources so the field stays varied */
+  const takeNext = (): ExtendedStatus | null => {
+    const order: EdwardSource[] = []
+    for (const src of ['home', 'firehose', 'tag', 'trend'] as EdwardSource[]) {
+      for (let i = 0; i < SOURCE_WEIGHT[src]; i++) order.push(src)
+    }
+    for (let i = 0; i < order.length; i++) {
+      const src = order[(dripTurn + i) % order.length]!
+      const next = backpack[src].shift()
+      if (next) {
+        dripTurn = (dripTurn + i + 1) % order.length
+        backpackKeys.delete(statusIdentity(next))
+        return next
+      }
+    }
+    return null
+  }
+
+  /** Release pace follows the stream speed; still holds everything back */
+  const dripDelay = () => {
+    const mul = speedMeta(edward.speed).mul
+    if (!mul) return 2500
+    return Math.round(2600 / mul)
+  }
+
+  const drip = () => {
+    dripTimer = null
+    if (!running) return
+    if (speedMeta(edward.speed).mul > 0 && edward.active) {
+      const next = takeNext()
+      if (next) {
+        edward.mergeNewer([next])
+        syncBackpackCount()
+      }
+    }
+    dripTimer = setTimeout(drip, dripDelay())
+  }
+
+  const tag = (list: ExtendedStatus[], source: EdwardSource, tagName?: string) =>
+    list.map((s) => ({ ...s, _edSource: source, ...(tagName ? { _edTag: tagName } : {}) }) as ExtendedStatus)
+
+  /** Account whose home / tags / trends we read: active if signed in, else primary */
+  const feedAccount = () => {
+    const active = instances.activeAccount
+    if (active?.accessToken) return active
+    const primary = instances.primaryInstance
+    return primary?.accessToken ? primary : null
+  }
+
+  const followedTagNames = () => {
+    const names = new Set<string>()
+    for (const t of groups.followedTags) {
+      const n = (t.name || '').replace(/^#/, '').toLowerCase()
+      if (n) names.add(n)
+    }
+    for (const g of groups.joinedGroups) {
+      const n = (g.tag || '').replace(/^#/, '').toLowerCase()
+      if (n) names.add(n)
+    }
+    return [...names]
+  }
+
+  const fetchHome = async (): Promise<ExtendedStatus[]> => {
+    const acct = feedAccount()
+    if (!acct) return []
+    try {
+      const client = instances.getClient(acct.id)
+      const list = await client.v1.timelines.home.list({
+        limit: HOME_LIMIT,
+        ...(homeSince ? { sinceId: homeSince } : {}),
+      })
+      if (list[0]?.id) homeSince = list[0].id
+      return tag(
+        list.map((s) => ({ ...s, _instanceId: acct.id, _instanceUrl: acct.url }) as ExtendedStatus),
+        'home',
+      )
+    } catch (e) {
+      if (httpStatusFrom(e) === 429) rateLimited = true
+      return []
+    }
+  }
+
+  /** One (or a few, when seeding) followed tags per call — they take turns */
+  const fetchTags = async (count: number): Promise<ExtendedStatus[]> => {
+    const acct = feedAccount()
+    const names = followedTagNames()
+    if (!acct || !names.length) return []
+    const client = instances.getClient(acct.id)
+    const picks: string[] = []
+    for (let i = 0; i < Math.min(count, names.length); i++) {
+      picks.push(names[(tagCursor + i) % names.length]!)
+    }
+    tagCursor = (tagCursor + picks.length) % Math.max(1, names.length)
+    const pages = await Promise.all(
+      picks.map(async (name) => {
+        try {
+          const list = await client.v1.timelines.tag.$select(encodeURIComponent(name)).list({
+            limit: TAG_LIMIT,
+            ...(tagSince[name] ? { sinceId: tagSince[name] } : {}),
+          })
+          if (list[0]?.id) tagSince[name] = list[0].id
+          return tag(
+            list.map((s) => ({ ...s, _instanceId: acct.id, _instanceUrl: acct.url }) as ExtendedStatus),
+            'tag',
+            name,
+          )
+        } catch (e) {
+          if (httpStatusFrom(e) === 429) rateLimited = true
+          return [] as ExtendedStatus[]
+        }
+      }),
+    )
+    return pages.flat()
+  }
+
+  /** Trending posts on your server — or the public host for guests */
+  const fetchTrends = async (): Promise<ExtendedStatus[]> => {
+    const acct = feedAccount()
+    try {
+      if (acct) {
+        const list = await instances.getClient(acct.id).v1.trends.statuses.list({ limit: TREND_LIMIT })
+        return tag(
+          list.map((s) => ({ ...s, _instanceId: acct.id, _instanceUrl: acct.url }) as ExtendedStatus),
+          'trend',
+        )
+      }
+      const url = resolvePublicInstanceUrl(instances.activeAccount?.url || instances.instances[0]?.url)
+      const list = await publicClient(url).v1.trends.statuses.list({ limit: TREND_LIMIT })
+      const host = hostnameOf(url) || 'public'
+      return tag(
+        list.map((s) => ({ ...s, _instanceId: `public:${host}`, _instanceUrl: url }) as ExtendedStatus),
+        'trend',
+      )
+    } catch {
+      return []
+    }
+  }
 
   const firehoseTargets = () => {
     // Watch every connected server — denser than active-only publicTimelineTargets
@@ -229,12 +423,28 @@ export function useEdwardStream() {
     rateLimited = false
     try {
       void loadAffinity()
-      const page = await fetchFromTargets(SEED_LIMIT)
+      // Followed tags / groups feed the tag source — fetch them alongside
+      if (!groups.followedTags.length) await groups.fetchFollowedTags().catch(() => {})
+      const [page, home, tags, trends] = await Promise.all([
+        fetchFromTargets(SEED_LIMIT),
+        fetchHome(),
+        fetchTags(3),
+        fetchTrends(),
+      ])
       if (gen !== generation) return
-      edward.replaceStatuses(page)
-      refreshSinceCursors()
+      // Everything goes in the backpack; a varied first handful takes the stage
+      pack([...home, ...tags, ...trends, ...page])
+      const stage: ExtendedStatus[] = []
+      while (stage.length < SEED_STAGE) {
+        const next = takeNext()
+        if (!next) break
+        stage.push(next)
+      }
+      syncBackpackCount()
+      edward.replaceStatuses(stage)
+      sinceCursors = newestIdPerInstance(page)
       edward.setSourceCount(firehoseTargets().length || 1)
-      if (!page.length && rateLimited) {
+      if (!stage.length && rateLimited) {
         failStreak += 1
         edward.setError('Your server is rate-limiting us — the stream will fill in shortly.')
       }
@@ -268,19 +478,23 @@ export function useEdwardStream() {
         return
       }
       if (!Object.keys(sinceCursors).length) refreshSinceCursors()
-      const newer = await fetchFromTargets(POLL_LIMIT, { ...sinceCursors }, { since: true })
+      // Backpack already full: skip the firehose this round — easy on rate limits
+      const wantFirehose = backpackSize() < BACKPACK_FULL
+      const [newer, home, tags, trends] = await Promise.all([
+        wantFirehose
+          ? fetchFromTargets(POLL_LIMIT, { ...sinceCursors }, { since: true })
+          : Promise.resolve([] as ExtendedStatus[]),
+        pollCount % HOME_EVERY === 0 ? fetchHome() : Promise.resolve([] as ExtendedStatus[]),
+        fetchTags(1),
+        pollCount % TREND_EVERY === 0 ? fetchTrends() : Promise.resolve([] as ExtendedStatus[]),
+      ])
       if (!edward.active || gen !== generation) return
 
-      const existing = new Set(edward.statuses.map((s) => statusIdentity(s)))
-      const fresh = newer.filter((s) => {
-        const key = statusIdentity(s)
-        return key && !existing.has(key)
-      })
-
-      if (fresh.length) {
-        edward.mergeNewer(fresh)
-        refreshSinceCursors()
+      if (newer.length) {
+        const merged = { ...sinceCursors, ...newestIdPerInstance(newer) }
+        sinceCursors = merged
       }
+      pack([...home, ...tags, ...trends, ...newer])
     } catch {
       // Every server (and the guest fallback) failed — offline, DNS, 5xx.
       // Back off like a 429 instead of retrying at full pace.
@@ -331,6 +545,8 @@ export function useEdwardStream() {
     if (!running || gen !== generation) return
     lastPollAt = Date.now()
     schedule()
+    if (dripTimer) clearTimeout(dripTimer)
+    dripTimer = setTimeout(drip, dripDelay())
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibility)
     }
@@ -346,6 +562,14 @@ export function useEdwardStream() {
       timer = null
     }
     sinceCursors = {}
+    if (dripTimer) {
+      clearTimeout(dripTimer)
+      dripTimer = null
+    }
+    for (const src of Object.keys(backpack) as EdwardSource[]) backpack[src] = []
+    backpackKeys.clear()
+    homeSince = null
+    for (const k of Object.keys(tagSince)) delete tagSince[k]
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', onVisibility)
     }

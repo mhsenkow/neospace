@@ -7,7 +7,7 @@
  */
 
 import { useEdwardStore } from '~/stores/edward'
-import type { EdwardBallDescriptor } from '~/utils/edwardSemantics'
+import { EDWARD_SOURCE_GLYPH, type EdwardBallDescriptor, type EdwardReason } from '~/utils/edwardSemantics'
 import {
   drawEmoticoin,
   faceSpecFor,
@@ -46,6 +46,7 @@ const hoverCard = shallowRef<{
   age: string
   counts: { fav: number; boost: number; reply: number } | null
   accent: string
+  reasons: EdwardReason[]
   /** Flip the card left / up when it would leave the screen */
   flipX: boolean
   flipY: boolean
@@ -55,7 +56,7 @@ const hoverCard = shallowRef<{
 
 /** Readable name + snippet under the most prominent balls (DOM = crisp text) */
 const captions = shallowRef<
-  { id: string; name: string; text: string; accent: string; x: number; y: number; o: number }[]
+  { id: string; name: string; text: string; glyph: string; accent: string; x: number; y: number; o: number }[]
 >([])
 let captionTick = 0
 
@@ -114,6 +115,7 @@ type BallRuntime = {
   createdAt: number
   engagement: number
   counts: { fav: number; boost: number; reply: number } | null
+  reasons: EdwardReason[]
 }
 
 const STREAM_BOTTOM = -18
@@ -327,6 +329,25 @@ const paintPips = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor) => {
   ctx.restore()
 }
 
+/** Feed mark top-left (⌂ home, # your tags, ↑ trending) — firehose stays bare */
+const paintSourceBadge = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor) => {
+  if (!d.source || d.source === 'firehose') return
+  ctx.save()
+  ctx.fillStyle = d.source === 'home' ? '#59d1e0' : d.source === 'tag' ? '#ffe566' : '#ff7eb3'
+  ctx.beginPath()
+  ctx.arc(94, 94, 26, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#1a1420'
+  ctx.lineWidth = 6
+  ctx.stroke()
+  ctx.fillStyle = '#1a1420'
+  ctx.font = `700 30px ${RIM_FONT}`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(EDWARD_SOURCE_GLYPH[d.source], 94, 96)
+  ctx.restore()
+}
+
 const compact = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
 
 const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTexture']> => {
@@ -348,6 +369,7 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
   paintServerDialect(ctx, dialect, seed)
   paintRimText(ctx, d)
   paintPips(ctx, d)
+  paintSourceBadge(ctx, d)
   paintAuthorChip(ctx, d)
 
   const tex = new THREE!.CanvasTexture(canvas)
@@ -367,6 +389,7 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
       paintRimText(ctx, d)
       paintMediaPeek(ctx, img)
       paintPips(ctx, d)
+      paintSourceBadge(ctx, d)
       paintAuthorChip(ctx, d)
       tex.needsUpdate = true
     }
@@ -591,6 +614,7 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     createdAt: d.createdAt,
     engagement: d.engagement,
     counts: d.counts ?? null,
+    reasons: d.reasons ?? [],
   }
 }
 
@@ -604,6 +628,7 @@ const applyAffinityLayout = (b: BallRuntime, d: EdwardBallDescriptor) => {
   b.isShort = d.isShort
   b.shortText = d.shortText
   b.moodWhy = d.moodWhy
+  b.reasons = d.reasons ?? []
   const nearBoost = 1 + Math.max(0, (-lane.z) / 10) * 1.1
   const affBoost = 1 + d.affinity * 0.55 + d.exploreRankNorm * 0.65
   const size = (0.95 + d.size * 1.55) * nearBoost * affBoost
@@ -1045,7 +1070,9 @@ const placeCaptions = (
     r: t.x + Math.min(200, hostW * 0.42) + 18,
     b: t.y + 48,
   }))
-  const out: { id: string; name: string; text: string; accent: string; x: number; y: number; o: number }[] = []
+  const out: { id: string; name: string; text: string; glyph: string; accent: string; x: number; y: number; o: number }[] = []
+  const l = lens.value
+  const lensBox = l ? { l: l.cx - l.w / 2, r: l.cx + l.w / 2, t: l.cy - l.h / 2, b: l.cy + l.h / 2 } : null
   cands.sort((a, b) => b.r - a.r)
   for (const c of cands) {
     if (out.length >= max) break
@@ -1054,12 +1081,16 @@ const placeCaptions = (
     if (y < stageTop || y + CAPTION_H > stageBottom || minX > maxX) continue
     const box = { l: x - CAPTION_W / 2, t: y, r: x + CAPTION_W / 2, b: y + CAPTION_H }
     if (rects.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) continue
+    // The lens subject is in the deck — keep its window clear of labels
+    if (lensBox && box.l < lensBox.r && box.r > lensBox.l && box.t < lensBox.b && box.b > lensBox.t) continue
     rects.push(box)
     const cw = c.b.badges.includes('cw')
     out.push({
       id: c.b.identity,
       name: c.b.label,
       text: cw ? 'content warning' : c.b.preview || (c.b.mediaUrl ? 'picture' : '…'),
+      // The most personal reason leads (♥ you follow, # your tag, ⌂ home…)
+      glyph: c.b.reasons[0]?.kind === 'nuance' ? '' : c.b.reasons[0]?.glyph || '',
       accent: dialectForHost(c.b.host).accent,
       x,
       y,
@@ -1232,6 +1263,7 @@ const projectHover = (b: BallRuntime) => {
     age: ageLabel(b.createdAt),
     counts: b.counts,
     accent: dialectForHost(b.host).accent,
+    reasons: b.reasons,
     flipX: x > rect.width - 300,
     flipY: y > rect.height - 260,
     x,
@@ -1876,7 +1908,7 @@ onUnmounted(() => {
         '--srv': c.accent,
       }"
     >
-      <strong>{{ c.name }}</strong>
+      <strong><em v-if="c.glyph" aria-hidden="true">{{ c.glyph }}</em>{{ c.name }}</strong>
       <span>{{ c.text }}</span>
     </div>
 
@@ -1899,6 +1931,15 @@ onUnmounted(() => {
           <p class="edward-canvas__hover-preview">{{ hoverCard.preview }}</p>
         </div>
       </div>
+      <ul v-if="hoverCard.reasons.length" class="edward-canvas__hover-why">
+        <li
+          v-for="r in hoverCard.reasons"
+          :key="r.text"
+          :class="`edward-canvas__why--${r.kind}`"
+        >
+          <span aria-hidden="true">{{ r.glyph }}</span>{{ r.text }}
+        </li>
+      </ul>
       <div class="edward-canvas__hover-meta">
         <span v-if="hoverCard.counts?.fav">♥ {{ hoverCard.counts.fav }}</span>
         <span v-if="hoverCard.counts?.boost">↻ {{ hoverCard.counts.boost }}</span>
@@ -2137,6 +2178,38 @@ onUnmounted(() => {
   }
 }
 
+/* Why it's here — personal first, then source, then what it's like */
+.edward-canvas__hover-why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.08rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.625rem;
+    letter-spacing: 0.03em;
+    border: 1px solid color-mix(in srgb, #59d1e0 45%, transparent);
+    color: #59d1e0;
+  }
+
+  .edward-canvas__why--you {
+    border-color: color-mix(in srgb, #ff7eb3 60%, transparent);
+    color: #ff7eb3;
+  }
+
+  .edward-canvas__why--nuance {
+    border-color: color-mix(in srgb, #ffe566 40%, transparent);
+    color: #ffe566;
+  }
+}
+
 /* Name + snippet under prominent bubbles — quiet, readable, never interactive */
 .edward-canvas__caption {
   position: absolute;
@@ -2165,6 +2238,12 @@ onUnmounted(() => {
     font-size: 0.625rem;
     letter-spacing: 0.03em;
     color: #ffe566;
+
+    em {
+      margin-right: 0.3em;
+      font-style: normal;
+      color: #ff7eb3;
+    }
   }
 
   span {

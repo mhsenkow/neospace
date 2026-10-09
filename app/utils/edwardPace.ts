@@ -122,14 +122,3 @@ export const EDWARD_RAIL_COLUMN = 204
 export function edwardDeckColumn(viewportW: number): number {
   return Math.round(Math.min(560, Math.max(400, viewportW * 0.27)))
 }
-
-/**
- * How many earlier posts the desktop deck can stack under the hero
- * (hero + up to four = five previews) for a given viewport height.
- */
-export function edwardDeckTrailCount(viewportH: number): number {
-  if (viewportH >= 1000) return 4
-  if (viewportH >= 880) return 3
-  if (viewportH >= 760) return 2
-  return 1
-}
