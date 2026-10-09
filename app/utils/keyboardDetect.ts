@@ -45,6 +45,10 @@ export function measureKeyboard(): KeyboardMeasure {
     Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop),
   )
 
+  // Pinch-zoom shrinks the visual viewport too — without a focused field that's
+  // not a keyboard (docks were lifting / data-keyboard-open flipping while zoomed)
+  if ((vv.scale || 1) > 1.05 && !hasTextFocus()) return { inset: 0, open: false }
+
   // Overlay keyboards
   if (inset >= 100) return { inset, open: true }
 

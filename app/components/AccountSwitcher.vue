@@ -64,8 +64,10 @@ const onTriggerClick = (e: MouseEvent) => {
     return
   }
 
-  // Nav + multi: single tap → profile immediately; double-tap cycles account
-  if (isNav.value && multi.value) {
+  // Nav + multi: single tap → profile immediately; double-tap cycles account.
+  // Pointer taps only (detail > 0): a held / double-pressed Enter fires keyboard
+  // clicks <320ms apart and silently switched the posting account.
+  if (isNav.value && multi.value && e.detail > 0) {
     const now = Date.now()
     if (now - lastTapAt < 320) {
       lastTapAt = 0

@@ -15,6 +15,13 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
+/** Roving tab stop — falls back to the first option so the group stays reachable */
+const tabStop = computed(() =>
+  props.options.some((o) => o.value === props.modelValue)
+    ? props.modelValue
+    : props.options[0]?.value,
+)
+
 function select(value: string) {
   if (value === props.modelValue) return
   emit('update:modelValue', value)
@@ -51,7 +58,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
       class="neo-radio-group__btn"
       role="radio"
       :aria-checked="opt.value === modelValue"
-      :tabindex="opt.value === modelValue ? 0 : -1"
+      :tabindex="opt.value === tabStop ? 0 : -1"
       @click="select(opt.value)"
       @keydown="onKeydown($event, i)"
     >

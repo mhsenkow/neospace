@@ -29,7 +29,10 @@ function readBlob(): SharedBlob {
   try {
     const raw = localStorage.getItem(SUITE_SHARED_KEY)
     const parsed = raw ? JSON.parse(raw) : {}
-    return parsed && typeof parsed === 'object' ? (parsed as SharedBlob) : {}
+    // Arrays are objects too — spreading one into the blob wrote "0","1"… keys
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as SharedBlob)
+      : {}
   } catch {
     return {}
   }

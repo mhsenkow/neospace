@@ -96,8 +96,12 @@ export const useThemeStore = defineStore('theme', {
     /** Persist escape hatch from Settings or ?safe=1 */
     setProfileCssDisabled(disabled: boolean) {
       if (typeof localStorage === 'undefined') return
-      if (disabled) localStorage.setItem('neospace_disable_profile_css', '1')
-      else localStorage.removeItem('neospace_disable_profile_css')
+      try {
+        if (disabled) localStorage.setItem('neospace_disable_profile_css', '1')
+        else localStorage.removeItem('neospace_disable_profile_css')
+      } catch {
+        /* quota / storage blocked — still apply for this session below */
+      }
       if (disabled) this.disableChaosMode()
       else if (this.isChaosMode) this.injectChaos()
     },
@@ -114,8 +118,8 @@ export const useThemeStore = defineStore('theme', {
     },
 
     async loadUserTheme(customCSS: string) {
+      // setUserCustomCSS already (re)injects when chaos mode is on
       this.setUserCustomCSS(customCSS)
-      if (this.isChaosMode) this.injectChaos()
     },
   },
 })

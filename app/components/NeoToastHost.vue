@@ -27,11 +27,17 @@ function onFocusOut(id: number, e: FocusEvent) {
   release(id, 'focus')
 }
 
+/** A removed toast never fires mouseleave / focusout — drop its holds with it */
+function dismiss(id: number) {
+  holds.delete(id)
+  toast.dismiss(id)
+}
+
 function onAction(id: number, fn?: () => void) {
   try {
     fn?.()
   } finally {
-    toast.dismiss(id)
+    dismiss(id)
   }
 }
 </script>
@@ -63,7 +69,7 @@ function onAction(id: number, fn?: () => void) {
             type="button"
             class="neo-toast__dismiss"
             aria-label="Dismiss"
-            @click="toast.dismiss(t.id)"
+            @click="dismiss(t.id)"
           >
             ×
           </button>

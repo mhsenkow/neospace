@@ -783,6 +783,16 @@ select:focus-visible {
   .mobile-header {
     border-color: CanvasText;
   }
+
+  // Selected tabs / segments / current nav mark themselves with box-shadow or a
+  // tinted fill — both are dropped in forced colors, leaving no selected state.
+  // (html prefix outranks the scoped `border: none` resets on these controls)
+  html [role='tab'][aria-selected='true'],
+  html [role='radio'][aria-checked='true'],
+  html [aria-pressed='true'],
+  html :is(a, button)[aria-current]:not([aria-current='false']) {
+    border: 2px solid Highlight;
+  }
 }
 
 // Dialog open: stop background scroll (complement to per-sheet overflow locks)

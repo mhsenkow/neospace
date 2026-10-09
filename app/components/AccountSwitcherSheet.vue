@@ -480,6 +480,8 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--neo-text-muted);
   cursor: pointer;
+  // WCAG 2.5.8 — 11px text + padding was ~21px tall
+  min-height: 24px;
   padding: 0.15rem 0.35rem;
   border-radius: 6px;
 
