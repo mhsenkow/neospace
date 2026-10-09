@@ -150,7 +150,8 @@ const showGroupPicker = computed(
 )
 
 const draftKey = computed(() => {
-  if (props.initialVisibility === 'direct') return 'dm'
+  // Per recipient: one shared 'dm' draft restored "@alice …" over a new message to Bob
+  if (props.initialVisibility === 'direct') return `dm:${(props.initialText || '').trim().toLowerCase()}`
   if (props.inReplyToId) return `reply:${props.inReplyToId}`
   if (props.quoteUrl) return 'quote'
   const tag = props.initialGroupTag?.replace(/^#/, '').trim()
