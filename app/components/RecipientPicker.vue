@@ -94,6 +94,17 @@ watch(query, (q) => {
   search(q)
 })
 
+/*
+ * Search results / the following list land asynchronously. Keep the highlight
+ * on the same person (or drop it) so Enter can't pick whoever slid into that
+ * slot, and aria-activedescendant never points at a removed option.
+ */
+watch(displayAccounts, (next, prev) => {
+  if (listIndex.value < 0) return
+  const activeId = prev?.[listIndex.value]?.id
+  listIndex.value = activeId ? next.findIndex((a) => a.id === activeId) : -1
+})
+
 onMounted(() => {
   void loadFollowing()
 })

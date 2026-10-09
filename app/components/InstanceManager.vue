@@ -68,6 +68,15 @@ const watchServer = async () => {
   }
 }
 
+/** The row (and the button that had focus) is gone — don't drop focus to <body> */
+const keepFocusInDialog = () =>
+  nextTick(() => {
+    const root = modalRef.value
+    if (root && !root.contains(document.activeElement)) {
+      root.querySelector<HTMLElement>('.accounts-close')?.focus()
+    }
+  })
+
 const stopWatching = async (instance: ConnectedInstance) => {
   const ok = await overlayStore.openConfirm({
     title: 'Stop watching?',
@@ -77,6 +86,7 @@ const stopWatching = async (instance: ConnectedInstance) => {
   })
   if (!ok) return
   instancesStore.removeInstance(instance.id)
+  void keepFocusInDialog()
   toastStore.show({ message: `Stopped watching ${instance.name}` })
 }
 
@@ -90,6 +100,7 @@ const removeAccount = async (instance: ConnectedInstance) => {
   })
   if (!ok) return
   await instancesStore.removeAccount(instance.id)
+  void keepFocusInDialog()
   toastStore.show({ message: `Removed ${handle}` })
 }
 
@@ -124,6 +135,7 @@ const signOut = async (instance: ConnectedInstance) => {
   })
   if (!ok) return
   await instancesStore.logoutInstance(instance.id)
+  void keepFocusInDialog()
   toastStore.show({ message: `Signed out of ${instance.name}` })
 }
 
@@ -192,11 +204,14 @@ const isActive = (instance: ConnectedInstance) =>
                   class="account-row"
                   :class="{ 'account-row--active': isActive(instance) }"
                 >
+                  <!-- Decorative: the name is the next thing read -->
                   <img
                     v-if="instance.user?.avatar"
                     :src="instance.user.avatar"
-                    :alt="instance.user.displayName || instance.user.username"
+                    alt=""
                     class="account-row__avatar"
+                    width="40"
+                    height="40"
                   />
                   <div class="account-row__info">
                     <div class="account-row__name-row">
@@ -300,7 +315,10 @@ const isActive = (instance: ConnectedInstance) =>
                     <img
                       v-if="instance.instanceInfo?.thumbnail"
                       :src="instance.instanceInfo.thumbnail"
-                      :alt="instance.name"
+                      alt=""
+                      width="40"
+                      height="40"
+                      loading="lazy"
                     />
                     <span v-else aria-hidden="true">🌐</span>
                   </div>
@@ -529,9 +547,11 @@ const isActive = (instance: ConnectedInstance) =>
   }
 
   &__name {
+    min-width: 0;
     font-size: 0.9375rem;
     font-weight: 600;
     color: var(--neo-text-primary);
+    overflow-wrap: anywhere;
   }
 
   &__badge {

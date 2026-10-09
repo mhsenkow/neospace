@@ -12,6 +12,7 @@ import { useEdwardStore } from '~/stores/edward'
 import { usePostActions } from '~/composables/usePostActions'
 import { activeClient } from '~/composables/useMasto'
 import { stripHtml } from '~/utils/stripHtml'
+import { lookupAcctFor } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
 
 const props = defineProps<{
@@ -140,7 +141,14 @@ const resolveAccountId = async (): Promise<{ client: ReturnType<typeof activeCli
   if (!acct.value) return null
   try {
     const client = activeClient()
-    const found = await client.v1.accounts.lookup({ acct: acct.value })
+    const found = await client.v1.accounts.lookup({
+      acct: lookupAcctFor(
+        acct.value,
+        body.value.account?.url,
+        props.status._instanceUrl,
+        instancesStore.activeAccount?.url,
+      ),
+    })
     return { client, id: found.id }
   } catch {
     return null
@@ -151,15 +159,17 @@ const resolveAccountId = async (): Promise<{ client: ReturnType<typeof activeCli
 const handleGhost = async () => {
   if (!requireAuth() || ghostBusy.value || ghosted.value) return
   ghostBusy.value = true
+  // Captured up front: the deck can swap posts while the lookup is in flight
+  const who = acct.value
+  const postId = props.status.id
   try {
     const ctx = await resolveAccountId()
     if (!ctx) {
       toastStore.show({ message: 'Couldn’t find that account', duration: 3200 })
       return
     }
-    const who = acct.value
     await ctx.client.v1.accounts.$select(ctx.id).mute()
-    ghosted.value = true
+    if (props.status.id === postId) ghosted.value = true
     toastStore.show({ message: `Ghosted @${who}`, duration: 2600 })
     // Out of the stream now, not just on the next refresh
     edward.dropAuthor(who)
@@ -177,15 +187,16 @@ const handleShape = async () => {
     return
   }
   shapeBusy.value = true
+  const who = acct.value
+  const postId = props.status.id
   try {
     const ctx = await resolveAccountId()
     if (!ctx) {
       toastStore.show({ message: 'Couldn’t find that account', duration: 3200 })
       return
     }
-    const who = acct.value
     await ctx.client.v1.accounts.$select(ctx.id).block()
-    shaped.value = true
+    if (props.status.id === postId) shaped.value = true
     toastStore.show({ message: `Shaped @${who}!!`, duration: 2600 })
     edward.dropAuthor(who)
   } catch {

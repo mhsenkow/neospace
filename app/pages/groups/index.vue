@@ -50,8 +50,19 @@ const trendingServerLabel = computed(() => {
 })
 
 const viewGroup = (tag: string) => {
-  router.push(`/groups/${tag}`)
+  router.push(`/groups/${encodeURIComponent(tag)}`)
 }
+
+const hasSearch = computed(() => searchQuery.value.trim().length > 0)
+
+/** One persistent polite region — inserted-with-content regions often go unannounced */
+const searchStatus = computed(() => {
+  if (!hasSearch.value) return ''
+  if (isSearching.value) return 'Searching groups…'
+  const n = searchResults.value.length
+  if (!n) return `No groups match “${searchQuery.value.trim()}”`
+  return `${n} ${n === 1 ? 'group' : 'groups'} found`
+})
 
 const suggestedRailRef = ref<HTMLElement | null>(null)
 const trendingRailRef = ref<HTMLElement | null>(null)
@@ -106,29 +117,22 @@ useHead({
             enterkeyhint="search"
             @keydown.enter="dismissKeyboardOnTouch"
           />
-          <span v-if="isSearching" class="search-loading" role="status" aria-live="polite">Searching…</span>
+          <span v-if="isSearching" class="search-loading" aria-hidden="true">Searching…</span>
         </div>
-        <p
-          v-if="searchQuery.trim() && isSearching"
-          class="sr-only"
-          role="status"
-          aria-live="polite"
-        >
-          Searching groups…
-        </p>
+        <p class="sr-only" role="status" aria-live="polite">{{ searchStatus }}</p>
       </div>
 
       <!-- Search Results -->
-      <section v-if="searchQuery.trim() && isSearching && searchResults.length === 0" class="groups-section">
+      <section v-if="hasSearch && isSearching && searchResults.length === 0" class="groups-section">
         <div class="loading-state" aria-busy="true">
           <FunLoader fill label="Searching groups" />
         </div>
       </section>
 
-      <section v-else-if="searchQuery.trim() && !isSearching && searchResults.length === 0" class="groups-section">
+      <section v-else-if="hasSearch && !isSearching && searchResults.length === 0" class="groups-section">
         <div class="empty-state">
           <span class="empty-emoji" aria-hidden="true">🔍</span>
-          <p>No groups match “{{ searchQuery.trim() }}”.</p>
+          <p class="empty-state__text">No groups match “{{ searchQuery.trim() }}”.</p>
         </div>
       </section>
 
@@ -139,12 +143,11 @@ useHead({
             v-for="group in searchResults"
             :key="group.tag"
             :group="group"
-            @view="viewGroup"
           />
         </div>
       </section>
 
-      <template v-if="!searchQuery">
+      <template v-if="!hasSearch">
         <!-- Your groups — quick jump (Threads hub style) -->
         <section
           v-if="instancesStore.isAuthenticated && joinedGroups.length > 0"
@@ -205,7 +208,6 @@ useHead({
                 :group="group"
                 tile
                 role="listitem"
-                @view="viewGroup"
               />
             </div>
             <button
@@ -245,7 +247,6 @@ useHead({
                 :group="group"
                 tile
                 role="listitem"
-                @view="viewGroup"
               />
             </div>
             <button
@@ -299,7 +300,6 @@ useHead({
               v-for="group in filteredGroups"
               :key="group.tag"
               :group="group"
-              @view="viewGroup"
             />
           </TransitionGroup>
         </section>
@@ -704,6 +704,11 @@ useHead({
 .empty-state {
   align-items: center;
   padding: 2.5rem 1.5rem;
+}
+
+.empty-state__text {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .empty-emoji {

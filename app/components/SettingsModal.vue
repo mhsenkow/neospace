@@ -144,7 +144,8 @@ const confirmDiscard = async () => {
 
 /** Phone/tablet: category list → panel drill-down (replaces icon rail). */
 const isNarrowSettings = useMediaQuery('(max-width: 768px)')
-const mobilePanelOpen = ref(false)
+// open('humans') etc. should land on that panel on phones, not the category list
+const mobilePanelOpen = ref(settingsStore.openedToCategory)
 
 const headerTitle = computed(() => {
   if (isNarrowSettings.value && mobilePanelOpen.value) {
@@ -181,7 +182,7 @@ const trySetCategory = async (categoryId: string) => {
 }
 
 watch(isOpen, (open) => {
-  if (open) mobilePanelOpen.value = false
+  if (open) mobilePanelOpen.value = settingsStore.openedToCategory
 })
 
 watch(isNarrowSettings, (narrow) => {
@@ -237,16 +238,16 @@ const flipSizeOptions = [
 
 // Watch for settings load to populate forms
 watch(() => settingsStore.account, (account) => {
-  if (account) {
-    profileForm.displayName = account.displayName || ''
-    const sourceNote = (account as { source?: { note?: string } }).source?.note
-    profileForm.note =
-      typeof sourceNote === 'string' ? sourceNote : stripHtml(account.note || '')
-    profileForm.locked = account.locked || false
-    profileForm.bot = account.bot || false
-    profileForm.discoverable = account.discoverable !== false
-    syncProfileBaseline()
-  }
+  // Cleared on account switch — drop the previous account's name/bio so they
+  // can't be saved onto the newly active account
+  profileForm.displayName = account?.displayName || ''
+  const sourceNote = (account as { source?: { note?: string } } | null)?.source?.note
+  profileForm.note =
+    typeof sourceNote === 'string' ? sourceNote : stripHtml(account?.note || '')
+  profileForm.locked = account?.locked || false
+  profileForm.bot = account?.bot || false
+  profileForm.discoverable = account ? account.discoverable !== false : true
+  syncProfileBaseline()
 }, { immediate: true })
 
 watch(
@@ -300,29 +301,54 @@ watch(
 
 watch(
   () => instancesStore.activeAccountId,
-  () => {
+  async () => {
     settingsStore.clearModerationLists()
     privacyListsLoaded.value = false
+    if (!isOpen.value) return
+    await settingsStore.loadSettings()
+    if (settingsStore.activeCategory === 'privacy' && !privacyListsLoaded.value) {
+      privacyListsLoaded.value = true
+      await Promise.all([
+        settingsStore.loadMutedAccounts(),
+        settingsStore.loadBlockedAccounts(),
+        settingsStore.loadBlockedDomains(),
+      ])
+    }
   },
 )
 
 // Save handlers
 const saveProfile = async () => {
-  if (profileFormInvalid.value) return
-  await settingsStore.updateProfile({
-    displayName: profileForm.displayName,
-    note: profileForm.note,
-    bot: profileForm.bot,
-    discoverable: profileForm.discoverable,
-  })
+  if (profileFormInvalid.value || !settingsStore.account) return
+  try {
+    await settingsStore.updateProfile({
+      displayName: profileForm.displayName,
+      note: profileForm.note,
+      bot: profileForm.bot,
+      discoverable: profileForm.discoverable,
+    })
+  } catch {
+    // store.error is shown above the form — keep the edits so the user can retry
+    return
+  }
   syncProfileBaseline()
   settingsStore.clearSuccess()
 }
 
 const savePrivacy = async () => {
-  await settingsStore.updateProfile({ locked: profileForm.locked })
+  if (!settingsStore.account) return
+  try {
+    await settingsStore.updateProfile({ locked: profileForm.locked })
+  } catch {
+    return
+  }
   syncProfileBaseline()
   settingsStore.clearSuccess()
+}
+
+/** Moderation actions set store.error on failure — don't leak unhandled rejections */
+const runModeration = (action: () => Promise<unknown>) => {
+  action().catch(() => {})
 }
 
 const confirmDeleteFilter = async (filterId: string, title: string) => {
@@ -333,7 +359,7 @@ const confirmDeleteFilter = async (filterId: string, title: string) => {
     danger: true,
   })
   if (!ok) return
-  await settingsStore.deleteFilter(filterId)
+  runModeration(() => settingsStore.deleteFilter(filterId))
 }
 
 const savePostingDefaults = () => {
@@ -396,6 +422,15 @@ const clearThemePreview = () => {
   settingsStore.applyLocalAppearance()
 }
 
+// Closing (Escape) or leaving Appearance unmounts the swatch under the pointer
+// without a mouseleave — don't leave the whole app stuck on the previewed theme
+watch(
+  () => [isOpen.value, settingsStore.activeCategory, mobilePanelOpen.value] as const,
+  () => {
+    if (hoveredTheme.value) clearThemePreview()
+  },
+)
+
 const resetAppearance = () => {
   settingsStore.resetAppearance()
   Object.assign(appearanceForm, settingsStore.localPreferences)
@@ -409,8 +444,12 @@ const exportAppearance = () => {
   a.href = url
   a.download = 'neospace-appearance.json'
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoking synchronously can cancel the download in Safari / Firefox
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+/** Appearance JSON is a dozen short keys — anything bigger is the wrong file */
+const APPEARANCE_IMPORT_MAX_BYTES = 64 * 1024
 
 const importAppearanceInput = ref<HTMLInputElement | null>(null)
 
@@ -419,8 +458,16 @@ const importAppearance = async (event: Event) => {
   const file = input.files?.[0]
   if (!file) return
   try {
+    if (file.size > APPEARANCE_IMPORT_MAX_BYTES) {
+      throw new Error('That file is too large to be a NeoSpace appearance export')
+    }
     const text = await file.text()
-    settingsStore.importAppearanceJson(text)
+    try {
+      settingsStore.importAppearanceJson(text)
+    } catch (e) {
+      // JSON.parse messages ("Unexpected token…") mean nothing to people
+      throw e instanceof SyntaxError ? new Error('That file isn’t valid appearance JSON') : e
+    }
     Object.assign(appearanceForm, settingsStore.localPreferences)
     toastStore.show({ message: 'Appearance imported', duration: 2500 })
   } catch (e) {
@@ -655,9 +702,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 <FunLoader fill label="Loading settings" />
               </div>
 
+              <!-- Persistent live region: a role=status node inserted with its text
+                   is often not announced, and the banner may be scrolled out of view -->
+              <p class="sr-only" role="status">
+                {{ settingsStore.saveSuccess ? 'Settings saved' : '' }}
+              </p>
+
               <!-- Success message -->
               <Transition name="fade">
-                <div v-if="settingsStore.saveSuccess" class="settings-success" role="status">
+                <div v-if="settingsStore.saveSuccess" class="settings-success">
                   <span aria-hidden="true">✓</span> Settings saved successfully
                 </div>
               </Transition>
@@ -665,9 +718,19 @@ const fontPreviewStack = (fontId: NeoFontId) => {
               <!-- Error message -->
               <div v-if="settingsStore.error" class="settings-error" role="alert">
                 <span aria-hidden="true">⚠️</span> {{ settingsStore.error }}
+                <button
+                  v-if="!settingsStore.account && !settingsStore.isLoading"
+                  type="button"
+                  class="settings-btn settings-btn--small settings-btn--ghost settings-error__retry"
+                  @click="settingsStore.loadSettings()"
+                >
+                  Retry
+                </button>
               </div>
 
-              <template v-else>
+              <!-- A failed save keeps the panel (and the user's edits) visible; only a
+                   failed load hides it, so empty forms can't be saved over the account -->
+              <template v-if="!settingsStore.error || settingsStore.account">
               <!-- Profile Settings -->
               <section v-if="settingsStore.activeCategory === 'profile'" class="settings-section">
                 <div class="settings-section__header">
@@ -756,7 +819,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                 <div class="settings-actions">
                   <button 
                     class="settings-btn settings-btn--primary"
-                    :disabled="settingsStore.isSaving || profileFormInvalid || !profileDirty"
+                    :disabled="settingsStore.isSaving || profileFormInvalid || !profileDirty || !settingsStore.account"
                     @click="saveProfile"
                   >
                     {{ settingsStore.isSaving ? 'Saving...' : 'Save Changes' }}
@@ -793,7 +856,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                   <div class="settings-actions" style="margin-top: 1rem;">
                     <button
                       class="settings-btn settings-btn--primary"
-                      :disabled="settingsStore.isSaving || !privacyDirty"
+                      :disabled="settingsStore.isSaving || !privacyDirty || !settingsStore.account"
                       @click="savePrivacy"
                     >
                       {{ settingsStore.isSaving ? 'Saving...' : 'Save Privacy' }}
@@ -826,8 +889,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small"
+                        type="button"
+                        :aria-label="`Unmute @${account.acct}`"
                         :disabled="settingsStore.isModerationPending('unmute', account.id)"
-                        @click="settingsStore.unmuteAccount(account.id)"
+                        @click="runModeration(() => settingsStore.unmuteAccount(account.id))"
                       >
                         {{ settingsStore.isModerationPending('unmute', account.id) ? 'Unmuting…' : 'Unmute' }}
                       </button>
@@ -870,8 +935,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small"
+                        type="button"
+                        :aria-label="`Unblock @${account.acct}`"
                         :disabled="settingsStore.isModerationPending('unblock', account.id)"
-                        @click="settingsStore.unblockAccount(account.id)"
+                        @click="runModeration(() => settingsStore.unblockAccount(account.id))"
                       >
                         {{ settingsStore.isModerationPending('unblock', account.id) ? 'Unblocking…' : 'Unblock' }}
                       </button>
@@ -925,8 +992,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                         </div>
                         <button
                           class="settings-btn settings-btn--small"
+                          type="button"
+                          :aria-label="`Unblock ${domain}`"
                           :disabled="settingsStore.isModerationPending('unblock-domain', domain)"
-                          @click="settingsStore.unblockDomain(domain)"
+                          @click="runModeration(() => settingsStore.unblockDomain(domain))"
                         >
                           {{ settingsStore.isModerationPending('unblock-domain', domain) ? 'Unblocking…' : 'Unblock' }}
                         </button>
@@ -1228,6 +1297,8 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                         type="file"
                         accept="application/json,.json"
                         class="settings-file-input"
+                        tabindex="-1"
+                        aria-hidden="true"
                         @change="importAppearance"
                       />
                     </div>
@@ -1394,6 +1465,8 @@ const fontPreviewStack = (fontId: NeoFontId) => {
                       </div>
                       <button 
                         class="settings-btn settings-btn--small settings-btn--danger"
+                        type="button"
+                        :aria-label="`Delete filter ${filter.title}`"
                         :disabled="settingsStore.isModerationPending('delete-filter', filter.id)"
                         @click="confirmDeleteFilter(filter.id, filter.title)"
                       >
@@ -1921,6 +1994,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
 .settings-error {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
@@ -1930,6 +2004,12 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   border-radius: 8px;
   color: var(--neo-danger);
   font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+
+  &__retry {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
 }
 
 // Section
@@ -2963,6 +3043,8 @@ label:has(> .settings-radio-hidden:focus-visible) {
 
 .settings-filter-info {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 0.125rem;

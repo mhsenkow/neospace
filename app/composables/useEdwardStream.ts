@@ -3,7 +3,7 @@
  * Hits every connected instance's public federated (+ local) timelines when possible.
  */
 
-import { useEdwardStore, EDWARD_MAX_BALLS } from '~/stores/edward'
+import { useEdwardStore, EDWARD_MAX_BALLS, newestIdPerInstance } from '~/stores/edward'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import { statusIdentity, dedupeStatusesByIdentity } from '~/utils/statusIdentity'
@@ -55,15 +55,14 @@ export function useEdwardStream() {
     return instances.publicTimelineTargets()
   }
 
+  /**
+   * Bumped by stop(): a seed / poll still in flight from a previous session
+   * (or before an account switch) must not write into the next one.
+   */
+  let generation = 0
+
   const refreshSinceCursors = () => {
-    const next: Record<string, string> = {}
-    for (const s of edward.statuses) {
-      const id = s._instanceId
-      if (!id || next[id]) continue
-      // statuses are newest-first; first seen per instance is the since cursor
-      next[id] = s.id
-    }
-    sinceCursors = next
+    sinceCursors = newestIdPerInstance(edward.statuses)
   }
 
   const fetchFromTargets = async (
@@ -149,6 +148,7 @@ export function useEdwardStream() {
   const loadAffinity = async () => {
     if (affinityLoaded) return
     affinityLoaded = true
+    const gen = generation
     const ctx: EdwardAffinityContext = emptyAffinityContext()
     const user = instances.currentUser
     if (!user) {
@@ -218,17 +218,19 @@ export function useEdwardStream() {
     }
 
     affinityCache = { userKey, at: Date.now(), ctx }
-    if (!running) return
+    if (!running || gen !== generation) return
     edward.setAffinity(ctx)
   }
 
   const seed = async () => {
+    const gen = generation
     edward.setLoading(true)
     edward.setError(null)
     rateLimited = false
     try {
       void loadAffinity()
       const page = await fetchFromTargets(SEED_LIMIT)
+      if (gen !== generation) return
       edward.replaceStatuses(page)
       refreshSinceCursors()
       edward.setSourceCount(firehoseTargets().length || 1)
@@ -237,11 +239,12 @@ export function useEdwardStream() {
         edward.setError('Your server is rate-limiting us — the stream will fill in shortly.')
       }
     } catch (e: unknown) {
+      if (gen !== generation) return
       const msg = e instanceof Error ? e.message : 'Failed to load thought stream'
       edward.setError(msg)
       edward.replaceStatuses([])
     } finally {
-      edward.setLoading(false)
+      if (gen === generation) edward.setLoading(false)
     }
   }
 
@@ -255,6 +258,8 @@ export function useEdwardStream() {
     lastPollAt = Date.now()
     rateLimited = false
     pollCount += 1
+    const gen = generation
+    let failed = false
     // Re-seeding manages its own backoff bookkeeping
     const reseeding = !edward.statuses.length
     try {
@@ -264,7 +269,7 @@ export function useEdwardStream() {
       }
       if (!Object.keys(sinceCursors).length) refreshSinceCursors()
       const newer = await fetchFromTargets(POLL_LIMIT, { ...sinceCursors }, { since: true })
-      if (!edward.active) return
+      if (!edward.active || gen !== generation) return
 
       const existing = new Set(edward.statuses.map((s) => statusIdentity(s)))
       const fresh = newer.filter((s) => {
@@ -277,10 +282,15 @@ export function useEdwardStream() {
         refreshSinceCursors()
       }
     } catch {
-      /* soft-fail — backoff below */
+      // Every server (and the guest fallback) failed — offline, DNS, 5xx.
+      // Back off like a 429 instead of retrying at full pace.
+      failed = true
     } finally {
-      inFlight = false
-      if (!reseeding) failStreak = rateLimited ? failStreak + 1 : 0
+      // A stale poll must not clear the next run's in-flight flag / backoff
+      if (gen === generation) {
+        inFlight = false
+        if (!reseeding) failStreak = rateLimited || failed ? failStreak + 1 : 0
+      }
     }
   }
 
@@ -290,10 +300,12 @@ export function useEdwardStream() {
 
   const schedule = () => {
     if (!running) return
+    const gen = generation
     timer = setTimeout(async () => {
       timer = null
       await poll()
-      schedule()
+      // stop() (+ start()) while this poll was in flight: the new run has its own loop
+      if (gen === generation) schedule()
     }, nextDelay())
   }
 
@@ -314,8 +326,9 @@ export function useEdwardStream() {
     failStreak = 0
     edward.clearStatuses()
     edward.setAffinity(emptyAffinityContext())
+    const gen = generation
     await seed()
-    if (!running) return
+    if (!running || gen !== generation) return
     lastPollAt = Date.now()
     schedule()
     if (typeof document !== 'undefined') {
@@ -325,6 +338,8 @@ export function useEdwardStream() {
 
   const stop = () => {
     running = false
+    generation += 1
+    inFlight = false
     affinityLoaded = false
     if (timer) {
       clearTimeout(timer)

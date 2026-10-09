@@ -227,6 +227,16 @@ watch(canView, (ok) => {
   }
 })
 
+// Switching accounts keeps canView true — reload so the old inbox isn't shown until the next poll
+watch(
+  () => instancesStore.activeAccountId,
+  (id, prev) => {
+    if (!canView.value || !id || id === prev) return
+    searchQuery.value = ''
+    void refreshInbox()
+  },
+)
+
 const goHome = () => {
   void router.push('/')
 }

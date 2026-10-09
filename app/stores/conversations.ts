@@ -5,10 +5,10 @@
 
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
-import { activeClient } from '~/composables/useMasto'
+import { activeClient, clientFor } from '~/composables/useMasto'
 import { useInstancesStore } from './instances'
 import { logWarn } from '~/utils/log'
-import { findExactOneToOne } from '~/utils/dmHelpers'
+import { findExactOneToOne, stripLeadingMentionText } from '~/utils/dmHelpers'
 import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
 
 const PAGE_LIMIT = 40
@@ -40,15 +40,14 @@ let listAccountId: string | null = null
 /** previewFor runs per row per render — memoize by status (objects are replaced on update) */
 const previewCache = new WeakMap<object, string>()
 
-/** Strip leading @mentions from DM preview text */
-function previewText(html: string, participantAccts: string[]): string {
-  let text = stripHtml(html)
-  for (const acct of participantAccts) {
-    const handle = acct.startsWith('@') ? acct : `@${acct}`
-    const re = new RegExp(`^${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i')
-    text = text.replace(re, '').trim()
-  }
-  return text
+/**
+ * The inbox belongs to the active account. activeClient() honours a page's
+ * read-account override (status/profile opened from another account's
+ * notification) — polling through it would merge that account's DMs in here.
+ */
+function inboxClient(): mastodon.rest.Client {
+  const id = useInstancesStore().activeAccountId
+  return id ? clientFor(id) : activeClient()
 }
 
 export const useConversationsStore = defineStore('conversations', {
@@ -99,7 +98,7 @@ export const useConversationsStore = defineStore('conversations', {
       }
       this.error = null
       try {
-        const client = activeClient()
+        const client = inboxClient()
         const items = await client.v1.conversations.list({
           limit: PAGE_LIMIT,
         })
@@ -144,7 +143,7 @@ export const useConversationsStore = defineStore('conversations', {
       this.loadMoreError = null
       const seq = fetchSeq
       try {
-        const client = activeClient()
+        const client = inboxClient()
         const items = await client.v1.conversations.list({
           limit: PAGE_LIMIT,
           maxId: last.id,
@@ -174,7 +173,7 @@ export const useConversationsStore = defineStore('conversations', {
     async markRead(conversationId: string) {
       this.markReadLocal(conversationId)
       try {
-        const client = activeClient()
+        const client = inboxClient()
         const updated = await client.v1.conversations.$select(conversationId).read()
         const idx = this.conversations.findIndex((c) => c.id === conversationId)
         if (idx !== -1) {
@@ -218,7 +217,7 @@ export const useConversationsStore = defineStore('conversations', {
 
     async remove(conversationId: string) {
       try {
-        const client = activeClient()
+        const client = inboxClient()
         await client.v1.conversations.$select(conversationId).remove()
         this.conversations = this.conversations.filter((c) => c.id !== conversationId)
       } catch (e: unknown) {
@@ -236,8 +235,12 @@ export const useConversationsStore = defineStore('conversations', {
       if (!status?.content) return 'No messages yet'
       let clipped = previewCache.get(status)
       if (clipped === undefined) {
-        const participantAccts = (c.accounts || []).map((a) => a.acct).filter(Boolean)
-        clipped = clipGraphemes(previewText(status.content, participantAccts), 120)
+        // Incoming DMs open with "@me" — strip our own handle too
+        const participantAccts = [...(c.accounts || []).map((a) => a.acct), myAcct || '']
+        clipped = clipGraphemes(
+          stripLeadingMentionText(stripHtml(status.content), participantAccts),
+          120,
+        )
         previewCache.set(status, clipped)
       }
       const mine =

@@ -111,6 +111,28 @@ function hostOf(url?: string | null): string | null {
 }
 
 /**
+ * Handle to look an author up by on *your* server. `account.acct` is relative
+ * to the server that served the post: a local `bob` on the source server is a
+ * different person from `bob` on yours, so a bare lookup there would follow /
+ * mute / block the wrong account. Qualify with the profile's host (else the
+ * source server's) unless the post came from your own server.
+ */
+export function lookupAcctFor(
+  acct: string | null | undefined,
+  accountUrl: string | null | undefined,
+  sourceUrl: string | null | undefined,
+  activeUrl: string | null | undefined,
+): string {
+  const a = (acct || '').replace(/^@/, '').trim()
+  if (!a || a.includes('@')) return a
+  const sourceHost = hostOf(sourceUrl)?.toLowerCase() || null
+  const activeHost = hostOf(activeUrl)?.toLowerCase() || null
+  if (sourceHost && sourceHost === activeHost) return a
+  const host = hostOf(accountUrl)?.toLowerCase() || sourceHost
+  return host ? `${a}@${host}` : a
+}
+
+/**
  * Bot faces track Mastodon's `account.bot` flag, plus obvious self-marks
  * in handle / display name (e.g. `_bot`, `[bot]`). Unmarked stealth bots
  * will still slip through — that's a fediverse limit, not a face bug.

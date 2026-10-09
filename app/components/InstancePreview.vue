@@ -41,11 +41,21 @@ const registrationState = computed(() => {
   return 'unknown' as const
 })
 
+/** `registrations.url` comes from the remote server — only follow http(s) */
+const safeRemoteUrl = (raw: string | null | undefined): string | null => {
+  if (!raw) return null
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null
+  } catch {
+    return null
+  }
+}
+
 const signupUrl = computed(() => {
   const d = domain.value
   if (!d) return '#'
-  const url = instanceInfo.value?.registrationsUrl
-  return url || `https://${d}/auth/sign_up`
+  return safeRemoteUrl(instanceInfo.value?.registrationsUrl) || `https://${d}/auth/sign_up`
 })
 
 const close = () => {
@@ -191,7 +201,7 @@ const formatDate = (dateStr: string) => {
               Local Timeline
             </h3>
 
-            <div v-if="instancesStore.previewLoading" class="loading">
+            <div v-if="instancesStore.previewLoading" class="loading" role="status">
               <div class="spinner"></div>
               <span>Loading timeline...</span>
             </div>
@@ -206,10 +216,14 @@ const formatDate = (dateStr: string) => {
                 :key="status.id"
                 class="preview-post"
               >
-                <img 
-                  :src="status.account.avatar" 
-                  :alt="status.account.displayName"
+                <!-- Name is printed beside it — alt would just repeat it -->
+                <img
+                  :src="status.account.avatar"
+                  alt=""
                   class="avatar"
+                  width="40"
+                  height="40"
+                  loading="lazy"
                 />
                 <div class="post-content">
                   <div class="post-header">
@@ -226,6 +240,9 @@ const formatDate = (dateStr: string) => {
                       :key="media.id"
                       :src="media.previewUrl"
                       :alt="media.description || 'Media'"
+                      width="80"
+                      height="80"
+                      loading="lazy"
                     />
                   </div>
                 </div>
@@ -319,6 +336,7 @@ const formatDate = (dateStr: string) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
   padding: 1.5rem 2rem;
   background: var(--neo-preview-accent);
   color: var(--neo-text-on-accent);
@@ -328,6 +346,13 @@ const formatDate = (dateStr: string) => {
   display: flex;
   align-items: center;
   gap: 1rem;
+  min-width: 0;
+
+  // Remote-supplied title / long hostnames
+  > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 
   .emoji {
     font-size: 2.5rem;
@@ -354,6 +379,7 @@ const formatDate = (dateStr: string) => {
 }
 
 .close-btn {
+  flex-shrink: 0;
   background: color-mix(in srgb, var(--neo-text-on-accent) 20%, transparent);
   border: none;
   border-radius: 50%;
@@ -385,7 +411,8 @@ const formatDate = (dateStr: string) => {
 
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  // Three fixed columns squeezed "REGISTRATION" into its neighbour at 320px
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
   gap: 1rem;
   margin-bottom: 1.25rem;
 }
@@ -513,6 +540,7 @@ const formatDate = (dateStr: string) => {
   align-items: baseline;
   gap: 0.5rem;
   margin-bottom: 0.25rem;
+  overflow-wrap: anywhere;
 
   strong {
     color: var(--neo-text-primary);
@@ -674,8 +702,10 @@ const formatDate = (dateStr: string) => {
   }
 }
 
-// Phones: full-bleed sheet — 2rem gutters left ~230px for posts at 360px wide
-@media (max-width: 600px) {
+// Phones: full-bleed sheet — 2rem gutters left ~230px for posts at 360px wide.
+// Short viewports (landscape phones, 200% zoom) too: the fixed-height card
+// clipped the footer actions off the bottom with no way to scroll to them.
+@media (max-width: 600px), (max-height: 560px) {
   .preview-overlay {
     padding: 0;
     align-items: stretch;

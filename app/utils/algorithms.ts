@@ -53,13 +53,18 @@ export const ALGORITHM_SOURCES: { value: AlgorithmSource; label: string; needsAu
 
 const TAG_RE = /^[a-z0-9_]+$/i
 
+/**
+ * Lists arrive from share links and localStorage — untrusted. Keep only
+ * strings so a crafted `{"it":[1]}` can't throw inside `.replace` / `.trim`.
+ */
+function stringParts(raw: unknown, split: RegExp): string[] {
+  if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === 'string')
+  if (typeof raw !== 'string') return []
+  return raw.split(split).filter(Boolean)
+}
+
 export function normalizeTagList(raw: string | string[] | undefined): string[] {
-  const parts = Array.isArray(raw)
-    ? raw
-    : (raw || '')
-        .split(/[\s,]+/)
-        .map((t) => t.replace(/^#/, '').trim().toLowerCase())
-        .filter(Boolean)
+  const parts = stringParts(raw, /[\s,]+/)
   const out: string[] = []
   const seen = new Set<string>()
   for (const t of parts) {
@@ -73,12 +78,7 @@ export function normalizeTagList(raw: string | string[] | undefined): string[] {
 }
 
 export function normalizeKeywordList(raw: string | string[] | undefined): string[] {
-  const parts = Array.isArray(raw)
-    ? raw
-    : (raw || '')
-        .split(/[,]+/)
-        .map((k) => k.trim())
-        .filter(Boolean)
+  const parts = stringParts(raw, /[,]+/)
   const out: string[] = []
   const seen = new Set<string>()
   for (const k of parts) {
@@ -198,6 +198,10 @@ export function decodeAlgorithmShare(raw: string): AlgorithmSharePayload | null 
     const parsed = JSON.parse(json) as AlgorithmSharePayload
     if (parsed?.v !== 1 || typeof parsed.n !== 'string' || !parsed.n.trim()) return null
     if (parsed.s !== 'home' && parsed.s !== 'local' && parsed.s !== 'federated') return null
+    // Optional text fields get `.trim()`ed on import — drop anything that isn't a string
+    for (const key of ['d', 'a', 'an'] as const) {
+      if (parsed[key] !== undefined && typeof parsed[key] !== 'string') delete parsed[key]
+    }
     return parsed
   } catch {
     return null
@@ -218,8 +222,9 @@ export function sharePayloadToRecipe(payload: AlgorithmSharePayload, id?: string
     excludeTags: normalizeTagList(payload.et),
     includeKeywords: normalizeKeywordList(payload.ik),
     excludeKeywords: normalizeKeywordList(payload.ek),
-    authorAcct: payload.a?.trim() || undefined,
-    authorName: payload.an?.trim() || undefined,
+    // Encode caps these at 80; a hand-built link may not
+    authorAcct: payload.a?.trim().slice(0, 80) || undefined,
+    authorName: payload.an?.trim().slice(0, 80) || undefined,
     createdAt: now,
     updatedAt: now,
   }

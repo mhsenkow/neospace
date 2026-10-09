@@ -20,6 +20,7 @@ import { stripHtml } from '~/utils/stripHtml'
 import { emojify } from '~/utils/emojify'
 import { notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { participantLabel } from '~/utils/dmHelpers'
+import { useColumnDnd } from '~/composables/useColumnDnd'
 
 interface Props {
   column: ColumnConfig
@@ -53,36 +54,12 @@ const emit = defineEmits<{
   focus: []
 }>()
 
-const onColumnDragStart = (e: DragEvent) => {
-  if (!props.canReorder) return
-  e.dataTransfer?.setData('text/plain', props.column.id)
-  e.dataTransfer?.setData('application/x-neospace-column', props.column.id)
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-  emit('column-drag-start', props.column.id)
-}
-
-const onColumnDragEnd = () => {
-  emit('column-drag-end')
-}
-
-const onColumnDragOver = (e: DragEvent) => {
-  if (!props.canReorder) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  emit('column-drag-over', props.column.id)
-}
-
-const onColumnDrop = (e: DragEvent) => {
-  if (!props.canReorder) return
-  e.preventDefault()
-  const fromId =
-    e.dataTransfer?.getData('application/x-neospace-column') ||
-    e.dataTransfer?.getData('text/plain')
-  if (fromId && fromId !== props.column.id) {
-    emit('column-drop', fromId)
-  }
-  emit('column-drag-end')
-}
+// Drop target for the whole column; the drag handle itself lives in ColumnChrome
+const { onColumnDragOver, onColumnDrop } = useColumnDnd(
+  () => props.column.id,
+  emit,
+  () => props.canReorder,
+)
 
 const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
@@ -279,6 +256,9 @@ const loadRemoteProfile = async () => {
   }
 }
 
+/** Newer status loads (refresh or another peek) supersede older ones */
+let remoteStatusesGen = 0
+
 const loadRemoteStatuses = async (refresh = false) => {
   const account = remoteAccount.value
   if (!account || !instancesStore.hasAuthenticatedInstance) return
@@ -287,6 +267,7 @@ const loadRemoteStatuses = async (refresh = false) => {
     remoteMaxId.value = null
     remoteHasMore.value = true
   }
+  const gen = ++remoteStatusesGen
   remoteLoadingStatuses.value = true
   try {
     const client = activeClient()
@@ -295,13 +276,16 @@ const loadRemoteStatuses = async (refresh = false) => {
       maxId: remoteMaxId.value || undefined,
       excludeReplies: true,
     })
+    // The peek moved to someone else meanwhile — don't append their posts here
+    if (gen !== remoteStatusesGen || remoteAccount.value?.id !== account.id) return
     remoteStatuses.value = refresh ? page : [...remoteStatuses.value, ...page]
     if (page.length > 0) remoteMaxId.value = page[page.length - 1]!.id
     remoteHasMore.value = page.length === 20
   } catch (e: any) {
+    if (gen !== remoteStatusesGen) return
     remoteError.value = e?.message || 'Couldn’t load posts'
   } finally {
-    remoteLoadingStatuses.value = false
+    if (gen === remoteStatusesGen) remoteLoadingStatuses.value = false
   }
 }
 
@@ -557,7 +541,7 @@ onUnmounted(() => {
           aria-label="Back to previous feed"
           @click="exitPeek"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
@@ -576,7 +560,7 @@ onUnmounted(() => {
           @pointerdown.stop
           @click.stop="onFocusClick"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <polyline points="15 3 21 3 21 9" />
             <polyline points="9 21 3 21 3 15" />
             <line x1="21" y1="3" x2="14" y2="10" />
@@ -594,7 +578,7 @@ onUnmounted(() => {
           @pointerdown.stop
           @click.stop="emit('remove')"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -925,11 +909,10 @@ onUnmounted(() => {
               class="row-btn"
               @click="openNotification(notif)"
             >
-              <span
-                v-if="notificationsStore.isUnread(notif)"
-                class="row-btn__unread"
-                aria-label="Unread"
-              />
+              <!-- aria-label is ignored on a plain span — carry it as hidden text -->
+              <span v-if="notificationsStore.isUnread(notif)" class="row-btn__unread">
+                <span class="sr-only">Unread</span>
+              </span>
               <span class="row-btn__badge"><NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" /></span>
               <span>
                 <strong class="row-btn__name">{{ notif.account?.displayName || notif.account?.username }}</strong>

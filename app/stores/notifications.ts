@@ -3,7 +3,7 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { logWarn } from '~/utils/log'
-import { idGreater } from '~/utils/compareId'
+import { compareId, idGreater } from '~/utils/compareId'
 import {
   collapseConsecutiveNotifications,
   type CollapsedNotification,
@@ -84,6 +84,11 @@ function tagNotification(
  * before the read marker moved can't land afterwards and resurrect the badge.
  */
 let badgeSeq = 0
+
+/** Newest-first by time; id breaks ties so equal timestamps keep a stable order */
+function byNewest(a: ExtendedNotification, b: ExtendedNotification): number {
+  return b._tsMs - a._tsMs || compareId(b.id, a.id)
+}
 
 function linkHasNext(headers: Headers): boolean {
   const link = headers.get('Link') || headers.get('link')
@@ -280,9 +285,20 @@ export const useNotificationsStore = defineStore('notifications', {
           authed.map(async (inst) => {
             try {
               const client = clientFor(inst.id)
-              const res = await client.v1.notifications.list.$raw({ limit: 30 })
+              const [res, marker] = await Promise.all([
+                client.v1.notifications.list.$raw({ limit: 30 }),
+                // Server read marker — moved by other clients and by markAllRead
+                client.v1.markers
+                  .fetch({ timeline: ['notifications'] })
+                  .catch(() => null),
+              ])
               const items = res.data
-              if (items.length && !this.lastReadByInstance[inst.id]) {
+              const serverLast = marker?.notifications?.lastReadId
+              const localLast = this.lastReadByInstance[inst.id]
+              if (serverLast && (!localLast || idGreater(serverLast, localLast))) {
+                // Read elsewhere (another client / device) — don't show them as unread here
+                this.persistLastRead(inst.id, serverLast)
+              } else if (items.length && !localLast) {
                 this.persistLastRead(inst.id, items[0]!.id)
               }
               return {
@@ -333,7 +349,7 @@ export const useNotificationsStore = defineStore('notifications', {
         if (gen !== this.fetchGeneration) return
 
         this.failedHosts = failed
-        merged.sort((a, b) => b._tsMs - a._tsMs)
+        merged.sort(byNewest)
         this.notifications = merged
         this.cursors = nextCursors
         this.hasMore = anyHasNext
@@ -421,7 +437,8 @@ export const useNotificationsStore = defineStore('notifications', {
 
         if (fresh.length) {
           // Accounts page independently — re-sort so 'all'/'newest' stays chronological
-          this.notifications = [...this.notifications, ...fresh].sort((a, b) => b._tsMs - a._tsMs)
+          this.notifications = [...this.notifications, ...fresh].sort(byNewest)
+          this.recomputeUnread()
         }
         this.cursors = nextCursors
         this.hasMore = anyHasNext && Object.keys(nextCursors).length > 0
@@ -441,16 +458,20 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     async markAllRead() {
-      badgeSeq += 1
-      const sorted = [...this.notifications].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )
+      // Highest id per account (ids, not timestamps, are what markers compare)
       const byInstance = new Map<string, string>()
-      for (const n of sorted) {
-        if (!byInstance.has(n._instanceId)) {
-          byInstance.set(n._instanceId, n.id)
-        }
+      for (const n of this.notifications) {
+        const top = byInstance.get(n._instanceId)
+        if (!top || idGreater(n.id, top)) byInstance.set(n._instanceId, n.id)
       }
+      // Never move a marker backwards (e.g. newest rows dismissed / read elsewhere)
+      for (const [instanceId, topId] of byInstance) {
+        const last = this.lastReadByInstance[instanceId]
+        if (last && idGreater(last, topId)) byInstance.delete(instanceId)
+      }
+      // Nothing loaded (fetch failed / never opened) — keep the server badge as-is
+      if (!byInstance.size) return
+      badgeSeq += 1
 
       const results = await Promise.all(
         [...byInstance.entries()].map(async ([instanceId, topId]) => {
@@ -485,20 +506,39 @@ export const useNotificationsStore = defineStore('notifications', {
         this.notifications.find((n) => n._key === keyOrId) ||
         this.notifications.find((n) => n.id === keyOrId)
       if (!notif) return
+      await this.dismissNotifications([notif._key])
+    },
 
-      const prev = this.notifications
-      this.notifications = this.notifications.filter((n) => n._key !== notif._key)
+    /**
+     * Optimistically remove rows (e.g. every notification folded into a grouped
+     * row), then dismiss on the server. Failures are re-inserted individually —
+     * restoring a whole-list snapshot would undo concurrent dismisses/refreshes.
+     */
+    async dismissNotifications(keys: string[]) {
+      const wanted = new Set(keys)
+      const removed = this.notifications.filter((n) => wanted.has(n._key))
+      if (!removed.length) return
+      this.notifications = this.notifications.filter((n) => !wanted.has(n._key))
       this.recomputeUnread()
+      const gen = this.fetchGeneration
 
-      try {
-        const client = clientFor(notif._instanceId)
-        await client.v1.notifications.$select(notif.id).dismiss()
-      } catch (e) {
-        this.notifications = prev
-        this.recomputeUnread()
-        console.error('Failed to dismiss notification:', e)
-        throw e
+      const results = await Promise.allSettled(
+        removed.map(async (n) => clientFor(n._instanceId).v1.notifications.$select(n.id).dismiss()),
+      )
+      const failed = removed.filter((_, i) => results[i]!.status === 'rejected')
+      if (!failed.length) return
+      // A refresh since then already reflects the server — don't resurrect into it
+      if (gen === this.fetchGeneration) {
+        const present = new Set(this.notifications.map((n) => n._key))
+        const back = failed.filter((n) => !present.has(n._key))
+        if (back.length) {
+          this.notifications = [...this.notifications, ...back].sort(byNewest)
+          this.recomputeUnread()
+        }
       }
+      const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+      console.error('Failed to dismiss notification:', first?.reason)
+      throw first?.reason ?? new Error('Couldn’t dismiss notification')
     },
 
     async clearAll() {

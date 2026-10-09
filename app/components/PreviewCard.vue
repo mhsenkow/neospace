@@ -78,12 +78,15 @@ const hasImage = computed(() => !!props.card.image)
 .preview-card__media {
   flex-shrink: 0;
   width: 100%;
+  // Reserve the box before the lazy image loads (link-card OG ratio) — no shift
+  aspect-ratio: 1.91 / 1;
   max-height: 160px;
   overflow: hidden;
   background: var(--neo-bg-tertiary);
 
   @container (min-width: 360px) {
     width: 7.5rem;
+    aspect-ratio: auto;
     max-height: none;
     min-height: 5.5rem;
   }
@@ -111,6 +114,11 @@ const hasImage = computed(() => !!props.card.image)
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.preview-card__title,
+.preview-card__desc {
+  overflow-wrap: anywhere;
 }
 
 .preview-card__title {

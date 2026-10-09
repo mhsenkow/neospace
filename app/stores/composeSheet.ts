@@ -105,8 +105,18 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     },
 
     posted(status: mastodon.v1.Status) {
-      this.onPosted?.(status)
+      const cb = this.onPosted
+      // Always close — a throwing callback left the sheet open on a sent post,
+      // inviting a second tap on Post (duplicate status).
       this.hide()
+      const fail = (e: unknown) => console.error('compose onPosted failed:', e)
+      try {
+        // Some callers pass async handlers (dmHelpers) — catch their rejections too
+        const result: unknown = cb?.(status)
+        if (result instanceof Promise) result.catch(fail)
+      } catch (e) {
+        fail(e)
+      }
     },
 
     hide() {

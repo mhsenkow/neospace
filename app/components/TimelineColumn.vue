@@ -27,6 +27,8 @@ import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
 import { emitComposedStatus, onComposedStatus } from '~/composables/useComposedStatus'
 import { useDeskViewport, useMobileViewport } from '~/composables/useBreakpoint'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
+import { useColumnDnd } from '~/composables/useColumnDnd'
+import { cursorPage } from '~/utils/linkHeader'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
 const withBrowseOrigin = (
@@ -60,6 +62,34 @@ const fetchGroupPage = async (tag: string, maxId?: string) => {
   })
   return withBrowseOrigin(list)
 }
+
+/**
+ * Liked / Saved page for the active account. These lists paginate by the
+ * favourite/bookmark row id from the Link header — a status id is NOT a valid
+ * max_id there (it would just return the first page again).
+ */
+const fetchSavedPage = async (kind: 'favourites' | 'bookmarks', maxId?: string | null) => {
+  const active = instancesStore.activeAccount
+  if (!active?.accessToken) {
+    throw new Error(kind === 'favourites' ? 'Sign in to view liked posts' : 'Sign in to view saved posts')
+  }
+  const client = instancesStore.getClient(active.id)
+  const params = { limit: 20, ...(maxId ? { maxId } : {}) }
+  const page = await cursorPage(
+    kind === 'favourites'
+      ? client.v1.favourites.list.$raw(params)
+      : client.v1.bookmarks.list.$raw(params),
+  )
+  return {
+    statuses: page.items.map(
+      (s): ExtendedStatus => ({ ...s, _instanceId: active.id, _instanceUrl: active.url }),
+    ),
+    nextMaxId: page.nextMaxId,
+  }
+}
+
+const isSavedFeed = (type: ColumnFeedType): type is 'favourites' | 'bookmarks' =>
+  type === 'favourites' || type === 'bookmarks'
 
 const fetchAlgorithmSourcePage = async (source: AlgorithmSource, cursor?: string) => {
   if (source === 'home') {
@@ -177,36 +207,11 @@ const emit = defineEmits<{
   focus: []
 }>()
 
-const onColumnDragStart = (e: DragEvent) => {
-  if (!props.canReorder) return
-  e.dataTransfer?.setData('text/plain', props.column.id)
-  e.dataTransfer?.setData('application/x-neospace-column', props.column.id)
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-  emit('column-drag-start', props.column.id)
-}
-
-const onColumnDragEnd = () => {
-  emit('column-drag-end')
-}
-
-const onColumnDragOver = (e: DragEvent) => {
-  if (!props.canReorder) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  emit('column-drag-over', props.column.id)
-}
-
-const onColumnDrop = (e: DragEvent) => {
-  if (!props.canReorder) return
-  e.preventDefault()
-  const fromId =
-    e.dataTransfer?.getData('application/x-neospace-column') ||
-    e.dataTransfer?.getData('text/plain')
-  if (fromId && fromId !== props.column.id) {
-    emit('column-drop', fromId)
-  }
-  emit('column-drag-end')
-}
+const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = useColumnDnd(
+  () => props.column.id,
+  emit,
+  () => props.canReorder,
+)
 
 const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
@@ -232,6 +237,13 @@ const maxId = ref<string | null>(null)
 const feedCursors = ref<Record<string, string>>({})
 /** Source-timeline cursor for algorithm filters (not the last displayed status) */
 const algoSourceCursor = ref<string | null>(null)
+/** Link-header cursor for Liked / Saved (favourite/bookmark row id) */
+const savedCursor = ref<string | null>(null)
+/**
+ * Last loadMore added nothing new (sparse algorithm window, all-duplicate
+ * page) — the sentinel never left view, so the observer won't fire again.
+ */
+const lastLoadAddedNothing = ref(false)
 const newPostsAnnounce = ref('')
 let newPostsAnnounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -278,9 +290,10 @@ watch(pendingLabel, (label) => {
     newPostsAnnounce.value = ''
     return
   }
-  // Throttle polite announcements while posts keep arriving
+  // Throttle polite announcements while posts keep arriving. Name the feed —
+  // several board columns can each announce, and "3 new posts" alone is ambiguous.
   newPostsAnnounceTimer = setTimeout(() => {
-    newPostsAnnounce.value = label
+    newPostsAnnounce.value = `${label} in ${feedLabel.value}`
   }, 700)
 })
 
@@ -550,30 +563,15 @@ const onPullEnd = async () => {
   if (!shouldRefresh) return
   isRefreshing.value = true
   try {
-    // Soft refresh — keep current posts visible until the new page lands
-    const gen = fetchGen
-    const fresh = await fetchFreshPage(gen)
-    // A feed/account switch landed meanwhile — this page belongs to the old feed
-    if (gen !== fetchGen) return
-    if (fresh.length) {
-      statuses.value = fresh
-      maxId.value = fresh.at(-1)?.id ?? null
-      pendingNew.value = []
-      hasMore.value = true
-      feedCursors.value = {}
-      if (props.column.feedType === 'home') {
-        const next: Record<string, string> = {}
-        for (const s of fresh) {
-          const ext = s as ExtendedStatus
-          if (!ext._instanceId) continue
-          const prev = next[ext._instanceId]
-          if (!prev || idLess(s.id, prev)) next[ext._instanceId] = s.id
-        }
-        feedCursors.value = next
-      }
+    // Soft refresh — fetchTimeline(true) keeps current posts visible until the
+    // new page lands, bumps the generation (so an in-flight loadMore can't append
+    // an old-cursor page after the fresh one) and reseeds every feed's cursors.
+    const hadPosts = statuses.value.length > 0
+    const ok = await fetchTimeline(true)
+    // No posts → the column's own error state already says what went wrong
+    if (!ok && hadPosts) {
+      toastStore.show({ message: 'Couldn’t refresh — try again', duration: 3500 })
     }
-  } catch (e) {
-    toastStore.show({ message: 'Couldn’t refresh — try again', duration: 3500 })
   } finally {
     isRefreshing.value = false
   }
@@ -631,6 +629,9 @@ const jumpToNew = () => {
     withPrependMotion(() => {
       statuses.value = dedupeStatusesByIdentity([...unique, ...statuses.value])
     })
+    // We're about to scroll to the top — let the cap apply now rather than
+    // leaving a long-pending batch over the limit until the next prepend.
+    isNearTop.value = true
     trimTailIfNearTop()
   }
   pendingNew.value = []
@@ -654,8 +655,8 @@ const MAX_FEED_STATUSES = 400
 
 const trimTailIfNearTop = () => {
   if (!isNearTop.value || statuses.value.length <= MAX_FEED_STATUSES) return
-  // Algorithm cursors track the source timeline, not the shown tail — leave those alone
-  if (props.column.feedType === 'algorithm') return
+  // Algorithm / Liked / Saved cursors aren't the shown tail's status id — leave those alone
+  if (props.column.feedType === 'algorithm' || isSavedFeed(props.column.feedType)) return
   const kept = statuses.value.slice(0, MAX_FEED_STATUSES)
   statuses.value = kept
   maxId.value = kept.at(-1)?.id ?? null
@@ -687,9 +688,10 @@ const mergeIncoming = (fresh: (mastodon.v1.Status | ExtendedStatus)[]) => {
     })
     trimTailIfNearTop()
   } else {
-    pendingNew.value = dedupeStatusesByIdentity([...newer, ...pendingNew.value]).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    )
+    // Capped: a reader parked mid-feed for hours shouldn't grow this forever
+    pendingNew.value = dedupeStatusesByIdentity([...newer, ...pendingNew.value])
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, MAX_FEED_STATUSES)
   }
 }
 
@@ -700,11 +702,10 @@ const loadTimelinePage = async (
   if (props.column.feedType === 'group' && props.column.groupTag) {
     return await fetchGroupPage(props.column.groupTag)
   }
-  if (props.column.feedType === 'favourites') {
-    return await instancesStore.fetchFavourites(20)
-  }
-  if (props.column.feedType === 'bookmarks') {
-    return await instancesStore.fetchBookmarks(20)
+  if (isSavedFeed(props.column.feedType)) {
+    const page = await fetchSavedPage(props.column.feedType)
+    if (gen === fetchGen) savedCursor.value = page.nextMaxId
+    return page.statuses
   }
   if (props.column.feedType === 'algorithm') {
     const page = await loadAlgorithmPage(20, null)
@@ -733,8 +734,6 @@ const loadTimelinePage = async (
   )
 }
 
-const fetchFreshPage = (gen = fetchGen) => loadTimelinePage(gen)
-
 const displayStatuses = computed(() => {
   const list = statuses.value
   if (props.column.feedType === 'home' && settingsStore.localPreferences.collapseReblogs) {
@@ -753,7 +752,9 @@ const feedSetSize = computed(() => (hasMore.value ? -1 : displayStatuses.value.l
 
 /** Fetch only posts newer than the current top (since_id) — avoids re-downloading the full page. */
 const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
-  const top = statuses.value[0]
+  // Newest post we already hold — including ones parked in the "new posts" pill,
+  // or every poll while you read re-downloads the same batch.
+  const top = pendingNew.value[0] ?? statuses.value[0]
   if (!top?.id) return []
 
   const sinceId = top.id
@@ -942,17 +943,20 @@ const scheduleAutoRetry = (err: unknown) => {
   }, seconds * 1000 + jitterMs)
 }
 
-const fetchTimeline = async (refresh = false) => {
+/** Resolves false when the load failed (and wasn't superseded by a newer one). */
+const fetchTimeline = async (refresh = false): Promise<boolean> => {
   cancelAutoRetry()
   const gen = ++fetchGen
   // An in-flight loadMore from the previous generation won't clear this itself
   isLoadingMore.value = false
+  lastLoadAddedNothing.value = false
   if (refresh) {
     // Keep existing posts visible until the new page lands — avoids blank Federated
     // when a newer fetch aborts an in-flight one (init + account/filter watches).
     maxId.value = null
     feedCursors.value = {}
     algoSourceCursor.value = null
+    savedCursor.value = null
     pendingNew.value = []
     hasMore.value = true
     loadMoreError.value = null
@@ -968,10 +972,7 @@ const fetchTimeline = async (refresh = false) => {
     if (props.column.feedType === 'home' && !instancesStore.hasAuthenticatedInstance) {
       throw new Error('Log in or add an instance to view your home timeline')
     }
-    if (
-      (props.column.feedType === 'favourites' || props.column.feedType === 'bookmarks') &&
-      !instancesStore.hasAuthenticatedInstance
-    ) {
+    if (isSavedFeed(props.column.feedType) && !instancesStore.hasAuthenticatedInstance) {
       throw new Error(
         props.column.feedType === 'favourites'
           ? 'Sign in to view liked posts'
@@ -989,27 +990,42 @@ const fetchTimeline = async (refresh = false) => {
       seedFeedCursors(result)
     }
 
-    if (gen !== fetchGen) return
+    if (gen !== fetchGen) return true
     statuses.value = dedupeStatusesByIdentity(result)
     if (result.length > 0) {
       maxId.value = statuses.value.at(-1)!.id
     }
-    // Algorithm sets hasMore inside loadTimelinePage; others use page size
-    if (props.column.feedType !== 'algorithm') {
+    // Algorithm sets hasMore inside loadTimelinePage; Liked / Saved follow the
+    // Link header; others use page size
+    if (isSavedFeed(props.column.feedType)) {
+      hasMore.value = result.length > 0 && !!savedCursor.value
+    } else if (props.column.feedType !== 'algorithm') {
       hasMore.value = result.length >= 20
     }
     autoRetryAttempt = 0
+    return true
   } catch (e: any) {
-    if (gen !== fetchGen) return
+    if (gen !== fetchGen) return true
     // Only surface the error if we have nothing to show
     if (!statuses.value.length) {
       const friendly = mapErrorToMessage(e)
       error.value = friendly.detail || friendly.title || e.message || 'Failed to fetch timeline'
       scheduleAutoRetry(e)
     }
+    return false
   } finally {
     if (gen === fetchGen) isLoading.value = false
   }
+}
+
+/** Re-observe the sentinel so a page that didn't push it out of view keeps paging. */
+const rearmInfiniteObserver = () => {
+  nextTick(() => {
+    const el = loadTrigger.value
+    if (!observer || !el) return
+    observer.unobserve(el)
+    observer.observe(el)
+  })
 }
 
 const loadMore = async () => {
@@ -1029,11 +1045,14 @@ const loadMore = async () => {
     }
   } else if (props.column.feedType === 'algorithm') {
     if (!algoSourceCursor.value) return
+  } else if (isSavedFeed(props.column.feedType)) {
+    if (!savedCursor.value) return
   } else if (!maxId.value) {
     return
   }
 
   const gen = fetchGen
+  let added = 0
   isLoadingMore.value = true
   loadMoreError.value = null
 
@@ -1063,12 +1082,11 @@ const loadMore = async () => {
         }
         break
       }
-      case 'favourites': {
-        newStatuses = await instancesStore.fetchFavourites(20, maxId.value!)
-        break
-      }
+      case 'favourites':
       case 'bookmarks': {
-        newStatuses = await instancesStore.fetchBookmarks(20, maxId.value!)
+        const page = await fetchSavedPage(props.column.feedType, savedCursor.value)
+        newStatuses = page.statuses
+        if (gen === fetchGen) savedCursor.value = page.nextMaxId
         break
       }
       case 'algorithm': {
@@ -1092,17 +1110,27 @@ const loadMore = async () => {
       })
       statuses.value = [...statuses.value, ...unique]
       maxId.value = newStatuses.at(-1)!.id
+      added = unique.length
     }
-    if (props.column.feedType !== 'algorithm') {
+    if (isSavedFeed(props.column.feedType)) {
+      hasMore.value = newStatuses.length > 0 && !!savedCursor.value
+    } else if (props.column.feedType !== 'algorithm') {
       hasMore.value = newStatuses.length > 0
     }
+    lastLoadAddedNothing.value = added === 0 && hasMore.value
   } catch (e: any) {
     if (gen !== fetchGen) return
     console.error('Load more error:', e)
     const friendly = mapErrorToMessage(e)
     loadMoreError.value = friendly.detail || friendly.title || 'Couldn’t load more'
   } finally {
-    if (gen === fetchGen) isLoadingMore.value = false
+    if (gen === fetchGen) {
+      isLoadingMore.value = false
+      // A short page can leave the sentinel in view, and IntersectionObserver only
+      // fires on change — re-arm it. A page that added nothing stops here (manual
+      // "Load more" below) instead of auto-scanning the whole source timeline.
+      if (added > 0 && hasMore.value) rearmInfiniteObserver()
+    }
   }
 }
 
@@ -1149,16 +1177,26 @@ watch(
 )
 
 watch(
-  () =>
-    `${instancesStore.activeAccountId ?? ''}:${instancesStore.activeInstanceFilter ?? ''}`,
-  (id, prev) => {
-    if (id === prev || !instancesStore.isInitialized) return
+  () => [instancesStore.activeAccountId ?? '', instancesStore.activeInstanceFilter ?? ''] as const,
+  ([accountId, filter], [prevAccountId, prevFilter]) => {
+    if ((accountId === prevAccountId && filter === prevFilter) || !instancesStore.isInitialized) {
+      return
+    }
+    if (accountId !== prevAccountId) {
+      // Every feed here is fetched / tagged as the active account (Liked, Saved,
+      // home-sourced algorithms, likes from group posts). Drop the old account's
+      // posts now — a soft refresh would leave them up if the new fetch fails.
+      statuses.value = []
+      void fetchTimeline(true)
+      return
+    }
     if (
       props.column.feedType === 'local' ||
       props.column.feedType === 'federated' ||
-      props.column.feedType === 'home'
+      props.column.feedType === 'home' ||
+      props.column.feedType === 'algorithm'
     ) {
-      fetchTimeline(true)
+      void fetchTimeline(true)
     }
   },
 )
@@ -1258,8 +1296,11 @@ onUnmounted(() => {
         class="neo-chrome-btn column-drag-handle"
         draggable="true"
         title="Drag to reorder"
-        aria-label="Drag to reorder column"
+        aria-label="Reorder column — drag, or press Left / Right arrow"
+        aria-keyshortcuts="ArrowLeft ArrowRight"
         @click.stop
+        @keydown.left.prevent="!isFirst && emit('move-left')"
+        @keydown.right.prevent="!isLast && emit('move-right')"
         @dragstart="onColumnDragStart"
         @dragend="onColumnDragEnd"
       >
@@ -1664,7 +1705,7 @@ onUnmounted(() => {
           </NuxtLink>
         </div>
         <p v-if="autoRetryIn" class="column-state__hint">Trying again automatically in about {{ autoRetryIn }}s.</p>
-        <button v-if="!errorActions.length" class="column-retry" @click="fetchTimeline(true)">Retry</button>
+        <button v-if="!errorActions.length" type="button" class="column-retry" @click="fetchTimeline(true)">Retry</button>
       </div>
 
       <!-- Login prompt for home when not authenticated -->
@@ -1744,6 +1785,15 @@ onUnmounted(() => {
             <p>{{ loadMoreError }}</p>
             <button type="button" class="column-retry" @click="loadMoreError = null; loadMore()">
               Retry
+            </button>
+          </div>
+          <div
+            v-else-if="lastLoadAddedNothing && hasMore && !isLoadingMore"
+            class="column-load-more-error"
+          >
+            <p>{{ column.feedType === 'algorithm' ? 'No matches in that stretch.' : 'Nothing new on that page.' }}</p>
+            <button type="button" class="column-retry" @click="loadMore()">
+              Keep looking
             </button>
           </div>
         </div>

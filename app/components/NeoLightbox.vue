@@ -110,7 +110,7 @@ const imgStyle = computed(() => {
       class="neo-lightbox"
       role="dialog"
       aria-modal="true"
-      :aria-label="overlay.lightbox.alt || 'Image viewer'"
+      aria-label="Image viewer"
       @click="onBackdropClick"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"

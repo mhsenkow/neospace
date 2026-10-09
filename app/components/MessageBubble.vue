@@ -6,6 +6,7 @@
 import type { mastodon } from 'masto'
 import { sanitizeStatusHtml } from '~/utils/sanitizeHtml'
 import { stripParticipantMentions } from '~/utils/dmMentions'
+import { safeHttpUrl } from '~/utils/dmHelpers'
 import { useOverlayStore } from '~/stores/overlay'
 import { useStatusStore } from '~/stores/status'
 import { useToastStore } from '~/stores/toast'
@@ -23,6 +24,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   retry: []
+  /** Failed send: drop the bubble and put the text back in the composer */
+  edit: []
   deleted: [statusId: string]
 }>()
 
@@ -139,8 +142,16 @@ const toggleReveal = () => {
   }
 }
 
+/** Server-supplied link for an attachment we can't render — http(s) only */
+const originalHref = (item: mastodon.v1.MediaAttachment) =>
+  safeHttpUrl(item.url) || safeHttpUrl(props.status.url)
+
 const copyText = async () => {
-  const text = bubbleHtml.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  // Keep line breaks and decode entities (tag-stripping alone copied "&amp;")
+  const html = bubbleHtml.value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+  const text = (new DOMParser().parseFromString(html, 'text/html').body.textContent || '').trim()
   if (!text) return
   try {
     await navigator.clipboard.writeText(text)
@@ -153,6 +164,13 @@ const copyText = async () => {
 
 const deleteOwn = async () => {
   menuOpen.value = false
+  const ok = await overlay.openConfirm({
+    title: 'Delete this message?',
+    body: 'It will be removed for everyone in the conversation.',
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await statusStore.deleteStatus(props.status.id)
     emit('deleted', props.status.id)
@@ -167,7 +185,9 @@ const openAsPost = () => {
   navigateTo(`/status/${props.status.id}`)
 }
 
-const onPointerDown = () => {
+const onPointerDown = (e: PointerEvent) => {
+  // Long-press is a touch gesture — a held mouse button is a text selection
+  if (e.pointerType === 'mouse') return
   if (longPressTimer) clearTimeout(longPressTimer)
   longPressTimer = setTimeout(() => {
     menuOpen.value = true
@@ -280,8 +300,8 @@ onBeforeUnmount(() => {
             <p v-for="item in unknownMedia" :key="item.id" class="msg-bubble__unknown">
               Attachment unavailable —
               <a
-                v-if="item.url || status.url"
-                :href="item.url || status.url || undefined"
+                v-if="originalHref(item)"
+                :href="originalHref(item) || undefined"
                 target="_blank"
                 rel="noopener noreferrer"
               >open original</a>
@@ -297,14 +317,12 @@ onBeforeUnmount(() => {
           :title="timeTitle"
         >{{ timeLabel }}</time>
         <p v-else-if="isPending" class="msg-bubble__delivery" role="status">Sending…</p>
-        <button
-          v-else
-          type="button"
-          class="msg-bubble__delivery msg-bubble__delivery--failed"
-          @click="emit('retry')"
-        >
-          Not delivered · Retry
-        </button>
+        <p v-else class="msg-bubble__delivery msg-bubble__delivery--failed">
+          Not delivered ·
+          <button type="button" class="msg-bubble__delivery-btn" @click="emit('retry')">Retry</button>
+          ·
+          <button type="button" class="msg-bubble__delivery-btn" @click="emit('edit')">Edit</button>
+        </p>
       </div>
 
       <!-- Shared APG menu button: focus, arrows, Escape, outside-close -->
@@ -542,11 +560,20 @@ onBeforeUnmount(() => {
 
     &--failed {
       color: var(--neo-danger, #c44);
-      cursor: pointer;
       font-weight: 600;
-      text-decoration: underline;
-      text-underline-offset: 2px;
     }
+  }
+
+  &__delivery-btn {
+    min-height: 24px;
+    padding: 0 0.15rem;
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 }
 </style>

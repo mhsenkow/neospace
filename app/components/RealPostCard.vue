@@ -1,4 +1,7 @@
 <script lang="ts">
+import { watch } from 'vue'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
+
 /** Shared across every card — one ResizeObserver instead of one per post. */
 const contentSizeCallbacks = new WeakMap<Element, () => void>()
 let contentSizeObserver: ResizeObserver | null = null
@@ -20,6 +23,56 @@ function unobserveContentSize(el: Element) {
   contentSizeCallbacks.delete(el)
   contentSizeObserver?.unobserve(el)
 }
+
+/**
+ * gifv autoplay — one shared IntersectionObserver plays loops only while on
+ * screen (and never under reduced motion). A bare `autoplay` attribute kept
+ * every gifv in a long feed downloading and decoding offscreen.
+ */
+const gifvVisible = new Set<HTMLVideoElement>()
+let gifvObserver: IntersectionObserver | null = null
+let gifvMotionWatched = false
+
+function syncGifv(video: HTMLVideoElement) {
+  if (gifvVisible.has(video) && !usePrefersReducedMotion().value) {
+    void video.play().catch(() => {})
+  } else if (!video.paused) {
+    video.pause()
+  }
+}
+
+/** `v-gifv-autoplay="isGifv"` — a false value leaves the video alone */
+const gifvAutoplay = {
+  mounted(video: HTMLVideoElement, binding: { value?: boolean }) {
+    if (binding.value === false) return
+    if (!gifvMotionWatched) {
+      gifvMotionWatched = true
+      // App-lifetime watcher: pause/resume visible loops when the setting flips
+      watch(usePrefersReducedMotion(), () => gifvVisible.forEach(syncGifv))
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      gifvVisible.add(video)
+      syncGifv(video)
+      return
+    }
+    gifvObserver ??= new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const video = entry.target as HTMLVideoElement
+          if (entry.isIntersecting) gifvVisible.add(video)
+          else gifvVisible.delete(video)
+          syncGifv(video)
+        }
+      },
+      { threshold: 0.25 },
+    )
+    gifvObserver.observe(video)
+  },
+  beforeUnmount(video: HTMLVideoElement) {
+    gifvVisible.delete(video)
+    gifvObserver?.unobserve(video)
+  },
+}
 </script>
 
 <script setup lang="ts">
@@ -35,7 +88,6 @@ import { stripHtml } from '~/utils/stripHtml'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { usePostActions } from '~/composables/usePostActions'
-import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
 
 interface Props {
@@ -93,7 +145,8 @@ const safeContent = computed(() =>
 )
 const linkCard = computed(() => {
   const card = displayStatus.value.card
-  if (!card?.url) return null
+  // Remote servers (non-Mastodon forks) can send any scheme — link http(s) only
+  if (!card?.url || !/^https?:\/\//i.test(card.url)) return null
   // Skip link cards when the post already has media (Mastodon often duplicates)
   if (displayStatus.value.mediaAttachments?.length) return null
   return card
@@ -110,7 +163,8 @@ const accountHandle = computed(() => {
     return `@${acct}`
   }
 })
-const cardLabelId = computed(() => `status-author-${displayStatus.value.id}`)
+// useId: the same post can render in several board columns at once
+const cardLabelId = `status-author-${useId()}`
 const isReblog = computed(() => !!props.status.reblog)
 const reblogger = computed(() => (isReblog.value ? props.status.account : null))
 const collapsedRebloggers = computed(
@@ -142,6 +196,7 @@ const shareOpen = ref(false)
 const boostOpen = ref(false)
 
 const prefersReducedMotion = usePrefersReducedMotion()
+const vGifvAutoplay = gifvAutoplay
 const isMobileViewport = useMobileViewport()
 
 /** Long-post collapse — overflow-based toggle (not char-count only) */
@@ -575,14 +630,8 @@ const handleReport = async () => {
 }
 
 const handleCopyLink = async () => {
-  const url = statusUrl.value
-  if (!url) return
-
   try {
-    await navigator.clipboard.writeText(url)
-    toastStore.show({ message: 'Link copied', duration: 2000 })
-  } catch {
-    prompt('Copy this link:', url)
+    await copyLink()
   } finally {
     isMenuOpen.value = false
   }
@@ -653,21 +702,20 @@ const onContentClick = (e: MouseEvent) => {
   openThread()
 }
 
-const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
-  const images = (displayStatus.value.mediaAttachments || []).filter((m) => m.type === 'image')
-  const items = images
-    .map((m, i) => {
-      const src = m.url || m.previewUrl
-      if (!src) return null
-      return {
-        src,
-        alt:
-          m.description ||
-          (images.length > 1 ? `Image ${i + 1} of ${images.length}` : 'Image without description'),
-        caption: m.description?.trim() || undefined,
-      }
-    })
-    .filter((item): item is { src: string; alt: string; caption: string | undefined } => !!item)
+const openLightbox = (media: mastodon.v1.MediaAttachment) => {
+  // Only images (with a src) go in the gallery — index by id, not by the
+  // attachment position, or a video/audio before the image opens the wrong one.
+  const images = (displayStatus.value.mediaAttachments || []).filter(
+    (m) => m.type === 'image' && !!(m.url || m.previewUrl),
+  )
+  const items = images.map((m, i) => ({
+    src: (m.url || m.previewUrl)!,
+    alt:
+      m.description ||
+      (images.length > 1 ? `Image ${i + 1} of ${images.length}` : 'Image without description'),
+    caption: m.description?.trim() || undefined,
+  }))
+  const index = images.findIndex((m) => m.id === media.id)
   const current = items[index]
   if (!current) return
   overlayStore.openLightbox({ ...current, items, index })
@@ -845,6 +893,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         <details
           v-if="hasSpoiler"
           class="status-cw"
+          :open="cwOpen"
           @toggle="onCwToggle"
         >
           <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
@@ -898,7 +947,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                 type="button"
                 class="status-media-hit"
                 :aria-label="media.description || (displayStatus.mediaAttachments.length > 1 ? `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}` : 'View image')"
-                @click.stop="openLightbox(media, mediaIdx)"
+                @click.stop="openLightbox(media)"
               >
                 <img
                   :src="media.previewUrl ?? media.url ?? undefined"
@@ -925,7 +974,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
                 :poster="media.previewUrl ?? undefined"
                 controls
                 preload="none"
-                :autoplay="media.type === 'gifv' && !prefersReducedMotion"
+                v-gifv-autoplay="media.type === 'gifv'"
                 :loop="media.type === 'gifv'"
                 :muted="media.type === 'gifv'"
                 playsinline
@@ -946,8 +995,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
         <!-- Poll -->
         <div v-if="displayStatus.poll" class="status-poll">
           <div
-            v-for="option in displayStatus.poll.options"
-            :key="option.title"
+            v-for="(option, optionIdx) in displayStatus.poll.options"
+            :key="optionIdx"
             class="status-poll-option"
             role="meter"
             :aria-valuenow="pollOptionPercent(option.votesCount)"
@@ -1889,6 +1938,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
   border-radius: var(--neo-radius-md, 8px);
   display: flex;
   justify-content: space-between;
+  gap: 0.5rem;
   overflow: hidden;
   font-size: 0.875rem;
 }
@@ -1906,6 +1956,17 @@ const openLightbox = (media: mastodon.v1.MediaAttachment, index: number) => {
 .status-poll-votes {
   position: relative;
   z-index: 1;
+}
+
+// Long option text (URLs, handles) wraps instead of pushing the % off the card
+.status-poll-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-poll-votes {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .status-poll-votes {

@@ -43,9 +43,16 @@ function loadRecipes(): AlgorithmRecipe[] {
     const byId = new Map<string, AlgorithmRecipe>()
     for (const b of builtins) byId.set(b.id, b)
     for (const c of custom.slice(0, MAX_CUSTOM)) {
-      if (!c.id || !c.name || !c.source) continue
+      // Untrusted JSON — strings where the UI calls string methods, a real source
+      if (typeof c.id !== 'string' || !c.id || typeof c.name !== 'string' || !c.name) continue
+      if (c.source !== 'home' && c.source !== 'local' && c.source !== 'federated') continue
       byId.set(c.id, {
         ...c,
+        description: typeof c.description === 'string' ? c.description : undefined,
+        authorAcct: typeof c.authorAcct === 'string' ? c.authorAcct : undefined,
+        authorName: typeof c.authorName === 'string' ? c.authorName : undefined,
+        createdAt: typeof c.createdAt === 'number' ? c.createdAt : 0,
+        updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : 0,
         includeTags: normalizeTagList(c.includeTags),
         excludeTags: normalizeTagList(c.excludeTags),
         includeKeywords: normalizeKeywordList(c.includeKeywords),
@@ -62,7 +69,11 @@ function loadRecipes(): AlgorithmRecipe[] {
 function saveCustom(recipes: AlgorithmRecipe[]) {
   if (typeof window === 'undefined') return
   const custom = recipes.filter((r) => !r.builtin).slice(0, MAX_CUSTOM)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, recipes: custom }))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, recipes: custom }))
+  } catch {
+    // Quota / private mode — keep the in-memory recipe rather than failing the save
+  }
 }
 
 export const useAlgorithmsStore = defineStore('algorithms', {
