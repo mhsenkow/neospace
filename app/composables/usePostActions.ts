@@ -3,8 +3,19 @@ import type { Ref, ComputedRef } from 'vue'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
-import { activeClient, clientFor } from '~/composables/useMasto'
+import { activeClient, activeCredentials, clientFor } from '~/composables/useMasto'
 import { hostnameOf } from '~/utils/instances'
+import {
+  authorizeInteractionUrl,
+  federationMessage,
+  isTransient,
+  resolveCandidates,
+  type FederationAction,
+  type FederationFailure,
+} from '~/utils/federation'
+
+/** "Acting as @x" is said once per account per session, not on every like */
+const announcedActingAs = new Set<string>()
 
 // Status already carries reblogged/favourited/bookmarked (as boolean | null)
 type ActionStatus = mastodon.v1.Status
@@ -37,10 +48,14 @@ export function usePostActions(options: {
 
   let resolvedIdCache: string | null = null
   let resolvedClientCache: mastodon.rest.Client | null = null
+  /** Why the last resolve failed — drives the toast wording + escape hatch */
+  let lastFailure: FederationFailure | null = null
+  let inflight: Promise<{ client: mastodon.rest.Client; id: string } | null> | null = null
 
   const clearActionCache = () => {
     resolvedIdCache = null
     resolvedClientCache = null
+    inflight = null
   }
 
   const sourceUrlOf = () => {
@@ -71,16 +86,35 @@ export function usePostActions(options: {
    * Never send a foreign snowflake to the active account — that 404s for remote
    * federated posts (especially reblogs, where `_instanceUrl` lives on the wrapper).
    */
+  /** The server that acts (honours a read-account override, like the client does) */
+  const actingUrl = () => {
+    try {
+      return activeCredentials().url
+    } catch {
+      return ''
+    }
+  }
+
   const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: string } | null> => {
     if (resolvedClientCache && resolvedIdCache) {
       return { client: resolvedClientCache, id: resolvedIdCache }
     }
+    // A prewarm may already be resolving this post — share it
+    if (inflight) return inflight
+    inflight = resolveContext().finally(() => {
+      inflight = null
+    })
+    return inflight
+  }
 
-    if (!instancesStore.instanceUrl || !instancesStore.accessToken) return null
+  const resolveContext = async (): Promise<{ client: mastodon.rest.Client; id: string } | null> => {
+    lastFailure = null
+    const homeUrl = actingUrl()
+    if (!homeUrl) return null
 
     const status = options.displayStatus.value
     const primaryClient = activeClient()
-    const activeHost = hostnameOf(instancesStore.instanceUrl)
+    const activeHost = hostnameOf(homeUrl)
     const sourceUrl = sourceUrlOf()
     const sourceHost = sourceUrl ? hostnameOf(sourceUrl) : ''
     // ActivityPub URI resolves more reliably than the HTML url across forks.
@@ -92,10 +126,16 @@ export function usePostActions(options: {
       return remember(primaryClient, status.id)
     }
 
-    // Multi-account / Edward: act on the account that served this row.
+    // Multi-account / Edward: act on the account that served this row — its id
+    // is already valid there, so no cross-server import is needed. Say so once.
     if (sourceUrl) {
       const source = instancesStore.getInstanceByUrl(sourceUrl)
       if (source?.accessToken) {
+        const who = source.user?.acct ? `@${source.user.acct}@${hostnameOf(source.url)}` : hostnameOf(source.url)
+        if (!announcedActingAs.has(source.id)) {
+          announcedActingAs.add(source.id)
+          toastStore.show({ message: `Acting as ${who} — the account that saw this post`, duration: 3600 })
+        }
         return remember(clientFor(source.id), status.id)
       }
     }
@@ -105,10 +145,12 @@ export function usePostActions(options: {
       return remember(primaryClient, status.id)
     }
 
-    // Search+resolve onto the active account (remote federated posts).
-    if (lookupUrl) {
-      const localId = await statusStore.resolveStatus(lookupUrl)
+    // Import onto your server: ActivityPub id first, then the page URL
+    const candidates = resolveCandidates(status.uri, options.statusUrl.value, status.url)
+    if (candidates.length) {
+      const { id: localId, failure } = await statusStore.resolveStatusDetailed(candidates)
       if (localId) return remember(primaryClient, localId)
+      lastFailure = failure
     }
 
     // Last resort: verify the raw id exists locally (same-server edge cases).
@@ -122,18 +164,35 @@ export function usePostActions(options: {
     return null
   }
 
-  const actionFailedToast = (kind: 'like' | 'repost' | 'bookmark', retry: () => void) => {
+  /**
+   * Say *why* it failed, naming both servers. Slow / rate-limited → Retry.
+   * Your server can't fetch it → open it on your own server's web page, which
+   * does the import server-side (works for posts the API search won't return).
+   */
+  const actionFailedToast = (kind: FederationAction, retry: () => void) => {
+    const failure = lastFailure ?? 'unknown'
+    const home = hostnameOf(actingUrl()) || null
+    const origin = hostnameOf(options.statusUrl.value || options.displayStatus.value.uri || '') || null
+    const uri = options.displayStatus.value.uri || options.statusUrl.value || ''
+    const canHandOff = !!uri && !!actingUrl() && !isTransient(failure) && failure !== 'offline'
     toastStore.show({
-      message:
-        kind === 'like'
-          ? 'Couldn’t update like — post may not be on your server yet'
-          : kind === 'repost'
-            ? 'Couldn’t update repost — post may not be on your server yet'
-            : 'Couldn’t update bookmark — post may not be on your server yet',
-      actionLabel: 'Retry',
-      onAction: retry,
-      duration: 5000,
+      message: federationMessage(failure, kind, { home, origin }),
+      actionLabel: canHandOff ? `Open on ${home}` : 'Retry',
+      onAction: canHandOff
+        ? () => window.open(authorizeInteractionUrl(actingUrl(), uri), '_blank', 'noopener')
+        : retry,
+      duration: 7000,
     })
+  }
+
+  /**
+   * Start the cross-server import before the tap (hover / focus on the action
+   * row, or a post landing on Edward's deck) so the like itself is instant —
+   * and any failure is known before you press.
+   */
+  const prewarm = () => {
+    if (!instancesStore.hasAuthenticatedInstance || resolvedIdCache || inflight) return
+    void getActionContext().catch(() => {})
   }
 
   const handleFavourite = async () => {
@@ -244,5 +303,6 @@ export function usePostActions(options: {
     handleBookmark,
     getActionContext,
     clearActionCache,
+    prewarm,
   }
 }

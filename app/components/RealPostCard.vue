@@ -77,6 +77,8 @@ const gifvAutoplay = {
 
 <script setup lang="ts">
 import type { mastodon } from 'masto'
+import { authorizeInteractionUrl, hostOf } from '~/utils/federation'
+import { activeCredentials } from '~/composables/useMasto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
@@ -89,6 +91,24 @@ import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { usePostActions } from '~/composables/usePostActions'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
+
+/** Reply couldn't import the post: say which server, and offer its own web page (does the import server-side) */
+const replyHandOff = (uri: string) => {
+  let home = ''
+  try {
+    home = activeCredentials().url
+  } catch {
+    /* guest */
+  }
+  const host = hostOf(home) || 'your server'
+  return {
+    message: `Couldn’t bring this post to ${host} to reply — it may be private, deleted, or blocked between servers.`,
+    ...(home && uri
+      ? { actionLabel: `Open on ${host}`, onAction: () => window.open(authorizeInteractionUrl(home, uri), '_blank', 'noopener') }
+      : {}),
+  }
+}
+
 
 interface Props {
   status: mastodon.v1.Status
@@ -365,6 +385,7 @@ const {
   toggleBoost,
   handleBookmark: bookmarkAction,
   getActionContext,
+  prewarm,
 } = usePostActions({
   displayStatus,
   statusUrl,
@@ -415,12 +436,13 @@ const openReplyComposer = async () => {
     const replyId = await statusStore.resolveReplyId({
       id: displayStatus.value.id,
       url: statusUrl.value,
+      uri: displayStatus.value.uri,
       sourceInstanceUrl: ext._instanceUrl || null,
     })
     if (!replyId) {
       toastStore.show({
-        message: 'Couldn’t find that post on your account’s server.',
-        duration: 4200,
+        ...replyHandOff(displayStatus.value.uri || statusUrl.value || ''),
+        duration: 7000,
       })
       return
     }
@@ -1039,7 +1061,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
         </div>
 
         <!-- Actions: on mobile, like sits in the right thumb zone -->
-        <footer class="status-actions">
+        <!-- Reaching for the buttons starts any cross-server import early -->
+        <footer class="status-actions" @pointerenter="prewarm" @focusin="prewarm">
           <button
             class="status-action status-action--reply"
             :aria-label="(displayStatus.repliesCount ?? 0) > 0 ? `Reply, ${formatNumber(displayStatus.repliesCount)}` : 'Reply'"
@@ -2253,6 +2276,22 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
   .status-media-image {
     max-height: 400px;
+  }
+
+  // Flick on desktop (focused column): keep the full-bleed slide, not a feed card
+  .status-card.status-card--flip {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: var(--neo-bg-primary);
+
+    &:hover {
+      background: var(--neo-bg-primary);
+    }
+
+    .status-media-image {
+      max-height: none;
+    }
   }
 }
 </style>

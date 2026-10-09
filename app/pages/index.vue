@@ -1418,9 +1418,9 @@ useHead({ title: 'Home | NeoSpace' })
         type="button"
         class="mobile-feed-chrome__mode"
         :class="{ 'mobile-feed-chrome__mode--flip': activeViewMode === 'flip' }"
-        aria-label="Flip view"
+        aria-label="Flick view — one post at a time"
         :aria-pressed="activeViewMode === 'flip'"
-        :title="activeViewMode === 'flip' ? 'Flip' : 'Flow'"
+        :title="activeViewMode === 'flip' ? 'Flick — one post at a time' : 'Feed — scroll a list'"
         :disabled="!!boardPortal"
         @click="toggleActiveViewMode"
       >

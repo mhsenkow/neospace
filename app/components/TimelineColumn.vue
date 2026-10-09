@@ -193,10 +193,17 @@ const props = withDefaults(defineProps<Props>(), {
 /** Desktop-only inline compose — mobile uses the + sheet (avoids stealing Loom handoff) */
 const isDesktop = useDeskViewport()
 
-/** Flip = full-bleed snap — mobile only */
+/**
+ * Flick (flip) = one post per screen, snap to the next. Phones always honour
+ * the column's mode; on desktop it applies to the focused column, where
+ * there's room for it — the board's skinny columns stay a feed.
+ */
 const isFlip = computed(
-  () => !isDesktop.value && (props.column.viewMode || 'flow') === 'flip',
+  () => (!isDesktop.value || props.focused) && (props.column.viewMode || 'flow') === 'flip',
 )
+/** Desktop focused column: choose how to move through it */
+const showModeSwitch = computed(() => isDesktop.value && props.focused)
+const setViewMode = (mode: 'flow' | 'flip') => columnsStore.setColumnViewMode(props.column.id, mode)
 
 const syncFlipPort = () => {
   const el = scrollContainer.value
@@ -1617,10 +1624,48 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <div
+        v-if="showModeSwitch"
+        class="column-mode"
+        role="group"
+        aria-label="How to move through this feed"
+        @pointerdown.stop
+      >
+        <button
+          type="button"
+          class="column-mode__opt"
+          :class="{ 'is-on': !isFlip }"
+          :aria-pressed="!isFlip"
+          title="Feed — scroll a list"
+          @click.stop="setViewMode('flow')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="4" y1="6" x2="20" y2="6" />
+            <line x1="4" y1="12" x2="20" y2="12" />
+            <line x1="4" y1="18" x2="20" y2="18" />
+          </svg>
+          Feed
+        </button>
+        <button
+          type="button"
+          class="column-mode__opt"
+          :class="{ 'is-on': isFlip }"
+          :aria-pressed="isFlip"
+          title="Flick — one post at a time (j / k, wheel, or arrows)"
+          @click.stop="setViewMode('flip')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="6" y="3" width="12" height="18" rx="2" />
+            <polyline points="9 10 12 7 15 10" />
+          </svg>
+          Flick
+        </button>
+      </div>
+
       <button
         type="button"
         class="neo-chrome-btn column-focus"
-        :class="{ 'column-focus--push': !canReorder, 'neo-chrome-btn--on': focused }"
+        :class="{ 'column-focus--push': !canReorder && !showModeSwitch, 'neo-chrome-btn--on': focused }"
         :title="focused ? 'Show all views' : 'Focus this view'"
         :aria-label="focused ? 'Show all views' : 'Focus this view'"
         :aria-pressed="focused"
@@ -1909,6 +1954,62 @@ onUnmounted(() => {
 
 .column-focus--push {
   margin-left: auto;
+}
+
+/* Feed / Flick — segmented, quiet until hovered */
+.column-mode {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 0.25rem;
+  padding: 2px;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-secondary);
+
+  // Reorder arrows (when shown) sit between title and this — they own the push
+  .column-reorder + & {
+    margin-left: 0.25rem;
+  }
+
+  &__opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 26px;
+    padding: 0 0.6rem;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--neo-chrome-fg);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--neo-text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-focus, var(--neo-accent));
+      outline-offset: 1px;
+    }
+
+    &.is-on {
+      background: var(--neo-bg-card, var(--neo-bg-primary));
+      color: var(--neo-text-primary);
+      box-shadow: 0 1px 2px color-mix(in srgb, var(--neo-text-primary) 14%, transparent);
+    }
+  }
+}
+
+/* Desktop flick: a centred stage at a readable width, not edge to edge */
+@media (min-width: 1024px) {
+  .column-posts--flip {
+    width: min(760px, 100%);
+    margin-inline: auto;
+  }
 }
 
 .neo-chrome-btn--on {

@@ -10,6 +10,12 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, activeCredentials, publicClient } from '~/composables/useMasto'
 import { hostnameOf } from '~/utils/instances'
+import {
+  classifyFederationError,
+  isTransient,
+  resolveCandidates,
+  type FederationFailure,
+} from '~/utils/federation'
 
 /** Per-account LRU for resolve=true status lookups (thread poll / actions). */
 const RESOLVE_CACHE_MAX = 64
@@ -210,40 +216,70 @@ export const useStatusStore = defineStore('status', {
       }
     },
 
-    async resolveStatus(statusUrl: string): Promise<string | null> {
-      const instances = useInstancesStore()
-      const cacheKey = `${instances.activeAccountId || 'anon'}|${statusUrl}`
+    /**
+     * Import a post from another server onto the acting account's server and
+     * return its local id. Tries each candidate (ActivityPub id, then page
+     * URL), retries once when the remote is just slow, and says why it failed.
+     */
+    async resolveStatusDetailed(
+      candidates: string[],
+    ): Promise<{ id: string | null; failure: FederationFailure | null }> {
+      let failure: FederationFailure | null = null
+      for (const url of candidates) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const id = await this.resolveStatusOnce(url)
+            if (id) return { id, failure: null }
+            failure = 'unreachable'
+            break
+          } catch (e) {
+            failure = classifyFederationError(e)
+            if (!isTransient(failure) || attempt === 1) break
+            await new Promise((r) => setTimeout(r, 1200))
+          }
+        }
+      }
+      return { id: null, failure }
+    },
+
+    /** One resolve call; throws on HTTP errors so callers can tell why */
+    async resolveStatusOnce(statusUrl: string): Promise<string | null> {
+      // Key by the server that will act (read override included), not just the
+      // active account id — an id resolved on one server is meaningless on another
+      let actingUrl = 'anon'
+      try {
+        actingUrl = activeCredentials().url
+      } catch {
+        /* guest */
+      }
+      const cacheKey = `${actingUrl}|${statusUrl}`
       const cached = resolveStatusCache.get(cacheKey)
-      // Only positive hits are cached — a transient miss/network blip must not
-      // brick likes/boosts for the rest of the session.
       if (cached) {
-        // Refresh recency so eviction drops the least-recently used, not the oldest
         resolveStatusCache.delete(cacheKey)
         resolveStatusCache.set(cacheKey, cached)
         return cached
       }
-
-      try {
-        const client = this.getReadClient()
-        const results = await client.v2.search.list({
-          q: statusUrl,
-          resolve: true,
-          type: 'statuses',
-          limit: 1,
-        })
-        const id = results.statuses[0]?.id ?? null
-        if (id) {
-          resolveStatusCache.set(cacheKey, id)
-          if (resolveStatusCache.size > RESOLVE_CACHE_MAX) {
-            const oldest = resolveStatusCache.keys().next().value
-            if (oldest) resolveStatusCache.delete(oldest)
-          }
+      const results = await this.getReadClient().v2.search.list({
+        q: statusUrl,
+        resolve: true,
+        type: 'statuses',
+        limit: 1,
+      })
+      const id = results.statuses[0]?.id ?? null
+      if (id) {
+        resolveStatusCache.set(cacheKey, id)
+        if (resolveStatusCache.size > RESOLVE_CACHE_MAX) {
+          const oldest = resolveStatusCache.keys().next().value
+          if (oldest) resolveStatusCache.delete(oldest)
         }
-        return id
-      } catch (e) {
-        console.warn('Failed to resolve status:', e)
-        return null
       }
+      return id
+    },
+
+    async resolveStatus(statusUrl: string): Promise<string | null> {
+      const { id, failure } = await this.resolveStatusDetailed([statusUrl])
+      if (!id && failure) console.warn('Failed to resolve status:', failure, statusUrl)
+      return id
     },
 
     /**
@@ -253,12 +289,18 @@ export const useStatusStore = defineStore('status', {
     async resolveReplyId(opts: {
       id?: string | null
       url?: string | null
+      /** ActivityPub id — resolves more reliably than the page URL */
+      uri?: string | null
       /** Origin instance URL the status was fetched from (e.g. _instanceUrl) */
       sourceInstanceUrl?: string | null
     }): Promise<string | null> {
-      const instances = useInstancesStore()
-      const activeUrl = instances.instanceUrl
-      if (!activeUrl) return null
+      // The server that will post the reply (read override included)
+      let activeUrl = ''
+      try {
+        activeUrl = activeCredentials().url
+      } catch {
+        return null
+      }
 
       const activeHost = hostnameOf(activeUrl)
       const id = opts.id?.trim() || null
@@ -271,8 +313,9 @@ export const useStatusStore = defineStore('status', {
       if (id && sourceHost && sourceHost === activeHost) return id
       if (id && url && hostnameOf(url) === activeHost) return id
 
-      if (url) {
-        const resolved = await this.resolveStatus(url)
+      const candidates = resolveCandidates(opts.uri, url)
+      if (candidates.length) {
+        const { id: resolved } = await this.resolveStatusDetailed(candidates)
         if (resolved) return resolved
       }
 

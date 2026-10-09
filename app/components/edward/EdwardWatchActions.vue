@@ -3,6 +3,8 @@
  * Quick actions for the watched Edward face — heart / boost / stash / yap / beam / ghost / shape.
  */
 
+import { authorizeInteractionUrl, hostOf } from '~/utils/federation'
+import { activeCredentials } from '~/composables/useMasto'
 import type { ExtendedStatus } from '~/stores/instances'
 import { useInstancesStore } from '~/stores/instances'
 import { useStatusStore } from '~/stores/status'
@@ -13,6 +15,23 @@ import { usePostActions } from '~/composables/usePostActions'
 import { activeClient } from '~/composables/useMasto'
 import { stripHtml } from '~/utils/stripHtml'
 import { lookupAcctFor } from '~/utils/edwardSemantics'
+
+/** Reply couldn't import the post: say which server, and offer its own web page (does the import server-side) */
+const replyHandOff = (uri: string) => {
+  let home = ''
+  try {
+    home = activeCredentials().url
+  } catch {
+    /* guest */
+  }
+  const host = hostOf(home) || 'your server'
+  return {
+    message: `Couldn’t bring this post to ${host} to reply — it may be private, deleted, or blocked between servers.`,
+    ...(home && uri
+      ? { actionLabel: `Open on ${host}`, onAction: () => window.open(authorizeInteractionUrl(home, uri), '_blank', 'noopener') }
+      : {}),
+  }
+}
 import NeoIcon from '~/components/NeoIcon.vue'
 
 const props = defineProps<{
@@ -48,6 +67,7 @@ const {
   handleFavourite,
   toggleBoost,
   handleBookmark,
+  prewarm,
 } = usePostActions({
   displayStatus: body,
   statusUrl,
@@ -92,12 +112,13 @@ const handleYap = async () => {
     const replyId = await statusStore.resolveReplyId({
       id: body.value.id,
       url: statusUrl.value,
+      uri: body.value.uri,
       sourceInstanceUrl: props.status._instanceUrl || null,
     })
     if (!replyId) {
       toastStore.show({
-        message: 'Couldn’t find that post on your server',
-        duration: 4200,
+        ...replyHandOff(body.value.uri || statusUrl.value || ''),
+        duration: 7000,
       })
       return
     }
@@ -139,17 +160,17 @@ const handleBeam = async () => {
 
 const resolveAccountId = async (): Promise<{ client: ReturnType<typeof activeClient>; id: string } | null> => {
   if (!acct.value) return null
+  const handle = lookupAcctFor(
+    acct.value,
+    body.value.account?.url,
+    props.status._instanceUrl,
+    instancesStore.activeAccount?.url,
+  )
   try {
     const client = activeClient()
-    const found = await client.v1.accounts.lookup({
-      acct: lookupAcctFor(
-        acct.value,
-        body.value.account?.url,
-        props.status._instanceUrl,
-        instancesStore.activeAccount?.url,
-      ),
-    })
-    return { client, id: found.id }
+    // lookup only knows accounts your server has met; resolve (WebFinger) asks theirs
+    const id = await statusStore.resolveAccount(handle)
+    return id ? { client, id } : null
   } catch {
     return null
   }
@@ -267,6 +288,8 @@ const onToolbarKeydown = (e: KeyboardEvent) => {
     role="toolbar"
     :aria-orientation="variant === 'rail' ? 'vertical' : 'horizontal'"
     aria-label="Actions on watched post"
+    @pointerenter="prewarm"
+    @focusin="prewarm"
     @keydown="onToolbarKeydown"
     @focusin="onToolbarFocusin"
     @click.stop
