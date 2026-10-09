@@ -255,6 +255,12 @@ const syncRoving = () => {
 onMounted(syncRoving)
 onUpdated(syncRoving)
 
+/** Focus into the rail: start any cross-server import, then the toolbar's own bookkeeping */
+const onRailFocusin = (e: FocusEvent) => {
+  prewarm()
+  onToolbarFocusin(e)
+}
+
 const onToolbarFocusin = (e: FocusEvent) => {
   const btn = (e.target as HTMLElement | null)?.closest?.('.edward-watch-actions__btn')
   if (btn instanceof HTMLButtonElement) setRoving(btn)
@@ -289,9 +295,8 @@ const onToolbarKeydown = (e: KeyboardEvent) => {
     :aria-orientation="variant === 'rail' ? 'vertical' : 'horizontal'"
     aria-label="Actions on watched post"
     @pointerenter="prewarm"
-    @focusin="prewarm"
     @keydown="onToolbarKeydown"
-    @focusin="onToolbarFocusin"
+    @focusin="onRailFocusin"
     @click.stop
     @pointerdown.stop
   >
