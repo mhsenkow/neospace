@@ -12,6 +12,7 @@ import type { mastodon } from 'masto'
 const sheet = useComposeSheetStore()
 const overlayStore = useOverlayStore()
 const panelRef = ref<HTMLElement | null>(null)
+const composeRef = ref<{ isDirty: boolean; discardDraft: () => void } | null>(null)
 const sheetOpen = computed(() => sheet.open)
 
 const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(sheetOpen, {
@@ -19,9 +20,9 @@ const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(sheetO
 })
 
 const requestClose = async () => {
-  const draft = panelRef.value?.querySelector<HTMLTextAreaElement>('textarea.compose-input, .compose-input')
-  const dirty = !!(draft?.value?.trim())
-  if (dirty) {
+  // Own text, CW or attachments — a prefilled "@handle " or photo-only post counts right
+  const compose = composeRef.value
+  if (compose?.isDirty) {
     const ok = await overlayStore.openConfirm({
       title: 'Discard this draft?',
       body: 'Your post will be lost.',
@@ -29,6 +30,8 @@ const requestClose = async () => {
       danger: true,
     })
     if (!ok) return
+    // Otherwise the autosaved draft reappears next time this composer opens
+    compose.discardDraft()
   }
   sheet.hide()
 }
@@ -136,6 +139,7 @@ const onPick = async (account: mastodon.v1.Account) => {
                 v-if="sheet.contextPost.text.length > 120"
                 type="button"
                 class="compose-sheet__context-toggle"
+                :aria-expanded="contextExpanded"
                 @click="contextExpanded = !contextExpanded"
               >
                 {{ contextExpanded ? 'Show less' : 'Show more' }}
@@ -143,6 +147,7 @@ const onPick = async (account: mastodon.v1.Account) => {
             </div>
           </article>
           <RealComposeBox
+            ref="composeRef"
             :key="sheet.instanceKey"
             :initial-text="sheet.initialText || undefined"
             :initial-visibility="sheet.initialVisibility || undefined"
@@ -315,7 +320,8 @@ const onPick = async (account: mastodon.v1.Account) => {
 }
 
 .compose-sheet__context-toggle {
-  margin: 0.35rem 0 0;
+  min-height: 24px;
+  margin: 0.25rem 0 0;
   padding: 0;
   border: none;
   background: none;
@@ -360,9 +366,17 @@ const onPick = async (account: mastodon.v1.Account) => {
     color: var(--neo-text-primary);
     font-weight: 600;
   }
+
+  // Long remote handles wrap at 320px instead of widening the sheet
+  strong,
+  span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 .compose-sheet__context-text {
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: 0.875rem;
   line-height: 1.4;

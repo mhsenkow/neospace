@@ -53,6 +53,8 @@ export function formatRelativeTime(
   if (!Number.isFinite(then) || !Number.isFinite(base)) return ''
 
   let duration = (then - base) / 1000
+  // A server clock a little ahead of ours shouldn't read "in 20 seconds"
+  if (duration > 0 && duration < 60) duration = 0
   const rtf = getRtf(locale)
 
   for (const { amount, unit } of DIVISIONS) {

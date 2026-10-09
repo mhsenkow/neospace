@@ -97,10 +97,14 @@ export function useAccountSearch() {
     }, 220)
   }
 
+  /** Runs on every compose keystroke outside a mention — don't churn refs */
   const clear = () => {
-    if (searchTimer) clearTimeout(searchTimer)
+    if (searchTimer) {
+      clearTimeout(searchTimer)
+      searchTimer = null
+    }
     searchRace.next()
-    results.value = []
+    if (results.value.length) results.value = []
     isSearching.value = false
     error.value = null
   }

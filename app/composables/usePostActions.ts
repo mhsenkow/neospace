@@ -30,6 +30,10 @@ export function usePostActions(options: {
   const isBoosting = ref(false)
   const isBookmarking = ref(false)
   const likePop = ref(false)
+  let likePopTimer: ReturnType<typeof setTimeout> | null = null
+  onUnmounted(() => {
+    if (likePopTimer) clearTimeout(likePopTimer)
+  })
 
   let resolvedIdCache: string | null = null
   let resolvedClientCache: mastodon.rest.Client | null = null
@@ -137,11 +141,16 @@ export function usePostActions(options: {
 
     isFavouriting.value = true
     const s = options.displayStatus.value
-    s.favourited = !s.favourited
-    s.favouritesCount += s.favourited ? 1 : -1
-    if (s.favourited) {
+    // Capture the intent — the same object can be toggled from another card
+    // (board columns share statuses) while this request is in flight.
+    const want = !s.favourited
+    s.favourited = want
+    s.favouritesCount = Math.max(0, (s.favouritesCount || 0) + (want ? 1 : -1))
+    if (want) {
       likePop.value = true
-      setTimeout(() => {
+      if (likePopTimer) clearTimeout(likePopTimer)
+      likePopTimer = setTimeout(() => {
+        likePopTimer = null
         likePop.value = false
       }, 320)
     }
@@ -150,15 +159,17 @@ export function usePostActions(options: {
       const ctx = await getActionContext()
       if (!ctx) throw new Error('Not resolvable')
 
-      if (s.favourited) {
+      if (want) {
         await ctx.client.v1.statuses.$select(ctx.id).favourite()
       } else {
         await ctx.client.v1.statuses.$select(ctx.id).unfavourite()
       }
     } catch (e) {
       clearActionCache()
-      s.favourited = !s.favourited
-      s.favouritesCount += s.favourited ? 1 : -1
+      if (s.favourited === want) {
+        s.favourited = !want
+        s.favouritesCount = Math.max(0, (s.favouritesCount || 0) + (want ? -1 : 1))
+      }
       actionFailedToast('like', () => void handleFavourite())
     } finally {
       isFavouriting.value = false
@@ -172,7 +183,7 @@ export function usePostActions(options: {
 
     isBoosting.value = true
     s.reblogged = wantBoost
-    s.reblogsCount += wantBoost ? 1 : -1
+    s.reblogsCount = Math.max(0, (s.reblogsCount || 0) + (wantBoost ? 1 : -1))
 
     try {
       const ctx = await getActionContext()
@@ -186,8 +197,10 @@ export function usePostActions(options: {
       }
     } catch (e) {
       clearActionCache()
-      s.reblogged = !s.reblogged
-      s.reblogsCount += s.reblogged ? 1 : -1
+      if (s.reblogged === wantBoost) {
+        s.reblogged = !wantBoost
+        s.reblogsCount = Math.max(0, (s.reblogsCount || 0) + (wantBoost ? -1 : 1))
+      }
       actionFailedToast('repost', () => void toggleBoost(wantBoost))
     } finally {
       isBoosting.value = false
@@ -199,20 +212,21 @@ export function usePostActions(options: {
 
     isBookmarking.value = true
     const s = options.displayStatus.value
-    s.bookmarked = !s.bookmarked
+    const want = !s.bookmarked
+    s.bookmarked = want
 
     try {
       const ctx = await getActionContext()
       if (!ctx) throw new Error('Not resolvable')
 
-      if (s.bookmarked) {
+      if (want) {
         await ctx.client.v1.statuses.$select(ctx.id).bookmark()
       } else {
         await ctx.client.v1.statuses.$select(ctx.id).unbookmark()
       }
     } catch (e) {
       clearActionCache()
-      s.bookmarked = !s.bookmarked
+      if (s.bookmarked === want) s.bookmarked = !want
       actionFailedToast('bookmark', () => void handleBookmark(closeMenu))
     } finally {
       isBookmarking.value = false

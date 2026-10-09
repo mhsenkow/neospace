@@ -8,10 +8,6 @@ import { useInstancesStore } from '~/stores/instances'
 import {
   COMPOSE_IMAGE_ACCEPT,
   COMPOSE_MAX_IMAGE_DIMENSION,
-  COMPOSE_MEDIA_ACCEPT,
-  DEFAULT_MAX_ATTACHMENTS,
-  DEFAULT_MAX_FILE_BYTES,
-  MEDIA_ALT_MAX,
   uploadTimeoutForBytes,
 } from '~/utils/composeConstants'
 
@@ -79,6 +75,8 @@ export function useComposeMedia() {
   let dragDepth = 0
   const altTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const uploadControllers = new Map<string, AbortController>()
+  /** Set on unmount — addFiles awaits downscaling and must not start uploads after */
+  let disposed = false
 
   const maxAttachments = computed(
     () => instancesStore.composeMediaLimits.maxAttachments,
@@ -159,11 +157,12 @@ export function useComposeMedia() {
     const controller = new AbortController()
     uploadControllers.set(localId, controller)
     const label = draft.file.name || 'Attachment'
+    const sentDescription = draft.description.trim()
     announce(`Uploading ${label}`)
     try {
       const remote = await statusStore.uploadMedia(
         draft.file,
-        draft.description.trim() || undefined,
+        sentDescription || undefined,
         {
           signal: controller.signal,
           timeoutMs: uploadTimeoutForBytes(draft.file.size),
@@ -174,6 +173,11 @@ export function useComposeMedia() {
       if (!current) return
       current.remoteId = remote.id
       announce(`${label} uploaded`)
+      // Alt typed while the upload ran had no media id to PUT to — send it now
+      // (queued, so flushAltDescriptions() still catches it before posting).
+      if (current.description.trim() !== sentDescription) {
+        setDescription(localId, current.description)
+      }
     } catch (e: any) {
       if (controller.signal.aborted) return
       const msg = e?.message || 'Upload failed'
@@ -260,6 +264,13 @@ export function useComposeMedia() {
     const accepted: ComposeAttachment[] = []
     for (const { file, hint } of take) {
       const prepared = file.type.startsWith('image/') ? await downscaleImageFile(file) : file
+      // Downscaling awaits — the composer may have closed, or a parallel paste /
+      // drop may have filled the remaining slots meanwhile.
+      if (disposed) break
+      if (attachments.value.length + accepted.length >= limit) {
+        rejected.push({ name: file.name, reason: `Attachment limit reached (${limit})` })
+        continue
+      }
       accepted.push({
         localId: uid(),
         file: markRaw(prepared),
@@ -389,6 +400,7 @@ export function useComposeMedia() {
   }
 
   onUnmounted(() => {
+    disposed = true
     for (const a of attachments.value) abortUpload(a.localId)
     uploadControllers.clear()
     for (const t of altTimers.values()) clearTimeout(t)

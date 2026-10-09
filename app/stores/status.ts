@@ -194,7 +194,12 @@ export const useStatusStore = defineStore('status', {
       const cached = resolveStatusCache.get(cacheKey)
       // Only positive hits are cached — a transient miss/network blip must not
       // brick likes/boosts for the rest of the session.
-      if (cached) return cached
+      if (cached) {
+        // Refresh recency so eviction drops the least-recently used, not the oldest
+        resolveStatusCache.delete(cacheKey)
+        resolveStatusCache.set(cacheKey, cached)
+        return cached
+      }
 
       try {
         const client = this.getReadClient()

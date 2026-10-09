@@ -14,8 +14,12 @@ const categories: { id: ReportCategory; label: string; hint: string }[] = [
 
 useFocusTrap(dialogRef, isOpen, {
   onEscape: () => overlay.resolveReport(null),
-  initialFocus: '.neo-report__category',
+  // The checked radio — `.neo-report__category` is a <label>, which can't take focus
+  initialFocus: '.neo-report__category input:checked',
 })
+
+/** Forwarding only means something when the account lives on another server */
+const isRemoteAccount = computed(() => overlay.report.accountAcct.includes('@'))
 
 watch(isOpen, (open) => {
   if (open) overlay.report.comment = ''
@@ -75,7 +79,7 @@ watch(isOpen, (open) => {
           />
         </label>
 
-        <label class="neo-report__forward">
+        <label v-if="isRemoteAccount" class="neo-report__forward">
           <input v-model="overlay.report.forward" type="checkbox" />
           <span>Forward to the remote server (when applicable)</span>
         </label>
