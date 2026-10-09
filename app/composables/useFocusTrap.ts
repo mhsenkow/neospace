@@ -8,12 +8,14 @@ import { nextTick, onUnmounted, watch, type Ref } from 'vue'
 import { useScrollLock } from '~/composables/useScrollLock'
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), summary, iframe, audio[controls], video[controls], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
 
 type TrapEntry = {
   id: number
   root: () => HTMLElement | null | undefined
   onEscape?: () => void
+  /** Where focus goes back to when this trap closes */
+  previous: HTMLElement | null
 }
 
 let trapStack: TrapEntry[] = []
@@ -30,11 +32,24 @@ function isVisible(el: HTMLElement): boolean {
 function listFocusable(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
     (el) =>
-      !el.hasAttribute('disabled') &&
+      // :disabled also covers controls inside a disabled <fieldset>
+      !el.matches(':disabled') &&
       el.getAttribute('aria-hidden') !== 'true' &&
       el.tabIndex !== -1 &&
+      !el.closest('[inert]') &&
       isVisible(el),
   )
+}
+
+/**
+ * Focus origin to return to. A menu item (NeoMenu) is hidden by the time the
+ * dialog it opened closes — return to the menu's trigger instead of <body>.
+ */
+function restoreTarget(el: HTMLElement | null): HTMLElement | null {
+  const menu = el?.closest?.('[role="menu"][id]')
+  if (!menu) return el
+  const trigger = document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(menu.id)}"]`)
+  return trigger || el
 }
 
 function topTrap(): TrapEntry | undefined {
@@ -115,18 +130,17 @@ export function useFocusTrap(
   },
 ) {
   const scrollLock = useScrollLock()
-  let previous: HTMLElement | null = null
   let entry: TrapEntry | null = null
   let locked = false
   let scrollHeld = false
 
   const activate = async () => {
-    previous = (document.activeElement as HTMLElement) || null
     locked = true
     entry = {
       id: ++idSeq,
       root: () => containerRef.value,
       onEscape: opts?.onEscape,
+      previous: restoreTarget((document.activeElement as HTMLElement) || null),
     }
     trapStack.push(entry)
     ensureListening()
@@ -155,9 +169,25 @@ export function useFocusTrap(
 
   const deactivate = () => {
     locked = false
+    let restore: HTMLElement | null = null
     if (entry) {
-      trapStack = trapStack.filter((t) => t.id !== entry!.id)
+      const closing = entry
+      const wasTop = topTrap()?.id === closing.id
+      const closingRoot = closing.root()
+      trapStack = trapStack.filter((t) => t.id !== closing.id)
       entry = null
+      if (wasTop) {
+        restore = closing.previous
+      } else {
+        // A trap under the top one closed (e.g. the drawer behind a dialog it
+        // opened): don't pull focus out of the open dialog — hand our origin to
+        // any dialog that was opened from inside us, whose own origin is going away.
+        for (const t of trapStack) {
+          if (!t.previous) continue
+          const orphaned = closingRoot ? closingRoot.contains(t.previous) : !t.previous.isConnected
+          if (orphaned) t.previous = closing.previous
+        }
+      }
     }
     if (!trapStack.length) {
       document.documentElement.classList.remove('neo-dialog-open')
@@ -167,8 +197,6 @@ export function useFocusTrap(
       scrollHeld = false
     }
     maybeStopListening()
-    const restore = previous
-    previous = null
     if (restore && restore.isConnected && typeof restore.focus === 'function') {
       try {
         restore.focus()

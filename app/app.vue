@@ -64,6 +64,8 @@ const restoreMainScroll = (top: number) => {
   tick()
 }
 
+let lastFocusPath = route.path
+
 watch(
   () => route.path,
   async () => {
@@ -80,6 +82,12 @@ watch(
 watch(
   () => route.fullPath,
   async () => {
+    const pathChanged = route.path !== lastFocusPath
+    lastFocusPath = route.path
+    // Query-only replaces (notification filter tabs, explore ?q=/?tab=) are
+    // in-page state — refocusing `main` there yanked focus out of the tablist /
+    // search field on every arrow key or keystroke.
+    if (!pathChanged && (window.history.state as { replaced?: boolean } | null)?.replaced) return
     await nextTick()
     const main = document.getElementById('main-content')
     if (main instanceof HTMLElement) {

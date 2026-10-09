@@ -5,6 +5,7 @@
  */
 
 import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { typeaheadMatch } from '~/utils/typeahead'
 
 const props = withDefaults(
   defineProps<{
@@ -183,7 +184,39 @@ function onMenuKeydown(e: KeyboardEvent) {
   if (e.key === 'End') {
     e.preventDefault()
     list[list.length - 1]?.focus()
+    return
   }
+  // APG typeahead: printable keys jump to the next item starting with them
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== ' ') {
+    typeBuffer += e.key
+    if (typeTimer) clearTimeout(typeTimer)
+    typeTimer = setTimeout(() => {
+      typeBuffer = ''
+      typeTimer = null
+    }, 500)
+    const hit = typeaheadMatch(
+      list.map((el) => el.textContent || el.getAttribute('aria-label') || ''),
+      typeBuffer,
+      i,
+    )
+    if (hit >= 0) {
+      e.preventDefault()
+      list[hit]?.focus()
+    }
+  }
+}
+
+let typeBuffer = ''
+let typeTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Focus left for something outside (screen-reader cursor, programmatic focus) — close */
+function onMenuFocusOut(e: FocusEvent) {
+  if (!open.value) return
+  const next = e.relatedTarget
+  // null = focus went nowhere yet (Safari click on a non-focusable spot) — keep open
+  if (!(next instanceof Node)) return
+  if (rootRef.value?.contains(next) || menuRef.value?.contains(next)) return
+  close(false)
 }
 
 function onDocPointer(e: MouseEvent | PointerEvent) {
@@ -219,7 +252,10 @@ function listen(on: boolean) {
 }
 
 watch(open, (v) => listen(v), { immediate: true })
-onUnmounted(() => listen(false))
+onUnmounted(() => {
+  listen(false)
+  if (typeTimer) clearTimeout(typeTimer)
+})
 
 defineExpose({ open, close, toggle })
 </script>
@@ -254,6 +290,7 @@ defineExpose({ open, close, toggle })
         :aria-label="label"
         :style="teleport ? panelStyle : undefined"
         @keydown="onMenuKeydown"
+        @focusout="onMenuFocusOut"
         @click="onPanelClick"
       >
         <slot name="items" />
