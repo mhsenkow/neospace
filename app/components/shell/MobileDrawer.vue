@@ -4,6 +4,7 @@ import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
+import { recipeTip } from '~/utils/algorithms'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
@@ -69,6 +70,7 @@ const drawerAlgorithmItems = computed(() => {
   const items: {
     key: string
     label: string
+    tip?: string | null
     icon: NeoIconName
     feedType: ColumnFeedType
     feedParam?: string
@@ -86,6 +88,7 @@ const drawerAlgorithmItems = computed(() => {
     items.push({
       key: `algo-${recipe.id}`,
       label: recipe.name,
+      tip: recipeTip(recipe),
       icon: 'filter',
       feedType: 'algorithm',
       feedParam: recipe.id,
@@ -245,6 +248,7 @@ useFocusTrap(mobileSidebarRef, open, {
               <button
                 type="button"
                 class="mobile-sidebar__suggest"
+                :title="item.tip || item.label"
                 @click="openBoardFeedFromDrawer(item.feedType, item.feedParam)"
               >
                 <span class="mobile-sidebar__suggest-icon mobile-sidebar__suggest-icon--glyph">
@@ -252,6 +256,7 @@ useFocusTrap(mobileSidebarRef, open, {
                 </span>
                 <span class="mobile-sidebar__suggest-text">
                   <span class="mobile-sidebar__suggest-name">{{ item.label }}</span>
+                  <span v-if="item.tip" class="mobile-sidebar__suggest-tag">{{ item.tip }}</span>
                 </span>
               </button>
             </li>
@@ -726,7 +731,12 @@ useFocusTrap(mobileSidebarRef, open, {
 
   &__suggest-tag {
     font-size: 0.6875rem;
+    line-height: 1.3;
     color: var(--neo-text-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   &__scroll {

@@ -207,14 +207,9 @@ const hostLabel = (url?: string) => {
 
 const { formatAbsoluteTime } = useRelativeTime()
 
-const ensureNotifAccount = (notif: ExtendedNotification) => {
-  if (notif._instanceId && notif._instanceId !== instancesStore.activeAccountId) {
-    const inst = instancesStore.instances.find((i) => i.id === notif._instanceId)
-    instancesStore.setActiveAccount(notif._instanceId)
-    const handle = inst?.user?.acct || inst?.name || 'account'
-    toastStore.show({ message: `Switched to @${handle}`, duration: 3200 })
-  }
-}
+/** Prefer the notification’s account client via ?account= — don’t switch global active. */
+const accountQuery = (instanceId?: string) =>
+  instanceId ? { account: instanceId } : {}
 
 const followRequestBusy = ref<Record<string, boolean>>({})
 
@@ -260,19 +255,23 @@ const rejectFollowRequest = async (notif: ExtendedNotification, e?: Event) => {
 /** Avatar / name → their profile (e.g. who liked your comment) */
 const openNotifProfile = (notif: ExtendedNotification, e?: Event) => {
   e?.stopPropagation()
-  ensureNotifAccount(notif)
   const acct = notif.account?.acct
-  if (acct) router.push({ path: '/profile', query: { user: acct } })
+  if (acct) {
+    router.push({
+      path: '/profile',
+      query: { user: acct, ...accountQuery(notif._instanceId) },
+    })
+  }
 }
 
-/** Body / preview → the post (or profile for follows) */
+/** Action / preview → the post (or profile for follows) */
 const openNotification = (notif: ExtendedNotification) => {
-  ensureNotifAccount(notif)
+  const via = accountQuery(notif._instanceId)
 
   if (notif.type === 'follow' || notif.type === 'follow_request') {
     const acct = notif.account?.acct
     if (acct) {
-      router.push({ path: '/profile', query: { user: acct } })
+      router.push({ path: '/profile', query: { user: acct, ...via } })
       return
     }
   }
@@ -282,15 +281,26 @@ const openNotification = (notif: ExtendedNotification) => {
     const url = status.url || status.uri
     router.push({
       path: `/status/${status.id}`,
-      query: url ? { url } : undefined,
+      query: {
+        ...(url ? { url } : {}),
+        ...via,
+      },
     })
     return
   }
 
   const acct = notif.account?.acct
-  if (acct) {
-    router.push({ path: '/profile', query: { user: acct } })
-  }
+  if (acct) router.push({ path: '/profile', query: { user: acct, ...via } })
+}
+
+/** Show @handle when display name alone would hide who they are */
+const actorHandle = (notif: ExtendedNotification) => {
+  const acct = notif.account?.acct?.trim()
+  if (!acct) return ''
+  const name = (notif.account?.displayName || '').trim()
+  const user = (notif.account?.username || '').trim()
+  if (!name || name === user || name === acct || name === `@${acct}`) return ''
+  return acct.startsWith('@') ? acct : `@${acct}`
 }
 
 const previewText = (status?: mastodon.v1.Status | null) => {
@@ -540,39 +550,62 @@ const chromeTitle = computed(() => {
                 { 'notif-item--unread': notificationsStore.isUnread(notif) },
               ]"
             >
-              <!-- Type icon badge -->
               <div class="notif-item__type-badge" aria-hidden="true">
                 <NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" />
               </div>
 
-              <!-- Avatar → profile (decorative for keyboard) -->
-              <div v-if="notif.account" class="notif-item__avatar" aria-hidden="true">
+              <button
+                v-if="notif.account"
+                type="button"
+                class="notif-item__avatar"
+                :aria-label="`Open profile: ${notif.account.displayName || notif.account.username || notif.account.acct}`"
+                @click="openNotifProfile(notif, $event)"
+              >
                 <img
                   :src="notif.account.avatar"
                   alt=""
                   loading="lazy"
                   decoding="async"
                 />
-              </div>
+                <span class="notif-item__avatar-badge" aria-hidden="true">
+                  <NeoIcon :name="notifIconName(notif.type)" :size="10" :stroke="2.25" />
+                </span>
+              </button>
+              <div v-else class="notif-item__avatar notif-item__avatar--empty" aria-hidden="true" />
 
-              <!-- Content: name → profile; rest → post -->
               <div class="notif-item__body">
                 <div class="notif-item__headline">
-                  <button
-                    type="button"
-                    class="notif-item__open-headline"
-                    @click="openNotification(notif)"
-                  >
+                  <p class="notif-item__who">
                     <span v-if="notificationsStore.isUnread(notif)" class="notif-item__unread-dot">
                       <span class="sr-only">Unread</span>
                     </span>
-                    <span v-if="notif.account" class="notif-item__name">{{ actorLabel(notif) }}</span>
-                    <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
-                    <span
-                      v-if="showAccountHost && notif._instanceUrl"
-                      class="notif-item__host"
-                    >· {{ hostLabel(notif._instanceUrl) }}</span>
-                  </button>
+                    <button
+                      v-if="notif.account"
+                      type="button"
+                      class="notif-item__name"
+                      @click="openNotifProfile(notif, $event)"
+                    >
+                      {{ actorLabel(notif) }}
+                      <span
+                        v-if="actorHandle(notif)"
+                        class="notif-item__acct"
+                      >{{ actorHandle(notif) }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="notif-item__action-btn"
+                      :aria-label="notif.status?.id
+                        ? `${notifLabel(notif.type)} — open post`
+                        : notifLabel(notif.type)"
+                      @click="openNotification(notif)"
+                    >
+                      <span class="notif-item__action">{{ notifLabel(notif.type) }}</span>
+                      <span
+                        v-if="showAccountHost && notif._instanceUrl"
+                        class="notif-item__host"
+                      >· {{ hostLabel(notif._instanceUrl) }}</span>
+                    </button>
+                  </p>
                   <time
                     class="notif-item__time"
                     :datetime="notif.createdAt"
@@ -586,7 +619,9 @@ const chromeTitle = computed(() => {
                   v-if="previewText(notif.status) || notif.status?.mediaAttachments?.length"
                   type="button"
                   class="notif-item__open"
-                  :aria-label="previewText(notif.status) ? undefined : `Open post: ${notifLabel(notif.type)} (media)`"
+                  :aria-label="previewText(notif.status)
+                    ? 'Open post'
+                    : `Open post: ${notifLabel(notif.type)} (media)`"
                   @click="openNotification(notif)"
                 >
                   <p v-if="previewText(notif.status)" class="notif-item__preview">
@@ -632,12 +667,10 @@ const chromeTitle = computed(() => {
                 </div>
               </div>
 
-              <!-- Dismiss -->
               <button
                 type="button"
                 class="notif-item__dismiss"
                 :aria-label="dismissLabel(notif)"
-                title="Dismiss"
                 @click="handleDismiss(notif)"
               >
                 <NeoIcon name="x" :size="14" :stroke="2" />
@@ -861,8 +894,8 @@ const chromeTitle = computed(() => {
   :deep(.neo-tabs__tab) {
     display: inline-flex;
     align-items: center;
-    min-height: 34px;
-    padding: 0.375rem 0.75rem;
+    min-height: 40px;
+    padding: 0.4rem 0.8rem;
     border-radius: var(--neo-radius-sm, 4px);
     border: 1px solid var(--neo-border-color);
     background: var(--neo-bg-secondary);
@@ -1124,36 +1157,49 @@ const chromeTitle = computed(() => {
     flex-shrink: 0;
     width: 44px;
     height: 44px;
-    border-radius: 50%;
-    overflow: hidden;
-    background: var(--neo-bg-tertiary);
+    margin: 0;
     margin-top: 0.125rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    overflow: visible;
+    background: var(--neo-bg-tertiary);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
 
     img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
+      border-radius: 50%;
     }
-  }
-
-  &__open-headline {
-    flex: 1;
-    min-width: 0;
-    // Long unbroken display names / hosts must wrap, not push the row wide
-    overflow-wrap: anywhere;
-    padding: 0;
-    border: none;
-    background: transparent;
-    text-align: left;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
 
     &:focus-visible {
       outline: 2px solid var(--neo-accent);
       outline-offset: 2px;
     }
+
+    &--empty {
+      cursor: default;
+      pointer-events: none;
+    }
+  }
+
+  &__avatar-badge {
+    display: none;
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 1.1rem;
+    height: 1.1rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--neo-bg-primary);
+    border: 1px solid var(--neo-border-color);
+    color: var(--neo-text-secondary);
+    box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
   }
 
   &__follow-actions {
@@ -1189,12 +1235,15 @@ const chromeTitle = computed(() => {
   &__who {
     margin: 0;
     min-width: 0;
+    flex: 1;
+    overflow-wrap: anywhere;
+    line-height: 1.4;
   }
 
   &__name {
     display: inline;
     padding: 0;
-    margin: 0 0.35rem 0 0;
+    margin: 0 0.3rem 0 0;
     border: none;
     background: transparent;
     color: var(--neo-text-primary);
@@ -1206,6 +1255,7 @@ const chromeTitle = computed(() => {
 
     &:hover {
       text-decoration: underline;
+      color: var(--neo-accent);
     }
 
     &:focus-visible {
@@ -1214,6 +1264,13 @@ const chromeTitle = computed(() => {
       outline-offset: 2px;
       border-radius: 2px;
     }
+  }
+
+  &__acct {
+    margin-left: 0.3rem;
+    font-weight: 500;
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
   }
 
   &__action {
@@ -1323,21 +1380,22 @@ const chromeTitle = computed(() => {
 
   &__dismiss {
     position: absolute;
-    top: 0.5rem;
-    right: 0.15rem;
+    top: 0.35rem;
+    right: 0;
     z-index: 2;
     opacity: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     border: 1px solid transparent;
     background: var(--neo-bg-secondary);
     color: var(--neo-text-secondary);
     cursor: pointer;
     transition: opacity 0.15s, background-color 0.15s, color 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
 
     &:hover,
     &:focus-visible {
@@ -1349,7 +1407,7 @@ const chromeTitle = computed(() => {
     }
 
     @media (hover: none) {
-      opacity: 0.7;
+      opacity: 0.85;
     }
   }
 
@@ -1416,29 +1474,69 @@ const chromeTitle = computed(() => {
 // ====== Responsive ======
 
 @media (max-width: 560px) {
+  .notif-page {
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .notif-container {
+    padding: 0 0.65rem;
+  }
+
+  .notif-filters-wrap {
+    margin: 0 -0.65rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+
   .notif-item {
-    gap: 0.5rem;
-    padding: 0.75rem 0.25rem 0.75rem 0.375rem;
+    // Badge hidden — only avatar + body (dismiss is absolute)
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.55rem;
+    padding: 0.8rem 0.15rem 0.8rem 0.2rem;
 
     &__type-badge {
       display: none;
     }
 
     &__avatar {
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
+    }
+
+    &__avatar-badge {
+      display: flex;
     }
 
     &__headline {
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 0.2rem 0.65rem;
       font-size: 0.875rem;
+      padding-right: 2.6rem;
+    }
+
+    &__time {
+      margin-left: auto;
     }
 
     &__preview {
       font-size: 0.8125rem;
+      -webkit-line-clamp: 3;
     }
 
     &__body {
-      padding-right: 1.5rem;
+      padding-right: 0.15rem;
+    }
+
+    &__media-thumb {
+      width: 48px;
+      height: 48px;
+    }
+
+    &__follow-actions .neo-btn {
+      min-height: 40px;
+      padding-left: 0.9rem;
+      padding-right: 0.9rem;
     }
   }
 }

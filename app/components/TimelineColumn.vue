@@ -18,7 +18,7 @@ import {
   statusIdentity,
   statusListKey,
 } from '~/utils/statusIdentity'
-import { statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
+import { recipeTip, statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
 import { useRankedFeed } from '~/composables/useRankedFeed'
 import { useSettingsStore } from '~/stores/settings'
 import { idLess } from '~/utils/compareId'
@@ -1460,11 +1460,16 @@ onUnmounted(() => {
                 :class="{
                   'feed-dropdown__item--active':
                     column.feedType === 'algorithm' && column.algorithmId === recipe.id,
+                  'feed-dropdown__item--algo': !!recipeTip(recipe),
                 }"
+                :title="recipeTip(recipe) || recipe.name"
                 @click="switchFeed('algorithm', recipe.id)"
               >
                 <NeoIcon name="filter" :size="16" :stroke="1.5" />
-                {{ recipe.name }}
+                <span class="feed-dropdown__algo">
+                  <span class="feed-dropdown__algo-name">{{ recipe.name }}</span>
+                  <span v-if="recipeTip(recipe)" class="feed-dropdown__algo-tip">{{ recipeTip(recipe) }}</span>
+                </span>
               </button>
               <button
                 type="button"
@@ -2176,9 +2181,36 @@ onUnmounted(() => {
       font-size: 0.8125rem;
     }
 
+    &--algo {
+      align-items: flex-start;
+    }
+
     svg {
       flex-shrink: 0;
     }
+  }
+
+  &__algo {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    text-align: left;
+  }
+
+  &__algo-name {
+    font: inherit;
+  }
+
+  &__algo-tip {
+    font-size: 0.6875rem;
+    font-weight: 450;
+    line-height: 1.3;
+    color: var(--neo-text-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   &__group-icon {

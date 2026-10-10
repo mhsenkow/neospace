@@ -29,7 +29,7 @@ export function notifLabel(type: string): string {
     case 'reblog': return 'boosted your post'
     case 'follow': return 'followed you'
     case 'follow_request': return 'requested to follow you'
-    case 'poll': return "'s poll has ended"
+    case 'poll': return 'ended a poll'
     case 'status': return 'posted'
     case 'update': return 'edited a post'
     case 'admin.sign_up': return 'signed up (admin notice)'

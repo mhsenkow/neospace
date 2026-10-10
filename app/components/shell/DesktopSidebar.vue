@@ -6,6 +6,7 @@ import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
+import { recipeTip } from '~/utils/algorithms'
 import { useSettingsStore } from '~/stores/settings'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import {
@@ -88,6 +89,7 @@ const sidebarAlgorithmItems = computed(() => {
   const items: {
     key: string
     label: string
+    tip?: string | null
     icon: 'globe' | 'servers' | 'heart' | 'bookmark' | 'filter'
     feedType: ColumnFeedType
     feedParam?: string
@@ -106,6 +108,7 @@ const sidebarAlgorithmItems = computed(() => {
     items.push({
       key: `algo-${recipe.id}`,
       label: recipe.name,
+      tip: recipeTip(recipe),
       icon: 'filter',
       feedType: 'algorithm',
       feedParam: recipe.id,
@@ -379,17 +382,23 @@ watch(
           <button
             type="button"
             class="sidebar__row"
-            :class="{ 'sidebar__row--on': boardFeedActive(item.feedType, item.feedParam) }"
+            :class="{
+              'sidebar__row--on': boardFeedActive(item.feedType, item.feedParam),
+              'sidebar__row--stacked': !!item.tip,
+            }"
             :aria-current="boardFeedActive(item.feedType, item.feedParam) ? 'true' : undefined"
-            :title="item.key === 'local' ? `Local (${localHostLabel})` : item.label"
+            :title="item.tip || (item.key === 'local' ? `Local (${localHostLabel})` : item.label)"
             @click="void openBoardFeed(item.feedType, item.feedParam)"
           >
             <span class="sidebar__row-glyph" aria-hidden="true">
               <NeoIcon :name="item.icon" :size="18" :stroke="1.75" />
             </span>
             <span class="sidebar__label">
-              <template v-if="item.key === 'local'">Local</template>
-              <template v-else>{{ item.label }}</template>
+              <span class="sidebar__label-main">
+                <template v-if="item.key === 'local'">Local</template>
+                <template v-else>{{ item.label }}</template>
+              </span>
+              <span v-if="item.tip" class="sidebar__label-tip">{{ item.tip }}</span>
             </span>
           </button>
         </li>
@@ -1002,6 +1011,22 @@ watch(
       background: color-mix(in srgb, var(--neo-bg-hover) 85%, var(--neo-accent) 15%);
       font-weight: 600;
     }
+
+    &--stacked {
+      align-items: flex-start;
+      min-height: 0;
+      padding-top: 0.55rem;
+      padding-bottom: 0.55rem;
+      border-radius: var(--neo-radius-xl, 12px);
+
+      .sidebar__row-glyph {
+        margin-top: 0.1rem;
+      }
+
+      .sidebar__label {
+        white-space: normal;
+      }
+    }
   }
 
   &__link--badge .nav-badge {
@@ -1019,6 +1044,29 @@ watch(
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  &__label-main {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__label-tip {
+    margin-top: 0.15rem;
+    font-size: 0.6875rem;
+    font-weight: 450;
+    line-height: 1.3;
+    color: var(--neo-text-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .sidebar--rail &__label-tip {
+    display: none;
   }
 
   &__section {

@@ -263,6 +263,13 @@ export function recipeSummary(recipe: AlgorithmRecipe): string {
   return bits.join(' · ')
 }
 
+/** Plain-language tip for menus (ranker tip, else recipe description). */
+export function recipeTip(recipe: Pick<AlgorithmRecipe, 'ranker' | 'description'>): string | null {
+  if (recipe.ranker && RANKERS[recipe.ranker]) return RANKERS[recipe.ranker].tip
+  const d = recipe.description?.trim()
+  return d || null
+}
+
 export function builtinRecipes(): AlgorithmRecipe[] {
   const now = Date.now()
   return [

@@ -832,22 +832,32 @@ onUnmounted(() => {
             >
               <img :src="notif.account.avatar" alt="" loading="lazy" decoding="async" />
             </button>
-            <button
-              type="button"
-              class="row-btn"
-              @click="openNotification(notif)"
-            >
-              <!-- aria-label is ignored on a plain span — carry it as hidden text -->
+            <div class="row-btn row-btn--split">
               <span v-if="notificationsStore.isUnread(notif)" class="row-btn__unread">
                 <span class="sr-only">Unread</span>
               </span>
-              <span class="row-btn__badge"><NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" /></span>
-              <span>
-                <strong class="row-btn__name">{{ notif.account?.displayName || notif.account?.username }}</strong>
-                <em>{{ notifLabel(notif.type) }} · {{ formatTime(notif.createdAt) }}</em>
-                <em v-if="notifPreview(notif.status)" class="row-btn__excerpt">{{ notifPreview(notif.status) }}</em>
+              <span class="row-btn__badge" aria-hidden="true">
+                <NeoIcon :name="notifIconName(notif.type)" :size="14" :stroke="2" />
               </span>
-            </button>
+              <span class="row-btn__copy">
+                <button
+                  v-if="notif.account"
+                  type="button"
+                  class="row-btn__name"
+                  @click="openNotifProfile(notif, $event)"
+                >
+                  {{ notif.account.displayName || notif.account.username }}
+                </button>
+                <button
+                  type="button"
+                  class="row-btn__action"
+                  @click="openNotification(notif)"
+                >
+                  <em>{{ notifLabel(notif.type) }} · {{ formatTime(notif.createdAt) }}</em>
+                  <em v-if="notifPreview(notif.status)" class="row-btn__excerpt">{{ notifPreview(notif.status) }}</em>
+                </button>
+              </span>
+            </div>
           </div>
           <button
             v-if="notificationsStore.hasMore && !notificationsStore.isEmpty"
@@ -1058,7 +1068,7 @@ onUnmounted(() => {
   display: flex;
   align-items: stretch;
 
-  &--unread .row-btn strong {
+  &--unread .row-btn__name {
     font-weight: 700;
   }
 
@@ -1226,6 +1236,14 @@ onUnmounted(() => {
     background: var(--neo-bg-hover);
   }
 
+  &--split {
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+
   img,
   .row-btn__avatar img {
     width: 36px;
@@ -1246,24 +1264,55 @@ onUnmounted(() => {
     flex-shrink: 0;
   }
 
-  &__name {
-    font-weight: 600;
-  }
-
-  span {
+  &__copy {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
     min-width: 0;
     flex: 1;
+  }
 
-    strong {
-      font-size: 0.8125rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+  &__name,
+  &__action {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 4px;
+
+    &:hover {
+      background: var(--neo-bg-hover);
     }
 
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 1px;
+    }
+  }
+
+  &__name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &:hover {
+      color: var(--neo-accent);
+      text-decoration: underline;
+    }
+  }
+
+  &__action {
     em {
+      display: block;
       font-style: normal;
       font-size: 0.75rem;
       color: var(--neo-text-tertiary);
@@ -1298,7 +1347,7 @@ onUnmounted(() => {
 
   &__excerpt {
     white-space: normal !important;
-    display: -webkit-box;
+    display: -webkit-box !important;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;

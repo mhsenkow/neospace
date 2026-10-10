@@ -58,8 +58,21 @@ const ranker = ref<RankerId | ''>('')
 const rankerOptions = computed(() =>
   (Object.keys(RANKERS) as RankerId[])
     .filter((id) => !RANKERS[id].needsAuth || instancesStore.hasAuthenticatedInstance)
-    .map((id) => ({ value: id, label: RANKERS[id].short, hint: RANKERS[id].description })),
+    .map((id) => ({
+      value: id,
+      label: RANKERS[id].short,
+      tip: RANKERS[id].tip,
+      hint: RANKERS[id].description,
+    })),
 )
+
+const rankerExplain = computed(() => {
+  if (!ranker.value) {
+    return 'Newest first — reverse-chron from the Source above. Pick X, Facebook, or TikTok-style to re-rank a mixed candidate pool instead.'
+  }
+  const r = RANKERS[ranker.value]
+  return `${r.description} Pulls from ${r.sources.join(', ')} — Source above is ignored.`
+})
 const noReblogs = ref(false)
 const noReplies = ref(false)
 const includeTags = ref('')
@@ -462,7 +475,11 @@ async function removeRecipe() {
             <fieldset class="algo-sheet__sources">
               <legend>Ranking</legend>
               <div class="algo-sheet__source-pills">
-                <label class="algo-sheet__pill" :class="{ 'algo-sheet__pill--on': !ranker }" title="Newest first">
+                <label
+                  class="algo-sheet__pill"
+                  :class="{ 'algo-sheet__pill--on': !ranker }"
+                  title="Newest first — reverse chronological from Source"
+                >
                   <input v-model="ranker" type="radio" value="" class="sr-only" @change="onRulesManualEdit">
                   <NeoIcon v-if="!ranker" name="check" :size="14" :stroke="2.25" class="algo-sheet__check" />
                   Newest
@@ -472,7 +489,7 @@ async function removeRecipe() {
                   :key="opt.value"
                   class="algo-sheet__pill"
                   :class="{ 'algo-sheet__pill--on': ranker === opt.value }"
-                  :title="opt.hint"
+                  :title="opt.tip"
                 >
                   <input v-model="ranker" type="radio" :value="opt.value" class="sr-only" @change="onRulesManualEdit">
                   <NeoIcon
@@ -485,9 +502,14 @@ async function removeRecipe() {
                   {{ opt.label }}-style
                 </label>
               </div>
-              <p v-if="ranker" class="algo-sheet__rank-hint">
-                {{ RANKERS[ranker].description }} Pulls from {{ RANKERS[ranker].sources.join(', ') }} — Source above is ignored.
+              <p class="algo-sheet__rank-hint" role="status">
+                {{ rankerExplain }}
               </p>
+              <ul v-if="!ranker && rankerOptions.length" class="algo-sheet__rank-tips">
+                <li v-for="opt in rankerOptions" :key="`tip-${opt.value}`">
+                  <strong>{{ opt.label }}</strong> — {{ opt.tip }}
+                </li>
+              </ul>
             </fieldset>
 
             <div class="algo-sheet__toggles" role="group" aria-label="Filters">
@@ -863,6 +885,32 @@ async function removeRecipe() {
   font-size: 0.75rem;
   line-height: 1.45;
   color: var(--neo-text-muted);
+}
+
+.algo-sheet__rank-tips {
+  margin: 0.55rem 0 0;
+  padding: 0.55rem 0.7rem;
+  list-style: none;
+  border-radius: var(--neo-radius-sm, 8px);
+  border: 1px solid var(--neo-border-color);
+  background: color-mix(in srgb, var(--neo-bg-secondary) 92%, var(--neo-accent) 8%);
+
+  li {
+    margin: 0;
+    padding: 0.28rem 0;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--neo-text-secondary);
+
+    & + li {
+      border-top: 1px solid color-mix(in srgb, var(--neo-border-color) 70%, transparent);
+    }
+
+    strong {
+      color: var(--neo-text-primary);
+      font-weight: 650;
+    }
+  }
 }
 
 .algo-sheet__source-pills {

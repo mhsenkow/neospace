@@ -79,29 +79,41 @@ export type RankedItem<S extends RankStatus = RankStatus> = {
 
 export const RANKERS: Record<
   RankerId,
-  { label: string; short: string; description: string; sources: CandidateSource[]; needsAuth: boolean }
+  {
+    label: string
+    short: string
+    /** One-line tip for menus / tooltips */
+    tip: string
+    /** Fuller explainer for the algorithm editor */
+    description: string
+    sources: CandidateSource[]
+    needsAuth: boolean
+  }
 > = {
   x: {
     label: 'X-style For You',
     short: 'X',
+    tip: 'Like X/Twitter For You — replies count far more than likes, mixes people you follow with discoveries, and spreads authors out.',
     description:
-      "Twitter's open-sourced ranker: replies weigh 27× a like, half in-network / half out, one post per author at a time.",
+      'Ranks like X’s open-sourced For You: a reply is worth ~27× a like, about half the feed is people you follow and half is discovery, and you rarely see the same author twice in a row.',
     sources: ['home', 'trend', 'tag', 'local'],
     needsAuth: true,
   },
   facebook: {
     label: 'Facebook-style Feed',
     short: 'Facebook',
+    tip: 'Like a Facebook feed — friends and conversations first; comments beat likes; engagement-bait sinks.',
     description:
-      'Meaningful social interactions: friends and groups first, conversations count 30× a like, engagement bait sinks.',
+      'Ranks for meaningful social interactions: mutuals and close follows rise, a real conversation counts ~30× a like, and clickbait / engagement-bait is demoted.',
     sources: ['home', 'tag', 'trend'],
     needsAuth: true,
   },
   tiktok: {
     label: 'TikTok-style For You',
     short: 'TikTok',
+    tip: 'Like TikTok For You — interest and media over who you follow; skips big accounts; never the same creator twice in a row.',
     description:
-      'Interest over follows: media-first, follower count ignored, never the same creator twice in a row, room for the unseen.',
+      'Ranks for interest, not follow graph: media-first posts, follower count ignored, exploration slots for unseen creators, and never the same author twice in a row.',
     sources: ['federated', 'trend', 'tag', 'local', 'home'],
     needsAuth: false,
   },
