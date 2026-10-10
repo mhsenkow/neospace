@@ -2292,6 +2292,33 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     .status-media-image {
       max-height: none;
     }
+
+    // Wide focused stage: media edge-to-edge, caption chrome stays readable
+    &.status-card--flip-media {
+      :deep(.status-header),
+      .status-content-wrap,
+      .status-cw,
+      .status-poll {
+        max-width: 40rem;
+        width: 100%;
+        margin-inline: auto;
+        box-sizing: border-box;
+      }
+
+      :deep(.status-header) {
+        padding-inline: 1.25rem 4.5rem;
+      }
+
+      .status-content-wrap,
+      .status-cw {
+        padding-inline: 1.25rem 4.5rem;
+      }
+
+      .status-poll {
+        margin-inline: auto;
+        padding-inline: 1.25rem 4.5rem;
+      }
+    }
   }
 }
 </style>

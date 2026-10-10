@@ -1307,6 +1307,7 @@ onUnmounted(() => {
       'timeline-column--drop-target': dropTarget,
       'timeline-column--dragging': dragging,
       'timeline-column--menu-open': feedMenuOpen,
+      'timeline-column--focus-wide': isDesktop && focused,
     }"
     @dragover="onColumnDragOver"
     @drop="onColumnDrop"
@@ -1813,7 +1814,10 @@ onUnmounted(() => {
         v-else
         ref="feedRoot"
         class="column-posts"
-        :class="{ 'column-posts--flip': isFlip }"
+        :class="{
+          'column-posts--flip': isFlip,
+          'column-posts--focus-wide': isDesktop && focused,
+        }"
         role="feed"
         tabindex="0"
         :aria-busy="isLoadingMore || isLoading"
@@ -1907,6 +1911,16 @@ onUnmounted(() => {
 
     .column-header {
       z-index: 40;
+    }
+  }
+
+  // Focused desktop: keep the title/chrome readable while the stage goes wide
+  &--focus-wide {
+    .column-header {
+      max-width: 44rem;
+      width: 100%;
+      margin-inline: auto;
+      box-sizing: border-box;
     }
   }
 }
@@ -2009,9 +2023,10 @@ onUnmounted(() => {
   }
 }
 
-/* Desktop flick: a centred stage at a readable width, not edge to edge */
+/* Desktop flick (board / multi-column): keep a centred readable stage.
+   Focused mode uses .column-posts--focus-wide for edge-to-edge media. */
 @media (min-width: 1024px) {
-  .column-posts--flip {
+  .column-posts--flip:not(.column-posts--focus-wide) {
     width: min(760px, 100%);
     margin-inline: auto;
   }
@@ -2291,6 +2306,9 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  // Queryable width so focused-mode media can bleed to the column edges
+  container-type: inline-size;
+  container-name: timeline-col;
   // Mobile: vertical latch — horizontal feed switches are driven by index.vue
   // axis-lock (Chrome Android won't chain pan-x through this).
   // Desktop / iPad board: allow horizontal pan so Magic Keyboard trackpad can
@@ -2474,6 +2492,37 @@ onUnmounted(() => {
         border-color: transparent;
       }
     }
+  }
+
+  // Focused desktop: media spans the column; reading chrome stays ~44rem
+  &--focus-wide:not(.column-posts--flip) {
+    // content-visibility paint-containment would clip the media breakout
+    :deep(.status-card) {
+      content-visibility: visible;
+    }
+
+    :deep(.status-media) {
+      width: 100cqi;
+      max-width: 100cqi;
+      margin-left: calc(50% - 50cqi);
+      border-radius: 0;
+    }
+
+    :deep(.status-media-image) {
+      max-height: min(70vh, 720px);
+      object-fit: contain;
+      background: var(--neo-bg-secondary);
+    }
+
+    :deep(.status-media-video) {
+      max-height: min(75vh, 800px);
+    }
+  }
+
+  &--focus-wide.column-posts--flip {
+    width: 100%;
+    max-width: none;
+    margin-inline: 0;
   }
 }
 

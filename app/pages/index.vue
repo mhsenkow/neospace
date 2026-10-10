@@ -2255,12 +2255,13 @@ useHead({ title: 'Home | NeoSpace' })
     }
   }
 
-  // Focused tab: one wider reading column
+  // Focused tab: fill the main pane so media can go edge-to-edge; text stays
+  // capped inside the column / card (see TimelineColumn + RealPostCard).
   .columns-page--tabs & {
     @media (min-width: 1024px) {
-      max-width: min(840px, 100%);
+      max-width: none;
       width: 100%;
-      margin-inline: auto;
+      margin-inline: 0;
       overflow-x: hidden;
       touch-action: pan-y;
 
@@ -2744,10 +2745,10 @@ useHead({ title: 'Home | NeoSpace' })
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
-    max-width: min(840px, 100%);
+    max-width: min(44rem, 100%);
     width: 100%;
     margin: 0 auto;
-    padding: 0.35rem 0.25rem 0.5rem;
+    padding: 0.35rem 0.75rem 0.5rem;
     border-bottom: 1px solid var(--neo-border-color);
     box-sizing: border-box;
   }
