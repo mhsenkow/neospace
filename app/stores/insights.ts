@@ -299,5 +299,15 @@ export const useInsightsStore = defineStore('insights', {
       this.error = null
       this.accountId = null
     },
+
+    invalidateStatusCache(accountId?: string) {
+      if (accountId) statusCache.delete(cacheKey(accountId))
+      else statusCache.clear()
+    },
+
+    async refreshInsights(account: mastodon.v1.Account, windowDays?: InsightsWindowDays) {
+      this.invalidateStatusCache(account.id)
+      await this.fetchInsights(account, windowDays)
+    },
   },
 })

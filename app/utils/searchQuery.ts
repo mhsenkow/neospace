@@ -4,6 +4,7 @@
  */
 
 import type { CuratedInstance } from '~/composables/useCuratedInstances'
+import { formatCompact } from '~/utils/insights'
 
 export type SearchIntent =
   | { kind: 'url'; url: string }
@@ -91,8 +92,19 @@ export function activePostFilterCount(f: PostFilters): number {
 
 const SINCE_DAYS: Record<Exclude<PostSince, ''>, number> = { day: 1, week: 7, month: 31, year: 365 }
 
-function isoDay(d: Date) {
-  return d.toISOString().slice(0, 10)
+/** Local calendar date for Mastodon `after:` (exclusive — use day before the window). */
+export function localIsoDay(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function afterDateForSince(since: Exclude<PostSince, ''>, now = new Date()): string {
+  // Mastodon `after:` is exclusive by date — subtract one extra day for the window length
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  d.setDate(d.getDate() - (SINCE_DAYS[since] + 1))
+  return localIsoDay(d)
 }
 
 /** Fold filter chips into Mastodon operators, skipping ones already typed */
@@ -105,21 +117,23 @@ export function buildPostQuery(q: string, f: PostFilters, now = new Date()): str
   if (f.links && !has(/(^|\s)has:link/i)) ops.push('has:link')
   if (f.noReplies && !has(/(^|\s)-?is:reply/i)) ops.push('-is:reply')
   if (f.since && !has(/(^|\s)(after|during):/i)) {
-    const d = new Date(now.getTime() - SINCE_DAYS[f.since] * 86_400_000)
-    ops.push(`after:${isoDay(d)}`)
+    ops.push(`after:${afterDateForSince(f.since, now)}`)
   }
   return [q.trim(), ...ops].filter(Boolean).join(' ')
 }
 
-/** Tappable operator examples for the Posts tab */
-export const POST_OPERATOR_TIPS: { insert: string; label: string }[] = [
-  { insert: 'from:me', label: 'Your posts' },
-  { insert: 'has:media', label: 'With media' },
-  { insert: 'has:poll', label: 'Polls' },
-  { insert: '-is:reply', label: 'No replies' },
-  { insert: 'language:en', label: 'In English' },
-  { insert: `after:${isoDay(new Date(Date.now() - 7 * 86_400_000))}`, label: 'Past week' },
-]
+/** Tappable operator examples for the Posts tab — dates computed fresh per call */
+export function postOperatorTips(now = new Date(), languageCode = 'en'): { insert: string; label: string }[] {
+  const lang = languageCode.trim() || 'en'
+  return [
+    { insert: 'from:me', label: 'Your posts' },
+    { insert: 'has:media', label: 'With media' },
+    { insert: 'has:poll', label: 'Polls' },
+    { insert: '-is:reply', label: 'No replies' },
+    { insert: `language:${lang}`, label: `In ${lang}` },
+    { insert: `after:${afterDateForSince('week', now)}`, label: 'Past week' },
+  ]
+}
 
 // ── Highlighting ───────────────────────────────────────────────────────────
 
@@ -192,10 +206,8 @@ export function rankServers(list: CuratedInstance[], raw: string): CuratedInstan
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 
-const compactNumber = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
-
 export function formatCount(n: number | undefined | null): string {
-  return compactNumber.format(Number(n) || 0)
+  return formatCompact(Number(n) || 0)
 }
 
 const pluralRules = new Intl.PluralRules(undefined)
@@ -203,7 +215,7 @@ const pluralRules = new Intl.PluralRules(undefined)
 /** "1 post" / "1.2K posts" — compact number plus the right singular/plural noun. */
 export function formatCountLabel(n: number | undefined | null, one: string, other = `${one}s`): string {
   const value = Number(n) || 0
-  return `${compactNumber.format(value)} ${pluralRules.select(value) === 'one' ? one : other}`
+  return `${formatCompact(value)} ${pluralRules.select(value) === 'one' ? one : other}`
 }
 
 /** Mastodon search wants 2+ ASCII chars; a single CJK (etc.) character is enough. */

@@ -571,10 +571,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** The test fails if Google Fonts or another undeclared font origin is contacted.
   - **Done:** `e2e/journeys/fonts-privacy.spec.ts` records every network request for 16 chrome × face combinations (signed-in session, mocked server): fails on any font-CDN host (Google Fonts, Bunny, Typekit, jsdelivr, unpkg…), any undeclared origin, any font file not from the app origin, and — for @fontsource chromes — requires the expected family's `.woff2` to load from the app origin so it can't pass by loading nothing. Proved it fails by injecting a Google Fonts `<link>`. 16/16 pass against the generated build.
 
-- [ ] **NS-085 · P3 · I — Preload only the active critical font.**
+- [x] **NS-085 · P3 · I — Preload only the active critical font.**
   - **Target:** [app/utils/loadFonts.ts:128](/Users/powerox/neospace/app/utils/loadFonts.ts:128).
   - **Change:** Coordinate prepaint and boot with a minimal active-face preload rather than loading all appearance fonts eagerly.
   - **Done when:** A cold load reduces text swapping without downloading unused families.
+  - **Done:** Critical families load regular immediately and bold on idle; prepaint preloads OpenDyslexic woff2 when `font=dyslexic`. Tests: `tests/p3-polish-batch.test.ts`, `tests/loadFonts.test.ts`.
 
 - [x] **NS-086 · P1 · R — Define the shared focus color for every theme.**
   - **Target:** [app/assets/css/_themes.scss:24](/Users/powerox/neospace/app/assets/css/_themes.scss:24).
@@ -3657,7 +3658,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/pages/profile.vue:257` — `chromeTitle`, the `useHead` title (`:604`) and the unfollow confirm (`:497`) use the raw `displayName`, so custom emoji appear as `:blobcat:` shortcodes.
   - **Provenance:** [October 9 candidate, line 856](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:856); explicit source files unchanged at review time.
 
-- [ ] **NS-530 · P3 · DESIGN · A · S — Use one sentence-case style everywhere.**
+- [x] **NS-530 · P3 · DESIGN · A · S — Use one sentence-case style everywhere.**
+  - **Done:** Removed `.profile-chip` lowercase; relationship chips use sentence case (`profile-chip--rel` already had `text-transform: none`).
   - **Target:** [app/pages/profile.vue:1499](/Users/powerox/neospace/app/pages/profile.vue:1499). **Area:** app/pages/profile.vue — identity, header & relationship.
   - **Change:** Use one sentence-case style everywhere.
   - **Prior observation to check:** `app/pages/profile.vue:1499` — `.profile-chip` sets `text-transform: lowercase`, which also applies to the relationship chips, so they render "follows you" and "domain blocked" while the same chips elsewhere are Title Case. The bot chip is lowercase "bot" (`:744`), "BOT" in `FollowersModal.vue:304` and "Bot" in `SearchPersonRow.vue:59`.
@@ -3712,7 +3714,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/pages/profile.vue:1080` — The "Search posts…" placeholder implies a server search, but it only filters loaded posts. The empty message (`:1146`) admits this only after a miss.
   - **Provenance:** [October 9 candidate, line 873](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:873); explicit source files unchanged at review time.
 
-- [ ] **NS-538 · P3 · CODE · A · S — Delete them.**
+- [x] **NS-538 · P3 · CODE · A · S — Delete them.**
+  - **Done:** Removed dead `.profile-loading__spinner` / `@keyframes spin`, `.profile-chrome-more`, and `.profile-error span { font-size: 3rem }`.
   - **Target:** [app/pages/profile.vue:1199](/Users/powerox/neospace/app/pages/profile.vue:1199). **Area:** app/pages/profile.vue — tabs, posts & editing.
   - **Change:** Delete them.
   - **Prior observation to check:** `app/pages/profile.vue:1199` — `.profile-handle__acct` is defined twice (also `:1488`) with conflicting colors. `.profile-loading__spinner` and `@keyframes spin` (`:1345-1352`), `.profile-chrome-more` (`:1671`) and `.profile-error span { font-size: 3rem }` (`:1312`) are dead.
@@ -3746,7 +3749,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/utils/sanitizeCss.ts:143` — Splitting selectors on raw commas breaks `:is(a, b)` and `:where(…)` into `.scope :is(a, .scope b)`, silently changing what legitimate skins match.
   - **Provenance:** [October 9 candidate, line 886](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:886); explicit source files unchanged at review time.
 
-- [ ] **NS-543 · P3 · UX · A · M — Keep @keyframes with a per-profile name prefix (and rewrite matching animation-name values).**
+- [x] **NS-543 · P3 · UX · A · M — Keep @keyframes with a per-profile name prefix (and rewrite matching animation-name values).**
+  - **Done:** `sanitizeProfileCss` keeps `@keyframes` as `ns-profile-*` and rewrites `animation`/`animation-name`. Test: `tests/p3-polish-batch.test.ts`.
   - **Target:** [app/utils/sanitizeCss.ts:186](/Users/powerox/neospace/app/utils/sanitizeCss.ts:186). **Area:** app/utils/sanitizeCss.ts — profile skin sanitizer.
   - **Change:** Keep `@keyframes` with a per-profile name prefix (and rewrite matching `animation-name` values).
   - **Prior observation to check:** `app/utils/sanitizeCss.ts:186` — `@keyframes`, `@container` and `@font-face` are dropped, so any animated chaos skin silently stops animating.
@@ -3759,43 +3763,50 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/utils/sanitizeCss.ts:61` — `element()` / `-moz-element(#id)` aren't blocked. In Firefox a skin can paint live app elements (another column, the compose box) as a background to fake UI.
   - **Provenance:** [October 9 candidate, line 888](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:888); explicit source files unchanged at review time.
 
-- [ ] **NS-545 · P3 · UX · A · S — Prefer spoilerText when set, and fall back to "Photo / video post" or "Poll".**
+- [x] **NS-545 · P3 · UX · A · S — Prefer spoilerText when set, and fall back to "Photo / video post" or "Poll".**
+  - **Done:** `statusToInsightRow` in `app/utils/insights.ts` (spoiler / media / poll previews).
   - **Target:** [app/utils/insights.ts:152](/Users/powerox/neospace/app/utils/insights.ts:152). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Prefer `spoilerText` when set, and fall back to "Photo / video post" or "Poll".
   - **Prior observation to check:** `app/utils/insights.ts:152` — The preview is the post body even when it's behind a content warning, so Top posts reveal CW'd text and media-only posts read "(no text)" (`ProfileInsights.vue:451`).
   - **Provenance:** [October 9 candidate, line 894](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:894); explicit source files unchanged at review time.
 
-- [ ] **NS-546 · P3 · CODE · A · S — Pass { requestInit: { signal } } as useFediverseSearch.ts:375 does, and drop the cast.**
+- [x] **NS-546 · P3 · CODE · A · S — Pass { requestInit: { signal } } as useFediverseSearch.ts:375 does, and drop the cast.**
+  - **Done:** `insights` store passes `{ requestInit: { signal } }` to `statuses.list`.
   - **Target:** [app/stores/insights.ts:173](/Users/powerox/neospace/app/stores/insights.ts:173). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Pass `{ requestInit: { signal } }` as `useFediverseSearch.ts:375` does, and drop the cast.
   - **Prior observation to check:** `app/stores/insights.ts:173` — The `AbortController` signal is never passed to `statuses.list(...)` (and the params are cast `as any`), so `abortInFlight()` doesn't cancel the network requests.
   - **Provenance:** [October 9 candidate, line 896](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:896); explicit source files unchanged at review time.
 
-- [ ] **NS-547 · P3 · UX · A · S — Add a Refresh button that clears statusCache, or invalidate the cache from compose onPosted.**
+- [x] **NS-547 · P3 · UX · A · S — Add a Refresh button that clears statusCache, or invalidate the cache from compose onPosted.**
+  - **Done:** Insights Refresh + `invalidateStatusCache` on own-profile compose `onPosted` (`ProfileInsights.vue`, `profile.vue`, `insights` store).
   - **Target:** [app/stores/insights.ts:192](/Users/powerox/neospace/app/stores/insights.ts:192). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Add a Refresh button that clears `statusCache`, or invalidate the cache from compose `onPosted`.
   - **Prior observation to check:** `app/stores/insights.ts:192` — The 5-minute cache isn't invalidated when you post or delete, and there's no refresh control, so a just-published post is missing from Insights.
   - **Provenance:** [October 9 candidate, line 897](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:897); explicit source files unchanged at review time.
 
-- [ ] **NS-548 · P3 · UX · A · S — Pluralize, say "posts", and use one hour format.**
+- [x] **NS-548 · P3 · UX · A · S — Pluralize, say "posts", and use one hour format.**
+  - **Done:** Heat summary/titles use `formatInsightHour` and post/slot plurals; lifetime foot says posts/followers with singular forms.
   - **Target:** [app/components/ProfileInsights.vue:163](/Users/powerox/neospace/app/components/ProfileInsights.vue:163). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Pluralize, say "posts", and use one hour format.
   - **Prior observation to check:** `app/components/ProfileInsights.vue:163` — Plurals are wrong: "· 1 posts" in the heat summary, `title="… — 1 posts"` (`:366`), "N statuses" (`:494`, which also says "statuses" where the rest of the app says "posts") and "followers" for 1. The hour also shows as "9:00" in titles but "09:00" in the summary.
   - **Provenance:** [October 9 candidate, line 898](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:898); explicit source files unchanged at review time.
 
-- [ ] **NS-549 · P3 · UX · A · S — Use "3 posts · 1.2K engagement".**
+- [x] **NS-549 · P3 · UX · A · S — Use "3 posts · 1.2K engagement".**
+  - **Done:** Hashtag meta in `ProfileInsights.vue`.
   - **Target:** [app/components/ProfileInsights.vue:465](/Users/powerox/neospace/app/components/ProfileInsights.vue:465). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Use "3 posts · 1.2K engagement".
   - **Prior observation to check:** `app/components/ProfileInsights.vue:465` — The tag meta reads "3 · 1.2K eng", where "eng" is unexplained jargon and the bare "3" has no unit.
   - **Provenance:** [October 9 candidate, line 899](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:899); explicit source files unchanged at review time.
 
-- [ ] **NS-550 · P3 · DESIGN · A · S — Use largest-remainder rounding.**
+- [x] **NS-550 · P3 · DESIGN · A · S — Use largest-remainder rounding.**
+  - **Done:** `largestRemainderSlots` drives waffle + legend percents. Test: `tests/p3-polish-batch.test.ts`.
   - **Target:** [app/components/ProfileInsights.vue:189](/Users/powerox/neospace/app/components/ProfileInsights.vue:189). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Use largest-remainder rounding.
   - **Prior observation to check:** `app/components/ProfileInsights.vue:189` — Each kind's waffle cells are rounded separately, so the cells can total 99 (one grey "empty" cell at 100% coverage), and the legend percentages (`:416`) can sum to 99 or 101.
   - **Provenance:** [October 9 candidate, line 900](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:900); explicit source files unchanged at review time.
 
-- [ ] **NS-551 · P3 · UX · A · S — Keep the listener (and the payload) alive for the tab's lifetime, and show "Loom is slow — download…**
+- [x] **NS-551 · P3 · UX · A · S — Keep the listener (and the payload) alive for the tab's lifetime, and show "Loom is slow — download…**
+  - **Done:** After 8s Loom export returns `slow` (listener kept); UI shows “Loom is slow — download CSVs instead?” instead of auto-download.
   - **Target:** [app/utils/loomExport.ts:165](/Users/powerox/neospace/app/utils/loomExport.ts:165). **Area:** app/components/ProfileInsights.vue, app/stores/insights.ts, app/utils/insights.ts, app/utils/loomExport.ts.
   - **Change:** Keep the listener (and the payload) alive for the tab's lifetime, and show "Loom is slow — download instead?" rather than auto-downloading.
   - **Prior observation to check:** `app/utils/loomExport.ts:165` — After 8 seconds the message listener is removed and the CSVs auto-download. If Loom loads slowly, the user ends up with an empty Loom tab plus an unexpected download, and a late "ready" is ignored.
@@ -3815,7 +3826,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/components/FollowersModal.vue:303` — Display names render raw, so custom emoji show as `:shortcode:`. The same happens in `ProfilePeekCard.vue:61` and `SearchPersonRow.vue:25`.
   - **Provenance:** [October 9 candidate, line 911](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:911); explicit source files unchanged at review time.
 
-- [ ] **NS-554 · P3 · UX · A · S — Decrement profileStore.viewedProfile counts when it's your own list, and toast "Blocked @x".**
+- [x] **NS-554 · P3 · UX · A · S — Decrement profileStore.viewedProfile counts when it's your own list, and toast "Blocked @x".**
+  - **Done:** `FollowersModal.vue` adjusts counts on block/remove follower and toasts blocked handle.
   - **Target:** [app/components/FollowersModal.vue:183](/Users/powerox/neospace/app/components/FollowersModal.vue:183). **Area:** app/components/FollowersModal.vue.
   - **Change:** Decrement `profileStore.viewedProfile` counts when it's your own list, and toast "Blocked @x".
   - **Prior observation to check:** `app/components/FollowersModal.vue:183` — Block and Remove follower (`:204`) drop the row but don't update the profile's follower/following counts, and there's no success toast.
@@ -3828,7 +3840,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/components/FollowersModal.vue:380` — "Loading..." uses three dots while the rest of the app uses "Loading…", and the overlay color is hard-coded `rgba(0,0,0,0.75)` (`:394`).
   - **Provenance:** [October 9 candidate, line 913](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:913); explicit source files unchanged at review time.
 
-- [ ] **NS-556 · P3 · CODE · A · S — Pass { requestInit: { signal } } through $raw/list.**
+- [x] **NS-556 · P3 · CODE · A · S — Pass { requestInit: { signal } } through $raw/list.**
+  - **Done:** Followers list `$raw` calls pass abort `signal`.
   - **Target:** [app/components/FollowersModal.vue:66](/Users/powerox/neospace/app/components/FollowersModal.vue:66). **Area:** app/components/FollowersModal.vue.
   - **Change:** Pass `{ requestInit: { signal } }` through `$raw`/`list`.
   - **Prior observation to check:** `app/components/FollowersModal.vue:66` — `void signal` drops the pager's AbortSignal, so closing or switching tabs never cancels the request. `useLinkedProfileFeed.ts:78` does the same.
@@ -3848,7 +3861,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 918](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:918); explicit source files unchanged at review time.
   - **Done:** `ProfilePeekCard.vue` avatar uses `alt=""` (name is in the adjacent heading).
 
-- [ ] **NS-559 · P3 · CODE · A · S — Use Array.from(name)[0] or clipGraphemes.**
+- [x] **NS-559 · P3 · CODE · A · S — Use Array.from(name)[0] or clipGraphemes.**
+  - **Done:** `ProfilePeekCard.vue` placeholder initial uses `[...name][0]`.
   - **Target:** [app/components/ProfilePeekCard.vue:57](/Users/powerox/neospace/app/components/ProfilePeekCard.vue:57). **Area:** app/components/ProfilePeekCard.vue & ProfileHumanBadges.vue.
   - **Change:** Use `Array.from(name)[0]` or `clipGraphemes`.
   - **Prior observation to check:** `app/components/ProfilePeekCard.vue:57` — `.slice(0, 1)` splits surrogate pairs, so a name starting with an emoji renders a broken glyph in the placeholder.
@@ -3868,13 +3882,15 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/components/ProfileHumanBadges.vue:71` — The microcopy "Settings → Humans first — why this exists." is awkward, and screen readers read the arrow as "right arrow". The `opacity:0.92` on the cards (`:135`) also lowers the contrast of the already-muted 11px text.
   - **Provenance:** [October 9 candidate, line 922](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:922); explicit source files unchanged at review time.
 
-- [ ] **NS-562 · P3 · UX · A · S — Use after: with the local date minus N+1 days.**
+- [x] **NS-562 · P3 · UX · A · S — Use after: with the local date minus N+1 days.**
+  - **Done:** `localIsoDay` + `afterDateForSince` in `searchQuery.ts`. Tests updated in `tests/searchQuery.test.ts`, `tests/p3-polish-batch.test.ts`.
   - **Target:** [app/utils/searchQuery.ts:79](/Users/powerox/neospace/app/utils/searchQuery.ts:79). **Area:** app/pages/explore.vue.
   - **Change:** Use `after:` with the local date minus N+1 days.
   - **Prior observation to check:** `app/utils/searchQuery.ts:79` — `isoDay` uses UTC, and Mastodon's `after:` is exclusive by date, so "Past day" returns only posts from today (UTC), not the last 24 hours. Late in the evening west of UTC it can return nothing.
   - **Provenance:** [October 9 candidate, line 933](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:933); explicit source files unchanged at review time.
 
-- [ ] **NS-563 · P3 · UX · A · S — Compute tips in a computed/getter, and use the user's UI language.**
+- [x] **NS-563 · P3 · UX · A · S — Compute tips in a computed/getter, and use the user's UI language.**
+  - **Done:** `postOperatorTips()` computed on Explore from `navigator.language`.
   - **Target:** [app/utils/searchQuery.ts:106](/Users/powerox/neospace/app/utils/searchQuery.ts:106). **Area:** app/pages/explore.vue.
   - **Change:** Compute tips in a computed/getter, and use the user's UI language.
   - **Prior observation to check:** `app/utils/searchQuery.ts:106` — The "Past week" tip's `after:` date is computed once at module load, so a long-lived SPA tab inserts a stale date. "In English" is hard-coded to `language:en` (`:105`).
@@ -3915,43 +3931,50 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/components/search/SearchTagRow.vue:42` — The button combines `aria-pressed="true"` with `aria-label="Unfollow #x"`, so screen readers hear "Unfollow #x, pressed".
   - **Provenance:** [October 9 candidate, line 953](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:953); explicit source files unchanged at review time.
 
-- [ ] **NS-569 · P3 · DESIGN · A · S — Use one formatter app-wide.**
+- [x] **NS-569 · P3 · DESIGN · A · S — Use one formatter app-wide.**
+  - **Done:** Explore `formatCount` delegates to `formatCompact` from `insights.ts`.
   - **Target:** [app/utils/searchQuery.ts:180](/Users/powerox/neospace/app/utils/searchQuery.ts:180). **Area:** app/components/search/*.vue.
   - **Change:** Use one formatter app-wide.
   - **Prior observation to check:** `app/utils/searchQuery.ts:180` — Explore's `formatCount` always uses compact notation in the user's locale, while the profile and insights `formatCompact` (`utils/insights.ts:401`) uses `'en'` and compacts only at 10,000 and above. The same account shows "1.2K followers" in search and "1,234 followers" on its profile.
   - **Provenance:** [October 9 candidate, line 954](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:954); explicit source files unchanged at review time.
 
-- [ ] **NS-570 · P3 · PERF · A · S — Resolve only when the host part matches a complete-domain pattern.**
+- [x] **NS-570 · P3 · PERF · A · S — Resolve only when the host part matches a complete-domain pattern.**
+  - **Done:** Account search sets `resolve` only for complete `user@host.tld` queries.
   - **Target:** [app/composables/useAccountSearch.ts:85](/Users/powerox/neospace/app/composables/useAccountSearch.ts:85). **Area:** Composables: discovery, recents, account search, pagers.
   - **Change:** Resolve only when the host part matches a complete-domain pattern.
   - **Prior observation to check:** `app/composables/useAccountSearch.ts:85` — `resolve` is set whenever the query contains "@", so typing "alice@mast" fires a remote WebFinger lookup for each partial domain.
   - **Provenance:** [October 9 candidate, line 959](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:959); explicit source files unchanged at review time.
 
-- [ ] **NS-571 · P3 · UX · A · S — Pass the page size and set hasMore = items.length &gt;= limit, as useAccountPager.ts:49 does.**
+- [x] **NS-571 · P3 · UX · A · S — Pass the page size and set hasMore = items.length &gt;= limit, as useAccountPager.ts:49 does.**
+  - **Done:** `usePager` optional `pageSize`; Followers + linked profile feeds pass limit.
   - **Target:** [app/composables/usePager.ts:92](/Users/powerox/neospace/app/composables/usePager.ts:92). **Area:** Composables: discovery, recents, account search, pagers.
   - **Change:** Pass the page size and set `hasMore = items.length >= limit`, as `useAccountPager.ts:49` does.
   - **Prior observation to check:** `app/composables/usePager.ts:92` — For plain-array pages, `hasMore` stays true after a short final page, so `useLinkedProfileFeed` shows "Load more" past the end and an extra empty request runs.
   - **Provenance:** [October 9 candidate, line 960](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:960); explicit source files unchanged at review time.
 
-- [ ] **NS-572 · P3 · CODE · A · S — Add a generation token, and memoize failures briefly.**
+- [x] **NS-572 · P3 · CODE · A · S — Add a generation token, and memoize failures briefly.**
+  - **Done:** `useSearchDiscovery` generation guard + 60s failure memo on `reset()`.
   - **Target:** [app/composables/useSearchDiscovery.ts:69](/Users/powerox/neospace/app/composables/useSearchDiscovery.ts:69). **Area:** Composables: discovery, recents, account search, pagers.
   - **Change:** Add a generation token, and memoize failures briefly.
   - **Prior observation to check:** `app/composables/useSearchDiscovery.ts:69` — `fetchSlice` has no generation guard. After `reset()` on a sign-in change, an in-flight request from the previous source still writes its suggestions and trends. Failed slices aren't memoized either (`:72`), so a server with trends disabled is re-hit on every tab flip.
   - **Provenance:** [October 9 candidate, line 961](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:961); explicit source files unchanged at review time.
 
-- [ ] **NS-573 · P3 · SEC · A · S — Delete the bucket in logoutInstance, and add a "Remember searches" toggle.**
+- [x] **NS-573 · P3 · SEC · A · S — Delete the bucket in logoutInstance, and add a "Remember searches" toggle.**
+  - **Done:** `purgeRecentSearches` on `logoutInstance`; Settings → Privacy “Remember searches”; `record` respects toggle.
   - **Target:** [app/composables/useRecentSearches.ts:36](/Users/powerox/neospace/app/composables/useRecentSearches.ts:36). **Area:** Composables: discovery, recents, account search, pagers.
   - **Change:** Delete the bucket in `logoutInstance`, and add a "Remember searches" toggle.
   - **Prior observation to check:** `app/composables/useRecentSearches.ts:36` — Recent searches are kept per account in localStorage but aren't pruned when that account is logged out (only `clearLocalDeviceData` wipes them), and there's no setting to turn history off. Every tapped topic is also recorded (`explore.vue:426`).
   - **Provenance:** [October 9 candidate, line 962](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:962); explicit source files unchanged at review time.
 
-- [ ] **NS-574 · P3 · CODE · A · S — Re-read before writing (or listen for storage events), and compare case-insensitively.**
+- [x] **NS-574 · P3 · CODE · A · S — Re-read before writing (or listen for storage events), and compare case-insensitively.**
+  - **Done:** Recent searches re-read localStorage on write/remove; `storage` listener; case-insensitive remove.
   - **Target:** [app/composables/useRecentSearches.ts:37](/Users/powerox/neospace/app/composables/useRecentSearches.ts:37). **Area:** Composables: discovery, recents, account search, pagers.
   - **Change:** Re-read before writing (or listen for `storage` events), and compare case-insensitively.
   - **Prior observation to check:** `app/composables/useRecentSearches.ts:37` — The store is read once per mount and written whole, so two open tabs overwrite each other's history. `remove` (`:53`) is case-sensitive while `record` dedupes case-insensitively.
   - **Provenance:** [October 9 candidate, line 963](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:963); explicit source files unchanged at review time.
 
-- [ ] **NS-575 · P3 · CODE · A · S — Type the params, and map errors with mapErrorToMessage.**
+- [x] **NS-575 · P3 · CODE · A · S — Type the params, and map errors with mapErrorToMessage.**
+  - **Done:** `useLinkedProfileFeed` typed list params + friendly errors; abort `signal` wired.
   - **Target:** [app/composables/useLinkedProfileFeed.ts:84](/Users/powerox/neospace/app/composables/useLinkedProfileFeed.ts:84). **Area:** Composables: discovery, recents, account search, pagers.
   - **Change:** Type the params, and map errors with `mapErrorToMessage`.
   - **Prior observation to check:** `app/composables/useLinkedProfileFeed.ts:84` — The params are cast `as any`, and the errors at `:119` and `:132` surface the raw `e.message`.
@@ -4132,61 +4155,71 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/components/NeoRadioGroup.vue:115-118` — At ≤480px every button gets `flex: 1 1 calc(33.333% - 2px)`, so the 5 font-size options wrap 3 + 2 and the last two stretch wider than the first three.
   - **Provenance:** [October 9 candidate, line 576](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:576); explicit source files unchanged at review time.
 
-- [ ] **NS-602 · P3 · CODE · A · S — Emit $sidebar-width-expanded/-rail as the tokens, set --neo-sidebar-width on :root instead of .neo-layout,…**
+- [x] **NS-602 · P3 · CODE · A · S — Emit $sidebar-width-expanded/-rail as the tokens, set --neo-sidebar-width on :root instead of .neo-layout,…**
+  - **Done:** `:root` + `html[data-rail]` own `--neo-sidebar-width`; removed duplicate vars from `.neo-layout`; dropped stale sm/md/lg tokens.
   - **Target:** [app/assets/css/_structural.scss:173](/Users/powerox/neospace/app/assets/css/_structural.scss:173). **Area:** Cascade & token hygiene.
   - **Change:** Emit `$sidebar-width-expanded`/`-rail` as the tokens, set `--neo-sidebar-width` on `:root` instead of `.neo-layout`, and delete the `-sm/-md/-lg` set.
   - **Prior observation to check:** `app/assets/css/_structural.scss:173-176` — (old #119): `:root` sets `--neo-sidebar-width: 64px` from the stale 56/64/72 tokens, while the real widths are 248/200/68 (`default.vue:316,352,357`). Every `var(--neo-sidebar-width, 248px)` fallback is dead, and anything teleported outside `.neo-layout` gets 64px.
   - **Provenance:** [October 9 candidate, line 653](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:653); explicit source files unchanged at review time.
 
-- [ ] **NS-603 · P3 · CODE · A · S — Delete the palette, point $chaos-stop-1 at a theme token, and either adopt @include vars.desk or remove it.**
+- [x] **NS-603 · P3 · CODE · A · S — Delete the palette, point $chaos-stop-1 at a theme token, and either adopt @include vars.desk or remove it.**
+  - **Done:** Removed unused chaos gradient tokens, `@mixin desk/mobile`, and stale sidebar sm/md/lg SCSS vars. Legacy `$bg` palette kept (still referenced by `_themes.scss` mixins).
   - **Target:** [app/assets/css/_variables.scss:8](/Users/powerox/neospace/app/assets/css/_variables.scss:8). **Area:** Cascade & token hygiene.
   - **Change:** Delete the palette, point `$chaos-stop-1` at a theme token, and either adopt `@include vars.desk` or remove it.
   - **Prior observation to check:** `app/assets/css/_variables.scss:8-28,175-201` — (old #116/#119): the light/dark palette (`$bg`…`$dark-mark`, with `$mute: #757575` and `$accent: #c45c26` disagreeing with the live `#666666`/`#a84c1e`), `$sidebar-width-rail/expanded`, `$bp-*`, `@mixin desk` and `@mixin mobile` aren't used anywhere. The comment "used by pre-paint + layout" (`:175`) is false. Only `$accent` leaks out, via `$chaos-stop-1`.
   - **Provenance:** [October 9 candidate, line 654](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:654); explicit source files unchanged at review time.
 
-- [ ] **NS-604 · P3 · CODE · A · M — Prune them (or document them as public API for profile CSS).**
+- [x] **NS-604 · P3 · CODE · A · M — Prune them (or document them as public API for profile CSS).**
+  - **Done:** Documented structural tokens as profile-CSS public surface in `_structural.scss` (full prune deferred — high blast radius).
   - **Target:** [app/assets/css/_structural.scss:14](/Users/powerox/neospace/app/assets/css/_structural.scss:14). **Area:** Cascade & token hygiene.
   - **Change:** Prune them (or document them as public API for profile CSS).
   - **Prior observation to check:** `app/assets/css/_structural.scss:14-25,91-129,185-206` (+ `_themes.scss:66,69,357`) — About 80 custom properties are defined and never read: the whole `--neo-opacity-*` scale except 50, `--neo-letter-spacing-*`, `--neo-transition-timing-*`, `--neo-transition-slow(er)`, `--neo-container-*` except xl, `--neo-content-width*`, `--neo-z-base/-fixed/-sticky/-sheet`, `--neo-warning-*`, `--neo-success-light`, `--neo-danger-light/-dark`, `--neo-info-light/-dark`, `--neo-accent-light`, `--neo-accent-soft-hover`, `--neo-bg-active`, `--neo-border-color-light`, `--neo-body-tracking`, `--neo-chrome-outline-style`, `--neo-nes-sky`, `--neo-mobile-chrome-top`.
   - **Provenance:** [October 9 candidate, line 655](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:655); explicit source files unchanged at review time.
 
-- [ ] **NS-605 · P3 · CODE · A · S — Delete them, along with the --neo-chaos-* tokens (_structural.scss:214-217).**
+- [x] **NS-605 · P3 · CODE · A · S — Delete them, along with the --neo-chaos-* tokens (_structural.scss:214-217).**
+  - **Done:** Removed `.neo-btn--chaos`, `@keyframes gradient-shift`, and `--neo-chaos-*` tokens.
   - **Target:** [app/assets/css/main.scss:265](/Users/powerox/neospace/app/assets/css/main.scss:265). **Area:** Cascade & token hygiene.
   - **Change:** Delete them, along with the `--neo-chaos-*` tokens (`_structural.scss:214-217`).
   - **Prior observation to check:** `app/assets/css/main.scss:265-281,399-403` — `.neo-btn--chaos` and `@keyframes gradient-shift` aren't used anywhere in `app/`.
   - **Provenance:** [October 9 candidate, line 656](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:656); explicit source files unchanged at review time.
 
-- [ ] **NS-606 · P3 · DESIGN · A · S — Move them to utils/groupCategory.ts, and define the cat tokens per scheme (or derive them from --neo-accent).**
+- [x] **NS-606 · P3 · DESIGN · A · S — Move them to utils/groupCategory.ts, and define the cat tokens per scheme (or derive them from --neo-accent).**
+  - **Done:** `app/utils/groupCategory.ts`; `--neo-cat-*` derive from theme tokens; shell re-exports helpers.
   - **Target:** [app/assets/css/_structural.scss:158](/Users/powerox/neospace/app/assets/css/_structural.scss:158). **Area:** Cascade & token hygiene.
   - **Change:** Move them to `utils/groupCategory.ts`, and define the cat tokens per scheme (or derive them from `--neo-accent`).
   - **Prior observation to check:** `app/assets/css/_structural.scss:158-165` + `app/composables/useShellAppearance.ts:165-174` — The `--neo-cat-*` group colours are fixed light-theme hexes (two are the old `#c45c26` accent) and aren't themed. The sidebar/GroupCard tints are therefore the same in Contrast, Beta and Brutal. The helpers also sit in a "shell appearance" composable they have nothing to do with.
   - **Provenance:** [October 9 candidate, line 657](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:657); explicit source files unchanged at review time.
 
-- [ ] **NS-607 · P3 · DESIGN · A · S — Add a single --neo-disabled-opacity token.**
+- [x] **NS-607 · P3 · DESIGN · A · S — Add a single --neo-disabled-opacity token.**
+  - **Done:** `--neo-disabled-opacity: 0.5` on `:root`; primary/tertiary/chrome disabled states use it.
   - **Target:** [app/assets/css/main.scss:194](/Users/powerox/neospace/app/assets/css/main.scss:194). **Area:** Cascade & token hygiene.
   - **Change:** Add a single `--neo-disabled-opacity` token.
   - **Prior observation to check:** `app/assets/css/main.scss:194,341,447` + `SettingsModal.vue:3193` + `main.scss:224` — Disabled opacity is .45, .5, .6 or .7 depending on the component, so disabled controls look different across adjacent surfaces.
   - **Provenance:** [October 9 candidate, line 658](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:658); explicit source files unchanged at review time.
 
-- [ ] **NS-608 · P3 · DESIGN · A · S — Implement the halo with outline + outline-offset only (or a CSS layer the components can opt out of).**
+- [x] **NS-608 · P3 · DESIGN · A · S — Implement the halo with outline + outline-offset only (or a CSS layer the components can opt out of).**
+  - **Done:** Global `:focus-visible` no longer replaces component `box-shadow` with a bg halo.
   - **Target:** [app/assets/css/main.scss:739](/Users/powerox/neospace/app/assets/css/main.scss:739). **Area:** Cascade & token hygiene.
   - **Change:** Implement the halo with `outline` + `outline-offset` only (or a CSS layer the components can opt out of).
   - **Prior observation to check:** `app/assets/css/main.scss:739-743` — The global `:focus-visible` sets `box-shadow: 0 0 0 4px var(--neo-bg-primary)`, which replaces any component shadow while focused. Brutal/NES 4px offset card shadows and Ink-line press shadows vanish on focus, and cards jump.
   - **Provenance:** [October 9 candidate, line 659](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:659); explicit source files unchanged at review time.
 
-- [ ] **NS-609 · P3 · DESIGN · A · S — Add ::selection { background: var(--neo-accent-soft-hover); color: var(--neo-text-primary) } and a minimal…**
+- [x] **NS-609 · P3 · DESIGN · A · S — Add ::selection { background: var(--neo-accent-soft-hover); color: var(--neo-text-primary) } and a minimal…**
+  - **Done:** `::selection` + `@media print` shell hide / light colours in `main.scss`.
   - **Target:** [app/assets/css/main.scss](/Users/powerox/neospace/app/assets/css/main.scss). **Area:** Cascade & token hygiene.
   - **Change:** Add `::selection { background: var(--neo-accent-soft-hover); color: var(--neo-text-primary) }` and a minimal print sheet that hides the shell and forces light colours.
   - **Prior observation to check:** `app/assets/css/main.scss` (whole file) — There is no `::selection` style, so selection uses the OS highlight, which ignores the theme (blue on Loom gold or Tank green). There are no `@media print` rules, so printing a thread prints the sidebar, mobile tab bar and dark page background.
   - **Provenance:** [October 9 candidate, line 660](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:660); explicit source files unchanged at review time.
 
-- [ ] **NS-610 · P3 · DESIGN · A · S — Drop the body transition, or apply a short view-transition for theme changes only.**
+- [x] **NS-610 · P3 · DESIGN · A · S — Drop the body transition, or apply a short view-transition for theme changes only.**
+  - **Done:** Removed cross-fade on `body` background/color (cards no longer flash two-tone).
   - **Target:** [app/assets/css/main.scss:65](/Users/powerox/neospace/app/assets/css/main.scss:65). **Area:** Cascade & token hygiene.
   - **Change:** Drop the body transition, or apply a short view-transition for theme changes only.
   - **Prior observation to check:** `app/assets/css/main.scss:65` — Only `body` cross-fades `background-color`/`color` (220ms) on theme change; cards, sidebar and modal snap immediately, so a switch shows a half-second two-tone flash.
   - **Provenance:** [October 9 candidate, line 661](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:661); explicit source files unchanged at review time.
 
-- [ ] **NS-611 · P3 · UX · A · S — Rename one ("Columns: Focused/Wide/Packed" vs "Spacing: Roomy/Cozy/Dense").**
+- [x] **NS-611 · P3 · UX · A · S — Rename one ("Columns: Focused/Wide/Packed" vs "Spacing: Roomy/Cozy/Dense").**
+  - **Done:** Board cycle announces “Columns” (Appearance spacing stays “Spacing”).
   - **Target:** [app/composables/useShellAppearance.ts:119](/Users/powerox/neospace/app/composables/useShellAppearance.ts:119). **Area:** Runtime appearance (`appearance.ts`, `loadFonts.ts`, `suiteLook.ts`, `useShellAppearance.ts`, `stores/theme.ts`).
   - **Change:** Rename one ("Columns: Focused/Wide/Packed" vs "Spacing: Roomy/Cozy/Dense").
   - **Prior observation to check:** `app/composables/useShellAppearance.ts:119-139` vs `app/utils/appearance.ts:110-114` — There are two unrelated "density" settings: desk column density (Focused / Roomy / Packed) and Appearance density (Roomy / Cozy / Dense). Both have a "Roomy" option that means different things.
@@ -4206,7 +4239,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 675](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:675); explicit source files unchanged at review time.
   - Evidence: N/A — `NeoIcon` already sets `aria-hidden="true"` unless a label is passed — no change needed.
 
-- [ ] **NS-614 · P3 · CODE · A · S — Delete the dead actions, or wire setProfileCssDisabled to a "Disable profile CSS on this device" toggle in…**
+- [x] **NS-614 · P3 · CODE · A · S — Delete the dead actions, or wire setProfileCssDisabled to a "Disable profile CSS on this device" toggle in…**
+  - **Done:** Settings → Appearance toggle calls `setProfileCssDisabled` (persisted escape hatch besides `?safe=1`).
   - **Target:** [app/stores/theme.ts:30](/Users/powerox/neospace/app/stores/theme.ts:30). **Area:** Runtime appearance (`appearance.ts`, `loadFonts.ts`, `suiteLook.ts`, `useShellAppearance.ts`, `stores/theme.ts`).
   - **Change:** Delete the dead actions, or wire `setProfileCssDisabled` to a "Disable profile CSS on this device" toggle in Appearance.
   - **Prior observation to check:** `app/stores/theme.ts:30,39-43,97-107,120-123` — `safeCustomCSS` (identity getter), `toggleMode`, `setProfileCssDisabled` and `loadUserTheme` have no callers. `setProfileCssDisabled` claims to be the "escape hatch from Settings" but no Settings UI exists, so `?safe=1` is the only way out of a broken skin.

@@ -57,7 +57,7 @@ const posts = computed(() => formatCompact(props.account.statusesCount ?? 0))
       class="profile-card__avatar profile-card__avatar--placeholder"
       aria-hidden="true"
     >
-      {{ (account.displayName || account.username || '?').slice(0, 1).toUpperCase() }}
+      {{ [...(account.displayName || account.username || '?')][0]?.toUpperCase() ?? '?' }}
     </div>
     <div class="profile-card__meta">
       <h3 class="profile-card__name">

@@ -129,7 +129,7 @@ export function useShellAppearance() {
   /** Board density (Packed / Roomy / Focused) — announced like the Look cycles */
   const cycleBoardDensity = () => {
     columnsStore.toggleDeskDensity()
-    nextTick(() => announceLook('Board density', densityLabel.value))
+    nextTick(() => announceLook('Columns', densityLabel.value))
   }
 
   const densityTitle = computed(() => {
@@ -180,13 +180,4 @@ export function useShellAppearance() {
   }
 }
 
-export function categoryColor(category: string) {
-  const key = ['tech', 'creative', 'gaming', 'social', 'news', 'trending', 'local', 'other'].includes(category)
-    ? category
-    : 'other'
-  return `var(--neo-cat-${key})`
-}
-
-export function categoryTint(category: string) {
-  return `color-mix(in srgb, ${categoryColor(category)} 13%, transparent)`
-}
+export { categoryColor, categoryTint } from '~/utils/groupCategory'

@@ -48,11 +48,11 @@ describe('tagFromQuery', () => {
 })
 
 describe('buildPostQuery', () => {
-  const now = new Date('2026-10-09T12:00:00Z')
+  const now = new Date(2026, 9, 9, 12, 0, 0)
 
   it('folds filters into Mastodon operators', () => {
     const q = buildPostQuery('rust', { ...emptyPostFilters(), fromMe: true, media: true, noReplies: true, since: 'week' }, now)
-    expect(q).toBe('rust from:me has:media -is:reply after:2026-10-02')
+    expect(q).toBe('rust from:me has:media -is:reply after:2026-10-01')
   })
 
   it('does not duplicate operators already typed', () => {

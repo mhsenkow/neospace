@@ -10,6 +10,7 @@
 
 const MAX_CSS_CHARS = 50_000
 const SCOPE = '.chaos-active #main-content'
+const KEYFRAME_PREFIX = 'ns-profile-'
 /**
  * Appended to every non-empty skin. #main-content is `position: static`, so an
  * absolutely positioned descendant (`top:0;left:0;width:100vw;height:100vh`) would
@@ -109,8 +110,35 @@ export function sanitizeProfileCss(raw: string): string {
 
   // Scope every rule under .chaos-active #main-content so profile CSS
   // cannot restyle the shell (sidebar, settings, overlays).
-  const scoped = scopeCss(css, SCOPE)
+  const keyframeNames = new Map<string, string>()
+  const scoped = scopeCss(css, SCOPE, keyframeNames)
   return scoped ? scoped + SKIN_CONTAINMENT : ''
+}
+
+function prefixKeyframeName(raw: string): string {
+  const clean = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+  return `${KEYFRAME_PREFIX}${clean || 'anim'}`
+}
+
+/** Rewrite animation-name tokens in declarations using the keyframe rename map. */
+function rewriteAnimationNames(block: string, keyframeNames: Map<string, string>): string {
+  if (!keyframeNames.size) return block
+  return block.replace(
+    /\b(animation(?:-name)?)\s*:\s*([^;}{]+)/gi,
+    (full, prop: string, value: string) => {
+      const parts = value.split(',')
+      const next = parts.map((part) => {
+        const trimmed = part.trim()
+        const tokens = trimmed.split(/\s+/)
+        if (!tokens.length) return trimmed
+        const first = tokens[0]!
+        const mapped = keyframeNames.get(first)
+        if (mapped) tokens[0] = mapped
+        return tokens.join(' ')
+      })
+      return `${prop}: ${next.join(', ')}`
+    },
+  )
 }
 
 const IDENT_CHAR = /[a-zA-Z0-9_\-\u0080-￿]/
@@ -212,7 +240,7 @@ function scopeSelectors(prelude: string, scope: string): string | null {
  * any rule with a nested block (CSS nesting: `a { :is(&, body) {…} }` would
  * escape the scope) is dropped.
  */
-function scopeCss(css: string, scope: string): string {
+function scopeCss(css: string, scope: string, keyframeNames: Map<string, string>): string {
   let out = ''
   let i = 0
   while (i < css.length) {
@@ -238,15 +266,24 @@ function scopeCss(css: string, scope: string): string {
     if (markers) out += markers
 
     if (prelude.startsWith('@')) {
+      const kf = prelude.match(/^@keyframes\s+([^{]+)$/i)
+      if (kf) {
+        const orig = kf[1]!.trim()
+        const prefixed = prefixKeyframeName(orig)
+        keyframeNames.set(orig, prefixed)
+        out += `@keyframes ${prefixed}{${inner}}`
+        continue
+      }
       if (/^@(media|supports|layer)\b/i.test(prelude)) {
-        out += `${prelude}{${scopeCss(inner, scope)}}`
+        out += `${prelude}{${scopeCss(inner, scope, keyframeNames)}}`
       }
       continue
     }
 
     if (scanTo(inner, 0, '{}') !== -1) continue
     const selectors = scopeSelectors(prelude, scope)
-    if (selectors) out += `${selectors}{${inner}}`
+    const body = rewriteAnimationNames(inner, keyframeNames)
+    if (selectors) out += `${selectors}{${body}}`
   }
   return out
 }

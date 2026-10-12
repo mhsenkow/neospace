@@ -6,6 +6,7 @@
 
 import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
+import { useThemeStore } from '~/stores/theme'
 import { useToastStore } from '~/stores/toast'
 import {
   applyAppearance,
@@ -35,7 +36,20 @@ const props = defineProps<{
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
+const themeStore = useThemeStore()
 const toastStore = useToastStore()
+
+const profileCssDisabledOnDevice = ref(false)
+onMounted(() => {
+  try {
+    profileCssDisabledOnDevice.value = localStorage.getItem('neospace_disable_profile_css') === '1'
+  } catch {
+    profileCssDisabledOnDevice.value = false
+  }
+})
+const toggleProfileCssDisabled = () => {
+  themeStore.setProfileCssDisabled(profileCssDisabledOnDevice.value)
+}
 
 // Appearance form
 const appearanceForm = reactive({
@@ -457,6 +471,21 @@ const fontPreviewStack = (fontId: NeoFontId) => {
         <code>css</code>, <code>custom_css</code>, <code>theme</code>, <code>style</code>, or
         <code>chaos_css</code>, NeoSpace can apply that CSS here. (Formerly called Chaos Mode.)
       </p>
+
+      <label class="settings-toggle">
+        <div class="settings-toggle__info">
+          <span class="settings-toggle__label">Disable profile CSS on this device</span>
+          <span class="settings-toggle__desc">
+            Escape hatch if a skin breaks layout — same as adding <code>?safe=1</code> to the URL
+          </span>
+        </div>
+        <input
+          v-model="profileCssDisabledOnDevice"
+          type="checkbox"
+          class="settings-checkbox"
+          @change="toggleProfileCssDisabled"
+        />
+      </label>
 
       <label class="settings-toggle">
         <div class="settings-toggle__info">

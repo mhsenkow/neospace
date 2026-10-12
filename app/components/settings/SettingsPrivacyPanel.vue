@@ -2,6 +2,7 @@
 import { useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
+import { rememberSearchHistoryEnabled, setRememberSearchHistory } from '~/composables/useRecentSearches'
 
 const emit = defineEmits<{ 'update:dirty': [boolean] }>()
 const settingsStore = useSettingsStore()
@@ -69,6 +70,11 @@ const runModeration = (action: () => Promise<unknown>) => {
   action().catch(() => {})
 }
 
+const rememberSearches = ref(rememberSearchHistoryEnabled())
+const onRememberSearchesChange = () => {
+  setRememberSearchHistory(rememberSearches.value)
+}
+
 const newBlockDomain = ref('')
 const isBlockingDomain = ref(false)
 
@@ -112,6 +118,24 @@ const submitBlockDomain = async () => {
             {{ settingsStore.isSaving ? 'Saving...' : 'Save Privacy' }}
           </button>
         </div>
+      </fieldset>
+
+      <div class="settings-divider" />
+
+      <fieldset class="settings-fieldset">
+        <legend class="settings-subheading">Explore</legend>
+        <label class="settings-toggle">
+          <div class="settings-toggle__info">
+            <span class="settings-toggle__label">Remember searches on this device</span>
+            <span class="settings-toggle__desc">When off, recent Explore queries are not saved per account</span>
+          </div>
+          <input
+            v-model="rememberSearches"
+            type="checkbox"
+            class="settings-checkbox"
+            @change="onRememberSearchesChange"
+          />
+        </label>
       </fieldset>
 
       <div class="settings-divider" />

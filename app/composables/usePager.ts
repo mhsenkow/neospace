@@ -21,7 +21,7 @@ function normalizePage<T>(page: T[] | CursorPage<T>, lastId: (items: T[]) => str
   return { items: page.items, nextMaxId: page.nextMaxId, explicit: true }
 }
 
-export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
+export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>, pageSize = 0) {
   const items = ref<T[]>([]) as Ref<T[]>
   const hasMore = ref(true)
   const isLoading = ref(false)
@@ -89,7 +89,9 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
       if (gen !== generation) return
       dedupeAppend(page.items, true)
       nextMaxId = page.nextMaxId
-      hasMore.value = page.items.length > 0 && (!page.explicit || !!page.nextMaxId)
+      hasMore.value =
+        page.items.length > 0 &&
+        (page.explicit ? !!page.nextMaxId : pageSize > 0 ? page.items.length >= pageSize : true)
     } catch (e) {
       if (gen !== generation) return
       if ((e as { name?: string })?.name === 'AbortError') return
@@ -134,7 +136,13 @@ export function usePager<T extends PagerItem>(fetchPage: FetchPageFn<T>) {
       const before = items.value.length
       dedupeAppend(page.items, false)
       nextMaxId = page.nextMaxId
-      if (items.value.length === before || (page.explicit && !page.nextMaxId)) hasMore.value = false
+      if (
+        items.value.length === before ||
+        (page.explicit && !page.nextMaxId) ||
+        (pageSize > 0 && page.items.length < pageSize)
+      ) {
+        hasMore.value = false
+      }
     } catch (e) {
       if (gen !== generation) return
       if ((e as { name?: string })?.name === 'AbortError') return

@@ -8,6 +8,7 @@
  */
 
 import { useProfileStore } from '~/stores/profile'
+import { useInsightsStore } from '~/stores/insights'
 import { useInstancesStore } from '~/stores/instances'
 import { useThemeStore } from '~/stores/theme'
 import { onBeforeRouteLeave } from 'vue-router'
@@ -502,6 +503,7 @@ const openCompose = () => {
     placeholder: "What's new?",
     title: 'New post',
     onPosted: async () => {
+      if (profileStore.isOwnProfile) useInsightsStore().invalidateStatusCache(profileStore.viewedProfile?.id)
       await fetchStatusesGuarded(true, optsForTab(profileTab.value))
     },
   })
@@ -1663,10 +1665,6 @@ useHead({
   padding: 4rem 2rem;
   text-align: center;
 
-  span {
-    font-size: 3rem;
-  }
-
   p {
     color: var(--neo-text-muted);
     font-size: 1rem;
@@ -1694,15 +1692,6 @@ useHead({
   background: color-mix(in srgb, var(--neo-danger) 12%, transparent);
   color: var(--neo-danger);
   font-size: 0.875rem;
-}
-
-.profile-loading__spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 // Threads-style hero — name left, avatar right, presence row
@@ -1850,7 +1839,6 @@ useHead({
   border-radius: 4px;
   background: var(--neo-bg-tertiary);
   color: var(--neo-text-tertiary);
-  text-transform: lowercase;
 
   &--lock {
     display: inline-flex;
@@ -2020,11 +2008,6 @@ useHead({
       background: var(--neo-bg-hover, var(--neo-bg-tertiary));
     }
   }
-}
-
-.profile-chrome-more {
-  display: inline-flex;
-  line-height: 0;
 }
 
 .profile-menu-item {

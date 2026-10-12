@@ -26,7 +26,7 @@ import {
   emptyPostFilters,
   formatCount,
   highlightTerms,
-  POST_OPERATOR_TIPS,
+  postOperatorTips,
   rankServers,
   type PostSince,
 } from '~/utils/searchQuery'
@@ -78,6 +78,9 @@ const peopleFollowingOnly = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 const isSignedIn = computed(() => instancesStore.hasAuthenticatedInstance)
+const postOperatorTipsList = computed(() =>
+  postOperatorTips(new Date(), navigator.language?.split('-')[0] || 'en'),
+)
 
 const {
   searchBusy,
@@ -831,7 +834,7 @@ onUnmounted(() => {
           <section class="explore-tips" aria-labelledby="explore-tips-h">
             <h2 id="explore-tips-h" class="explore-section-title">{{ isSignedIn ? 'Search smarter' : 'Browse by tag' }}</h2>
             <div v-if="isSignedIn" class="explore-topic-row">
-              <button v-for="tip in POST_OPERATOR_TIPS" :key="tip.insert" type="button" class="explore-op" @click="insertOperator(tip.insert)">
+              <button v-for="tip in postOperatorTipsList" :key="tip.insert" type="button" class="explore-op" @click="insertOperator(tip.insert)">
                 <code>{{ tip.insert }}</code>
                 <span>{{ tip.label }}</span>
               </button>

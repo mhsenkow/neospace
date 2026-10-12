@@ -9,6 +9,8 @@ import type { mastodon } from 'masto'
 import {
   formatCompact,
   formatDateOnly,
+  formatInsightHour,
+  largestRemainderSlots,
   type InsightsWindowDays,
 } from '~/utils/insights'
 import { downloadInsightsCsv, exportInsightsToLoom } from '~/utils/loomExport'
@@ -34,6 +36,16 @@ const exportReport = computed(() => insights.exportReport)
 const load = async (days?: InsightsWindowDays) => {
   exportNote.value = ''
   await insights.fetchInsights(props.account, days)
+}
+
+const refreshInsights = async () => {
+  exportNote.value = ''
+  windowBusy.value = true
+  try {
+    await insights.refreshInsights(props.account, insights.windowDays)
+  } finally {
+    windowBusy.value = false
+  }
 }
 
 onMounted(async () => {
@@ -74,7 +86,9 @@ const onExportLoom = async () => {
     exportNote.value =
       result === 'posted'
         ? 'Opened Loom with your insight datasets.'
-        : 'Loom didn’t acknowledge — a zip of CSVs was downloaded instead.'
+        : result === 'slow'
+          ? 'Loom is slow — download CSVs instead?'
+          : 'Loom didn’t acknowledge — a zip of CSVs was downloaded instead.'
   } catch {
     exportNote.value = 'Export failed — try Download CSVs.'
   } finally {
@@ -162,7 +176,7 @@ const heatSummary = computed(() => {
     }
   }
   if (!peakPosts) return 'No posts in this window yet.'
-  return `Most active: ${DAY_NAMES[peakDay]} ${String(peakHour).padStart(2, '0')}:00 (${peakPosts} post${peakPosts === 1 ? '' : 's'}) · ${activeCells} active slots · ${totalPosts} posts`
+  return `Most active: ${DAY_NAMES[peakDay]} ${formatInsightHour(peakHour)} (${peakPosts} post${peakPosts === 1 ? '' : 's'}) · ${activeCells} active slot${activeCells === 1 ? '' : 's'} · ${totalPosts} post${totalPosts === 1 ? '' : 's'}`
 })
 
 const heatTableRows = computed(() => {
@@ -184,18 +198,22 @@ const attrMix = computed(() =>
   (report.value?.mix || []).filter((m) => ATTR_KINDS.has(m.kind)),
 )
 
-const typeMixTotal = computed(() =>
-  typeMix.value.reduce((s, m) => s + m.count, 0) || 1,
-)
+const typeMixPercents = computed(() => {
+  const mix = typeMix.value
+  const slots = largestRemainderSlots(
+    mix.map((m) => m.count),
+    100,
+  )
+  return mix.map((m, i) => ({ kind: m.kind, count: m.count, percent: slots[i] ?? 0 }))
+})
 
 const waffleCells = computed(() => {
-  const mix = typeMix.value
+  const mix = typeMixPercents.value
   const total = 100
   const cells: { kind: string; i: number }[] = []
   let used = 0
   for (const m of mix) {
-    const n = Math.max(0, Math.round((m.count / typeMixTotal.value) * total))
-    for (let i = 0; i < n && used < total; i++) {
+    for (let i = 0; i < m.percent && used < total; i++) {
       cells.push({ kind: m.kind, i: used++ })
     }
   }
@@ -267,6 +285,14 @@ const kpi = computed(() => {
       >
       <p v-if="windowBusy || (insights.isLoading && report)" class="insights__updating" role="status">Updating…</p>
       <div class="insights__actions">
+        <button
+          type="button"
+          class="neo-btn neo-btn--tertiary"
+          :disabled="insights.isLoading"
+          @click="refreshInsights"
+        >
+          Refresh
+        </button>
         <button
           type="button"
           class="neo-btn neo-btn--primary"
@@ -367,7 +393,7 @@ const kpi = computed(() => {
               :key="`${w}-${h}`"
               class="insights__heat-cell"
               :class="{ 'insights__heat-cell--empty': heatCell(w - 1, h - 1) === 0 }"
-              :title="`${DAY_NAMES[w - 1]} ${h - 1}:00 — ${heatCell(w - 1, h - 1)} posts`"
+              :title="`${DAY_NAMES[w - 1]} ${formatInsightHour(h - 1)} — ${heatCell(w - 1, h - 1)} post${heatCell(w - 1, h - 1) === 1 ? '' : 's'}`"
               :style="heatCellStyle(heatCell(w - 1, h - 1))"
             />
           </template>
@@ -414,10 +440,10 @@ const kpi = computed(() => {
           />
         </div>
         <ul class="insights__legend">
-          <li v-for="m in typeMix" :key="m.kind">
+          <li v-for="m in typeMixPercents" :key="m.kind">
             <span class="insights__swatch" :data-kind="m.kind" />
             {{ TYPE_LABELS[m.kind] || m.kind }} · {{ m.count }}
-            ({{ Math.round((m.count / typeMixTotal) * 100) }}%)
+            ({{ m.percent }}%)
           </li>
         </ul>
       </div>
@@ -466,7 +492,7 @@ const kpi = computed(() => {
               #{{ tag.name }}
             </NuxtLink>
             <span class="insights__tag-meta">
-              {{ tag.count }} · {{ formatCompact(tag.engagement) }} eng
+              {{ tag.count }} post{{ tag.count === 1 ? '' : 's' }} · {{ formatCompact(tag.engagement) }} engagement
             </span>
           </li>
         </ul>
@@ -494,8 +520,10 @@ const kpi = computed(() => {
 
       <p class="insights__foot">
         Lifetime ·
-        {{ formatCompact(report.account.followers) }} followers ·
-        {{ formatCompact(report.account.statuses) }} statuses
+        {{ formatCompact(report.account.followers) }}
+        {{ report.account.followers === 1 ? 'follower' : 'followers' }} ·
+        {{ formatCompact(report.account.statuses) }}
+        {{ report.account.statuses === 1 ? 'post' : 'posts' }}
         <template v-if="formatDateOnly(report.account.lastStatusAt)">
           · last active {{ formatDateOnly(report.account.lastStatusAt) }}
         </template>

@@ -433,6 +433,25 @@ export function formatCompact(nVal: number): string {
   return nVal.toFixed(1)
 }
 
+/** Integer slots that sum to `totalSlots` (largest-remainder / Hamilton method). */
+export function largestRemainderSlots(counts: number[], totalSlots: number): number[] {
+  if (totalSlots <= 0 || !counts.length) return counts.map(() => 0)
+  const sum = counts.reduce((a, b) => a + b, 0) || 1
+  const raw = counts.map((c) => (c / sum) * totalSlots)
+  const slots = raw.map((r) => Math.floor(r))
+  let remainder = totalSlots - slots.reduce((a, b) => a + b, 0)
+  const order = raw
+    .map((r, i) => ({ i, frac: r - slots[i]! }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (let k = 0; k < remainder; k++) slots[order[k % order.length]!.i]! += 1
+  return slots
+}
+
+export function formatInsightHour(hour: number): string {
+  const h = Math.max(0, Math.min(23, Math.floor(hour)))
+  return `${h}:00`
+}
+
 /**
  * Whether a capped fetch actually leaves the *requested* window incomplete: if the pages we got
  * already reach back past the window's start, a 7d or 30d view isn't "capped" just because the

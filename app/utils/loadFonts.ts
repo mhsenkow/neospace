@@ -119,32 +119,67 @@ const failed = new Set<string>()
 let retryHooked = false
 const MAX_FONT_RETRIES = 2
 
-function loadFamily(name: string, weights: FaceWeights): Promise<void> {
-  return Promise.all([weights.regular(), weights.bold()]).then(() => undefined)
+/** Self-hosted latin-400 files under /public/fonts (prepaint may link rel=preload). */
+export const CRITICAL_FONT_PRELOAD_PATHS: Partial<Record<string, string>> = {
+  'OpenDyslexic': '/fonts/opendyslexic-latin-400-normal.woff2',
 }
 
-function scheduleFamilyLoad(name: string, defer: boolean) {
-  if (loaded.has(name) || typeof document === 'undefined') return
+function loadRegular(name: string, weights: FaceWeights): Promise<void> {
+  return weights.regular().then(() => undefined)
+}
+
+function loadBold(name: string, weights: FaceWeights): Promise<void> {
+  return weights.bold().then(() => undefined)
+}
+
+function scheduleFamilyLoad(name: string, mode: 'critical' | 'deferred' | 'bold-only') {
+  if (typeof document === 'undefined') return
   const weights = FONT_LOADERS[name]
   if (!weights) return
 
-  const run = () => {
-    if (loaded.has(name)) return
-    loaded.add(name)
-    void loadFamily(name, weights)
-      .then(() => {
-        failed.delete(name)
-      })
+  const runRegular = () => {
+    const key = `${name}:400`
+    if (loaded.has(key)) return
+    loaded.add(key)
+    void loadRegular(name, weights)
+      .then(() => failed.delete(key))
       .catch(() => {
-        loaded.delete(name)
-        failed.add(name)
+        loaded.delete(key)
+        failed.add(key)
         ensureFontRetryHook()
       })
   }
 
-  if (defer && typeof requestIdleCallback === 'function') requestIdleCallback(run)
-  else if (defer) queueMicrotask(run)
-  else run()
+  const runBold = () => {
+    const key = `${name}:bold`
+    if (loaded.has(key)) return
+    loaded.add(key)
+    void loadBold(name, weights)
+      .then(() => failed.delete(key))
+      .catch(() => {
+        loaded.delete(key)
+        failed.add(key)
+        ensureFontRetryHook()
+      })
+  }
+
+  const defer = (fn: () => void) => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(fn)
+    else queueMicrotask(fn)
+  }
+
+  if (mode === 'bold-only') {
+    defer(runBold)
+    return
+  }
+  if (mode === 'deferred') {
+    defer(runRegular)
+    defer(runBold)
+    return
+  }
+  // Critical UI/body face: regular now, bold when idle — one fewer blocking face on cold load
+  runRegular()
+  defer(runBold)
 }
 
 /** Retry failed faces after connectivity returns — no theme toggle required */
@@ -157,16 +192,16 @@ function ensureFontRetryHook() {
     retries += 1
     const pending = [...failed]
     failed.clear()
-    for (const name of pending) {
-      if (loaded.has(name)) continue
+    for (const key of pending) {
+      const name = key.replace(/:(400|bold)$/, '')
       const weights = FONT_LOADERS[name]
       if (!weights) continue
-      loaded.add(name)
-      void loadFamily(name, weights)
-        .then(() => failed.delete(name))
+      const run = key.endsWith(':bold') ? () => loadBold(name, weights) : () => loadRegular(name, weights)
+      void run()
+        .then(() => failed.delete(key))
         .catch(() => {
-          loaded.delete(name)
-          failed.add(name)
+          loaded.delete(key)
+          failed.add(key)
         })
     }
   }
@@ -187,8 +222,16 @@ export function resolveFontFamilies(ui: NeoUiId, font: NeoFontId): { critical: s
 export function ensureFontsLoaded(ui: NeoUiId, font: NeoFontId) {
   if (typeof document === 'undefined') return
   const { critical, deferred } = resolveFontFamilies(ui, font)
-  for (const name of critical) scheduleFamilyLoad(name, false)
-  for (const name of deferred) scheduleFamilyLoad(name, true)
+  for (const name of critical) scheduleFamilyLoad(name, 'critical')
+  for (const name of deferred) scheduleFamilyLoad(name, 'deferred')
+}
+
+/** href for prepaint `<link rel="preload">` — active critical regular face only */
+export function criticalFontPreloadHref(ui: NeoUiId, font: NeoFontId): string | null {
+  const { critical } = resolveFontFamilies(ui, font)
+  const name = critical[0]
+  if (!name) return null
+  return CRITICAL_FONT_PRELOAD_PATHS[name] ?? null
 }
 
 /** Families covered by local loaders (for tests / CSP verification) */

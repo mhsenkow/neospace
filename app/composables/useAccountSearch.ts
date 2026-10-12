@@ -95,10 +95,13 @@ export function useAccountSearch() {
           return
         }
         const client = activeClient()
+        const resolve =
+          /@/.test(q) &&
+          /^[^\s@]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(q)
         const found = await client.v1.accounts.search.list({
           q,
           limit,
-          resolve: q.includes('@'),
+          resolve,
         })
         if (!ticket.isCurrent()) return
         results.value = Array.isArray(found) ? found : []

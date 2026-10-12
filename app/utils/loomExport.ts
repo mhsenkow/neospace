@@ -92,7 +92,9 @@ export function downloadInsightsCsv(report: InsightsReport) {
  * Only reports 'posted' after Loom acks ready (or echoes an ack).
  * Falls back to downloading CSVs if the popup is blocked or no ack arrives.
  */
-export async function exportInsightsToLoom(report: InsightsReport): Promise<'posted' | 'downloaded'> {
+export async function exportInsightsToLoom(
+  report: InsightsReport,
+): Promise<'posted' | 'downloaded' | 'slow'> {
   const { files, preferred } = buildInsightsExport(report)
   const payload: NeoSpaceLoomDataMessage = {
     type: 'neospace-loom-data',
@@ -128,12 +130,14 @@ export async function exportInsightsToLoom(report: InsightsReport): Promise<'pos
     }
   }
 
-  return await new Promise<'posted' | 'downloaded'>((resolve) => {
+  return await new Promise<'posted' | 'downloaded' | 'slow'>((resolve) => {
     let settled = false
-    const finish = (result: 'posted' | 'downloaded') => {
+    const finish = (result: 'posted' | 'downloaded' | 'slow') => {
       if (settled) return
       settled = true
-      window.removeEventListener('message', onMessage)
+      if (result !== 'slow') {
+        window.removeEventListener('message', onMessage)
+      }
       window.clearTimeout(deadlineTimer)
       resolve(result)
     }
@@ -157,8 +161,7 @@ export async function exportInsightsToLoom(report: InsightsReport): Promise<'pos
 
     window.addEventListener('message', onMessage)
     const deadlineTimer = window.setTimeout(() => {
-      downloadInsightsCsv(report)
-      finish('downloaded')
+      finish('slow')
     }, 8_000)
   })
 }

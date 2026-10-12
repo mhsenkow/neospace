@@ -155,14 +155,14 @@
   --neo-z-skip: 10000;
 
   // Group category accents (sidebar / chips)
-  --neo-cat-tech: #c45c26;
-  --neo-cat-creative: #b8860b;
-  --neo-cat-gaming: #2f7d4a;
-  --neo-cat-social: #a84c1e;
-  --neo-cat-news: #3a6ea5;
-  --neo-cat-trending: #c45c26;
-  --neo-cat-local: #757575;
-  --neo-cat-other: #757575;
+  --neo-cat-tech: var(--neo-accent);
+  --neo-cat-creative: var(--neo-warning);
+  --neo-cat-gaming: var(--neo-success);
+  --neo-cat-social: var(--neo-accent-hover);
+  --neo-cat-news: var(--neo-info);
+  --neo-cat-trending: var(--neo-accent);
+  --neo-cat-local: var(--neo-text-muted);
+  --neo-cat-other: var(--neo-text-quaternary);
   
   // === Layout ===
   --neo-content-width-narrow: #{vars.$content-width-narrow};
@@ -170,10 +170,11 @@
   --neo-content-width-wide: #{vars.$content-width-wide};
   --neo-content-width: var(--neo-content-width-base);
   
-  --neo-sidebar-width-sm: #{vars.$sidebar-width-sm};
-  --neo-sidebar-width-md: #{vars.$sidebar-width-md};
-  --neo-sidebar-width-lg: #{vars.$sidebar-width-lg};
-  --neo-sidebar-width: var(--neo-sidebar-width-md);
+  --neo-sidebar-width: #{vars.$sidebar-width-expanded};
+
+  @media (min-width: 1024px) and (max-width: 1199px) {
+    --neo-sidebar-width: 200px;
+  }
 
   // Mobile shell chrome — in-flow header/tabs; FABs offset above tab bar
   --neo-mobile-chrome-top: 0px;
@@ -210,12 +211,15 @@
   --neo-cursor: default;
   --neo-glow: none;
 
-  // Chaos gradient button stops
-  --neo-chaos-stop-1: #{vars.$chaos-stop-1};
-  --neo-chaos-stop-2: #{vars.$chaos-stop-2};
-  --neo-chaos-stop-3: #{vars.$chaos-stop-3};
-  --neo-chaos-fg: #{vars.$chaos-fg};
+  // Disabled controls — one opacity app-wide (see main.scss)
+  --neo-disabled-opacity: 0.5;
 }
+
+html[data-rail] {
+  --neo-sidebar-width: #{vars.$sidebar-width-rail};
+}
+
+// Tokens above include the profile-CSS public surface — custom skins may reference them.
 
 // Auto-hiding tab bar (useAutoHideNav): floating buttons that sit above it
 // follow it down. `translate` (not transform) so it never fights a component's

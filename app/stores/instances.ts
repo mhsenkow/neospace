@@ -941,6 +941,8 @@ export const useInstancesStore = defineStore('instances', {
       const instance = this.instances.find((i) => i.id === instanceId)
       if (!instance) return
 
+      const loggedOutUserId = instance.user?.id || null
+
       const clientSecret = instance.clientSecret || readClientSecret(instanceId)
       if (instance.accessToken && instance.clientId && clientSecret) {
         try {
@@ -974,6 +976,11 @@ export const useInstancesStore = defineStore('instances', {
       }
 
       this.saveToStorage()
+
+      if (loggedOutUserId) {
+        const { purgeRecentSearches } = await import('~/composables/useRecentSearches')
+        purgeRecentSearches(loggedOutUserId)
+      }
     },
 
     /** Revoke tokens then drop the instance from NeoSpace */

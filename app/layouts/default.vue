@@ -422,7 +422,6 @@ watch(
 }
 
 .neo-layout {
-  --neo-sidebar-width: 248px;
   /* --neo-feed-tabs-h comes from html.neo-route-board (_structural.scss) */
   display: flex;
   min-height: 100vh;
@@ -456,15 +455,6 @@ watch(
     overflow: hidden;
   }
 
-  // iPad / small laptop: give the board more horizontal room
-  @media (min-width: 1024px) and (max-width: 1199px) {
-    --neo-sidebar-width: 200px;
-  }
-
-  &--rail,
-  :global(html[data-rail]) & {
-    --neo-sidebar-width: 68px;
-  }
 }
 
 /* Bottom-right dock for install banner + suite waffle — below modal/drawer */

@@ -7,6 +7,7 @@ import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { clientFor } from '~/composables/useMasto'
 import { usePager } from '~/composables/usePager'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 
 const PAGE_SIZE = 20
 
@@ -61,34 +62,39 @@ export function useLinkedProfileFeed() {
       const fresh = await client.v1.accounts.verifyCredentials()
       instancesStore.updateActiveAccount(fresh, instanceId)
       if (gen === refreshGen) account.value = fresh
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (gen === refreshGen && !account.value) {
         throw e
       }
     }
   }
 
-  const statusPager = usePager<ExtendedStatus>(async ({ maxId, signal }) => {
-    const instanceId = resolvedInstanceId.value
-    const user = account.value
-    if (!instanceId || !user) return []
+  const statusPager = usePager<ExtendedStatus>(
+    async ({ maxId, signal }) => {
+      const instanceId = resolvedInstanceId.value
+      const user = account.value
+      if (!instanceId || !user) return []
 
-    const client = clientFor(instanceId)
-    const instanceUrl = viewingInstance.value?.url || ''
-    void signal
-    const page = await client.v1.accounts.$select(user.id).statuses.list({
-      limit: PAGE_SIZE,
-      maxId,
-      excludeReplies: true,
-      excludeReblogs: false,
-    } as any)
+      const client = clientFor(instanceId)
+      const instanceUrl = viewingInstance.value?.url || ''
+      const page = await client.v1.accounts.$select(user.id).statuses.list(
+        {
+          limit: PAGE_SIZE,
+          maxId,
+          excludeReplies: true,
+          excludeReblogs: false,
+        },
+        { requestInit: { signal } },
+      )
 
-    return page.map((s) => ({
-      ...s,
-      _instanceId: instanceId,
-      _instanceUrl: instanceUrl,
-    }))
-  })
+      return page.map((s) => ({
+        ...s,
+        _instanceId: instanceId,
+        _instanceUrl: instanceUrl,
+      }))
+    },
+    PAGE_SIZE,
+  )
 
   const statuses = statusPager.items
   const hasMore = statusPager.hasMore
@@ -114,9 +120,10 @@ export function useLinkedProfileFeed() {
       if (gen !== refreshGen) return
       statusPager.reset()
       await statusPager.loadInitial()
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (gen !== refreshGen) return
-      error.value = e?.message || 'Failed to load profile'
+      const friendly = mapErrorToMessage(e)
+      error.value = friendly.detail || friendly.title || 'Failed to load profile'
       statusPager.reset()
     } finally {
       if (gen === refreshGen) isLoading.value = false
@@ -129,7 +136,8 @@ export function useLinkedProfileFeed() {
     await statusPager.loadMore()
     const err = statusPager.error.value
     if (err) {
-      loadMoreError.value = err instanceof Error ? err.message : 'Could not load more'
+      const friendly = mapErrorToMessage(err)
+      loadMoreError.value = friendly.detail || friendly.title || 'Could not load more'
     }
   }
 

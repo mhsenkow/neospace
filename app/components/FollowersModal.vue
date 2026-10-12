@@ -14,11 +14,15 @@ import { formatDateOnly } from '~/utils/insights'
 import { plainDisplayName } from '~/utils/displayName'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
+import { useProfileStore } from '~/stores/profile'
 import { logError } from '~/utils/log'
+
+const FOLLOWERS_PAGE_SIZE = 20
 
 const instancesStore = useInstancesStore()
 const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
+const profileStore = useProfileStore()
 
 const reportActionError = (e: unknown, fallback: string) => {
   logError(fallback, e)
@@ -88,23 +92,22 @@ const enrichPage = async (fetchedAccounts: mastodon.v1.Account[]) => {
 }
 
 const pager = usePager<mastodon.v1.Account>(async ({ maxId, signal }) => {
-  void signal
   const client = getClient()
   const accountId = props.accountId || instancesStore.currentUser?.id
   if (!accountId) return []
 
   // Follow lists paginate by follow-row id (Link header), not account id
-  const opts = { limit: 20, maxId }
+  const opts = { limit: FOLLOWERS_PAGE_SIZE, maxId }
   const account = client.v1.accounts.$select(accountId)
   const page = await cursorPage(
     activeTab.value === 'followers'
-      ? account.followers.list.$raw(opts)
-      : account.following.list.$raw(opts),
+      ? account.followers.list.$raw(opts, { requestInit: { signal } })
+      : account.following.list.$raw(opts, { requestInit: { signal } }),
   )
 
   void enrichPage(page.items)
   return page
-})
+}, FOLLOWERS_PAGE_SIZE)
 
 const accounts = pager.items
 const isLoading = pager.isLoading
@@ -207,7 +210,23 @@ const handleMute = async (accountId: string) => {
   }
 }
 
+const adjustOwnListCount = (delta: number) => {
+  if (!isOwnFollowersList.value || !profileStore.viewedProfile) return
+  if (activeTab.value === 'followers') {
+    profileStore.viewedProfile = {
+      ...profileStore.viewedProfile,
+      followersCount: Math.max(0, (profileStore.viewedProfile.followersCount || 0) + delta),
+    }
+  } else {
+    profileStore.viewedProfile = {
+      ...profileStore.viewedProfile,
+      followingCount: Math.max(0, (profileStore.viewedProfile.followingCount || 0) + delta),
+    }
+  }
+}
+
 const handleBlock = async (accountId: string) => {
+  const blocked = accounts.value.find((a) => a.id === accountId)
   const ok = await overlayStore.openConfirm({
     title: 'Block this account?',
     body: 'They will not be able to see your posts or interact with you.',
@@ -221,6 +240,9 @@ const handleBlock = async (accountId: string) => {
     const client = getClient()
     await client.v1.accounts.$select(accountId).block()
     accounts.value = accounts.value.filter((a) => a.id !== accountId)
+    adjustOwnListCount(-1)
+    const handle = blocked?.acct ? `@${blocked.acct}` : 'account'
+    toastStore.show({ message: `Blocked ${handle}`, duration: 3200 })
   } catch (e) {
     reportActionError(e, 'Block action failed')
   } finally {
@@ -242,6 +264,7 @@ const handleRemoveFollower = async (accountId: string) => {
     const client = getClient()
     await client.v1.accounts.$select(accountId).removeFromFollowers()
     accounts.value = accounts.value.filter((a) => a.id !== accountId)
+    adjustOwnListCount(-1)
   } catch (e) {
     reportActionError(e, 'Remove follower failed')
   } finally {

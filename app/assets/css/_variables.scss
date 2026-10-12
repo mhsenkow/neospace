@@ -128,11 +128,6 @@ $shadow-dark-xl: 0 24px 48px rgba(0, 0, 0, 0.45);
 $shadow-dark-2xl: 0 32px 64px rgba(0, 0, 0, 0.5);
 
 // Chaos gradient button
-$chaos-stop-1: $accent;
-$chaos-stop-2: #8338ec;
-$chaos-stop-3: #3a86ff;
-$chaos-fg: #ffffff;
-
 // Rams motion — decelerate, short, no bounce
 $ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 $ease-in: cubic-bezier(0.4, 0, 1, 1);
@@ -169,10 +164,7 @@ $content-width-narrow: 520px;
 $content-width-base: 640px;
 $content-width-wide: 760px;
 
-$sidebar-width-sm: 56px;
-$sidebar-width-md: 64px;
-$sidebar-width-lg: 72px;
-// Real shell widths (rail collapsed / expanded) — used by pre-paint + layout
+// Shell sidebar widths (also on :root as --neo-sidebar-width)
 $sidebar-width-rail: 68px;
 $sidebar-width-expanded: 248px;
 
@@ -187,18 +179,6 @@ $breakpoint-md: 768px;
 $breakpoint-lg: $bp-desk;
 $breakpoint-xl: $bp-wide;
 $breakpoint-2xl: 1400px;
-
-@mixin desk {
-  @media (min-width: $bp-desk) {
-    @content;
-  }
-}
-
-@mixin mobile {
-  @media (max-width: $bp-desk-max) {
-    @content;
-  }
-}
 
 /// :hover only where a pointer can really hover — on touch screens a tap leaves
 /// :hover stuck (e.g. a Like button keeps its hover tint after toggling).

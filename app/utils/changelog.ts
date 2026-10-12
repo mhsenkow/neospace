@@ -34,6 +34,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Edward: less GPU drain when idle/recessed, clearer hover cards, Restart 3D if the scene glitches',
       'Leave-a-note feedback hardened; stronger CI (browser + a11y + real lint)',
       'Shared feed menus, shell polish, and lots of small UX fixes across groups and ranked feeds',
+      'Profile Insights refresh + clearer stats; search history privacy toggle; theme token cleanup',
     ],
   },
   {

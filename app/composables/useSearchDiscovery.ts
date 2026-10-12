@@ -22,7 +22,8 @@ const TTL_MS = 5 * 60_000
 
 type Slice = 'tags' | 'links' | 'posts' | 'people' | 'followedTags'
 
-const memo = new Map<string, { at: number; value: unknown }>()
+const memo = new Map<string, { at: number; value: unknown; failed?: boolean }>()
+const FAIL_TTL_MS = 60_000
 
 export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
   const instancesStore = useInstancesStore()
@@ -36,6 +37,7 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
   const peopleSource = ref<'suggestions' | 'directory'>('directory')
   const sourceHost = ref('')
   const loading = ref<Set<Slice>>(new Set())
+  let fetchGen = 0
 
   const source = () => {
     if (opts.isSignedIn.value) {
@@ -51,6 +53,7 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
   }
 
   const fetchSlice = async <T>(slice: Slice, fn: (src: ReturnType<typeof source>) => Promise<T>, apply: (v: T) => void) => {
+    const gen = fetchGen
     let src: ReturnType<typeof source>
     try {
       src = source()
@@ -60,17 +63,20 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
     sourceHost.value = new URL(src.url).hostname
     const key = `${src.url}|${src.guest ? 'g' : 'u'}|${slice}`
     const hit = memo.get(key)
-    if (hit && Date.now() - hit.at < TTL_MS) {
-      apply(hit.value as T)
+    const ttl = hit?.failed ? FAIL_TTL_MS : TTL_MS
+    if (hit && Date.now() - hit.at < ttl) {
+      if (!hit.failed) apply(hit.value as T)
       return
     }
     loading.value = new Set([...loading.value, slice])
     try {
       const value = await fn(src)
+      if (gen !== fetchGen) return
       memo.set(key, { at: Date.now(), value })
       apply(value)
     } catch {
-      // Discovery is garnish — some servers disable trends or the directory
+      if (gen !== fetchGen) return
+      memo.set(key, { at: Date.now(), value: null, failed: true })
     } finally {
       const next = new Set(loading.value)
       next.delete(slice)
@@ -134,6 +140,7 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
 
   /** Account/sign-in changed — drop stale slices so the next load refetches */
   const reset = () => {
+    fetchGen += 1
     trendingTags.value = []
     trendingLinks.value = []
     trendingPosts.value = []

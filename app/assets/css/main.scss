@@ -52,6 +52,26 @@ html {
   scrollbar-color: var(--neo-text-muted) var(--neo-bg-tertiary);
 }
 
+::selection {
+  background: var(--neo-accent-soft-hover, var(--neo-accent-soft));
+  color: var(--neo-text-primary);
+}
+
+@media print {
+  .sidebar,
+  .mobile-header,
+  .mobile-tab-bar,
+  .neo-bottom-dock,
+  .compose-fab {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+}
+
 body {
   font-family: var(--neo-font-family);
   line-height: var(--neo-leading-body, var(--neo-line-height));
@@ -63,7 +83,6 @@ body {
   cursor: var(--neo-cursor);
   min-height: 100vh;
   min-height: 100dvh;
-  transition: background-color var(--neo-transition), color var(--neo-transition);
   overflow-x: hidden; // Prevent horizontal scroll
   overscroll-behavior-x: none;
   font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
@@ -191,7 +210,7 @@ ul, ol {
     }
 
     &:disabled {
-      opacity: 0.45;
+      opacity: var(--neo-disabled-opacity, 0.5);
       cursor: not-allowed;
     }
   }
@@ -221,7 +240,7 @@ ul, ol {
 
     &:disabled {
       color: var(--neo-text-quaternary);
-      opacity: 0.7;
+      opacity: var(--neo-disabled-opacity, 0.5);
       cursor: not-allowed;
     }
   }
@@ -262,22 +281,6 @@ ul, ol {
     }
   }
   
-  &--chaos {
-    background: linear-gradient(
-      135deg,
-      var(--neo-chaos-stop-1),
-      var(--neo-chaos-stop-2),
-      var(--neo-chaos-stop-3)
-    );
-    background-size: 200% 200%;
-    color: var(--neo-chaos-fg);
-    animation: gradient-shift 3s ease infinite;
-    box-shadow: var(--neo-glow);
-    
-    @include hover {
-      filter: brightness(1.05);
-    }
-  }
 }
 
 // Chrome surface: sets local emphasis for nested icon controls / labels.
@@ -338,7 +341,7 @@ ul, ol {
   }
 
   &:disabled {
-    opacity: 0.45;
+    opacity: var(--neo-disabled-opacity, 0.5);
     cursor: not-allowed;
   }
 }
@@ -394,12 +397,6 @@ ul, ol {
   .sidebar__foot-btn[aria-label]:not([aria-label='']):focus-visible::after {
     transform: translateX(-50%) translateY(0);
   }
-}
-
-@keyframes gradient-shift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
 }
 
 // Avatar Component
@@ -741,7 +738,6 @@ html.neo-standalone {
 :focus-visible {
   outline: 2px solid var(--neo-focus, var(--neo-accent));
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--neo-bg-primary);
 }
 
 .neo-input:focus-visible,
@@ -751,7 +747,6 @@ select:focus-visible {
   outline: 2px solid var(--neo-focus, var(--neo-accent));
   outline-offset: 1px;
   border-color: var(--neo-focus, var(--neo-accent));
-  box-shadow: 0 0 0 3px var(--neo-bg-primary);
 }
 
 [tabindex="-1"]:focus {
