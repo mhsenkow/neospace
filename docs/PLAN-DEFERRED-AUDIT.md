@@ -11,28 +11,31 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 ## Epics
 
 ### 1. Self-host Google Fonts
+- **Status:** Done (fontsource dynamic imports; Google removed from CSP)
 - **Why:** FOUT + IP leak to Google; fonts currently load after JS
 - **Scope:** `@nuxt/fonts` or fontsource for the faces in `appearance.ts`; preload active face; drop Google from CSP when unused
 - **Size:** L (~2MB+ for all 15 families — consider subsetting to shipped faces only)
 - **Refs:** `loadFonts.ts`, audit PERF·M·M
 
 ### 2. Compose: rich autocomplete
+- **Status:** Done (`@` / `#` / `:emoji:` via `useComposeAutocomplete`)
 - **Why:** Only `@` mentions autocomplete today
 - **Scope:** Generalize `ComposeAutocomplete` for `#hashtag` and `:emoji:` (custom + unicode)
 - **Size:** L
 - **Refs:** `RealComposeBox.vue`, audit UX·M·L
 
 ### 3. Compose: upload progress + cancel
+- **Status:** Done (XHR progress + phases + cancel/retry)
 - **Why:** “Uploading…” with no progress or abort
 - **Scope:** XHR (or fetch + ReadableStream) progress events; per-item abort UI wired to existing `AbortController`s
 - **Size:** M–L (API client rewrite)
 - **Refs:** `useComposeMedia.ts`, audit UX·M·M
 
 ### 4. Compose: polls + scheduling
-- **Status:** Scheduling done (`datetime-local` → `scheduledAt` on create; toast only — no scheduled list UI). Polls still open.
+- **Status:** Done (poll create/vote + schedule picker + Settings scheduled queue)
 - **Why:** Missing Mastodon posting features
 - **Scope:** Poll editor (options, expires, multiple); schedule picker; API fields on create
-- **Size:** L (polls remaining)
+- **Size:** L
 - **Refs:** `RealComposeBox.vue`, audit UX·M·L
 
 ### 5. Trusted Types + token isolation
@@ -46,6 +49,7 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - **Refs:** `instances.ts`, `sanitizeHtml.ts`, `public/_headers`, audit SEC·M·M ×2
 
 ### 6. Split `instances` store
+- **Status:** Partial (`instanceInfo` + `oauthApp` helpers extracted; further splits optional)
 - **Why:** ~871 lines mixing OAuth, persistence, timelines, preview UI
 - **Scope:** `accounts` store + directory/peek store + thin timeline helpers; keep public API stable during migrate
 - **Size:** L
@@ -59,18 +63,21 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - **Refs:** `SettingsModal.vue`, audit UX·M·M
 
 ### 8. Settings: fork-specific paths
+- **Status:** Done (`serverCapabilities` + settings deep links)
 - **Why:** Mastodon-only deep links break on GoToSocial / Akkoma
 - **Scope:** Detect software from instance info; map preferences/filter URLs per fork
 - **Size:** M
 - **Refs:** `SettingsModal.vue`, audit UX·L·S
 
 ### 9. Split SettingsModal
+- **Status:** Partial (Appearance panel + section header extracted; more panels remain)
 - **Why:** ~2.2k lines; section headers copied 7×
 - **Scope:** `SettingsSectionHeader` + one panel component per category; thin host modal
 - **Size:** L (best after #7)
 - **Refs:** `SettingsModal.vue`, audit CODE·M·L
 
 ### 10. Playwright + axe
+- **Status:** Done (`e2e/`, CI `e2e` job, mocked Mastodon fixtures)
 - **Why:** No e2e / a11y CI gate
 - **Scope:** Playwright with mocked Mastodon routes; fail on serious axe violations; wire into `npm run check` / CI
 - **Size:** L
@@ -94,15 +101,15 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 
 ## Checklist
 
-- [ ] Self-host Google Fonts
-- [ ] Compose `#` / `:` autocomplete
-- [ ] Compose upload progress + cancel UI
-- [x] Compose scheduling (`scheduledAt` picker)
-- [ ] Compose polls
+- [x] Self-host Google Fonts
+- [x] Compose `#` / `:` autocomplete
+- [x] Compose upload progress + cancel UI
+- [x] Compose scheduling (`scheduledAt` picker) + scheduled queue
+- [x] Compose polls
 - [ ] Trusted Types + token isolation + CSP harden
-- [ ] Split `instances` store
-- [ ] Settings mobile drill-down
-- [ ] Settings fork-specific paths
-- [ ] Split SettingsModal into panels
-- [ ] Playwright + axe CI
+- [x] Split `instances` store (helpers extracted; further splits optional)
+- [x] Settings mobile drill-down
+- [x] Settings fork-specific paths
+- [x] Split SettingsModal into panels (first slices)
+- [x] Playwright + axe CI
 - [ ] (Ops) Turnstile keys on Pages / build

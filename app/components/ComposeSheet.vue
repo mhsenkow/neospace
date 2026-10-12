@@ -25,15 +25,23 @@ const requestClose = async () => {
   // Own text, CW or attachments — a prefilled "@handle " or photo-only post counts right
   const compose = composeRef.value
   if (compose?.isDirty) {
-    const ok = await overlayStore.openConfirm({
-      title: 'Discard this draft?',
-      body: 'Your post will be lost.',
+    const choice = await overlayStore.openChoice({
+      title: 'Close this post?',
+      body: sheet.draftSlot
+        ? 'Your post will be lost.'
+        : 'Save it as a draft to finish later, or discard it. Attached media and polls are not saved with drafts.',
+      // A redraft's saved slot is keyed to a deleted post — it could never be reopened
+      secondaryLabel: sheet.draftSlot ? undefined : 'Save draft and close',
       confirmLabel: 'Discard',
       danger: true,
     })
-    if (!ok) return
-    // Otherwise the autosaved draft reappears next time this composer opens
-    compose.discardDraft()
+    if (choice === 'cancel') return
+    if (choice === 'secondary') {
+      compose.saveDraft()
+    } else {
+      // Otherwise the autosaved draft reappears next time this composer opens
+      compose.discardDraft()
+    }
   }
   sheet.hide()
 }
@@ -199,6 +207,8 @@ const onPick = async (account: mastodon.v1.Account) => {
             :key="sheet.instanceKey"
             submit-in-header
             :initial-text="sheet.initialText || undefined"
+            :initial-spoiler="sheet.initialSpoiler || undefined"
+            :draft-slot="sheet.draftSlot || undefined"
             :initial-visibility="sheet.initialVisibility || undefined"
             :initial-group-tag="sheet.groupTag || undefined"
             :placeholder="sheet.placeholder || undefined"

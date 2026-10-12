@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
- * Shared @mention listbox for composers (APG combobox companion).
+ * Shared composer listbox for @mentions, #hashtags and :emoji: (APG combobox companion).
  */
-import type { mastodon } from 'masto'
 import { accountHandle } from '~/composables/useAccountSearch'
+import type { ComposeSuggestion, ComposeTokenKind } from '~/utils/composeTokens'
 
 const props = defineProps<{
   id: string
-  results: mastodon.v1.Account[]
+  items: ComposeSuggestion[]
+  kind: ComposeTokenKind
   searching?: boolean
   activeIndex: number
   /** Open upward when there isn't room below (keyboard / bottom sheet) */
@@ -15,51 +16,85 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [account: mastodon.v1.Account]
+  select: [item: ComposeSuggestion]
 }>()
+
+const KIND_LABEL: Record<ComposeTokenKind, string> = {
+  mention: 'Mention',
+  hashtag: 'Hashtag',
+  emoji: 'Emoji',
+}
+const label = computed(() => `${KIND_LABEL[props.kind]} suggestions`)
 
 /** Polite announcement — focus stays in the textarea, so say what appeared */
 const statusText = computed(() => {
-  if (props.searching && !props.results.length) return 'Looking up…'
-  const n = props.results.length
+  if (props.searching && !props.items.length) return 'Looking up…'
+  const n = props.items.length
   if (!n) return ''
-  return `${n} ${n === 1 ? 'suggestion' : 'suggestions'}`
+  const active = props.items[props.activeIndex]
+  const lead = `${n} ${n === 1 ? 'suggestion' : 'suggestions'}`
+  if (!active) return lead
+  const name =
+    active.kind === 'mention'
+      ? accountHandle(active.account)
+      : active.kind === 'hashtag'
+        ? `#${active.name}`
+        : `:${active.shortcode}:`
+  return `${lead}. ${name}, ${props.activeIndex + 1} of ${n}`
 })
+
+const usesLabel = (uses: number | null) =>
+  uses == null ? '' : `${uses} ${uses === 1 ? 'post' : 'posts'} today`
 </script>
 
 <template>
   <div
-    v-if="searching || results.length"
+    v-if="searching || items.length"
     :id="id"
     class="compose-autocomplete"
     :class="{ 'compose-autocomplete--up': flipUp }"
     role="listbox"
-    aria-label="Mention suggestions"
+    :aria-label="label"
   >
     <p
-      v-if="searching && !results.length"
+      v-if="searching && !items.length"
       class="compose-autocomplete__status"
       aria-hidden="true"
     >
       Looking up…
     </p>
     <button
-      v-for="(account, idx) in results"
-      :id="`${id}-${account.id}`"
-      :key="account.id"
+      v-for="(item, idx) in items"
+      :id="`${id}-${item.key}`"
+      :key="`${item.kind}:${item.key}`"
       type="button"
       tabindex="-1"
       class="compose-autocomplete__item"
       :class="{ 'compose-autocomplete__item--active': idx === activeIndex }"
       role="option"
       :aria-selected="idx === activeIndex"
-      @mousedown.prevent="emit('select', account)"
+      @mousedown.prevent="emit('select', item)"
     >
-      <img :src="account.avatar" alt="" class="compose-autocomplete__avatar" />
-      <span class="compose-autocomplete__meta">
-        <span class="compose-autocomplete__name">{{ account.displayName || account.username }}</span>
-        <span class="compose-autocomplete__acct">{{ accountHandle(account) }}</span>
-      </span>
+      <template v-if="item.kind === 'mention'">
+        <img :src="item.account.avatar" alt="" class="compose-autocomplete__avatar" />
+        <span class="compose-autocomplete__meta">
+          <span class="compose-autocomplete__name">{{ item.account.displayName || item.account.username }}</span>
+          <span class="compose-autocomplete__acct">{{ accountHandle(item.account) }}</span>
+        </span>
+      </template>
+      <template v-else-if="item.kind === 'hashtag'">
+        <span class="compose-autocomplete__glyph" aria-hidden="true">#</span>
+        <span class="compose-autocomplete__meta">
+          <span class="compose-autocomplete__name">#{{ item.name }}</span>
+          <span v-if="item.uses != null" class="compose-autocomplete__acct">{{ usesLabel(item.uses) }}</span>
+        </span>
+      </template>
+      <template v-else>
+        <img :src="item.url" alt="" class="compose-autocomplete__emoji" loading="lazy" />
+        <span class="compose-autocomplete__meta">
+          <span class="compose-autocomplete__name">:{{ item.shortcode }}:</span>
+        </span>
+      </template>
     </button>
   </div>
   <p class="sr-only" role="status" aria-live="polite">{{ statusText }}</p>
@@ -116,6 +151,25 @@ const statusText = computed(() => {
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
+}
+
+.compose-autocomplete__emoji {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.compose-autocomplete__glyph {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-secondary);
+  font-weight: 700;
 }
 
 .compose-autocomplete__meta {

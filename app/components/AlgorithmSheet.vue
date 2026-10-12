@@ -235,8 +235,22 @@ async function save(andOpen: boolean) {
       return
     }
     if (andOpen) {
-      columnsStore.ensureFocusedView('algorithm', recipe.id)
-      if (router.currentRoute.value.path !== '/') {
+      let colId = columnsStore.ensureFocusedView('algorithm', recipe.id)
+      if (!colId && columnsStore.columns.length >= columnsStore.maxColumns) {
+        const disposable = columnsStore.columns[columnsStore.columns.length - 1]
+        if (disposable && columnsStore.columns.length > 1) {
+          const { useOverlayStore } = await import('~/stores/overlay')
+          const ok = await useOverlayStore().openConfirm({
+            title: 'Board is full',
+            body: 'Replace the last column to open this algorithm? You can undo from the toast.',
+            confirmLabel: 'Replace',
+          })
+          if (ok) {
+            colId = columnsStore.replaceColumnWithView(disposable.id, 'algorithm', recipe.id)
+          }
+        }
+      }
+      if (colId && router.currentRoute.value.path !== '/') {
         await router.push('/')
       }
     }

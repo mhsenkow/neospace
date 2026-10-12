@@ -24,6 +24,27 @@ import {
   resolvePublicInstanceUrl,
 } from '~/utils/instances'
 import { dedupeStatusesByIdentity } from '~/utils/statusIdentity'
+import {
+  mapInstanceConfig,
+  mapV2InstanceInfo,
+  type ConnectedInstanceInfo,
+  type InstanceApiInfo,
+} from '~/utils/instanceInfo'
+import {
+  clearCachedOAuthApp,
+  OAUTH_FETCH_TIMEOUT_MS,
+  oauthFetch,
+  parseOAuthResponse,
+  readCachedOAuthApp,
+  writeCachedOAuthApp,
+} from '~/utils/oauthApp'
+import {
+  isFeatureAvailable,
+  serverSettingsUrl,
+  UNKNOWN_CAPABILITIES,
+  type ServerCapabilities,
+  type SettingsTopic,
+} from '~/utils/serverCapabilities'
 import { clearClientCache, clientFor, createRestClient, publicClient } from '~/composables/useMasto'
 
 export interface ConnectedInstance {
@@ -34,19 +55,7 @@ export interface ConnectedInstance {
   clientId: string | null
   clientSecret: string | null
   user: mastodon.v1.Account | null
-  instanceInfo: {
-    title?: string
-    thumbnail?: string
-    description?: string
-    /** From v2 instance configuration.statuses.max_characters */
-    maxCharacters?: number
-    /** From v2 instance configuration.accounts.max_profile_fields */
-    maxProfileFields?: number
-    maxMediaAttachments?: number
-    imageSizeLimit?: number
-    videoSizeLimit?: number
-    mediaDescriptionLimit?: number
-  } | null
+  instanceInfo: ConnectedInstanceInfo | null
   isConnecting: boolean
   error: string | null
   lastFetched: string | null
@@ -57,20 +66,6 @@ export interface ConnectedInstance {
 export interface ExtendedStatus extends mastodon.v1.Status {
   _instanceId: string
   _instanceUrl: string
-}
-
-export interface InstanceApiInfo {
-  title: string
-  description: string
-  stats?: {
-    userCount?: number
-    statusCount?: number
-    domainCount?: number
-  }
-  registrations?: boolean
-  registrationsUrl?: string | null
-  languages?: string[]
-  rules?: Array<{ id: string; text: string }>
 }
 
 interface MultiInstanceState {
@@ -95,57 +90,8 @@ const LEGACY_AUTH_KEY = 'neospace_auth'
 const STORAGE_VERSION = 1
 const APP_NAME = 'NeoSpace'
 const SCOPES = 'read write follow push'
-const OAUTH_APP_CACHE_KEY = 'neospace_oauth_apps'
-const OAUTH_FETCH_TIMEOUT_MS = 15_000
 /** Directory / preview / add-server probes — masto has no default timeout */
 const PEEK_TIMEOUT_MS = 8_000
-
-function readCachedOAuthApp(host: string): { clientId: string; clientSecret: string } | null {
-  if (typeof localStorage === 'undefined') return null
-  try {
-    const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
-    if (!raw) return null
-    const map = JSON.parse(raw) as Record<string, { clientId?: string; clientSecret?: string }>
-    const entry = map[host.toLowerCase()]
-    if (entry?.clientId && entry?.clientSecret) {
-      return { clientId: entry.clientId, clientSecret: entry.clientSecret }
-    }
-  } catch {
-    /* ignore */
-  }
-  return null
-}
-
-function writeCachedOAuthApp(host: string, clientId: string, clientSecret: string) {
-  if (typeof localStorage === 'undefined') return
-  try {
-    const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
-    const map = raw ? (JSON.parse(raw) as Record<string, { clientId: string; clientSecret: string }>) : {}
-    map[host.toLowerCase()] = { clientId, clientSecret }
-    localStorage.setItem(OAUTH_APP_CACHE_KEY, JSON.stringify(map))
-  } catch {
-    /* quota / private mode */
-  }
-}
-
-async function oauthFetch(url: string, init: RequestInit): Promise<Response> {
-  return fetch(url, {
-    ...init,
-    signal: AbortSignal.timeout(OAUTH_FETCH_TIMEOUT_MS),
-  })
-}
-
-async function parseOAuthResponse(response: Response): Promise<Record<string, unknown>> {
-  const text = await response.text()
-  try {
-    return JSON.parse(text) as Record<string, unknown>
-  } catch {
-    if (text.trim().startsWith('<')) {
-      throw new Error('Server returned an error page instead of a token response')
-    }
-    throw new Error(text.slice(0, 120) || 'Unexpected server response')
-  }
-}
 
 /** Accept raw blobs or `{ v: 1, ... }` wrappers */
 function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
@@ -178,27 +124,6 @@ function rememberRemoteInstanceInfo(key: string, entry: InstanceInfoCacheEntry) 
     const oldest = instanceInfoRemoteCache.keys().next().value
     if (oldest === undefined) break
     instanceInfoRemoteCache.delete(oldest)
-  }
-}
-
-function mapV2InstanceInfo(info: {
-  title: string
-  description?: string | null
-  usage?: { users?: { activeMonth?: number } | null } | null
-  registrations?: { enabled?: boolean; url?: string | null } | null
-  languages?: string[]
-  rules?: Array<{ id: string; text: string }> | null
-}): InstanceApiInfo {
-  return {
-    title: info.title,
-    description: info.description || '',
-    stats: {
-      userCount: info.usage?.users?.activeMonth,
-    },
-    registrations: info.registrations?.enabled,
-    registrationsUrl: info.registrations?.url ?? null,
-    languages: info.languages,
-    rules: info.rules?.map((r) => ({ id: r.id, text: r.text })),
   }
 }
 
@@ -343,6 +268,26 @@ export const useInstancesStore = defineStore('instances', {
           ? info.mediaDescriptionLimit
           : 1500
       return { maxAttachments, maxFileBytes, altMax }
+    },
+
+    /** Software + feature flags for the active posting account (unknown until probed). */
+    serverCapabilities(): ServerCapabilities {
+      return this.activeAccount?.instanceInfo?.capabilities ?? UNKNOWN_CAPABILITIES
+    },
+
+    /** Hide scheduling only when the server positively lacks it. */
+    canSchedulePosts(): boolean {
+      return isFeatureAvailable(this.serverCapabilities.scheduledStatuses)
+    },
+
+    canCreatePolls(): boolean {
+      return isFeatureAvailable(this.serverCapabilities.polls)
+    },
+
+    /** Web settings page on the active server for a topic, or null if none is known. */
+    serverSettingsLink() {
+      return (topic: SettingsTopic): string | null =>
+        serverSettingsUrl(this.serverCapabilities, this.activeAccount?.url, topic)
     },
 
     getInstanceById: (state) => (id: string): ConnectedInstance | undefined =>
@@ -688,19 +633,7 @@ export const useInstancesStore = defineStore('instances', {
         const info = await client.v2.instance.fetch()
 
         instance.name = info.title || url.replace(/^https?:\/\//, '')
-        instance.instanceInfo = {
-          title: info.title,
-          thumbnail: info.thumbnail?.url,
-          description: info.description,
-          maxCharacters: info.configuration?.statuses?.maxCharacters,
-          maxMediaAttachments: info.configuration?.statuses?.maxMediaAttachments,
-          maxProfileFields: info.configuration?.accounts?.maxProfileFields,
-          imageSizeLimit: info.configuration?.mediaAttachments?.imageSizeLimit,
-          videoSizeLimit: info.configuration?.mediaAttachments?.videoSizeLimit,
-          mediaDescriptionLimit: (
-            info.configuration?.mediaAttachments as { descriptionLimit?: number } | undefined
-          )?.descriptionLimit,
-        }
+        instance.instanceInfo = mapInstanceConfig(info)
         instance.isConnecting = false
         instance.lastFetched = new Date().toISOString()
 
@@ -865,19 +798,7 @@ export const useInstancesStore = defineStore('instances', {
           const error = await parseOAuthResponse(response)
           const code = String(error.error || '')
           if (code === 'invalid_client') {
-            const host = instance.url.replace(/^https?:\/\//, '').toLowerCase()
-            if (typeof localStorage !== 'undefined') {
-              try {
-                const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
-                if (raw) {
-                  const map = JSON.parse(raw) as Record<string, unknown>
-                  delete map[host]
-                  localStorage.setItem(OAUTH_APP_CACHE_KEY, JSON.stringify(map))
-                }
-              } catch {
-                /* ignore */
-              }
-            }
+            clearCachedOAuthApp(instance.url.replace(/^https?:\/\//, ''))
           }
           throw new Error(
             String(error.error_description || error.error || 'Token exchange failed'),
@@ -1034,20 +955,7 @@ export const useInstancesStore = defineStore('instances', {
         // Look up again — the list may have been replaced (storage merge) meanwhile
         const instance = this.instances.find((i) => i.id === instanceId)
         if (!instance) return
-        instance.instanceInfo = {
-          ...(instance.instanceInfo || {}),
-          title: info.title || instance.instanceInfo?.title,
-          thumbnail: info.thumbnail?.url || instance.instanceInfo?.thumbnail,
-          description: info.description || instance.instanceInfo?.description,
-          maxCharacters: info.configuration?.statuses?.maxCharacters,
-          maxMediaAttachments: info.configuration?.statuses?.maxMediaAttachments,
-          maxProfileFields: info.configuration?.accounts?.maxProfileFields,
-          imageSizeLimit: info.configuration?.mediaAttachments?.imageSizeLimit,
-          videoSizeLimit: info.configuration?.mediaAttachments?.videoSizeLimit,
-          mediaDescriptionLimit: (
-            info.configuration?.mediaAttachments as { descriptionLimit?: number } | undefined
-          )?.descriptionLimit,
-        }
+        instance.instanceInfo = mapInstanceConfig(info, instance.instanceInfo)
         this.saveToStorage()
       } catch (e) {
         logWarn(`Instance info refresh failed for ${instanceId}:`, e)

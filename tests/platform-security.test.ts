@@ -375,3 +375,122 @@ describe('sanitizeReturnTo', () => {
     }
   })
 })
+
+describe('feedback diagnostic logs opt-in', () => {
+  it('never attaches logs unless includeLogs is true', async () => {
+    const { buildFeedbackBody, createGitHubIssue } = await import('../app/utils/feedback')
+    clearLogRing()
+    logError('boom', 'https://x.example/s?access_token=abc123secret')
+    const ring = formatLogRingForFeedback()
+    expect(ring).toContain('boom')
+
+    expect(buildFeedbackBody('note', false, ring)).toBe('note')
+    expect(buildFeedbackBody('note', true, ring)).toContain('Recent client logs')
+    expect(buildFeedbackBody('note', true, '')).toBe('note')
+
+    const sent: any[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)))
+        return new Response(JSON.stringify({ url: 'https://github.com/x/y/issues/1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+    await createGitHubIssue('t', 'note')
+    await createGitHubIssue('t', 'note', { includeLogs: false })
+    await createGitHubIssue('t', 'note', { includeLogs: true })
+    expect(sent[0].body).toBe('note')
+    expect(sent[1].body).toBe('note')
+    expect(sent[2].body).toContain('boom')
+    expect(sent[2].body).not.toContain('abc123secret')
+    clearLogRing()
+  })
+})
+
+describe('feedback rate limit and Turnstile branches', () => {
+  let seq = 0
+  const ip = () => `198.51.100.${++seq}`
+  function req(body: unknown, addr: string) {
+    return new Request('https://neospace.ibm.io/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: {
+        Origin: 'https://neospace.ibm.io',
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': addr,
+      },
+    })
+  }
+  function mockFetch(opts: { turnstile: boolean }) {
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(String(url))
+        if (String(url).includes('turnstile')) {
+          return new Response(JSON.stringify({ success: opts.turnstile }), { status: 200 })
+        }
+        return new Response(JSON.stringify({ html_url: 'https://github.com/x/y/issues/9' }), {
+          status: 201,
+        })
+      }),
+    )
+    return urls
+  }
+
+  it('returns 429 with Retry-After after the hourly cap from one address', async () => {
+    mockFetch({ turnstile: true })
+    const env = { GITHUB_TOKEN: 't' }
+    const addr = ip()
+    for (let i = 0; i < 5; i++) {
+      expect((await onRequestPost({ request: req({ body: 'x' }, addr), env })).status).toBe(200)
+    }
+    const res = await onRequestPost({ request: req({ body: 'x' }, addr), env })
+    expect(res.status).toBe(429)
+    expect(((await res.json()) as { code: string }).code).toBe('RATE_LIMITED')
+    expect(Number(res.headers.get('Retry-After'))).toBeGreaterThan(0)
+    // A different address is not affected (limiter is per-key, per-isolate)
+    expect((await onRequestPost({ request: req({ body: 'x' }, ip()), env })).status).toBe(200)
+  })
+
+  it('requires a Turnstile token when the secret is configured', async () => {
+    const urls = mockFetch({ turnstile: true })
+    const env = { GITHUB_TOKEN: 't', TURNSTILE_SECRET_KEY: 's' }
+    const res = await onRequestPost({ request: req({ body: 'x' }, ip()), env })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { code: string }).code).toBe('TURNSTILE_REQUIRED')
+    expect(urls).toHaveLength(0)
+  })
+
+  it('rejects a token siteverify refuses and accepts one it approves', async () => {
+    const env = { GITHUB_TOKEN: 't', TURNSTILE_SECRET_KEY: 's' }
+    mockFetch({ turnstile: false })
+    const bad = await onRequestPost({
+      request: req({ body: 'x', turnstileToken: 'tok' }, ip()),
+      env,
+    })
+    expect(bad.status).toBe(403)
+    expect(((await bad.json()) as { code: string }).code).toBe('TURNSTILE_FAILED')
+
+    const urls = mockFetch({ turnstile: true })
+    const ok = await onRequestPost({
+      request: req({ body: 'x', turnstileToken: 'tok' }, ip()),
+      env,
+    })
+    expect(ok.status).toBe(200)
+    expect(urls.some((u) => u.includes('api.github.com'))).toBe(true)
+  })
+
+  it('skips verification entirely when no secret is configured', async () => {
+    const urls = mockFetch({ turnstile: false })
+    const res = await onRequestPost({
+      request: req({ body: 'x' }, ip()),
+      env: { GITHUB_TOKEN: 't' },
+    })
+    expect(res.status).toBe(200)
+    expect(urls.some((u) => u.includes('turnstile'))).toBe(false)
+  })
+})

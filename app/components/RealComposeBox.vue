@@ -3,7 +3,7 @@
  * Compose — Threads-easy posting: drag/drop, paste, previews, Cmd+Enter
  */
 
-import { useStatusStore } from '~/stores/status'
+import { useStatusStore, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
@@ -12,7 +12,8 @@ import { COMPOSE_MEDIA_ACCEPT } from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
-import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
+import { useComposeAutocomplete } from '~/composables/useComposeAutocomplete'
+import type { ComposeSuggestion } from '~/utils/composeTokens'
 import { useOverlayStore } from '~/stores/overlay'
 import { httpStatusFrom, mapComposeError } from '~/utils/friendlyError'
 import type { mastodon } from 'masto'
@@ -52,6 +53,10 @@ const props = withDefaults(
     compact?: boolean
     /** Prefill (e.g. @acct) — applied once on mount */
     initialText?: string
+    /** Prefilled content warning (delete & redraft) — opens the CW field */
+    initialSpoiler?: string
+    /** Own draft slot (e.g. `redraft:<id>`): prefill is real content, never swapped for a saved draft */
+    draftSlot?: string
     /** Override default posting visibility (e.g. direct for DMs) */
     initialVisibility?: 'public' | 'unlisted' | 'private' | 'direct'
     /** Threads-style group/hashtag to tag on post */
@@ -95,13 +100,13 @@ const handoffStore = useComposeHandoffStore()
 const overlayStore = useOverlayStore()
 
 const content = ref(props.initialText || '')
-const spoilerText = ref('')
+const spoilerText = ref(props.initialSpoiler || '')
 const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
   props.initialVisibility || settingsStore.defaultVisibility,
 )
 /** datetime-local value (local wall clock); empty = post now */
 const scheduledLocal = ref('')
-const showCW = ref(false)
+const showCW = ref(!!props.initialSpoiler)
 const markSensitive = ref(settingsStore.defaultSensitive)
 const postLanguage = ref(settingsStore.defaultLanguage)
 const isPosting = ref(false)
@@ -187,6 +192,7 @@ const showGroupPicker = computed(
 )
 
 const draftKey = computed(() => {
+  if (props.draftSlot) return props.draftSlot
   // Per conversation / recipient: one shared 'dm' slot restored Alice's private
   // draft into a message to Bob.
   if (props.initialVisibility === 'direct') {
@@ -206,6 +212,7 @@ const {
   visibility: draftVisibility,
   restore: restoreDraft,
   clear: clearDraft,
+  flush: flushDraft,
   scheduleSave: scheduleDraftSave,
 } = useDraft(draftKey)
 
@@ -225,7 +232,9 @@ const applyDraft = () => {
 const persistDraft = () => {
   // The prefilled "@handle " alone isn't a draft (and kept a junk key per reply)
   draftText.value =
-    content.value.trim() === (props.initialText || '').trim() ? '' : content.value
+    !props.draftSlot && content.value.trim() === (props.initialText || '').trim()
+      ? ''
+      : content.value
   draftSpoiler.value = showCW.value ? spoilerText.value : ''
   draftVisibility.value = visibility.value
   scheduleDraftSave()
@@ -251,6 +260,7 @@ const {
   peerTubeHint,
   dismissPeerTubeHint,
   retryUpload,
+  cancelUpload,
   setDescription,
   flushAltDescriptions,
   onDragEnter,
@@ -260,11 +270,80 @@ const {
   onPaste,
 } = useComposeMedia()
 
+/** Honest status text: a % only when the browser reported real bytes sent */
+const uploadPhaseLabel = (item: (typeof attachments.value)[number]) => {
+  if (item.phase === 'processing') return 'Processing…'
+  if (item.progress != null) return `Uploading ${Math.round(item.progress * 100)}%`
+  return 'Uploading…'
+}
+
 /** Typed something beyond the reply's prefilled @mention */
 const hasOwnContent = computed(() => {
   const text = content.value.trim()
-  return !!text && text !== (props.initialText || '').trim()
+  // A redraft's prefill is the user's own (just-deleted) post — losing it needs a confirm
+  return !!text && (!!props.draftSlot || text !== (props.initialText || '').trim())
 })
+
+// ── Poll (not persisted with drafts — like attachments, scalars only) ──
+const POLL_DURATIONS = [
+  { seconds: 5 * 60, label: '5 minutes' },
+  { seconds: 30 * 60, label: '30 minutes' },
+  { seconds: 60 * 60, label: '1 hour' },
+  { seconds: 6 * 60 * 60, label: '6 hours' },
+  { seconds: 24 * 60 * 60, label: '1 day' },
+  { seconds: 3 * 24 * 60 * 60, label: '3 days' },
+  { seconds: 7 * 24 * 60 * 60, label: '7 days' },
+] as const
+const showPoll = ref(false)
+const pollOptions = ref<string[]>(['', ''])
+const pollDuration = ref<number>(24 * 60 * 60)
+const pollMultiple = ref(false)
+const pollInputRefs = ref<HTMLInputElement[]>([])
+
+const filledPollOptions = computed(() =>
+  pollOptions.value.map((o) => o.trim()).filter(Boolean),
+)
+const pollHasDuplicates = computed(() => {
+  const opts = filledPollOptions.value
+  return new Set(opts.map((o) => o.toLowerCase())).size !== opts.length
+})
+/** 2–4 distinct, non-empty options */
+const pollValid = computed(() => {
+  if (!showPoll.value) return true
+  const n = filledPollOptions.value.length
+  return n >= POLL_MIN_OPTIONS && n <= POLL_MAX_OPTIONS && !pollHasDuplicates.value
+})
+const pollError = computed(() => {
+  if (!showPoll.value) return ''
+  if (hasMedia.value) return 'Polls can’t include photos or video — remove one.'
+  if (pollHasDuplicates.value) return 'Poll options must be different.'
+  return ''
+})
+
+const resetPoll = () => {
+  showPoll.value = false
+  pollOptions.value = ['', '']
+  pollDuration.value = 24 * 60 * 60
+  pollMultiple.value = false
+}
+
+const addPollOption = () => {
+  if (pollOptions.value.length < POLL_MAX_OPTIONS) pollOptions.value = [...pollOptions.value, '']
+}
+const removePollOption = (idx: number) => {
+  if (pollOptions.value.length <= POLL_MIN_OPTIONS) return
+  pollOptions.value = pollOptions.value.filter((_, i) => i !== idx)
+}
+const togglePoll = () => {
+  if (isPosting.value) return
+  if (showPoll.value) {
+    resetPoll()
+    return
+  }
+  if (hasMedia.value) return
+  showPoll.value = true
+  nextTick(() => pollInputRefs.value?.[0]?.focus())
+}
 
 /** Screen-reader confirmation — the form just resets on success otherwise */
 const postAnnounce = ref('')
@@ -354,6 +433,9 @@ const canPost = computed(() => {
     !isPosting.value &&
     !isUploading.value &&
     !props.disabled &&
+    pollValid.value &&
+    !(showPoll.value && hasMedia.value) &&
+    (!showPoll.value || hasText) &&
     allReady.value &&
     instancesStore.isAuthenticated
   )
@@ -446,6 +528,7 @@ const resetForm = () => {
     ? props.initialGroupTag.replace(/^#/, '')
     : null
   clearAttachments()
+  resetPoll()
   error.value = null
   closeMentions()
 }
@@ -465,28 +548,20 @@ const formatScheduleAnnounce = (iso: string) => {
   }
 }
 
-/** @-mention autocomplete */
+/** @mention / #hashtag / :emoji: autocomplete — one token machine, shared keyboard nav */
+const autocomplete = useComposeAutocomplete({
+  text: () => content.value,
+  caret: () => textareaRef.value?.selectionStart ?? content.value.length,
+})
 const {
-  results: mentionResults,
-  isSearching: mentionSearching,
-  search: searchMentions,
-  clear: clearMentions,
-} = useAccountSearch()
-const mentionOpen = ref(false)
-const mentionIndex = ref(0)
-const mentionAt = ref(-1)
-/** Only claim "expanded" while the listbox element actually exists */
-const mentionListShown = computed(
-  () => mentionOpen.value && (mentionSearching.value || mentionResults.value.length > 0),
-)
-// Fresh results can be shorter than the old list — keep the highlight on a real row
-watch(mentionResults, (list) => {
-  if (mentionIndex.value >= list.length) mentionIndex.value = 0
-})
-const activeMentionId = computed(() => {
-  const pick = mentionResults.value[mentionIndex.value]
-  return pick ? `${mentionListId}-${pick.id}` : undefined
-})
+  items: suggestions,
+  searching: mentionSearching,
+  index: mentionIndex,
+  open: mentionOpen,
+  listShown: mentionListShown,
+} = autocomplete
+const suggestionKind = computed(() => autocomplete.token.value?.kind ?? 'mention')
+const activeMentionId = computed(() => autocomplete.activeId(mentionListId))
 
 const submitShortcutTitle = computed(() => {
   if (isUploading.value) return 'Waiting for uploads…'
@@ -496,57 +571,25 @@ const submitShortcutTitle = computed(() => {
 })
 
 const closeMentions = () => {
-  mentionOpen.value = false
+  autocomplete.close()
   mentionFlipUp.value = false
-  mentionIndex.value = 0
-  mentionAt.value = -1
-  clearMentions()
 }
 
-const getMentionContext = () => {
-  const el = textareaRef.value
-  const caret = el?.selectionStart ?? content.value.length
-  const before = content.value.slice(0, caret)
-  const m = before.match(/(?:^|[\s([{“"'‘])@([a-zA-Z0-9_.@/-]*)$/)
-  if (!m) return null
-  const query = m[1] ?? ''
-  const start = before.length - query.length - 1
-  return { start, query, caret }
+const syncMentions = () => {
+  autocomplete.sync()
+  if (autocomplete.open.value) nextTick(syncMentionPlacement)
+  else mentionFlipUp.value = false
 }
 
-const syncMentions = (opts?: { resetIndex?: boolean }) => {
-  if (!instancesStore.isAuthenticated) {
-    closeMentions()
-    return
-  }
-  const ctx = getMentionContext()
-  if (!ctx) {
-    closeMentions()
-    return
-  }
-  // Don't pop open on a lone @ with zero chars unless user is typing into a mention
-  const queryChanged = mentionAt.value !== ctx.start || !mentionOpen.value
-  mentionAt.value = ctx.start
-  mentionOpen.value = true
-  if (opts?.resetIndex !== false && queryChanged) {
-    mentionIndex.value = 0
-  }
-  searchMentions(ctx.query)
-  nextTick(syncMentionPlacement)
-}
-
-const insertMention = (account: mastodon.v1.Account) => {
-  const ctx = getMentionContext()
-  if (!ctx) return
-  const handle = accountHandle(account)
-  const before = content.value.slice(0, ctx.start)
-  const after = content.value.slice(ctx.caret)
-  content.value = `${before}${handle} ${after}`
-  closeMentions()
+/** Replaces only the active token — text around (and other tokens) stay intact */
+const insertSuggestion = (item: ComposeSuggestion) => {
+  const out = autocomplete.pick(item)
+  if (!out) return
+  content.value = out.text
+  mentionFlipUp.value = false
   nextTick(() => {
-    const pos = before.length + handle.length + 1
     textareaRef.value?.focus()
-    textareaRef.value?.setSelectionRange(pos, pos)
+    textareaRef.value?.setSelectionRange(out.caret, out.caret)
   })
 }
 
@@ -629,6 +672,15 @@ const handlePost = async () => {
       inReplyToId: props.inReplyToId,
       language: postLanguage.value || undefined,
       scheduledAt: scheduledAtIso.value,
+      ...(showPoll.value
+        ? {
+            poll: {
+              options: filledPollOptions.value,
+              expiresIn: pollDuration.value,
+              multiple: pollMultiple.value || undefined,
+            },
+          }
+        : {}),
     }
 
     let result: mastodon.v1.Status | mastodon.v1.ScheduledStatus
@@ -693,7 +745,7 @@ const toggleCW = () => {
 }
 
 const openFilePicker = () => {
-  if (!canAddMore.value || isPosting.value) return
+  if (!canAddMore.value || isPosting.value || showPoll.value) return
   fileInputRef.value?.click()
 }
 
@@ -705,33 +757,13 @@ const onFilePicked = async (e: Event) => {
 
 const onKeydown = (e: KeyboardEvent) => {
   if (isImeEvent(e)) return
-  if (mentionOpen.value && mentionResults.value.length) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      e.stopPropagation()
-      mentionIndex.value = (mentionIndex.value + 1) % mentionResults.value.length
-      return
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      e.stopPropagation()
-      mentionIndex.value =
-        (mentionIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length
-      return
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault()
-      e.stopPropagation()
-      const pick = mentionResults.value[mentionIndex.value]
-      if (pick) insertMention(pick)
-      return
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      closeMentions()
-      return
-    }
+  const handled = autocomplete.handleKeydown(e)
+  if (handled) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (typeof handled === 'object') insertSuggestion(handled.picked)
+    else if (e.key === 'Escape') mentionFlipUp.value = false
+    return
   }
   // Compact reply / Threads pill: Enter sends (Shift+Enter keeps a newline)
   if (props.compact && e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
@@ -746,14 +778,14 @@ const onKeydown = (e: KeyboardEvent) => {
 }
 
 const onComposeInput = () => {
-  syncMentions({ resetIndex: true })
+  syncMentions()
 }
 
 const onMentionKeyup = (e: KeyboardEvent) => {
   // Don't reset arrow selection when navigating the popup
   if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) return
   if (isImeEvent(e)) return
-  syncMentions({ resetIndex: true })
+  syncMentions()
 }
 
 const focusComposer = () => {
@@ -877,8 +909,17 @@ defineExpose({
   submitLabel,
   /** Anything the user would lose by closing — own text, CW, or attachments */
   isDirty: computed(
-    () => hasOwnContent.value || hasMedia.value || (showCW.value && !!spoilerText.value.trim()),
+    () =>
+      hasOwnContent.value ||
+      hasMedia.value ||
+      (showCW.value && !!spoilerText.value.trim()) ||
+      (showPoll.value && filledPollOptions.value.length > 0),
   ),
+  /** "Save draft and close" — write the (text-only) draft now; attachments aren't restored */
+  saveDraft: () => {
+    persistDraft()
+    flushDraft()
+  },
   /** Confirmed "Discard" — drop the saved draft too, or it comes back next open */
   discardDraft: () => clearDraft(),
 })
@@ -946,11 +987,12 @@ defineExpose({
         <ComposeAutocomplete
           v-if="mentionOpen"
           :id="mentionListId"
-          :results="mentionResults"
+          :items="suggestions"
+          :kind="suggestionKind"
           :searching="mentionSearching"
           :active-index="mentionIndex"
           :flip-up="mentionFlipUp"
-          @select="insertMention"
+          @select="insertSuggestion"
         />
         <button
           type="button"
@@ -1036,11 +1078,12 @@ defineExpose({
         <ComposeAutocomplete
           v-if="mentionOpen"
           :id="mentionListId"
-          :results="mentionResults"
+          :items="suggestions"
+          :kind="suggestionKind"
           :searching="mentionSearching"
           :active-index="mentionIndex"
           :flip-up="mentionFlipUp"
-          @select="insertMention"
+          @select="insertSuggestion"
         />
       </div>
     </template>
@@ -1072,6 +1115,51 @@ defineExpose({
         :readonly="isPosting"
       />
     </div>
+
+    <fieldset v-if="showPoll" class="compose-poll" :disabled="isPosting" @click.stop>
+      <legend class="compose-poll__legend">Poll</legend>
+      <div v-for="(_, idx) in pollOptions" :key="idx" class="compose-poll__row">
+        <input
+          :ref="(el) => { if (el) pollInputRefs[idx] = el as HTMLInputElement }"
+          v-model="pollOptions[idx]"
+          type="text"
+          class="compose-poll__input neo-input"
+          maxlength="50"
+          :placeholder="`Option ${idx + 1}`"
+          :aria-label="`Poll option ${idx + 1}`"
+        />
+        <button
+          v-if="pollOptions.length > POLL_MIN_OPTIONS"
+          type="button"
+          class="compose-poll__remove"
+          :aria-label="`Remove option ${idx + 1}`"
+          @click="removePollOption(idx)"
+        >
+          ×
+        </button>
+      </div>
+      <div class="compose-poll__settings">
+        <button
+          v-if="pollOptions.length < POLL_MAX_OPTIONS"
+          type="button"
+          class="compose-poll__add"
+          @click="addPollOption"
+        >
+          + Add option
+        </button>
+        <label class="compose-poll__field">
+          <span>Ends in</span>
+          <select v-model.number="pollDuration" class="compose-poll__select" aria-label="Poll duration">
+            <option v-for="d in POLL_DURATIONS" :key="d.seconds" :value="d.seconds">{{ d.label }}</option>
+          </select>
+        </label>
+        <label class="compose-poll__field">
+          <input v-model="pollMultiple" type="checkbox" />
+          <span>Allow multiple choices</span>
+        </label>
+      </div>
+      <p v-if="pollError" class="compose-poll__error" role="alert">{{ pollError }}</p>
+    </fieldset>
 
     <aside v-if="peerTubeHint" class="compose-peertube" @click.stop>
       <p class="compose-peertube__text">{{ peerTubeHint }}</p>
@@ -1123,7 +1211,34 @@ defineExpose({
           <span aria-hidden="true">🎬</span>
           <span class="compose-media__video-name">{{ item.file.name }}</span>
         </div>
-        <div v-if="item.uploading" class="compose-media__overlay">Uploading…</div>
+        <div
+          v-if="item.uploading"
+          class="compose-media__overlay compose-media__overlay--busy"
+          role="group"
+          :aria-label="`${uploadPhaseLabel(item)} ${item.file.name || 'attachment'}`"
+        >
+          <span class="compose-media__phase">{{ uploadPhaseLabel(item) }}</span>
+          <!-- Real bytes-sent bar only; indeterminate when the browser can't report progress -->
+          <span
+            class="compose-media__bar"
+            :class="{ 'compose-media__bar--indeterminate': item.phase !== 'uploading' || item.progress == null }"
+            aria-hidden="true"
+          >
+            <span
+              v-if="item.phase === 'uploading' && item.progress != null"
+              :style="{ width: `${Math.round(item.progress * 100)}%` }"
+            />
+            <span v-else />
+          </span>
+          <button
+            type="button"
+            class="compose-media__cancel"
+            :aria-label="`Cancel upload of ${item.file.name || 'attachment'}`"
+            @click.stop="cancelUpload(item.localId)"
+          >
+            Cancel
+          </button>
+        </div>
         <button
           v-else-if="item.error"
           type="button"
@@ -1195,7 +1310,7 @@ defineExpose({
           class="compose-tool"
           aria-label="Add photo"
           title="Add photo"
-          :disabled="!canAddMore || isPosting"
+          :disabled="!canAddMore || isPosting || showPoll"
           @click="openFilePicker"
         >
           <NeoIcon name="image" :size="18" :stroke="1.75" />
@@ -1211,6 +1326,21 @@ defineExpose({
           @click="toggleCW"
         >
           <span aria-hidden="true">CW</span>
+        </button>
+        <button
+          v-if="!compact && (instancesStore.canCreatePolls || showPoll)"
+          type="button"
+          class="compose-tool"
+          :class="{ 'compose-tool--active': showPoll }"
+          :aria-label="showPoll ? 'Remove poll' : 'Add poll'"
+          :title="hasMedia && !showPoll ? 'Polls can’t include media' : showPoll ? 'Remove poll' : 'Add poll'"
+          :aria-pressed="showPoll"
+          :disabled="isPosting || (hasMedia && !showPoll)"
+          @click="togglePoll"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 6h10M4 12h16M4 18h7" />
+          </svg>
         </button>
 
         <!-- Compact replies inherit parent visibility — don't crowd the dock -->
@@ -1236,7 +1366,7 @@ defineExpose({
         </span>
 
         <!-- Place this cell in time — Mastodon scheduled_at (≥5 min) -->
-        <div v-if="!compact" class="compose-schedule">
+        <div v-if="!compact && instancesStore.canSchedulePosts" class="compose-schedule">
           <label class="compose-schedule__field">
             <span class="sr-only">Schedule for</span>
             <input
@@ -1608,6 +1738,97 @@ defineExpose({
   min-height: 0;
 }
 
+.compose-poll {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.65rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-md, 8px);
+  background: var(--neo-bg-tertiary);
+}
+
+.compose-poll__legend {
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+}
+
+.compose-poll__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.compose-poll__input {
+  flex: 1;
+  min-width: 0;
+  /* Absolute 16px — iOS zooms anything smaller */
+  font-size: max(16px, 1rem);
+}
+
+.compose-poll__remove,
+.compose-poll__add {
+  border: none;
+  background: transparent;
+  color: var(--neo-text-muted);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--neo-accent);
+  }
+}
+
+.compose-poll__remove {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.compose-poll__add {
+  min-height: 2rem;
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-link);
+}
+
+.compose-poll__settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.9rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+}
+
+.compose-poll__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.compose-poll__select {
+  padding: 0.25rem 0.35rem;
+  font: inherit;
+  background-color: var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm);
+}
+
+.compose-poll__error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--neo-danger, #dc2626);
+}
+
 .compose-input {
   resize: none;
   flex: 1;
@@ -1775,6 +1996,59 @@ defineExpose({
   &--error {
     color: var(--neo-danger);
   }
+
+  &--busy {
+    grid-auto-flow: row;
+    grid-template-rows: auto auto auto;
+    align-content: center;
+    gap: 0.3rem;
+  }
+}
+
+.compose-media__bar {
+  display: block;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--neo-border-color);
+
+  > span {
+    display: block;
+    height: 100%;
+    background: var(--neo-accent);
+    transition: width 0.15s linear;
+  }
+
+  &--indeterminate > span {
+    width: 40%;
+    animation: compose-media-indeterminate 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes compose-media-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compose-media__bar--indeterminate > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+.compose-media__cancel {
+  min-height: 24px;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  background: var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+  font: inherit;
+  font-size: 0.6875rem;
+  cursor: pointer;
 }
 
 .compose-media__remove {

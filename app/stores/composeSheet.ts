@@ -23,6 +23,10 @@ interface ComposeSheetState {
   /** Bump to remount RealComposeBox cleanly */
   instanceKey: number
   initialText: string
+  /** Prefilled content warning (delete & redraft) */
+  initialSpoiler: string
+  /** Own draft slot (e.g. `redraft:<id>`) so a saved "new post" draft can't overwrite the prefill */
+  draftSlot: string | null
   initialVisibility: ComposeVisibility | null
   placeholder: string | null
   title: string | null
@@ -40,6 +44,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     open: false,
     instanceKey: 0,
     initialText: '',
+    initialSpoiler: '',
+    draftSlot: null,
     initialVisibility: null,
     placeholder: null,
     title: null,
@@ -54,6 +60,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
   actions: {
     show(opts?: {
       initialText?: string
+      spoilerText?: string
+      draftSlot?: string | null
       visibility?: ComposeVisibility
       placeholder?: string
       title?: string
@@ -72,6 +80,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
         !!opts?.pickRecipient !== this.pickRecipient
 
       this.initialText = opts?.initialText ?? ''
+      this.initialSpoiler = opts?.spoilerText ?? ''
+      this.draftSlot = opts?.draftSlot ?? null
       this.initialVisibility = opts?.visibility ?? null
       this.placeholder = opts?.placeholder ?? null
       this.title = opts?.title ?? null
@@ -94,6 +104,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     continueWithRecipient(handle: string) {
       this.pickRecipient = false
       this.initialText = `${handle} `
+      this.initialSpoiler = ''
+      this.draftSlot = null
       this.initialVisibility = 'direct'
       this.placeholder = 'Write a private message…'
       this.title = 'New message'
@@ -123,6 +135,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     hide() {
       this.open = false
       this.initialText = ''
+      this.initialSpoiler = ''
+      this.draftSlot = null
       this.initialVisibility = null
       this.placeholder = null
       this.title = null

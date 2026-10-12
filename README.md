@@ -106,13 +106,14 @@ See [docs/STATUS.md](docs/STATUS.md) for the full picture.
 - Rate-limited feedback API with optional Cloudflare Turnstile
 - Vitest smoke tests + GitHub Actions CI (`typecheck`, `test`, `generate`)
 
-### Not yet (deferred)
+### Recently completed
 - Hashtag / emoji autocomplete in compose
-- Upload progress bars and cancel UI
-- Scheduled posts in compose (polls still open)
-- Self-hosted fonts (Google Fonts still loaded at runtime)
-- Fork-specific settings deep links
-- Playwright e2e / axe CI gate
+- Upload progress + cancel UI
+- Compose scheduling + scheduled-post queue in Settings
+- Compose polls (create + vote)
+- Self-hosted appearance fonts (no Google Fonts at runtime)
+- Fork-aware server capabilities + settings deep links
+- Playwright e2e + axe CI gate (mocked Mastodon API)
 
 ---
 
@@ -138,10 +139,13 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run generate` | Static SPA export (`.output/public`) — runs prepaint + spa-fallback |
 | `npm run prepaint` | Regenerate `public/boot/prepaint.js` from appearance catalog |
 | `npm run preview` | Preview production build |
-| `npm run check` | Typecheck Pages Functions + Vitest |
+| `npm run check` | Typecheck Pages Functions + app (`vue-tsc`) + Vitest |
 | `npm run typecheck` | Typecheck `functions/` |
-| `npm run typecheck:app` | Nuxt app typecheck (has known masto typing gaps) |
-| `npm test` | Vitest smoke tests |
+| `npm run typecheck:app` | Nuxt app typecheck (clean; part of `check` / CI) |
+| `npm run lint` | Same as typecheck + typecheck:app (no separate ESLint yet) |
+| `npm test` | Vitest unit tests |
+| `npm run test:e2e` | Playwright journeys + axe (requires `npm run generate` first) |
+| `npm run check:full` | `check` + `generate` + e2e |
 | `npm run cf:preview` | Generate + Wrangler Pages dev |
 | `npm run cf:deploy` | Generate + deploy to Cloudflare Pages |
 | `npm run analyze` | Bundle analysis |

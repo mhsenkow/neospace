@@ -4,6 +4,7 @@
  */
 
 import { useEdwardStore, edwardBallFor } from '~/stores/edward'
+import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useMediaQuery } from '~/composables/useBreakpoint'
 import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND, MOOD_GLYPH } from '~/utils/edwardFaces'
@@ -94,6 +95,7 @@ const ageLabel = (createdAt: number) => {
 
 const edward = useEdwardStore()
 const stream = useEdwardStream()
+const composeSheet = useComposeSheetStore()
 const router = useRouter()
 const rootEl = ref<HTMLElement | null>(null)
 const exploreInput = ref<HTMLInputElement | null>(null)
@@ -569,6 +571,16 @@ const resumeLive = (e?: Event) => {
   e?.stopPropagation()
   edward.resumeWatchLive()
 }
+
+// Edward is recessed while the compose sheet is open (reply from the modal / watch deck).
+// Restore on ANY close — Cancel, Discard, Esc — from here: this component outlives the
+// modal and deck that opened the sheet, so cleanup can't be skipped by an unmount.
+watch(
+  () => composeSheet.open,
+  (open) => {
+    if (!open && edward.recessed) edward.setRecessed(false)
+  },
+)
 
 const closeModal = () => {
   edward.clearSelection()

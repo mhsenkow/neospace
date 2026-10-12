@@ -14,6 +14,11 @@ import {
   uploadTimeoutForBytes,
 } from '~/utils/composeConstants'
 import { PEERTUBE_JOIN_URL } from '~/utils/peertube'
+import {
+  isUploadCancelled,
+  isUploadTimeout,
+  type UploadPhase,
+} from '~/utils/mediaUpload'
 
 export type ComposeAttachmentSource = 'user' | 'handoff'
 
@@ -22,6 +27,11 @@ export interface ComposeAttachment {
   file: File
   previewUrl: string
   remoteId: string | null
+  /** uploading → processing (server-side) → ready | error */
+  phase: UploadPhase
+  /** Real bytes-sent fraction 0..1; null when the browser can't tell (never faked) */
+  progress: number | null
+  /** True while uploading or processing (kept for existing callers) */
   uploading: boolean
   error: string | null
   /** Accessibility description sent to Mastodon as media description */
@@ -49,6 +59,8 @@ export function useComposeMedia() {
   let dragDepth = 0
   const altTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const uploadControllers = new Map<string, AbortController>()
+  /** Uploads the user cancelled (vs removed / unmounted / timed out) */
+  const userCancelled = new Set<string>()
   /** Set on unmount — addFiles awaits downscaling and must not start uploads after */
   let disposed = false
 
@@ -88,7 +100,7 @@ export function useComposeMedia() {
   const allReady = computed(
     () =>
       attachments.value.length === 0 ||
-      attachments.value.every((a) => a.remoteId && !a.uploading && !a.error),
+      attachments.value.every((a) => a.remoteId && a.phase === 'ready' && !a.uploading && !a.error),
   )
   const canAddMore = computed(() => attachments.value.length < maxAttachments.value)
 
@@ -104,6 +116,15 @@ export function useComposeMedia() {
     uploadControllers.delete(localId)
   }
 
+  /** User pressed Cancel on a running upload — keeps the tile so it can be retried. */
+  const cancelUpload = (localId: string) => {
+    const draft = attachments.value.find((a) => a.localId === localId)
+    if (!draft || !draft.uploading) return
+    userCancelled.add(localId)
+    // Keep the controller registered so uploadOne's catch still owns the tile
+    uploadControllers.get(localId)?.abort()
+  }
+
   const revokeAll = () => {
     for (const a of attachments.value) {
       if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
@@ -111,6 +132,7 @@ export function useComposeMedia() {
   }
 
   const removeAttachment = (localId: string) => {
+    userCancelled.delete(localId)
     abortUpload(localId)
     const timer = altTimers.get(localId)
     if (timer) {
@@ -126,6 +148,7 @@ export function useComposeMedia() {
   const clearAttachments = () => {
     for (const a of attachments.value) abortUpload(a.localId)
     uploadControllers.clear()
+    userCancelled.clear()
     for (const t of altTimers.values()) clearTimeout(t)
     altTimers.clear()
     revokeAll()
@@ -148,14 +171,23 @@ export function useComposeMedia() {
   }
 
   const uploadOne = async (localId: string) => {
-    const draft = patchAttachment(localId, { uploading: true, error: null })
+    const draft = patchAttachment(localId, {
+      phase: 'uploading',
+      progress: null,
+      uploading: true,
+      error: null,
+      remoteId: null,
+    })
     if (!draft) return
     abortUpload(localId)
+    userCancelled.delete(localId)
     const controller = new AbortController()
     uploadControllers.set(localId, controller)
     const label = draft.file.name || 'Attachment'
     const sentDescription = draft.description.trim()
     announce(`Uploading ${label}`)
+    // A newer attempt (retry) owns the tile — ignore late callbacks from this one
+    const isCurrent = () => uploadControllers.get(localId) === controller
     try {
       const remote = await statusStore.uploadMedia(
         draft.file,
@@ -163,29 +195,59 @@ export function useComposeMedia() {
         {
           signal: controller.signal,
           timeoutMs: uploadTimeoutForBytes(draft.file.size),
+          onProgress: (fraction) => {
+            if (isCurrent()) patchAttachment(localId, { progress: fraction })
+          },
+          onPhase: (phase) => {
+            if (!isCurrent()) return
+            patchAttachment(localId, { phase, ...(phase === 'processing' ? { progress: null } : {}) })
+            if (phase === 'processing') announce(`${label} uploaded, processing`)
+          },
         },
       )
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || !isCurrent()) return
       const current = attachments.value.find((a) => a.localId === localId)
       if (!current) return
       current.remoteId = remote.id
-      announce(`${label} uploaded`)
+      patchAttachment(localId, { phase: 'ready', progress: 1, uploading: false })
+      announce(`${label} ready`)
       // Alt typed while the upload ran had no media id to PUT to — send it now
       // (queued, so flushAltDescriptions() still catches it before posting).
       if (current.description.trim() !== sentDescription) {
         setDescription(localId, current.description)
       }
     } catch (e: any) {
-      if (controller.signal.aborted) return
-      const msg = e?.message || 'Upload failed'
+      if (!isCurrent()) return
+      if (isUploadCancelled(e) || controller.signal.aborted) {
+        // Removed / unmounted → stay silent. Only the user's Cancel leaves a retryable tile.
+        if (userCancelled.delete(localId)) {
+          patchAttachment(localId, {
+            phase: 'error',
+            error: 'Upload cancelled',
+            remoteId: null,
+            uploading: false,
+            progress: null,
+          })
+          announce(`${label} upload cancelled`)
+        }
+        return
+      }
+      const msg = isUploadTimeout(e)
+        ? 'Upload timed out'
+        : e?.message || 'Upload failed'
       patchAttachment(localId, {
+        phase: 'error',
         error: msg,
         remoteId: null,
+        uploading: false,
+        progress: null,
       })
       announce(`${label} upload failed`)
     } finally {
-      uploadControllers.delete(localId)
-      patchAttachment(localId, { uploading: false })
+      if (isCurrent()) {
+        uploadControllers.delete(localId)
+        patchAttachment(localId, { uploading: false })
+      }
     }
   }
 
@@ -297,6 +359,8 @@ export function useComposeMedia() {
         file: markRaw(prepared),
         previewUrl: URL.createObjectURL(prepared),
         remoteId: null,
+        phase: 'uploading',
+        progress: null,
         uploading: true,
         error: null,
         description: (hint || '').trim().slice(0, altMax.value),
@@ -457,6 +521,7 @@ export function useComposeMedia() {
     dismissPeerTubeHint,
     addFiles,
     retryUpload,
+    cancelUpload,
     removeAttachment,
     clearAttachments,
     clearHandoffAttachments,

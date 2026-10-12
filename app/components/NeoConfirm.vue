@@ -42,6 +42,14 @@ useFocusTrap(dialogRef, isOpen, {
             Cancel
           </button>
           <button
+            v-if="overlay.confirm.secondaryLabel"
+            type="button"
+            class="neo-btn neo-btn--primary neo-confirm__secondary"
+            @click="overlay.resolveConfirm('secondary')"
+          >
+            {{ overlay.confirm.secondaryLabel }}
+          </button>
+          <button
             type="button"
             class="neo-btn"
             :class="overlay.confirm.danger ? 'neo-btn--danger' : 'neo-btn--primary'"
@@ -92,6 +100,7 @@ useFocusTrap(dialogRef, isOpen, {
 
 .neo-confirm__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--neo-spacing-3, 0.5rem);
 }

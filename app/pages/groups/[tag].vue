@@ -212,9 +212,22 @@ const isOnBoard = computed(() =>
 )
 
 /** Pin this hashtag feed as a board column and jump home */
-const addToBoard = () => {
+const addToBoard = async () => {
   if (!tagValid.value) return
-  const id = columnsStore.ensureFocusedView('group', tag.value.toLowerCase())
+  const feedParam = tag.value.toLowerCase()
+  let id = columnsStore.ensureFocusedView('group', feedParam)
+  if (!id && columnsStore.columns.length >= columnsStore.maxColumns) {
+    const disposable = columnsStore.columns[columnsStore.columns.length - 1]
+    if (!disposable || columnsStore.columns.length <= 1) return
+    const { useOverlayStore } = await import('~/stores/overlay')
+    const ok = await useOverlayStore().openConfirm({
+      title: 'Board is full',
+      body: `Replace the last column to pin #${feedParam}? You can undo from the toast.`,
+      confirmLabel: 'Replace',
+    })
+    if (!ok) return
+    id = columnsStore.replaceColumnWithView(disposable.id, 'group', feedParam)
+  }
   if (id) router.push('/')
 }
 

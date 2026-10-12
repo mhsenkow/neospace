@@ -26,7 +26,11 @@ export type ConfirmState = {
   body: string
   confirmLabel: string
   danger: boolean
+  /** Optional third choice between Cancel and the confirm button (e.g. "Save draft") */
+  secondaryLabel: string
 }
+
+export type ConfirmChoice = 'confirm' | 'secondary' | 'cancel'
 
 export type ReportCategory = 'spam' | 'violation' | 'other'
 
@@ -44,7 +48,7 @@ export type ReportPayload = {
   forward: boolean
 }
 
-type ConfirmResolver = (ok: boolean) => void
+type ConfirmResolver = (choice: ConfirmChoice) => void
 type ReportResolver = (payload: ReportPayload | null) => void
 
 let confirmResolve: ConfirmResolver | null = null
@@ -72,6 +76,7 @@ export const useOverlayStore = defineStore('overlay', {
       body: '',
       confirmLabel: 'Confirm',
       danger: false,
+      secondaryLabel: '',
     } as ConfirmState,
     report: {
       open: false,
@@ -131,8 +136,19 @@ export const useOverlayStore = defineStore('overlay', {
       confirmLabel?: string
       danger?: boolean
     }): Promise<boolean> {
+      return this.openChoice(opts).then((c) => c === 'confirm')
+    },
+
+    /** Like openConfirm, plus an optional secondary action (Cancel stays the safe default) */
+    openChoice(opts: {
+      title: string
+      body: string
+      confirmLabel?: string
+      danger?: boolean
+      secondaryLabel?: string
+    }): Promise<ConfirmChoice> {
       if (confirmResolve) {
-        confirmResolve(false)
+        confirmResolve('cancel')
         confirmResolve = null
       }
       this.confirm = {
@@ -141,17 +157,18 @@ export const useOverlayStore = defineStore('overlay', {
         body: opts.body,
         confirmLabel: opts.confirmLabel ?? 'Confirm',
         danger: !!opts.danger,
+        secondaryLabel: opts.secondaryLabel ?? '',
       }
-      return new Promise<boolean>((resolve) => {
+      return new Promise<ConfirmChoice>((resolve) => {
         confirmResolve = resolve
       })
     },
 
-    resolveConfirm(ok: boolean) {
+    resolveConfirm(ok: boolean | ConfirmChoice) {
       this.confirm.open = false
       const resolve = confirmResolve
       confirmResolve = null
-      resolve?.(ok)
+      resolve?.(typeof ok === 'string' ? ok : ok ? 'confirm' : 'cancel')
     },
 
     openReport(opts: { accountAcct: string }): Promise<ReportPayload | null> {

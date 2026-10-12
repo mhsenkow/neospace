@@ -26,4 +26,29 @@ jobs:
       - run: npm run check
       # check = functions typecheck + full app typecheck (vue-tsc) + vitest
       - run: npm run generate
-      # eslint / a11y plugin / Playwright axe / Lighthouse CI still optional
+      - name: Record checked commit
+        run: |
+          echo "CI_COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "Checked commit: $(git rev-parse HEAD)"
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run generate
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser journeys + axe
+        run: npx playwright test --project=chromium
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

@@ -8,7 +8,8 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
-import { activeClient } from '~/composables/useMasto'
+import { activeClient, activeCredentials } from '~/composables/useMasto'
+import { accountsMatch, hostOf } from '~/utils/federation'
 import { stripHtml } from '~/utils/stripHtml'
 import { profileFieldLimit } from '~/utils/profileSources'
 import {
@@ -177,16 +178,25 @@ export const useProfileStore = defineStore('profile', {
         const client = this.getClient()
         let account: mastodon.v1.Account | null = null
 
+        const want = username.replace(/^@/, '').trim()
+        let homeHost = ''
         try {
-          account = await client.v1.accounts.lookup({ acct: username })
+          homeHost = hostOf(activeCredentials().url)
+        } catch {
+          /* guest */
+        }
+        try {
+          const found = await client.v1.accounts.lookup({ acct: want })
+          if (found && accountsMatch(want, found.acct, homeHost)) account = found
         } catch {
           const res = await client.v2.search.list({
-            q: username,
+            q: want,
             type: 'accounts',
             resolve: true,
-            limit: 1,
+            limit: 5,
           })
-          account = res.accounts?.[0] || null
+          account =
+            res.accounts?.find((a) => accountsMatch(want, a.acct, homeHost)) || null
         }
         if (seq !== profileSeq) return
 

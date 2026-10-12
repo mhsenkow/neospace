@@ -359,15 +359,8 @@ onBeforeUnmount(() => {
   disposed = true
   observer?.disconnect()
   observer = null
-  if (canView.value) {
-    void notificationsStore.markAllRead()
-  }
-})
-
-onDeactivated(() => {
-  if (canView.value) {
-    void notificationsStore.markAllRead()
-  }
+  // Leaving the page does NOT mark anything read — hidden/filtered rows keep their unread
+  // state. Only the explicit "Mark all read" menu action (handleMarkRead) does that.
 })
 
 const goHome = () => {

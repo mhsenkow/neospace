@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { parseStoredLayout } from '../app/stores/columns'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { MAX_COLUMNS, parseStoredLayout, useColumnsStore } from '../app/stores/columns'
 import {
   decodeAlgorithmShare,
   normalizeKeywordList,
@@ -90,5 +91,35 @@ describe('algorithm share hardening', () => {
     const recipe = sharePayloadToRecipe(payload!)
     expect(recipe.authorAcct).toHaveLength(80)
     expect(recipe.authorName).toHaveLength(80)
+  })
+})
+
+describe('ensureFocusedView board cap', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('does not silently evict a column when the board is full', () => {
+    const store = useColumnsStore()
+    store.columns = Array.from({ length: MAX_COLUMNS }, (_, i) => ({
+      id: `col-${i}`,
+      feedType: i === 0 ? 'home' : 'local',
+      viewMode: 'flow' as const,
+    }))
+    const before = store.columns.map((c) => c.id)
+    expect(store.ensureFocusedView('group', 'cats')).toBeNull()
+    expect(store.columns.map((c) => c.id)).toEqual(before)
+  })
+
+  it('replaceColumnWithView swaps deliberately and Undo restores', () => {
+    const store = useColumnsStore()
+    store.columns = [
+      { id: 'a', feedType: 'home', viewMode: 'flow' },
+      { id: 'b', feedType: 'local', viewMode: 'flow' },
+    ]
+    const id = store.replaceColumnWithView('b', 'group', 'dogs')
+    expect(id).toBeTruthy()
+    expect(store.columns.some((c) => c.id === 'b')).toBe(false)
+    expect(store.columns.some((c) => c.feedType === 'group' && c.groupTag === 'dogs')).toBe(true)
   })
 })

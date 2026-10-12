@@ -245,9 +245,10 @@ Run `npm run prepaint` manually after editing appearance catalogs; `npm run gene
 **`functions/api/feedback.ts`** — POST handler:
 
 - Origin/host allowlist (neospace.ibm.io, pages.dev, localhost)
-- Rate limit (5/hour/IP)
-- Optional Turnstile verify via `TURNSTILE_SECRET_KEY`
+- Rate limit (5/hour/IP) — **isolate-local** (`functions/utils/rateLimit.ts` keeps buckets in memory per Worker isolate). It dampens abuse but is not a global guarantee: separate isolates/colos each count independently and a cold start resets the counter. For an enforceable production limit, add a Cloudflare WAF rate-limiting rule on `POST /api/feedback` (or move buckets to a Durable Object/KV).
+- Optional Turnstile verify via `TURNSTILE_SECRET_KEY` (set `NUXT_PUBLIC_TURNSTILE_SITE_KEY` too — without the secret the server does not require a token)
 - Creates GitHub issue via `GITHUB_TOKEN`
+- Diagnostic logs are **opt-in**: the note dialog shows a preview behind an unchecked checkbox, and `createGitHubIssue` only appends the redacted log ring when `includeLogs` is true. Issues are public.
 
 Shared limits in `shared/feedbackConstants.ts`.
 

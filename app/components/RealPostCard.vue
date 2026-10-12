@@ -78,6 +78,7 @@ const gifvAutoplay = {
 <script setup lang="ts">
 import type { mastodon } from 'masto'
 import { authorizeInteractionUrl, hostOf } from '~/utils/federation'
+import { lookupAcctFor } from '~/utils/edwardSemantics'
 import { activeCredentials } from '~/composables/useMasto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
@@ -124,6 +125,8 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
+  /** Own post deleted (plain delete or delete & redraft) — hosts may drop it from their lists */
+  deleted: [statusId: string]
 }>()
 
 const statusStore = useStatusStore()
@@ -143,7 +146,7 @@ const openProfile = (acct: string | undefined | null, e?: Event) => {
 }
 
 const onHeaderProfileClick = (acct: string, e: MouseEvent) => {
-  openProfile(acct || displayStatus.value.account?.acct, e)
+  openProfile(acct || authorAcct.value, e)
 }
 
 // reactive(): timelines hold statuses in a shallowRef, so wrap here (no-op for
@@ -151,6 +154,21 @@ const onHeaderProfileClick = (acct: string, e: MouseEvent) => {
 const displayStatus = computed(
   () => reactive(props.status.reblog || props.status) as mastodon.v1.Status,
 )
+
+/** Full user@host for mute/block/report/reply — bare local handles from foreign servers must be qualified */
+const authorAcct = computed(() => {
+  const acct = displayStatus.value.account?.acct
+  if (!acct) return ''
+  const ext = props.status as ExtendedStatus
+  let activeUrl = ''
+  try {
+    activeUrl = activeCredentials().url
+  } catch {
+    /* guest */
+  }
+  return lookupAcctFor(acct, displayStatus.value.account?.url, ext._instanceUrl || null, activeUrl)
+})
+
 const accountEmojis = computed(() => displayStatus.value.account?.emojis || [])
 const statusEmojis = computed(() => displayStatus.value.emojis || [])
 const nameEmojiUrls = computed(() => emojiUrlSet(accountEmojis.value))
@@ -301,20 +319,6 @@ onUnmounted(() => {
   if (contentEl.value) unobserveContentSize(contentEl.value)
 })
 
-const pollDenominator = computed(() => {
-  const poll = displayStatus.value.poll
-  if (!poll) return 0
-  const voters = poll.votersCount ?? poll.votesCount
-  if (voters != null && voters > 0) return voters
-  return poll.options.reduce((sum, o) => sum + (o.votesCount || 0), 0)
-})
-
-const pollOptionPercent = (votes: number | null | undefined) => {
-  const total = pollDenominator.value
-  if (!total) return 0
-  return Math.round(((votes || 0) / total) * 100)
-}
-
 type MediaSize = { width?: number | null; height?: number | null }
 /** Reserve the box before the image loads: original → small → 16:9 default. */
 const mediaAspectRatio = (media: mastodon.v1.MediaAttachment) => {
@@ -335,6 +339,33 @@ const isOwnPost = computed(() => {
   return displayStatus.value.account.id === user.id ||
     displayStatus.value.account.acct === user.acct
 })
+
+/**
+ * Own post on the acting server — only then are its id and our account id valid for
+ * delete / pin. (A foreign post by a same-named user must never get these actions.)
+ */
+const canManageOwn = computed(() => {
+  const user = instancesStore.currentUser
+  if (!instancesStore.isAuthenticated || !user) return false
+  if (displayStatus.value.account.id !== user.id) return false
+  const ext = props.status as ExtendedStatus
+  const sourceUrl = (props.status.reblog ? displayStatus.value : ext) as ExtendedStatus
+  const from = sourceUrl._instanceUrl || ext._instanceUrl
+  if (!from) return true
+  try {
+    return hostOf(from) === hostOf(activeCredentials().url)
+  } catch {
+    return false
+  }
+})
+
+/** Mastodon only pins public / unlisted posts; reblog rows can't be pinned */
+const canPin = computed(
+  () =>
+    canManageOwn.value &&
+    !props.status.reblog &&
+    (displayStatus.value.visibility === 'public' || displayStatus.value.visibility === 'unlisted'),
+)
 
 const statusUrl = computed(() => displayStatus.value.url || displayStatus.value.uri)
 
@@ -446,7 +477,7 @@ const openReplyComposer = async () => {
       })
       return
     }
-    const handle = displayStatus.value.account.acct
+    const handle = authorAcct.value || displayStatus.value.account.acct
     const isDm = displayStatus.value.visibility === 'direct'
     // Touch: land on the thread dock so you type above the keyboard
     if (!isDm && preferThreadReplyDock()) {
@@ -585,9 +616,11 @@ const handleBookmark = () => bookmarkAction(isMenuOpen)
 
 const handleMute = async () => {
   if (!canInteract.value || isMuting.value) return
+  const acct = authorAcct.value
+  if (!acct) return
 
   const confirmed = await overlayStore.openConfirm({
-    title: `Mute @${displayStatus.value.account.acct}?`,
+    title: `Mute @${acct}?`,
     body: "You won't see their posts in your timelines.",
     confirmLabel: 'Mute',
     danger: true,
@@ -596,9 +629,20 @@ const handleMute = async () => {
 
   isMuting.value = true
   try {
-    await statusStore.muteAccount(displayStatus.value.account.id, {
-      acct: displayStatus.value.account.acct,
-    })
+    // Prefer local id when the post was fetched from the active server; else resolve the qualified acct
+    const ext = props.status as ExtendedStatus
+    let activeUrl = ''
+    try {
+      activeUrl = activeCredentials().url
+    } catch {
+      /* guest */
+    }
+    const fromActive =
+      !!ext._instanceUrl && hostOf(ext._instanceUrl) === hostOf(activeUrl)
+    await statusStore.muteAccount(
+      displayStatus.value.account.id,
+      fromActive ? undefined : { acct },
+    )
   } catch (e) {
     console.error('Mute error:', e)
     toastStore.show({ message: 'Couldn’t mute that account. Try again from your home server.' })
@@ -610,9 +654,11 @@ const handleMute = async () => {
 
 const handleBlock = async () => {
   if (!canInteract.value || isBlocking.value) return
+  const acct = authorAcct.value
+  if (!acct) return
 
   const confirmed = await overlayStore.openConfirm({
-    title: `Block @${displayStatus.value.account.acct}?`,
+    title: `Block @${acct}?`,
     body: "They won't be able to see your posts or interact with you.",
     confirmLabel: 'Block',
     danger: true,
@@ -621,9 +667,19 @@ const handleBlock = async () => {
 
   isBlocking.value = true
   try {
-    await statusStore.blockAccount(displayStatus.value.account.id, {
-      acct: displayStatus.value.account.acct,
-    })
+    const ext = props.status as ExtendedStatus
+    let activeUrl = ''
+    try {
+      activeUrl = activeCredentials().url
+    } catch {
+      /* guest */
+    }
+    const fromActive =
+      !!ext._instanceUrl && hostOf(ext._instanceUrl) === hostOf(activeUrl)
+    await statusStore.blockAccount(
+      displayStatus.value.account.id,
+      fromActive ? undefined : { acct },
+    )
   } catch (e) {
     console.error('Block error:', e)
     toastStore.show({ message: 'Couldn’t block that account. Try again from your home server.' })
@@ -635,21 +691,32 @@ const handleBlock = async () => {
 
 const handleReport = async () => {
   if (!canInteract.value) return
+  const acct = authorAcct.value
+  if (!acct) return
 
   const payload = await overlayStore.openReport({
-    accountAcct: displayStatus.value.account.acct,
+    accountAcct: acct,
   })
   if (!payload) return
 
   try {
     const ctx = await getActionContext()
+    const ext = props.status as ExtendedStatus
+    let activeUrl = ''
+    try {
+      activeUrl = activeCredentials().url
+    } catch {
+      /* guest */
+    }
+    const fromActive =
+      !!ext._instanceUrl && hostOf(ext._instanceUrl) === hostOf(activeUrl)
     await statusStore.reportStatus(
       ctx?.id || displayStatus.value.id,
       displayStatus.value.account.id,
       payload.comment || undefined,
       {
         statusUrl: statusUrl.value || undefined,
-        acct: displayStatus.value.account.acct,
+        acct: fromActive ? undefined : acct,
         category: payload.category,
         forward: payload.forward,
       },
@@ -660,6 +727,130 @@ const handleReport = async () => {
     toastStore.show({ message: 'Failed to submit report. Please try again.' })
   } finally {
     isMenuOpen.value = false
+  }
+}
+
+// ── Own-post management ──
+const removed = ref(false)
+const isDeleting = ref(false)
+const isPinning = ref(false)
+
+const handleDelete = async () => {
+  if (!canManageOwn.value || isDeleting.value) return
+  isMenuOpen.value = false
+  const ok = await overlayStore.openConfirm({
+    title: 'Delete this post?',
+    body: 'It will be removed from your profile and timelines. This can’t be undone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
+  const id = displayStatus.value.id
+  isDeleting.value = true
+  try {
+    await statusStore.deleteStatus(id)
+    removed.value = true
+    emit('deleted', id)
+    toastStore.show({ message: 'Post deleted', duration: 2500 })
+  } catch (e) {
+    toastStore.show({ message: e instanceof Error ? e.message : 'Couldn’t delete post' })
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+/** Delete, then reopen the text (and CW / visibility / reply target) in the composer */
+const handleRedraft = async () => {
+  if (!canManageOwn.value || isDeleting.value) return
+  isMenuOpen.value = false
+  const s = displayStatus.value
+  const lost = [s.mediaAttachments?.length ? 'attached media' : '', s.poll ? 'the poll' : '']
+    .filter(Boolean)
+    .join(' and ')
+  const ok = await overlayStore.openConfirm({
+    title: 'Delete and redraft?',
+    body: `The post is deleted and its text reopens in the composer.${lost ? ` Replies and ${lost} won’t carry over.` : ' Replies won’t carry over.'}`,
+    confirmLabel: 'Delete & redraft',
+    danger: true,
+  })
+  if (!ok) return
+  isDeleting.value = true
+  try {
+    // Read the source first: if this fails nothing is deleted and nothing is lost
+    const source = await statusStore.fetchStatusSource(s.id)
+    const deleted = await statusStore.deleteStatus(s.id)
+    removed.value = true
+    emit('deleted', s.id)
+    composeSheet.show({
+      title: 'Redraft',
+      initialText: source?.text ?? deleted.text ?? stripHtml(s.content),
+      spoilerText: source?.spoilerText ?? deleted.spoilerText ?? s.spoilerText ?? '',
+      visibility: s.visibility,
+      inReplyToId: s.inReplyToId || null,
+      draftSlot: `redraft:${s.id}`,
+    })
+  } catch (e) {
+    toastStore.show({ message: e instanceof Error ? e.message : 'Couldn’t delete post' })
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+const handleTogglePin = async () => {
+  if (!canPin.value || isPinning.value) return
+  isPinning.value = true
+  const s = displayStatus.value
+  const want = !s.pinned
+  try {
+    const updated = want ? await statusStore.pinStatus(s.id) : await statusStore.unpinStatus(s.id)
+    s.pinned = updated?.pinned ?? want
+    toastStore.show({ message: want ? 'Pinned to your profile' : 'Unpinned', duration: 2400 })
+  } catch (e) {
+    toastStore.show({
+      message: want
+        ? 'Couldn’t pin — you can pin up to 5 public or unlisted posts'
+        : 'Couldn’t unpin that post',
+    })
+  } finally {
+    isPinning.value = false
+    isMenuOpen.value = false
+  }
+}
+
+// ── Polls ──
+const isVoting = ref(false)
+
+const handleVote = async (choices: number[]) => {
+  const poll = displayStatus.value.poll
+  if (!poll || isVoting.value || poll.expired || poll.voted || !choices.length) return
+  if (!requireAuth()) return
+  isVoting.value = true
+  try {
+    // Vote on the server that owns the status: remote polls need the local copy's poll id
+    const ctx = await getActionContext()
+    if (!ctx) throw new Error('Not resolvable')
+    const local = await ctx.client.v1.statuses.$select(ctx.id).fetch()
+    const localPoll = local.poll
+    if (!localPoll) throw new Error('Poll not found')
+    if (localPoll.expired) {
+      displayStatus.value.poll = localPoll
+      toastStore.show({ message: 'This poll has closed' })
+      return
+    }
+    // Same options in the same order, or the indexes would vote for the wrong thing
+    const same =
+      localPoll.options.length === poll.options.length &&
+      localPoll.options.every((o, i) => o.title === poll.options[i]?.title)
+    if (!same) throw new Error('Poll mismatch')
+    const updated = await ctx.client.v1.polls.$select(localPoll.id).votes.create({ choices })
+    displayStatus.value.poll = updated
+    toastStore.show({ message: 'Vote sent', duration: 2200 })
+  } catch {
+    toastStore.show({
+      message: 'Couldn’t send your vote — it may have closed, or your server can’t reach this poll.',
+    })
+  } finally {
+    isVoting.value = false
   }
 }
 
@@ -759,6 +950,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
 <template>
   <article
+    v-if="!removed"
     class="status-card"
     :class="{
       'status-card--menu-open': isMenuOpen,
@@ -882,6 +1074,51 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                 </svg>
                 <span>Open original</span>
               </button>
+              <template v-if="canManageOwn">
+                <div class="status-dropdown-divider" role="separator" />
+                <button
+                  v-if="canPin"
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item"
+                  :disabled="isPinning"
+                  @click="handleTogglePin"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <path d="M12 17v5" />
+                    <path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7z" />
+                  </svg>
+                  <span>{{ displayStatus.pinned ? 'Unpin from profile' : 'Pin to profile' }}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item"
+                  :disabled="isDeleting"
+                  @click="handleRedraft"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+                  </svg>
+                  <span>Delete &amp; redraft</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item status-dropdown-item--danger"
+                  :disabled="isDeleting"
+                  @click="handleDelete"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                  </svg>
+                  <span>Delete</span>
+                </button>
+              </template>
               <template v-if="canInteract && !isOwnPost">
                 <div class="status-dropdown-divider" role="separator" />
                 <button
@@ -929,7 +1166,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           </NeoMenu>
         </PostHeader>
 
-        <!-- Content Warning / Spoiler -->
+        <!-- Content Warning / Spoiler — gates text, preview, poll, and media together -->
         <details
           v-if="hasSpoiler"
           class="status-cw"
@@ -943,44 +1180,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             v-html="safeContent"
             @click="onContentClick"
           />
-        </details>
-
-        <!-- Regular Content -->
-        <div v-else class="status-content-wrap">
-          <div
-            ref="contentEl"
-            class="status-content status-content--clickable"
-            :class="{ 'status-content--clamped': !contentExpanded }"
-            :lang="displayStatus.language || undefined"
-            v-html="safeContent"
-            @click="onContentClick"
-          />
-          <button
-            v-if="showSeeMore"
-            type="button"
-            class="status-see-more"
-            :aria-expanded="contentExpanded"
-            @click.stop="contentExpanded = !contentExpanded"
-          >
-            {{ contentExpanded ? 'See less' : 'See more' }}
-          </button>
-        </div>
-
-        <!-- Link preview -->
-        <PreviewCard v-if="linkCard && !isFlip" :card="linkCard" />
-
-        <!-- Media: gated behind CW / sensitive -->
-        <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
-          <button
-            v-if="mediaHidden"
-            type="button"
-            class="status-media-cw"
-            @click.stop="revealMedia"
-          >
-            <span>{{ hasSpoiler ? displayStatus.spoilerText : 'Sensitive media' }}</span>
-            <span class="status-media-cw__hint">Tap to reveal</span>
-          </button>
-          <template v-else>
+          <PreviewCard v-if="linkCard && !isFlip && cwOpen" :card="linkCard" />
+          <div v-if="displayStatus.mediaAttachments?.length && cwOpen" class="status-media">
             <template v-for="(media, mediaIdx) in displayStatus.mediaAttachments" :key="media.id">
               <button
                 v-if="media.type === 'image'"
@@ -1029,36 +1230,113 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                 class="status-media-audio"
               />
             </template>
-          </template>
-        </div>
-
-        <!-- Poll -->
-        <div v-if="displayStatus.poll" class="status-poll">
-          <div
-            v-for="(option, optionIdx) in displayStatus.poll.options"
-            :key="optionIdx"
-            class="status-poll-option"
-            role="meter"
-            :aria-valuenow="pollOptionPercent(option.votesCount)"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-label="`${option.title}: ${pollOptionPercent(option.votesCount)}%`"
-          >
-            <span class="status-poll-title">{{ option.title }}</span>
-            <span class="status-poll-votes">
-              {{ pollOptionPercent(option.votesCount) }}%
-              <span class="status-poll-votes__count">({{ option.votesCount ?? 0 }})</span>
-            </span>
-            <div
-              class="status-poll-bar"
-              :style="{ width: `${pollOptionPercent(option.votesCount)}%` }"
-            />
           </div>
-          <p class="status-poll-info">
-            {{ pollDenominator }} {{ pollDenominator === 1 ? 'vote' : 'votes' }}
-            · {{ displayStatus.poll.expired ? 'Closed' : 'Open' }}
-          </p>
-        </div>
+          <PostPoll
+            v-if="displayStatus.poll && cwOpen"
+            :poll="displayStatus.poll"
+            :can-vote="canInteract"
+            :voting="isVoting"
+            @vote="handleVote"
+          />
+        </details>
+
+        <!-- Regular Content (no spoiler text) -->
+        <template v-else>
+          <div class="status-content-wrap">
+            <div
+              ref="contentEl"
+              class="status-content status-content--clickable"
+              :class="{ 'status-content--clamped': !contentExpanded }"
+              :lang="displayStatus.language || undefined"
+              v-html="safeContent"
+              @click="onContentClick"
+            />
+            <button
+              v-if="showSeeMore"
+              type="button"
+              class="status-see-more"
+              :aria-expanded="contentExpanded"
+              @click.stop="contentExpanded = !contentExpanded"
+            >
+              {{ contentExpanded ? 'See less' : 'See more' }}
+            </button>
+          </div>
+
+          <!-- Link preview -->
+          <PreviewCard v-if="linkCard && !isFlip" :card="linkCard" />
+
+          <!-- Media: gated behind sensitive flag -->
+          <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
+            <button
+              v-if="mediaHidden"
+              type="button"
+              class="status-media-cw"
+              @click.stop="revealMedia"
+            >
+              <span>Sensitive media</span>
+              <span class="status-media-cw__hint">Tap to reveal</span>
+            </button>
+            <template v-else>
+              <template v-for="(media, mediaIdx) in displayStatus.mediaAttachments" :key="media.id">
+                <button
+                  v-if="media.type === 'image'"
+                  type="button"
+                  class="status-media-hit"
+                  :aria-label="media.description || (displayStatus.mediaAttachments.length > 1 ? `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}` : 'View image')"
+                  @click.stop="openLightbox(media)"
+                >
+                  <img
+                    :src="media.previewUrl ?? media.url ?? undefined"
+                    :alt="media.description || ''"
+                    class="status-media-image"
+                    :style="{ aspectRatio: mediaAspectRatio(media) }"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <span
+                    v-if="media.description?.trim()"
+                    class="status-media-alt-badge"
+                    title="Has alt text"
+                  >ALT</span>
+                  <span
+                    v-else
+                    class="status-media-alt-badge status-media-alt-badge--missing"
+                    title="No description"
+                  >No description</span>
+                </button>
+                <video
+                  v-else-if="media.type === 'video' || media.type === 'gifv'"
+                  :src="media.url ?? undefined"
+                  :poster="media.previewUrl ?? undefined"
+                  controls
+                  preload="none"
+                  v-gifv-autoplay="media.type === 'gifv'"
+                  :loop="media.type === 'gifv'"
+                  :muted="media.type === 'gifv'"
+                  playsinline
+                  :aria-label="media.description?.trim() || (media.type === 'gifv' ? 'Animated image' : 'Video attachment')"
+                  class="status-media-video"
+                />
+                <audio
+                  v-else-if="media.type === 'audio'"
+                  :src="media.url ?? undefined"
+                  controls
+                  :aria-label="media.description?.trim() || 'Audio attachment'"
+                  class="status-media-audio"
+                />
+              </template>
+            </template>
+          </div>
+
+          <!-- Poll -->
+          <PostPoll
+            v-if="displayStatus.poll"
+            :poll="displayStatus.poll"
+            :can-vote="canInteract"
+            :voting="isVoting"
+            @vote="handleVote"
+          />
+        </template>
 
         <!-- Actions: on mobile, like sits in the right thumb zone -->
         <!-- Reaching for the buttons starts any cross-server import early -->
@@ -1978,62 +2256,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   max-height: 500px;
   object-fit: contain;
   background: #000;
-}
-
-// Poll
-.status-poll {
-  margin-top: 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.status-poll-option {
-  position: relative;
-  padding: 0.5rem 0.75rem;
-  background-color: var(--neo-bg-tertiary);
-  border-radius: var(--neo-radius-md, 8px);
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  overflow: hidden;
-  font-size: 0.875rem;
-}
-
-.status-poll-bar {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background-color: var(--neo-accent-soft);
-  z-index: 0;
-}
-
-.status-poll-title,
-.status-poll-votes {
-  position: relative;
-  z-index: 1;
-}
-
-// Long option text (URLs, handles) wraps instead of pushing the % off the card
-.status-poll-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.status-poll-votes {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.status-poll-votes {
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-}
-
-.status-poll-info {
-  font-size: 0.75rem;
-  color: var(--neo-text-muted);
 }
 
 // ========================================

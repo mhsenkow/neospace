@@ -158,14 +158,18 @@ const handleBeam = async () => {
   }
 }
 
-const resolveAccountId = async (): Promise<{ client: ReturnType<typeof activeClient>; id: string } | null> => {
-  if (!acct.value) return null
-  const handle = lookupAcctFor(
+/** acct as your server knows it — also the key Edward uses to exclude the author */
+const lookupAcct = () =>
+  lookupAcctFor(
     acct.value,
     body.value.account?.url,
     props.status._instanceUrl,
     instancesStore.activeAccount?.url,
   )
+
+const resolveAccountId = async (): Promise<{ client: ReturnType<typeof activeClient>; id: string } | null> => {
+  if (!acct.value) return null
+  const handle = lookupAcct()
   try {
     const client = activeClient()
     // lookup only knows accounts your server has met; resolve (WebFinger) asks theirs
@@ -182,6 +186,7 @@ const handleGhost = async () => {
   ghostBusy.value = true
   // Captured up front: the deck can swap posts while the lookup is in flight
   const who = acct.value
+  const whoKey = lookupAcct()
   const postId = props.status.id
   try {
     const ctx = await resolveAccountId()
@@ -193,7 +198,7 @@ const handleGhost = async () => {
     if (props.status.id === postId) ghosted.value = true
     toastStore.show({ message: `Ghosted @${who}`, duration: 2600 })
     // Out of the stream now, not just on the next refresh
-    edward.dropAuthor(who)
+    edward.dropAuthor(whoKey)
   } catch {
     toastStore.show({ message: 'Couldn’t ghost', duration: 3200 })
   } finally {
@@ -209,6 +214,7 @@ const handleShape = async () => {
   }
   shapeBusy.value = true
   const who = acct.value
+  const whoKey = lookupAcct()
   const postId = props.status.id
   try {
     const ctx = await resolveAccountId()
@@ -219,20 +225,13 @@ const handleShape = async () => {
     await ctx.client.v1.accounts.$select(ctx.id).block()
     if (props.status.id === postId) shaped.value = true
     toastStore.show({ message: `Shaped @${who}!!`, duration: 2600 })
-    edward.dropAuthor(who)
+    edward.dropAuthor(whoKey)
   } catch {
     toastStore.show({ message: 'Couldn’t shape', duration: 3200 })
   } finally {
     shapeBusy.value = false
   }
 }
-
-watch(
-  () => composeSheet.open,
-  (open) => {
-    if (!open && edward.recessed) edward.setRecessed(false)
-  },
-)
 
 // ── Toolbar roving tabindex: one Tab stop, arrows move between actions ──
 const toolbarEl = ref<HTMLElement | null>(null)

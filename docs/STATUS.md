@@ -80,31 +80,24 @@ From [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md), in **suggested priority
 
 | # | Epic | Size | Why it matters |
 |---|------|------|----------------|
-| 7 | Settings mobile drill-down nav | M | Phone settings is an unlabelled icon rail — needs list → panel + back chrome |
-| 3 | Compose upload progress + cancel | M–L | Upload shows "Uploading…" with no progress or abort UI |
-| 2 | Compose `#` / `:emoji:` autocomplete | L | Only `@` mentions autocomplete today |
-| 4 | Compose polls (+ scheduling done) | L | Schedule picker ships; poll editor still open |
-| 9 | Split SettingsModal into panels | L | ~2.2k lines; do after mobile nav (#7) |
-| 6 | Split `instances` store | L | ~870 lines mixing OAuth, persistence, timelines, preview |
-| 1 | Self-host Google Fonts | L | FOUT + IP leak; fonts load after JS today |
-| 5 | Trusted Types + token isolation + CSP | L | Highest risk — do last among product work |
-| 8 | Settings fork-specific paths | M | Mastodon-only deep links break on GoToSocial/Akkoma |
-| 10 | Playwright + axe CI | L | No e2e or automated a11y gate yet |
+| 5 | Trusted Types + token isolation + CSP | L | Highest remaining risk among product work |
+| 6 | Split `instances` store (further) | L | Auth helpers extracted; timeline merge still large |
+| 9 | Split SettingsModal (further panels) | L | Appearance + section header extracted; more panels remain |
 | — | **(Ops) Turnstile keys** | — | Widget + server verify plumbed; keys not set |
 
 ### Checklist (from deferred plan)
 
-- [ ] Self-host Google Fonts
-- [ ] Compose `#` / `:` autocomplete
-- [ ] Compose upload progress + cancel UI
-- [x] Compose scheduling (`scheduledAt` picker)
-- [ ] Compose polls
+- [x] Self-host Google Fonts
+- [x] Compose `#` / `:` autocomplete
+- [x] Compose upload progress + cancel UI
+- [x] Compose scheduling (`scheduledAt` picker) + scheduled queue
+- [x] Compose polls
 - [ ] Trusted Types + token isolation + CSP harden
-- [ ] Split `instances` store
-- [ ] Settings mobile drill-down
-- [ ] Settings fork-specific paths
-- [ ] Split SettingsModal into panels
-- [ ] Playwright + axe CI
+- [x] Split `instances` store (oauth/instanceInfo helpers extracted; more possible)
+- [x] Settings mobile drill-down
+- [x] Settings fork-specific paths (via serverCapabilities)
+- [x] Split SettingsModal into panels (first slices)
+- [x] Playwright + axe CI
 - [ ] (Ops) Turnstile keys on Pages / build
 
 ---

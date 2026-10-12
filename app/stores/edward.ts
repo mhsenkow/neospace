@@ -7,8 +7,11 @@ import { toRaw } from 'vue'
 import type { ExtendedStatus } from '~/stores/instances'
 import {
   statusToEdwardBall,
+  edwardAuthorKey,
+  lookupAcctFor,
   type EdwardBallDescriptor,
 } from '~/utils/edwardSemantics'
+import { useInstancesStore } from '~/stores/instances'
 import { statusIdentity } from '~/utils/statusIdentity'
 import { compareId } from '~/utils/compareId'
 import {
@@ -111,6 +114,8 @@ interface EdwardState {
   /** Posts fetched and waiting to drip onto the stage */
   backpack: number
   backpackBySource: { home: number; tag: number; trend: number; firehose: number }
+  /** Ghosted / shaped authors (edwardAuthorKey) — merge and the stream backpack reject them */
+  excludedAuthors: string[]
 }
 
 export const useEdwardStore = defineStore('edward', {
@@ -138,6 +143,7 @@ export const useEdwardStore = defineStore('edward', {
     captions: true,
     backpack: 0,
     backpackBySource: { home: 0, tag: 0, trend: 0, firehose: 0 },
+    excludedAuthors: [],
   }),
 
   getters: {
@@ -336,6 +342,7 @@ export const useEdwardStore = defineStore('edward', {
       this.sourceCount = 0
       this.backpack = 0
       this.backpackBySource = { home: 0, tag: 0, trend: 0, firehose: 0 }
+      this.excludedAuthors = []
       this.affinity = emptyAffinityContext()
       if (typeof document !== 'undefined') {
         document.body.classList.remove('edward-active')
@@ -544,7 +551,31 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     replaceStatuses(list: ExtendedStatus[]) {
-      this.statuses = list.slice(0, EDWARD_MAX_BALLS)
+      this.statuses = list.filter((s) => !this.isAuthorExcluded(s)).slice(0, EDWARD_MAX_BALLS)
+    },
+
+    /** Canonical author key for a status (boosts count as the original author) */
+    authorKeyOf(s: ExtendedStatus): string {
+      const body = s.reblog || s
+      const activeUrl = useInstancesStore().activeAccount?.url
+      return edwardAuthorKey(
+        lookupAcctFor(
+          body.account?.acct,
+          body.account?.url,
+          (s.reblog ? (body as ExtendedStatus)._instanceUrl : null) || s._instanceUrl,
+          activeUrl,
+        ),
+        activeUrl,
+      )
+    },
+
+    isAuthorExcluded(s: ExtendedStatus): boolean {
+      if (!this.excludedAuthors.length) return false
+      return this.excludedAuthors.includes(this.authorKeyOf(s))
+    },
+
+    clearExcludedAuthors() {
+      if (this.excludedAuthors.length) this.excludedAuthors = []
     },
 
     /** Prepend newer posts; drop oldest beyond cap. Returns newly added identities. */
@@ -555,7 +586,7 @@ export const useEdwardStore = defineStore('edward', {
       const addedIds: string[] = []
       for (const s of incoming) {
         const key = statusIdentity(s)
-        if (!key || seen.has(key)) continue
+        if (!key || seen.has(key) || this.isAuthorExcluded(s)) continue
         seen.add(key)
         added.push(s)
         addedIds.push(key)
@@ -569,14 +600,17 @@ export const useEdwardStore = defineStore('edward', {
       this.watchHold = v
     },
 
-    /** Ghosted / shaped someone — their posts leave the stream right away */
+    /**
+     * Ghosted / shaped someone — their posts leave the stream right away and stay out
+     * (queued backpack posts included). Pass the handle as your server knows it
+     * (lookupAcctFor); bare local handles are matched against your own server.
+     */
     dropAuthor(acct: string) {
-      const key = acct.replace(/^@/, '').toLowerCase()
+      const key = edwardAuthorKey(acct, useInstancesStore().activeAccount?.url)
       if (!key) return
-      const authorOf = (s: ExtendedStatus) =>
-        ((s.reblog || s).account?.acct || '').replace(/^@/, '').toLowerCase()
+      if (!this.excludedAuthors.includes(key)) this.excludedAuthors = [...this.excludedAuthors, key]
       const gone = new Set(
-        this.statuses.filter((s) => authorOf(s) === key).map((s) => statusIdentity(s)),
+        this.statuses.filter((s) => this.authorKeyOf(s) === key).map((s) => statusIdentity(s)),
       )
       if (!gone.size) return
       this.statuses = this.statuses.filter((s) => !gone.has(statusIdentity(s)))

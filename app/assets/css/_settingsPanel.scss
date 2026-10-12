@@ -1,0 +1,239 @@
+// Settings panel primitives shared by SettingsModal and the extracted
+// Settings*Panel components. Scoped styles don't reach into child components,
+// so each scoped block includes this mixin (rules are identical everywhere).
+@mixin shared {
+  // Section
+  .settings-section {
+    animation: none;
+  }
+
+  .settings-group {
+    background: var(--neo-bg-primary);
+    border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 4px);
+    padding: 1.25rem;
+  }
+
+  .settings-subheading {
+    margin: 0 0 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--neo-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+
+    &--tight {
+      margin-top: 0.85rem;
+    }
+  }
+
+  .settings-hint {
+    margin: 0 0 0.875rem;
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+    line-height: 1.45;
+    max-width: 52ch;
+  }
+
+  .settings-divider {
+    height: 1px;
+    background: var(--neo-border-color);
+    margin: 1.25rem 0;
+  }
+
+  .settings-toggle {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    cursor: pointer;
+
+    & + & {
+      border-top: 1px solid var(--neo-border-color);
+    }
+
+    &__info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    &__label {
+      font-size: 0.9375rem;
+      font-weight: 500;
+      color: var(--neo-text-primary);
+    }
+
+    &__desc {
+      font-size: 0.8125rem;
+      color: var(--neo-text-muted);
+    }
+  }
+
+  .settings-checkbox {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--neo-accent);
+    cursor: pointer;
+  }
+
+  .settings-radio-hidden {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  // The real radio is invisible — show keyboard focus on its card instead
+  label:has(> .settings-radio-hidden:focus-visible) {
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 2px;
+  }
+
+  .settings-fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    /* Contain children — floated <legend> hacks make Name/Bio wrap beside the heading */
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+
+    > .settings-subheading {
+      float: none;
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      padding: 0;
+      margin: 0 0 0.75rem;
+    }
+  }
+
+  .settings-actions--inline {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .settings-file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .settings-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    border: none;
+    border-radius: var(--neo-radius-sm, 8px);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, filter 0.15s ease;
+    text-decoration: none;
+    text-transform: none;
+    letter-spacing: normal;
+
+    &--primary {
+      background: var(--neo-accent);
+      color: var(--neo-text-on-accent);
+
+      &:hover:not(:disabled) {
+        background: var(--neo-accent-hover);
+      }
+    }
+
+    &--ghost {
+      background: var(--neo-bg-primary);
+      color: var(--neo-text-primary);
+      border: 1px solid var(--neo-border-color);
+
+      &:hover {
+        background: var(--neo-bg-tertiary);
+      }
+    }
+
+    &--danger {
+      background: var(--neo-danger);
+      color: var(--neo-text-on-accent, #fff);
+
+      &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--neo-danger) 85%, var(--neo-text-primary));
+      }
+    }
+
+    &--small {
+      padding: 0.5rem 1rem;
+      font-size: 0.8125rem;
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+
+  .settings-actions {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .settings-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    background: var(--neo-bg-secondary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: 8px;
+    color: var(--neo-text-primary);
+    transition: all 0.15s ease;
+
+    &:focus {
+      outline: none;
+      border-color: var(--neo-accent);
+      box-shadow: 0 0 0 3px var(--neo-accent-soft);
+    }
+  }
+
+
+  .settings-field-hint {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+
+  .settings-field-error {
+    font-size: 0.75rem;
+    color: var(--neo-danger);
+  }
+
+  @media (max-width: 768px) {
+    .settings-toggle {
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .settings-group {
+      padding: 1rem;
+      border-radius: var(--neo-radius-sm, 4px);
+    }
+
+    .settings-btn {
+      padding: 0.625rem 1rem;
+      font-size: 0.875rem;
+      width: 100%;
+    }
+
+    .settings-actions {
+      flex-direction: column;
+      margin-top: 1.25rem;
+    }
+  }
+}

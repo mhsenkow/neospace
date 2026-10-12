@@ -60,6 +60,21 @@ export async function getGitHubNewIssueUrl(
   return url.slice(0, GITHUB_NEW_ISSUE_URL_MAX)
 }
 
+/** Recent client logs the user may opt in to attaching (already redacted by the log ring). */
+export function getDiagnosticLogPreview(): string {
+  return formatLogRingForFeedback()
+}
+
+/** Append the diagnostic-log block only when the user opted in. */
+export function buildFeedbackBody(
+  body: string,
+  includeLogs: boolean,
+  logRing: string = includeLogs ? formatLogRingForFeedback() : '',
+): string {
+  if (!includeLogs || !logRing) return body
+  return `${body.trim()}\n\n<details><summary>Recent client logs</summary>\n\n\`\`\`\n${logRing}\n\`\`\`\n</details>`
+}
+
 export async function createGitHubIssue(
   title: string,
   body: string,
@@ -68,12 +83,11 @@ export async function createGitHubIssue(
     imageBase64?: string | null
     href?: string
     turnstileToken?: string | null
+    /** Opt-in only — diagnostic logs are never attached unless this is true */
+    includeLogs?: boolean
   },
 ): Promise<string> {
-  const logRing = formatLogRingForFeedback()
-  const bodyWithLogs = logRing
-    ? `${body.trim()}\n\n<details><summary>Recent client logs</summary>\n\n\`\`\`\n${logRing}\n\`\`\`\n</details>`
-    : body
+  const bodyWithLogs = buildFeedbackBody(body, options?.includeLogs === true)
 
   const res = await fetch('/api/feedback', {
     method: 'POST',

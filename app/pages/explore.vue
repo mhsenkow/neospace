@@ -12,7 +12,8 @@
 
 import type { mastodon } from 'masto'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
-import { useInstancesStore, type InstanceApiInfo } from '~/stores/instances'
+import { useInstancesStore } from '~/stores/instances'
+import type { InstanceApiInfo } from '~/utils/instanceInfo'
 import { useGroupsStore } from '~/stores/groups'
 import { useFediverseSearch, ALL_PREVIEW, type ExploreSearchTab } from '~/composables/useFediverseSearch'
 import { useSearchDiscovery } from '~/composables/useSearchDiscovery'

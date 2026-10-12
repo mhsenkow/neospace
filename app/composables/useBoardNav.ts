@@ -77,7 +77,30 @@ export function useBoardNav() {
 
   /** Algorithms / Local / etc. — add if needed, then park on home. */
   const openBoardFeed = async (feedType: ColumnFeedType, feedParam?: string) => {
-    const id = columnsStore.ensureFocusedView(feedType, feedParam)
+    let id = columnsStore.ensureFocusedView(feedType, feedParam)
+    if (!id && columnsStore.columns.length >= columnsStore.maxColumns) {
+      // Board full — ask before replacing a column (never silently evict)
+      const { useOverlayStore } = await import('~/stores/overlay')
+      const { useToastStore } = await import('~/stores/toast')
+      const disposable =
+        columnsStore.columns.find((c) => c.feedType === 'profile' || c.feedType === 'search') ||
+        columnsStore.columns[columnsStore.columns.length - 1]
+      if (!disposable || columnsStore.columns.length <= 1) {
+        useToastStore().show({ message: 'Board is full — remove a column first' })
+        return
+      }
+      const label =
+        disposable.feedType === 'group' && disposable.groupTag
+          ? `#${disposable.groupTag}`
+          : disposable.feedType
+      const ok = await useOverlayStore().openConfirm({
+        title: 'Board is full',
+        body: `Replace “${label}” with this feed? You can undo from the toast.`,
+        confirmLabel: 'Replace',
+      })
+      if (!ok) return
+      id = columnsStore.replaceColumnWithView(disposable.id, feedType, feedParam)
+    }
     if (id) requestColumnJump(id)
     if (route.path !== '/') await router.push('/')
   }

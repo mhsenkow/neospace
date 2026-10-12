@@ -9,6 +9,7 @@ import {
   FeedbackError,
   FEEDBACK_BODY_MAX,
   FEEDBACK_TITLE_MAX,
+  getDiagnosticLogPreview,
   getGitHubNewIssueUrl,
   prepareScreenshot,
   type FeedbackKind,
@@ -42,6 +43,9 @@ const kind = ref<FeedbackKind>('ux')
 const title = ref('')
 const body = ref('')
 const shot = ref<string | null>(null)
+/** Opt-in: diagnostic logs are public once filed, so default off */
+const includeLogs = ref(false)
+const logPreview = ref('')
 const busy = ref(false)
 const toast = ref<string | null>(null)
 const fallbackUrl = ref<string | null>(null)
@@ -82,6 +86,7 @@ const reset = () => {
   body.value = ''
   kind.value = 'ux'
   shot.value = null
+  includeLogs.value = false
   if (fileRef.value) fileRef.value.value = ''
 }
 
@@ -178,6 +183,7 @@ const submit = async () => {
       kind: kind.value,
       imageBase64: shot.value,
       turnstileToken: turnstileToken.value,
+      includeLogs: includeLogs.value,
     })
     showToast('Note filed as a GitHub issue')
     fallbackUrl.value = url
@@ -210,6 +216,10 @@ const submit = async () => {
 useFocusTrap(overlayRef, open, {
   onEscape: () => tryClose(),
   initialFocus: 'input, textarea, .notes-panel__close',
+})
+
+watch(includeLogs, (on) => {
+  logPreview.value = on ? getDiagnosticLogPreview() : ''
 })
 
 watch(open, async (isOpen) => {
@@ -367,6 +377,22 @@ onUnmounted(() => {
             alt="Screenshot preview"
             class="notes-preview"
           />
+
+          <div v-if="!keyboardOpen" class="notes-logs">
+            <label class="notes-logs__toggle" for="neospace-note-logs">
+              <input id="neospace-note-logs" v-model="includeLogs" type="checkbox" />
+              <span>Include recent diagnostic logs (public on GitHub)</span>
+            </label>
+            <template v-if="includeLogs">
+              <p v-if="!logPreview" class="notes-logs__empty">No recent logs to attach.</p>
+              <pre
+                v-else
+                class="notes-logs__preview"
+                tabindex="0"
+                aria-label="Diagnostic logs that will be attached"
+              >{{ logPreview }}</pre>
+            </template>
+          </div>
 
           <!-- Keep Turnstile mounted — hiding it for the keyboard blocks submit -->
           <div
@@ -674,6 +700,38 @@ onUnmounted(() => {
   height: 1px;
   opacity: 0;
   overflow: hidden;
+}
+
+.notes-logs {
+  flex-shrink: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-secondary);
+}
+
+.notes-logs__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.notes-logs__empty {
+  margin: 0.35rem 0 0;
+  color: var(--neo-text-muted);
+}
+
+.notes-logs__preview {
+  margin: 0.35rem 0 0;
+  max-height: 7rem;
+  overflow: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 6px;
+  background: var(--neo-bg-tertiary);
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .notes-shot-row {

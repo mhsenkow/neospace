@@ -169,6 +169,21 @@ export function lookupAcctFor(
 }
 
 /**
+ * Canonical key for "who wrote this" across servers: qualified like lookupAcctFor, lower-cased,
+ * and bare when the author lives on your own server (so `bob` and `bob@your.host` match).
+ */
+export function edwardAuthorKey(
+  qualifiedAcct: string | null | undefined,
+  activeUrl: string | null | undefined,
+): string {
+  const a = (qualifiedAcct || '').replace(/^@/, '').trim().toLowerCase()
+  if (!a) return ''
+  const activeHost = hostOf(activeUrl)?.toLowerCase()
+  if (activeHost && a.endsWith(`@${activeHost}`)) return a.slice(0, -(activeHost.length + 1))
+  return a
+}
+
+/**
  * Bot faces track Mastodon's `account.bot` flag, plus obvious self-marks
  * in handle / display name (e.g. `_bot`, `[bot]`). Unmarked stealth bots
  * will still slip through — that's a fediverse limit, not a face bug.

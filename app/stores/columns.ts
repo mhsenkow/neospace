@@ -521,8 +521,9 @@ export const useColumnsStore = defineStore('columns', {
      * Open a view on the board (add if needed) and focus it.
      * Always focuses (does not toggle off) — use clearColumnFocus / toggleColumnFocus to leave.
      * `feedParam` is groupTag for groups, algorithmId for algorithms.
+     * When the board is full, returns null without mutating — callers offer replace or a route.
      */
-    ensureFocusedView(feedType: ColumnFeedType, feedParam?: string) {
+    ensureFocusedView(feedType: ColumnFeedType, feedParam?: string): string | null {
       // Use findColumn so profile peeks (profileAcct set) aren't treated as own-profile
       const match = this.findColumn(feedType, feedParam)
       if (match) {
@@ -532,20 +533,77 @@ export const useColumnsStore = defineStore('columns', {
         }
         return match.id
       }
-      // Board full — free a panel slot or the last column so nav still works
       if (this.columns.length >= MAX_COLUMNS) {
-        const disposable =
-          this.columns.find((c) => isPanelFeed(c.feedType) && c.feedType !== feedType) ||
-          this.columns[this.columns.length - 1]
-        if (disposable && this.columns.length > 1) {
-          this.removeColumn(disposable.id)
-        }
+        return null
       }
       const id = this.addColumn(feedType, feedParam)
       if (id) {
         this.focusedColumnId = id
         this.saveDeskLayout()
       }
+      return id ?? null
+    },
+
+    /**
+     * Deliberately replace one column with a new feed view. Undo restores the
+     * previous column (paired with removing the new one so the board stays ≤ max).
+     */
+    replaceColumnWithView(
+      replaceId: string,
+      feedType: ColumnFeedType,
+      feedParam?: string,
+    ): string | null {
+      const match = this.findColumn(feedType, feedParam)
+      if (match) {
+        if (this.focusedColumnId !== match.id) {
+          this.focusedColumnId = match.id
+          this.saveDeskLayout()
+        }
+        return match.id
+      }
+      const index = this.columns.findIndex((c) => c.id === replaceId)
+      if (index === -1 || this.columns.length <= 1) return null
+
+      const removed = { ...this.columns[index]! }
+      const removedFrom = this.accountKey
+      this.columns.splice(index, 1)
+
+      const id = this.addColumn(feedType, feedParam)
+      if (!id) {
+        // add failed — put the old column back
+        this.columns.splice(index, 0, removed)
+        this.persist()
+        return null
+      }
+      this.focusedColumnId = id
+      this.saveDeskLayout()
+
+      if (typeof window === 'undefined') return id
+      void import('./toast').then(({ useToastStore }) => {
+        const label =
+          removed.feedType === 'group' && removed.groupTag
+            ? `#${removed.groupTag}`
+            : removed.feedType === 'algorithm' && removed.algorithmId
+              ? 'Algorithm'
+              : FEED_LABELS[removed.feedType] || 'Column'
+        useToastStore().show({
+          message: `Replaced ${label}`,
+          actionLabel: 'Undo',
+          duration: 5000,
+          onAction: () => {
+            if (this.accountKey !== removedFrom) return
+            const newIdx = this.columns.findIndex((c) => c.id === id)
+            if (newIdx === -1) return
+            this.columns.splice(newIdx, 1)
+            if (this.columns.some((c) => c.id === removed.id)) return
+            const insertAt = Math.min(index, this.columns.length)
+            this.columns.splice(insertAt, 0, removed)
+            this.focusedColumnId = removed.id
+            this.saveDeskLayout()
+            this.persist()
+          },
+        })
+      })
       return id
     },
 

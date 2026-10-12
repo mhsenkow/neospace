@@ -262,13 +262,6 @@ const onBackdrop = (e: MouseEvent) => {
   if (e.target === e.currentTarget) emit('close')
 }
 
-watch(
-  () => composeSheet.open,
-  (open) => {
-    if (!open && edward.recessed) edward.setRecessed(false)
-  },
-)
-
 const syncJoined = () => {
   joinedTag.value =
     !!topTag.value &&

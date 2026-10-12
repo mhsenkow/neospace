@@ -1,30 +1,83 @@
 /**
- * Load only the Google Fonts needed for the active chrome + type face.
- * Avoids the previous ~15-family megabundle on every page.
- *
- * Google Fonts remain remote (15+ families × weights — fontsource bundle is ~2MB+).
- * OpenDyslexic is self-hosted under /public/fonts. To fully self-host, add @fontsource/*
- * packages per active UI map entry and preload only the active chrome + type face.
+ * Load only the self-hosted font families needed for the active chrome + type face.
+ * OpenDyslexic remains under /public/fonts (see _themes.scss).
  */
 
 import type { NeoFontId, NeoUiId } from './appearance'
 
-const FAMILY_QUERY: Record<string, string> = {
-  'Source Sans 3': 'family=Source+Sans+3:wght@400;500',
-  'Source Serif 4': 'family=Source+Serif+4:opsz,wght@8..60,400;8..60,500',
-  'Source Code Pro': 'family=Source+Code+Pro:wght@400;500',
-  'Josefin Sans': 'family=Josefin+Sans:wght@400;500',
-  'Josefin Slab': 'family=Josefin+Slab:wght@400;500',
-  'Cormorant Garamond': 'family=Cormorant+Garamond:wght@400;500',
-  'Space Mono': 'family=Space+Mono:wght@400;700',
-  'IBM Plex Sans': 'family=IBM+Plex+Sans:wght@400;500',
-  'IBM Plex Serif': 'family=IBM+Plex+Serif:wght@400;500',
-  'IBM Plex Mono': 'family=IBM+Plex+Mono:wght@400;500',
-  Oswald: 'family=Oswald:wght@400;500',
-  'Roboto Slab': 'family=Roboto+Slab:wght@400;500',
-  'Share Tech Mono': 'family=Share+Tech+Mono',
-  'Libre Franklin': 'family=Libre+Franklin:wght@400;500',
-  Newsreader: 'family=Newsreader:opsz,wght@6..72,400;6..72,500',
+/** Dynamic imports — only the active chrome + face are fetched */
+const FONT_LOADERS: Record<string, () => Promise<unknown>> = {
+  'Source Sans 3': () =>
+    Promise.all([
+      import('@fontsource/source-sans-3/400.css'),
+      import('@fontsource/source-sans-3/500.css'),
+    ]),
+  'Source Serif 4': () =>
+    Promise.all([
+      import('@fontsource/source-serif-4/400.css'),
+      import('@fontsource/source-serif-4/500.css'),
+    ]),
+  'Source Code Pro': () =>
+    Promise.all([
+      import('@fontsource/source-code-pro/400.css'),
+      import('@fontsource/source-code-pro/500.css'),
+    ]),
+  'Josefin Sans': () =>
+    Promise.all([
+      import('@fontsource/josefin-sans/400.css'),
+      import('@fontsource/josefin-sans/500.css'),
+    ]),
+  'Josefin Slab': () =>
+    Promise.all([
+      import('@fontsource/josefin-slab/400.css'),
+      import('@fontsource/josefin-slab/500.css'),
+    ]),
+  'Cormorant Garamond': () =>
+    Promise.all([
+      import('@fontsource/cormorant-garamond/400.css'),
+      import('@fontsource/cormorant-garamond/500.css'),
+    ]),
+  'Space Mono': () =>
+    Promise.all([
+      import('@fontsource/space-mono/400.css'),
+      import('@fontsource/space-mono/700.css'),
+    ]),
+  'IBM Plex Sans': () =>
+    Promise.all([
+      import('@fontsource/ibm-plex-sans/400.css'),
+      import('@fontsource/ibm-plex-sans/500.css'),
+    ]),
+  'IBM Plex Serif': () =>
+    Promise.all([
+      import('@fontsource/ibm-plex-serif/400.css'),
+      import('@fontsource/ibm-plex-serif/500.css'),
+    ]),
+  'IBM Plex Mono': () =>
+    Promise.all([
+      import('@fontsource/ibm-plex-mono/400.css'),
+      import('@fontsource/ibm-plex-mono/500.css'),
+    ]),
+  Oswald: () =>
+    Promise.all([
+      import('@fontsource/oswald/400.css'),
+      import('@fontsource/oswald/500.css'),
+    ]),
+  'Roboto Slab': () =>
+    Promise.all([
+      import('@fontsource/roboto-slab/400.css'),
+      import('@fontsource/roboto-slab/500.css'),
+    ]),
+  'Share Tech Mono': () => import('@fontsource/share-tech-mono/400.css'),
+  'Libre Franklin': () =>
+    Promise.all([
+      import('@fontsource/libre-franklin/400.css'),
+      import('@fontsource/libre-franklin/500.css'),
+    ]),
+  Newsreader: () =>
+    Promise.all([
+      import('@fontsource/newsreader/400.css'),
+      import('@fontsource/newsreader/500.css'),
+    ]),
 }
 
 /** Which remote families each chrome uses for body + UI */
@@ -79,42 +132,16 @@ export function ensureFontsLoaded(ui: NeoUiId, font: NeoFontId) {
   // Mono is only fetched when the active face is mono (lazy), via map[font]
   const names = new Set<string>([...(map.ui || []), ...(map[font] || [])])
 
-  const queries: string[] = []
-  const pending: string[] = []
   for (const name of names) {
     if (loaded.has(name)) continue
-    const q = FAMILY_QUERY[name]
-    if (!q) continue
-    // Optimistic mark prevents duplicate parallel loads; onerror clears for retry
+    const loader = FONT_LOADERS[name]
+    if (!loader) continue
     loaded.add(name)
-    pending.push(name)
-    queries.push(q)
+    void loader().catch(() => {
+      loaded.delete(name)
+    })
   }
-  if (!queries.length) return
-
-  // Ensure preconnect once
-  if (!document.querySelector('link[data-neo-font-preconnect]')) {
-    const pre1 = document.createElement('link')
-    pre1.rel = 'preconnect'
-    pre1.href = 'https://fonts.googleapis.com'
-    pre1.dataset.neoFontPreconnect = '1'
-    document.head.appendChild(pre1)
-    const pre2 = document.createElement('link')
-    pre2.rel = 'preconnect'
-    pre2.href = 'https://fonts.gstatic.com'
-    pre2.crossOrigin = ''
-    pre2.dataset.neoFontPreconnect = '1'
-    document.head.appendChild(pre2)
-  }
-
-  const href = `https://fonts.googleapis.com/css2?${queries.join('&')}&display=swap`
-  const link = document.createElement('link')
-  link.rel = 'stylesheet'
-  link.href = href
-  link.dataset.neoFont = queries.join(',')
-  link.onerror = () => {
-    for (const name of pending) loaded.delete(name)
-    link.remove()
-  }
-  document.head.appendChild(link)
 }
+
+/** Families covered by local loaders (for tests / CSP verification) */
+export const SELF_HOSTED_FONT_FAMILIES = Object.keys(FONT_LOADERS)

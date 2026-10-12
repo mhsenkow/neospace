@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  accountsMatch,
   authorizeInteractionUrl,
   classifyFederationError,
   federationMessage,
@@ -46,6 +47,64 @@ describe('messages + hand-off', () => {
     expect(
       resolveCandidates('https://a.social/users/x/statuses/1', null, 'https://a.social/@x/1', 'https://a.social/users/x/statuses/1', 'javascript:alert(1)'),
     ).toEqual(['https://a.social/users/x/statuses/1', 'https://a.social/@x/1'])
+  })
+})
+
+describe('accountsMatch', () => {
+  it('matches bare and fully-qualified local handles on the home host', () => {
+    expect(accountsMatch('bob', 'bob', 'home.social')).toBe(true)
+    expect(accountsMatch('bob', 'bob@home.social', 'home.social')).toBe(true)
+    expect(accountsMatch('bob@home.social', 'bob', 'home.social')).toBe(true)
+    expect(accountsMatch('@Bob', 'bob@home.social', 'home.social')).toBe(true)
+  })
+
+  it('rejects fuzzy lookalikes and wrong hosts', () => {
+    expect(accountsMatch('bob', 'bobby', 'home.social')).toBe(false)
+    expect(accountsMatch('bob', 'bob@other.social', 'home.social')).toBe(false)
+    expect(accountsMatch('bob@other.social', 'bob', 'home.social')).toBe(false)
+    expect(accountsMatch('alice@a.social', 'alice@b.social')).toBe(false)
+  })
+
+  it('requires an exact foreign handle match', () => {
+    expect(accountsMatch('bob@other.social', 'bob@other.social', 'home.social')).toBe(true)
+    expect(accountsMatch('bob@other.social', 'bob@other.social')).toBe(true)
+  })
+})
+
+describe('resolveAccount', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('rejects a mismatched search result instead of taking results[0]', async () => {
+    const store = useStatusStore()
+    vi.spyOn(store, 'getClient').mockReturnValue({
+      v1: {
+        accounts: {
+          lookup: vi.fn().mockRejectedValue(new Error('404')),
+          search: {
+            list: vi.fn().mockResolvedValue([{ id: '99', acct: 'bobby' }]),
+          },
+        },
+      },
+    } as never)
+    expect(await store.resolveAccount('bob')).toBeNull()
+  })
+
+  it('accepts an exact search match for a foreign handle', async () => {
+    const store = useStatusStore()
+    vi.spyOn(store, 'getClient').mockReturnValue({
+      v1: {
+        accounts: {
+          lookup: vi.fn().mockRejectedValue(new Error('404')),
+          search: {
+            list: vi.fn().mockResolvedValue([
+              { id: '1', acct: 'bob@other.social' },
+              { id: '2', acct: 'bobby' },
+            ]),
+          },
+        },
+      },
+    } as never)
+    expect(await store.resolveAccount('bob@other.social')).toBe('1')
   })
 })
 

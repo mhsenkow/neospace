@@ -95,3 +95,25 @@ export const hostOf = (url?: string | null): string => {
     return ''
   }
 }
+
+/**
+ * Exact account identity match for search/lookup results.
+ * Bare local handles match `user` or `user@homeHost`; foreign handles must match fully.
+ * Rejects fuzzy first-hits like `alice2` when looking up `alice`.
+ */
+export function accountsMatch(
+  requested: string,
+  foundAcct: string,
+  homeHost?: string | null,
+): boolean {
+  const want = requested.replace(/^@/, '').trim().toLowerCase()
+  const got = foundAcct.replace(/^@/, '').trim().toLowerCase()
+  if (!want || !got) return false
+  if (want === got) return true
+  const host = (homeHost || '').replace(/^@/, '').trim().toLowerCase()
+  if (!host) return false
+  // `bob` ≡ `bob@home` on the home server
+  if (!want.includes('@') && got === `${want}@${host}`) return true
+  if (!got.includes('@') && want === `${got}@${host}`) return true
+  return false
+}

@@ -21,7 +21,8 @@ import {
 import { recipeTip, statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
 import { useRankedFeed } from '~/composables/useRankedFeed'
 import { useSettingsStore } from '~/stores/settings'
-import { idLess } from '~/utils/compareId'
+import { compareId, idLess } from '~/utils/compareId'
+import { newestIdPerInstance } from '~/stores/edward'
 import { httpStatusFrom, mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
 import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
@@ -291,6 +292,13 @@ let flipRo: ResizeObserver | null = null
 const pendingNew = shallowRef<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isNearTop = ref(true)
 const toastStore = useToastStore()
+/** Visible when catch-up hit its page cap — posts may be missing between polls */
+const timelineGap = ref(false)
+/** Newest status id per instance for since_id polls (not the oldest-for-max_id feedCursors) */
+const sinceCursors = ref<Record<string, string>>({})
+
+const SINCE_PAGE_LIMIT = 20
+const CATCH_UP_MAX_PAGES = 5
 
 /** Mobile pull-to-refresh (no preventDefault — that fights iOS compositing) */
 const pullDistance = ref(0)
@@ -551,6 +559,14 @@ const onComposePosted = (status: mastodon.v1.Status) => {
   emitComposedStatus(status)
 }
 
+/** Own-post delete / delete-and-redraft — drop the card from this column */
+const onStatusDeleted = (statusId: string) => {
+  const drop = (list: (mastodon.v1.Status | ExtendedStatus)[]) =>
+    list.filter((s) => s.id !== statusId && s.reblog?.id !== statusId)
+  statuses.value = drop(statuses.value)
+  pendingNew.value = drop(pendingNew.value)
+}
+
 const onScroll = () => {
   if (!scrollContainer.value) return
   isNearTop.value = scrollContainer.value.scrollTop < 8
@@ -775,19 +791,33 @@ const displayRows = computed(() =>
 /** role="feed" articles: total is unknown (-1) while more pages can load */
 const feedSetSize = computed(() => (hasMore.value ? -1 : displayStatuses.value.length))
 
-/** Fetch only posts newer than the current top (since_id) — avoids re-downloading the full page. */
-const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
-  // Newest post we already hold — including ones parked in the "new posts" pill,
-  // or every poll while you read re-downloads the same batch.
-  const top = pendingNew.value[0] ?? statuses.value[0]
-  if (!top?.id) return []
+/** Seed / advance per-instance newest cursors from held posts */
+const refreshSinceCursors = (list: (mastodon.v1.Status | ExtendedStatus)[]) => {
+  const merged = { ...sinceCursors.value, ...newestIdPerInstance(list as ExtendedStatus[]) }
+  // Single-server feeds may lack _instanceId — fall back to global top
+  const top = list[0]
+  if (top?.id) {
+    const ext = top as ExtendedStatus
+    const key = ext._instanceId || '_default'
+    if (!merged[key] || compareId(top.id, merged[key]) > 0) merged[key] = top.id
+  }
+  sinceCursors.value = merged
+}
 
-  const sinceId = top.id
-
+/**
+ * Fetch one since_id page for the current feed. Returns [] when the feed
+ * type doesn't support live polling.
+ */
+const fetchSincePage = async (
+  cursors: Record<string, string>,
+  limit: number,
+): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
   if (props.column.feedType === 'group' && props.column.groupTag) {
+    const sinceId = cursors._default || Object.values(cursors)[0]
+    if (!sinceId) return []
     const client = publicClient()
     const list = await client.v1.timelines.tag.$select(props.column.groupTag).list({
-      limit: 20,
+      limit,
       sinceId,
     })
     return withBrowseOrigin(list)
@@ -797,17 +827,25 @@ const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]>
     if (!instancesStore.hasAuthenticatedInstance) return []
     const active = instancesStore.activeAccount
     if (!active?.accessToken) return []
-    return await instancesStore.fetchMergedHomeTimeline(20, { [active.id]: sinceId }, { since: true })
+    const sinceId = cursors[active.id] || cursors._default
+    if (!sinceId) return []
+    return await instancesStore.fetchMergedHomeTimeline(
+      limit,
+      { [active.id]: sinceId },
+      { since: true },
+    )
   }
 
   if (props.column.feedType === 'local' || props.column.feedType === 'federated') {
     const targets = instancesStore.publicTimelineTargets()
     if (targets.length === 1 && targets[0]?.accessToken) {
       const inst = targets[0]
+      const sinceId = cursors[inst.id] || cursors._default
+      if (!sinceId) return []
       const client = instancesStore.getClient(inst.id)
       const list = await client.v1.timelines.public.list({
         local: props.column.feedType === 'local',
-        limit: 20,
+        limit,
         sinceId,
       })
       return list.map((s) => ({
@@ -816,19 +854,28 @@ const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]>
         _instanceUrl: inst.url,
       }))
     }
-    if (instancesStore.instances.length > 0) {
+    if (instancesStore.instances.length > 0 && targets.length > 0) {
+      // Pass every target's cursor — not just targets[0]
+      const map: Record<string, string> = {}
+      for (const t of targets) {
+        const c = cursors[t.id] || cursors._default
+        if (c) map[t.id] = c
+      }
+      if (!Object.keys(map).length) return []
       return await instancesStore.fetchMergedTimeline(
         props.column.feedType as 'local' | 'federated',
-        20,
-        { [targets[0]!.id]: sinceId },
+        limit,
+        map,
         { since: true },
       )
     }
+    const sinceId = cursors._default || Object.values(cursors)[0]
+    if (!sinceId) return []
     const client = publicClient()
     return withBrowseOrigin(
       await client.v1.timelines.public.list({
         local: props.column.feedType === 'local',
-        limit: 20,
+        limit,
         sinceId,
       }),
     )
@@ -836,6 +883,48 @@ const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]>
 
   // Liked / Saved / algorithms: no since_id polling (lists aren’t live firehoses)
   return []
+}
+
+/**
+ * Fetch posts newer than held tops. Pages until a short page or CATCH_UP_MAX_PAGES.
+ * Sets timelineGap when the cap is hit so the reader can recover.
+ */
+const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+  const held = [...pendingNew.value, ...statuses.value]
+  if (!held.length) return []
+  refreshSinceCursors(held)
+
+  const collected: (mastodon.v1.Status | ExtendedStatus)[] = []
+  let cursors = { ...sinceCursors.value }
+  let hitCap = false
+
+  for (let page = 0; page < CATCH_UP_MAX_PAGES; page++) {
+    const batch = await fetchSincePage(cursors, SINCE_PAGE_LIMIT)
+    if (!batch.length) break
+    collected.push(...batch)
+    const advanced = newestIdPerInstance(batch as ExtendedStatus[])
+    cursors = { ...cursors, ...advanced }
+    const top = batch[0] as ExtendedStatus | undefined
+    if (top?.id) {
+      const key = top._instanceId || '_default'
+      if (!cursors[key] || compareId(top.id, cursors[key]) > 0) cursors[key] = top.id
+    }
+    if (batch.length < SINCE_PAGE_LIMIT) break
+    if (page === CATCH_UP_MAX_PAGES - 1) hitCap = true
+  }
+
+  sinceCursors.value = cursors
+  timelineGap.value = hitCap
+  return collected
+}
+
+/** Full refresh to recover posts that may have been skipped past the catch-up cap */
+const recoverTimelineGap = () => {
+  timelineGap.value = false
+  statuses.value = []
+  pendingNew.value = []
+  sinceCursors.value = {}
+  void fetchTimeline(true)
 }
 
 /** Recessed only pauses polling on mobile (one visible column); desktop multi-col keeps all live */
@@ -980,9 +1069,11 @@ const fetchTimeline = async (refresh = false): Promise<boolean> => {
     // when a newer fetch aborts an in-flight one (init + account/filter watches).
     maxId.value = null
     feedCursors.value = {}
+    sinceCursors.value = {}
     algoSourceCursor.value = null
     savedCursor.value = null
     pendingNew.value = []
+    timelineGap.value = false
     hasMore.value = true
     loadMoreError.value = null
   }
@@ -1190,7 +1281,18 @@ watch(
   () =>
     `${props.column.feedType}:${props.column.groupTag ?? ''}:${props.column.algorithmId ?? ''}`,
   () => {
-    if (instancesStore.isInitialized) fetchTimeline(true)
+    if (!instancesStore.isInitialized) return
+    // Hard clear on feed identity change — soft refresh would leave the old
+    // feed under the new label (including when the new fetch fails).
+    statuses.value = []
+    pendingNew.value = []
+    sinceCursors.value = {}
+    timelineGap.value = false
+    error.value = null
+    loadMoreError.value = null
+    isNearTop.value = true
+    if (scrollContainer.value) scrollContainer.value.scrollTop = 0
+    void fetchTimeline(true)
   },
 )
 
@@ -1748,6 +1850,14 @@ onUnmounted(() => {
         </button>
       </Transition>
 
+      <!-- Busy-timeline gap: catch-up hit its page cap -->
+      <div v-if="timelineGap" class="column-gap" role="status">
+        <p class="column-gap__text">Some newer posts may be missing — this feed was very busy.</p>
+        <button type="button" class="column-retry" @click="recoverTimelineGap">
+          Reload feed
+        </button>
+      </div>
+
       <!-- Loading -->
       <div v-if="isLoading" class="column-state" aria-busy="true">
         <FunLoader fill label="Loading" />
@@ -1833,6 +1943,7 @@ onUnmounted(() => {
             hide-inline-reply
             :aria-posinset="idx + 1"
             :aria-setsize="feedSetSize"
+            @deleted="onStatusDeleted"
           />
         </template>
         <template v-else>
@@ -1843,6 +1954,7 @@ onUnmounted(() => {
             :class="{ 'post-list-enter': enteringKeys.has(row.key) }"
             :aria-posinset="idx + 1"
             :aria-setsize="feedSetSize"
+            @deleted="onStatusDeleted"
           />
         </template>
 
@@ -2036,6 +2148,25 @@ onUnmounted(() => {
   color: var(--neo-accent);
 }
 
+
+.column-gap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 1rem;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
+
+  &__text {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neo-text-secondary);
+  }
+}
 
 .column-new-pill {
   position: sticky;

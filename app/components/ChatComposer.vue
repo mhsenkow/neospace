@@ -277,9 +277,43 @@ const retryPending = async () => {
   await postBody(pending.body, pending.mediaIds)
 }
 
+/**
+ * Touch-first device (primary pointer is coarse): Enter inserts a newline and the visible
+ * Send button sends. Desktop keeps Enter = send, Shift+Enter = newline.
+ */
+const coarsePointer = ref(false)
+let coarseMql: MediaQueryList | null = null
+const syncCoarse = () => {
+  coarsePointer.value = !!coarseMql?.matches
+}
+onMounted(() => {
+  if (typeof window === 'undefined' || !window.matchMedia) return
+  coarseMql = window.matchMedia('(pointer: coarse)')
+  syncCoarse()
+  coarseMql.addEventListener?.('change', syncCoarse)
+})
+onBeforeUnmount(() => {
+  coarseMql?.removeEventListener?.('change', syncCoarse)
+  coarseMql = null
+})
+
+const keysHint = computed(() =>
+  coarsePointer.value
+    ? 'Enter adds a new line. Use the Send button to send.'
+    : 'Enter sends. Shift+Enter adds a new line.',
+)
+
 const onKeydown = (e: KeyboardEvent) => {
   if (isImeEvent(e)) return
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key !== 'Enter') return
+  // Hardware keyboards (incl. iPad): Cmd/Ctrl+Enter always sends
+  if (e.metaKey || e.ctrlKey) {
+    e.preventDefault()
+    void send()
+    return
+  }
+  // Touch: leave the browser default (newline); desktop: Enter sends
+  if (!coarsePointer.value && !e.shiftKey) {
     e.preventDefault()
     void send()
   }
@@ -451,7 +485,7 @@ onMounted(() => {
             rows="1"
             :placeholder="placeholder || 'Message…'"
             :readonly="isSending"
-            enterkeyhint="send"
+            :enterkeyhint="coarsePointer ? 'enter' : 'send'"
             aria-label="Message"
             aria-describedby="chat-composer-keys"
             :aria-busy="isSending || undefined"
@@ -463,7 +497,7 @@ onMounted(() => {
         </div>
 
         <span id="chat-composer-keys" class="sr-only">
-          Enter sends. Shift+Enter adds a new line.
+          {{ keysHint }}
         </span>
         <span class="sr-only" aria-live="polite" aria-atomic="true">{{ counterAnnounce }}</span>
         <span class="sr-only" aria-live="polite" aria-atomic="true">{{ uploadAnnounce }}</span>
@@ -846,7 +880,7 @@ onMounted(() => {
   line-height: 1.35;
   resize: none;
   outline: none;
-  /* Soft keyboards: Enter sends; Shift+Enter still available on hardware */
+  /* Soft keyboards: Enter adds a line (coarse pointer); Send button sends */
   touch-action: manipulation;
 
   &::placeholder {

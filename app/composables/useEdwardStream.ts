@@ -3,6 +3,7 @@
  * Hits every connected instance's public federated (+ local) timelines when possible.
  */
 
+import { watch } from 'vue'
 import { useEdwardStore, EDWARD_MAX_BALLS, newestIdPerInstance } from '~/stores/edward'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
@@ -91,6 +92,8 @@ export function useEdwardStream() {
     for (const s of list) {
       const key = statusIdentity(s)
       if (!key || onStage.has(key) || backpackKeys.has(key)) continue
+      // Ghosted / shaped authors never re-enter through the backpack
+      if (edward.isAuthorExcluded(s)) continue
       const src = ((s as { _edSource?: EdwardSource })._edSource || 'firehose') as EdwardSource
       backpackKeys.add(key)
       backpack[src].push(s)
@@ -105,6 +108,23 @@ export function useEdwardStream() {
     syncBackpackCount()
   }
 
+  /** Drop queued posts by authors the user just ghosted / shaped */
+  const purgeExcluded = () => {
+    let changed = false
+    for (const src of Object.keys(backpack) as EdwardSource[]) {
+      const keep: ExtendedStatus[] = []
+      for (const s of backpack[src]) {
+        if (edward.isAuthorExcluded(s)) {
+          backpackKeys.delete(statusIdentity(s))
+          changed = true
+        } else keep.push(s)
+      }
+      backpack[src] = keep
+    }
+    if (changed) syncBackpackCount()
+  }
+  watch(() => edward.excludedAuthors, purgeExcluded)
+
   /** Weighted round-robin across sources so the field stays varied */
   const takeNext = (): ExtendedStatus | null => {
     const order: EdwardSource[] = []
@@ -113,7 +133,12 @@ export function useEdwardStream() {
     }
     for (let i = 0; i < order.length; i++) {
       const src = order[(dripTurn + i) % order.length]!
-      const next = backpack[src].shift()
+      let next = backpack[src].shift()
+      // Belt and braces: skip anything excluded since it was packed
+      while (next && edward.isAuthorExcluded(next)) {
+        backpackKeys.delete(statusIdentity(next))
+        next = backpack[src].shift()
+      }
       if (next) {
         dripTurn = (dripTurn + i + 1) % order.length
         backpackKeys.delete(statusIdentity(next))
@@ -539,6 +564,8 @@ export function useEdwardStream() {
     pollCount = 0
     failStreak = 0
     edward.clearStatuses()
+    // New session / account: mutes and blocks belong to the account that made them
+    edward.clearExcludedAuthors()
     edward.setAffinity(emptyAffinityContext())
     const gen = generation
     await seed()
@@ -574,6 +601,16 @@ export function useEdwardStream() {
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }
+
+  // Different account: its home feed, mutes and blocks differ — reseed from scratch
+  watch(
+    () => instances.activeAccountId,
+    (next, prev) => {
+      if (next === prev || !running) return
+      stop()
+      void start()
+    },
+  )
 
   return {
     start,
