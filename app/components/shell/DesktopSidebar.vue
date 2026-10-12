@@ -701,6 +701,16 @@ watch(
       margin-inline: auto;
     }
 
+    .sidebar__inbox {
+      width: 44px;
+      margin-inline: auto;
+
+      :deep(.neo-menu__trigger) {
+        justify-content: center;
+        width: 44px;
+      }
+    }
+
     .sidebar__section-head {
       justify-content: center;
       min-height: 0;
@@ -820,11 +830,12 @@ watch(
   }
 
   &__inbox {
-    display: block;
+    display: block !important;
     width: 100%;
 
     :deep(.neo-menu__trigger) {
       display: flex;
+      justify-content: flex-start;
       width: 100%;
       border-radius: var(--neo-radius-full, 999px);
     }
@@ -903,13 +914,14 @@ watch(
     color: var(--neo-text-secondary);
   }
 
-  &__link,
   &__row-split {
     display: flex;
     align-items: center;
     gap: 0.15rem;
+    width: 100%;
   }
 
+  &__link,
   &__row {
     display: flex;
     align-items: center;
@@ -941,21 +953,21 @@ watch(
       background: color-mix(in srgb, var(--neo-bg-hover) 85%, var(--neo-accent) 15%);
       font-weight: 600;
     }
+  }
 
-    &--stacked {
-      align-items: flex-start;
-      min-height: 0;
-      padding-top: 0.55rem;
-      padding-bottom: 0.55rem;
-      border-radius: var(--neo-radius-xl, 12px);
+  &__row--stacked {
+    align-items: flex-start;
+    min-height: 0;
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+    border-radius: var(--neo-radius-xl, 12px);
 
-      .sidebar__row-glyph {
-        margin-top: 0.1rem;
-      }
+    .sidebar__row-glyph {
+      margin-top: 0.1rem;
+    }
 
-      .sidebar__label {
-        white-space: normal;
-      }
+    .sidebar__label {
+      white-space: normal;
     }
   }
 
