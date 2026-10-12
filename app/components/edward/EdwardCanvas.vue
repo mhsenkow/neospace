@@ -1686,6 +1686,7 @@ const onResize = () => {
 }
 
 let lastFrameT = 0
+let filamentTick = 0
 /** Simulation clock — advances at the chosen speed (still = frozen) */
 let simT = 0
 
@@ -1722,7 +1723,9 @@ const frame = () => {
   simT += simDt
   updateBalls(t, dt, simT, simDt)
 
-  rebuildFilaments()
+  // Filament endpoints follow moving balls — refresh periodically, not every draw
+  // (rebuildFilaments still runs from syncBallsFromStore when topology changes)
+  if (++filamentTick % 30 === 0) rebuildFilaments()
 
   if (hoverIdentity) {
     const b = identityToBall.get(hoverIdentity)
