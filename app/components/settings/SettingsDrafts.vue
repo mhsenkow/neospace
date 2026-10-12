@@ -3,7 +3,13 @@
  * Account-scoped saved compose drafts (text / CW / visibility only).
  * Attachments are never restored from localStorage — see useDraft.ts.
  */
-import { listAccountDrafts, type ListedDraft } from '~/composables/useDraft'
+import {
+  draftGroupTag,
+  draftQuoteUrl,
+  draftReplyTarget,
+  listAccountDrafts,
+  type ListedDraft,
+} from '~/composables/useDraft'
 import { useInstancesStore } from '~/stores/instances'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useToastStore } from '~/stores/toast'
@@ -53,6 +59,13 @@ const preview = (d: ListedDraft) => {
 const openDraft = (d: ListedDraft) => {
   composeSheet.show({
     title: labelFor(d.key),
+    // Reopen under its own slot: the generic new-post draft can't replace this prefill,
+    // and a reply keeps replying to the original post
+    draftSlot: d.key,
+    inReplyToId: draftReplyTarget(d.key),
+    // Keep the group / quote relationship instead of reopening as an unrelated post
+    groupTag: draftGroupTag(d.key),
+    quoteUrl: draftQuoteUrl(d.key),
     initialText: d.text,
     spoilerText: d.spoiler || undefined,
     visibility: d.visibility || undefined,
@@ -60,13 +73,32 @@ const openDraft = (d: ListedDraft) => {
 }
 
 const discardDraft = (d: ListedDraft) => {
+  let raw: string | null = null
   try {
+    raw = localStorage.getItem(d.storageKey)
     localStorage.removeItem(d.storageKey)
+    // Removal that didn't stick (storage blocked) must not be reported as success
+    if (localStorage.getItem(d.storageKey) !== null) throw new Error('not removed')
   } catch {
-    /* ignore */
+    refresh()
+    toast.show({ message: 'Couldn’t discard this draft — browser storage is unavailable.', duration: 5000 })
+    return
   }
   refresh()
-  toast.show({ message: 'Draft discarded', duration: 2500 })
+  toast.show({
+    message: 'Draft discarded',
+    actionLabel: raw === null ? undefined : 'Undo',
+    onAction: () => {
+      try {
+        if (raw !== null && localStorage.getItem(d.storageKey) === null) {
+          localStorage.setItem(d.storageKey, raw)
+        }
+      } catch {
+        toast.show({ message: 'Couldn’t restore the draft.', duration: 4000 })
+      }
+      refresh()
+    },
+  })
 }
 </script>
 

@@ -15,9 +15,10 @@ import { useStatusStore } from '~/stores/status'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useLinkedProfileFeed } from '~/composables/useLinkedProfileFeed'
-import { stripHtml } from '~/utils/stripHtml'
-import { notifIconName, notifLabel } from '~/utils/notifHelpers'
+import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
+import { notifHasActor, notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { participantLabel } from '~/utils/dmHelpers'
+import { richDisplayName } from '~/utils/displayName'
 import { useColumnDnd } from '~/composables/useColumnDnd'
 
 interface Props {
@@ -264,6 +265,12 @@ const loadRemoteStatuses = async (refresh = false) => {
 }
 
 // ── Search ──────────────────────────────────────────────
+/** Content-warned posts show their CW, not the hidden text; long text is cut with an ellipsis */
+const searchStatusPreview = (status: mastodon.v1.Status) => {
+  const cw = (status.spoilerText || '').trim()
+  return cw ? `CW: ${clipGraphemes(cw, 120)}` : clipGraphemes(stripHtml(status.content), 120)
+}
+
 const searchQuery = ref('')
 const searchBusy = ref(false)
 const searchError = ref<string | null>(null)
@@ -295,7 +302,8 @@ const runSearch = async (q: string) => {
     const res = await client.v2.search.list({
       q: query,
       limit: 8,
-      resolve: instancesStore.hasAuthenticatedInstance && /@[\w.-]+@[\w.-]+/.test(query),
+      // @user@host and pasted post / profile URLs are lookups, not text searches
+      resolve: instancesStore.hasAuthenticatedInstance && (/@[\w.-]+@[\w.-]+/.test(query) || /^https?:\/\//i.test(query)),
     })
     if (!ticket.isCurrent()) return
     searchAccounts.value = res.accounts || []
@@ -471,6 +479,16 @@ watch(
     } else if (type !== 'messages') {
       stopDmRefresh()
     }
+  },
+)
+
+// Account switch: search results and a remote peek belong to the previous account's server
+watch(
+  () => instancesStore.activeAccountId,
+  (id, prev) => {
+    if (id === prev) return
+    if (props.column.feedType === 'search' && searchQuery.value.trim()) void runSearch(searchQuery.value)
+    if (props.column.feedType === 'profile' && props.column.profileAcct) void loadRemoteProfile()
   },
 )
 
@@ -741,7 +759,7 @@ onUnmounted(() => {
           >
             <img :src="acct.avatar" alt="" loading="lazy" decoding="async" />
             <span>
-              <strong>{{ acct.displayName || acct.username }}</strong>
+              <strong v-html="richDisplayName(acct)" />
               <em>@{{ acct.acct }}</em>
             </span>
           </button>
@@ -771,8 +789,8 @@ onUnmounted(() => {
           >
             <img :src="status.account.avatar" alt="" loading="lazy" decoding="async" />
             <span>
-              <strong>{{ status.account.displayName || status.account.username }}</strong>
-              <em>{{ stripHtml(status.content).slice(0, 120) }}</em>
+              <strong v-html="richDisplayName(status.account)" />
+              <em>{{ searchStatusPreview(status) }}</em>
             </span>
           </button>
         </section>
@@ -813,6 +831,14 @@ onUnmounted(() => {
             />
           </label>
           <p v-if="notificationsStore.isLoading && notificationsStore.isEmpty" class="panel-hint">Loading…</p>
+          <p
+            v-else-if="notificationsStore.isEmpty && notificationsStore.error"
+            class="panel-hint panel-hint--err"
+            role="alert"
+          >
+            {{ notificationsStore.error }}
+            <button type="button" class="neo-btn neo-btn--ghost" @click="notificationsStore.fetchNotifications(true)">Retry</button>
+          </p>
           <p v-else-if="notificationsStore.isEmpty" class="panel-hint">All caught up.</p>
           <p v-else-if="notifSearchQuery.trim() && !panelNotifications.length" class="panel-hint">
             No matches for “{{ notifSearchQuery.trim() }}”.
@@ -841,12 +867,12 @@ onUnmounted(() => {
               </span>
               <span class="row-btn__copy">
                 <button
-                  v-if="notif.account"
+                  v-if="notif.account && notifHasActor(notif.type)"
                   type="button"
                   class="row-btn__name"
                   @click="openNotifProfile(notif, $event)"
                 >
-                  {{ notif.account.displayName || notif.account.username }}
+                  <span v-html="richDisplayName(notif.account)" />
                 </button>
                 <button
                   type="button"
@@ -1445,5 +1471,13 @@ onUnmounted(() => {
     border: 1px solid var(--neo-border-color);
     border-radius: 4px;
   }
+}
+
+// Custom emoji inside rich display names (v-html content needs :deep)
+.row-btn strong :deep(img),
+.row-btn__name :deep(img) {
+  height: 1.15em;
+  width: auto;
+  vertical-align: -0.2em;
 }
 </style>

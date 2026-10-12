@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   lineageBlurb,
   storyBase,
@@ -326,14 +326,50 @@ describe('notifGroup', () => {
   })
 })
 
-describe('feedback area path', () => {
-  it('keeps pathname only (no query/hash secrets)', async () => {
+describe('createGitHubIssue client', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const jsonRes = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
+
+  it('sends the page path only — no query or hash secrets', async () => {
     const { createGitHubIssue } = await import('../app/utils/feedback')
-    // Unit-check the client payload shape via the documented contract in feedback.ts
-    expect(typeof createGitHubIssue).toBe('function')
-    const pathOnly = '/messages'
-    expect(pathOnly).not.toMatch(/\?/)
-    expect('/status/123?token=x'.split('?')[0]).toBe('/status/123')
+    const fetchMock = vi.fn(async () => jsonRes({ url: 'https://github.com/x/y/issues/1' }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('window', {
+      location: { pathname: '/status/123', search: '?token=secret', hash: '#frag' },
+    })
+    await expect(createGitHubIssue('t', 'b')).resolves.toBe('https://github.com/x/y/issues/1')
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/feedback')
+    const sent = JSON.parse(String(init.body))
+    expect(sent.href).toBe('/status/123')
+    expect(JSON.stringify(sent)).not.toContain('secret')
+    expect(sent.kind).toBe('other')
+  })
+
+  it('throws FeedbackError BAD_RESPONSE for a non-JSON reply (e.g. a CDN error page)', async () => {
+    const { createGitHubIssue, FeedbackError } = await import('../app/utils/feedback')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Bad gateway</html>', { status: 502, headers: { 'Content-Type': 'text/html' } })))
+    vi.stubGlobal('window', { location: { pathname: '/' } })
+    const err = await createGitHubIssue('t', 'b').catch((e) => e)
+    expect(err).toBeInstanceOf(FeedbackError)
+    expect(err).toMatchObject({ status: 502, code: 'BAD_RESPONSE' })
+  })
+
+  it('surfaces the server’s error code and message', async () => {
+    const { createGitHubIssue } = await import('../app/utils/feedback')
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ error: 'Too many notes — try again later', code: 'RATE_LIMITED' }, 429)))
+    vi.stubGlobal('window', { location: { pathname: '/' } })
+    const err = await createGitHubIssue('t', 'b').catch((e) => e)
+    expect(err).toMatchObject({ name: 'FeedbackError', status: 429, code: 'RATE_LIMITED', message: 'Too many notes — try again later' })
+  })
+
+  it('treats a 200 without a url as a failure', async () => {
+    const { createGitHubIssue } = await import('../app/utils/feedback')
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({})))
+    vi.stubGlobal('window', { location: { pathname: '/' } })
+    await expect(createGitHubIssue('t', 'b')).rejects.toMatchObject({ status: 200 })
   })
 })
 

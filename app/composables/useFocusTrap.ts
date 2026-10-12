@@ -24,7 +24,8 @@ let listening = false
 
 function isVisible(el: HTMLElement): boolean {
   if (typeof el.checkVisibility === 'function') {
-    return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+    // No checkOpacity: controls fading in (sheet/drawer enter) are still focusable
+    return el.checkVisibility({ checkVisibilityCSS: true })
   }
   return el.offsetParent !== null
 }
@@ -102,6 +103,8 @@ const onFocusIn = (e: FocusEvent) => {
   // inside the trap — let focus in, or keyboard users can never reach the items.
   const menu = target instanceof Element ? target.closest('[role="menu"][id]') : null
   if (menu && root.querySelector(`[aria-controls="${CSS.escape(menu.id)}"]`)) return
+  // Toasts (e.g. "Undo") sit outside every dialog but must stay reachable
+  if (target instanceof Element && target.closest('.neo-toast-host')) return
   const nodes = listFocusable(root)
   ;(nodes[0] || root).focus()
 }

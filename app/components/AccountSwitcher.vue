@@ -23,7 +23,6 @@ const router = useRouter()
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
 let longPressFired = false
-let lastTapAt = 0
 let pressStartX = 0
 let pressStartY = 0
 
@@ -43,20 +42,6 @@ const goProfile = () => {
   void openFeedOrRoute('profile', '/profile')
 }
 
-const cycleAccount = async () => {
-  if (!multi.value) return
-  instancesStore.cycleActiveAccount()
-  const active = instancesStore.activeAccount
-  const name =
-    active?.user?.displayName || active?.user?.username || active?.name || 'account'
-  const { useToastStore } = await import('~/stores/toast')
-  useToastStore().show({ message: `Posting as ${name}` })
-  if (route.path === '/profile' && !route.query.user) {
-    const { useProfileStore } = await import('~/stores/profile')
-    await useProfileStore().fetchProfile()
-  }
-}
-
 const onTriggerClick = (e: MouseEvent) => {
   if (longPressFired) {
     longPressFired = false
@@ -64,22 +49,8 @@ const onTriggerClick = (e: MouseEvent) => {
     return
   }
 
-  // Nav + multi: single tap → profile immediately; double-tap cycles account.
-  // Pointer taps only (detail > 0): a held / double-pressed Enter fires keyboard
-  // clicks <320ms apart and silently switched the posting account.
-  if (isNav.value && multi.value && e.detail > 0) {
-    const now = Date.now()
-    if (now - lastTapAt < 320) {
-      lastTapAt = 0
-      e.preventDefault()
-      void cycleAccount()
-      return
-    }
-    lastTapAt = now
-    goProfile()
-    return
-  }
-
+  // Nav: a tap goes to Profile (no double-tap cycling — it navigated AND switched identity);
+  // switching lives behind long-press / the labelled "Switch account" control.
   if (isNav.value) {
     goProfile()
     return
@@ -125,7 +96,7 @@ const onPointerUp = () => clearLongPress()
 const onPointerLeave = () => clearLongPress()
 
 const onTriggerKeydown = (e: KeyboardEvent) => {
-  if (!multi.value) return
+  // Single-account users need the sheet too (Add / Manage accounts).
   if (e.key === 'ArrowDown' || (e.key === 'Enter' && e.shiftKey)) {
     e.preventDefault()
     openMenu()
@@ -137,7 +108,8 @@ const triggerLabel = computed(() => {
     instancesStore.userDisplayName ||
     instancesStore.activeAccount?.user?.username ||
     'Profile'
-  return multi.value ? `${name}, switch accounts` : name
+  if (isNav.value) return `${name}, profile`
+  return multi.value ? `${name}, switch accounts` : `${name}, accounts`
 })
 
 onUnmounted(() => {
@@ -157,14 +129,10 @@ onUnmounted(() => {
       type="button"
       class="acct-switch__trigger"
       :class="{ active: route.path === '/profile' || menuOpen }"
-      :title="
-        multi
-          ? 'Profile · hold to switch accounts · double-tap to cycle'
-          : 'Profile'
-      "
+      :title="isNav ? (multi ? 'Profile · hold to switch accounts' : 'Profile') : 'Accounts'"
       :aria-label="triggerLabel"
-      :aria-expanded="menuOpen"
-      aria-haspopup="dialog"
+      :aria-expanded="isNav ? undefined : menuOpen"
+      :aria-haspopup="isNav ? undefined : 'dialog'"
       @click="onTriggerClick"
       @keydown="onTriggerKeydown"
       @pointerdown="onPointerDown"
@@ -197,6 +165,18 @@ onUnmounted(() => {
         </div>
       </span>
       <span v-if="multi" class="acct-switch__count" aria-hidden="true">{{ accounts.length }}</span>
+    </button>
+    <!-- Nav: the avatar goes to Profile, so keyboard / screen-reader users get a
+         separate labelled control for the account sheet (visible on focus). -->
+    <button
+      v-if="isNav"
+      type="button"
+      class="acct-switch__sheet-btn"
+      :aria-expanded="menuOpen"
+      aria-haspopup="dialog"
+      @click="toggleMenu"
+    >
+      Switch account
     </button>
   </div>
 </template>
@@ -240,6 +220,34 @@ onUnmounted(() => {
   &.active {
     background: var(--neo-accent-soft);
     color: var(--neo-accent);
+  }
+}
+
+.acct-switch__sheet-btn {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  // Visually hidden until keyboard focus (still in the tab order and a11y tree)
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+
+  &:focus-visible {
+    clip-path: none;
+    width: auto;
+    height: auto;
+    padding: 6px 10px;
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 4px);
+    background: var(--neo-bg-elevated, var(--neo-bg));
+    color: var(--neo-text);
+    font-size: 0.75rem;
+    z-index: 1;
   }
 }
 

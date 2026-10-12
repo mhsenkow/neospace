@@ -66,6 +66,34 @@ export const instanceV2 = {
   rules: [],
 }
 
+/** Second signed-in account on a different server — for account-switching journeys */
+export const SECOND_INSTANCE = 'https://second.test'
+
+export const secondAccount = {
+  ...account,
+  id: '2',
+  username: 'trin',
+  acct: 'trin',
+  display_name: 'Trin Tester',
+  url: `${SECOND_INSTANCE}/@trin`,
+  avatar: `${SECOND_INSTANCE}/avatars/trin.png`,
+  avatar_static: `${SECOND_INSTANCE}/avatars/trin.png`,
+  header: `${SECOND_INSTANCE}/headers/trin.png`,
+  header_static: `${SECOND_INSTANCE}/headers/trin.png`,
+}
+
+export const secondInstanceV2 = {
+  ...instanceV2,
+  domain: 'second.test',
+  title: 'Second Test',
+  thumbnail: { url: `${SECOND_INSTANCE}/packs/logo.png` },
+  configuration: {
+    ...instanceV2.configuration,
+    urls: { streaming: 'wss://second.test' },
+  },
+  contact: { email: 'admin@second.test', account: null },
+}
+
 export function makeStatus(id: string, overrides: Record<string, unknown> = {}) {
   return {
     id,
@@ -105,9 +133,32 @@ export const homeTimeline = [
   makeStatus('99', { content: '<p>Earlier fixture</p>' }),
 ]
 
+/** Home feed for the second account — distinct author, ids, and copy */
+export const secondHomeTimeline = [
+  makeStatus('200', {
+    content: '<p>Second server home post</p>',
+    uri: `${SECOND_INSTANCE}/users/trin/statuses/200`,
+    url: `${SECOND_INSTANCE}/@trin/200`,
+    account: secondAccount,
+  }),
+]
+
 export const oauthToken = {
   access_token: 'e2e-access-token',
   token_type: 'Bearer',
   scope: 'read write follow push',
   created_at: 1_700_000_000,
+}
+
+export const secondOauthToken = { ...oauthToken, access_token: 'e2e-access-token-2' }
+
+/** OAuth app registered for the fixture host (POST /api/v1/apps) */
+export const oauthApp = {
+  id: '1',
+  name: 'NeoSpace',
+  website: null,
+  redirect_uri: 'http://127.0.0.1/auth/callback',
+  client_id: 'e2e-client',
+  client_secret: 'e2e-secret',
+  vapid_key: '',
 }

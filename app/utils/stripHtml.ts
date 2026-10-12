@@ -1,3 +1,5 @@
+const BLOCK_SELECTOR = 'p,div,li,blockquote,pre,h1,h2,h3,h4,h5,h6,tr'
+
 const collapse = (s: string) => s.replace(/\s+/g, ' ').trim()
 
 /** Decode HTML entities and strip tags via DOMParser (browser only). */
@@ -10,6 +12,9 @@ export function stripHtml(html: string): string {
   }
   try {
     const doc = new DOMParser().parseFromString(html, 'text/html')
+    // textContent glues <br>/<p> boundaries together ("one<br>two" → "onetwo")
+    doc.body.querySelectorAll('br').forEach((br) => br.replaceWith(' '))
+    doc.body.querySelectorAll(BLOCK_SELECTOR).forEach((el) => el.append(' '))
     return collapse(doc.body.textContent || '')
   } catch {
     return collapse(html.replace(/<[^>]*>/g, ' '))

@@ -27,7 +27,6 @@ defineEmits<{
       type="button"
       class="neo-sheet-header__close"
       aria-label="Cancel"
-      title="Cancel"
       @click="$emit('cancel')"
     >
       <NeoIcon name="x" :size="20" :stroke="2" />
@@ -78,7 +77,13 @@ defineEmits<{
   flex-shrink: 0;
   touch-action: manipulation;
 
-  &:hover {
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover);
+    }
+  }
+
+  &:active {
     background: var(--neo-bg-hover);
   }
 

@@ -75,6 +75,7 @@ const startPlayback = () => {
         class="preview-card__embed"
         :src="embedSrc"
         :title="card.title || 'PeerTube video'"
+        sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
         allow="fullscreen; picture-in-picture"
         allowfullscreen
         loading="lazy"

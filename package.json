@@ -6,7 +6,9 @@
     "node": ">=22"
   },
   "scripts": {
+    "prebuild": "node scripts/build-prepaint.mjs",
     "build": "nuxt build",
+    "predev": "node scripts/build-prepaint.mjs",
     "dev": "nuxt dev",
     "prepaint": "node scripts/build-prepaint.mjs",
     "generate": "node scripts/build-prepaint.mjs && nuxt generate && node scripts/spa-fallback.mjs",
@@ -17,9 +19,10 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "typecheck": "tsc -p functions/tsconfig.json --noEmit",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
     "typecheck:app": "nuxt typecheck",
-    "lint": "npm run typecheck && npm run typecheck:app",
-    "check": "npm run typecheck && npm run typecheck:app && npm test",
+    "lint": "npm run typecheck && npm run typecheck:e2e && npm run typecheck:app",
+    "check": "npm run typecheck && npm run typecheck:e2e && npm run typecheck:app && npm test",
     "check:full": "npm run check && npm run generate && npm run test:e2e",
     "analyze": "nuxt analyze",
     "cf:preview": "npm run generate && wrangler pages dev",

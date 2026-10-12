@@ -10,6 +10,9 @@
 import { useProfileStore } from '~/stores/profile'
 import { useInstancesStore } from '~/stores/instances'
 import { useThemeStore } from '~/stores/theme'
+import { onBeforeRouteLeave } from 'vue-router'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
+import { inAppLinkFor } from '~/utils/richTextLinks'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import type { mastodon } from 'masto'
 import {
@@ -21,28 +24,21 @@ import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import {
-  buildPresenceLinks,
+  resolvePresence,
   extractHttpUrl,
   isPresenceField,
   mergePresenceIntoFields,
-  normalizeFieldKey,
   profileFieldLimit,
   readPresenceDraft,
 } from '~/utils/profileSources'
+import { isColumnsField, isProfileCssField } from '~/utils/profileCss'
 import { createRaceGuard } from '~/composables/useRace'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { formatCompact } from '~/utils/insights'
 import { useToastStore } from '~/stores/toast'
 import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
-
-const INTERNAL_FIELD_NAMES = new Set([
-  'neospace_columns',
-  'css',
-  'custom_css',
-  'theme',
-  'style',
-  'chaos_css',
-])
+import { logError } from '~/utils/log'
 
 const profileStore = useProfileStore()
 const instancesStore = useInstancesStore()
@@ -64,6 +60,9 @@ syncReadAccountOverride()
 watch(() => route.query.account, syncReadAccountOverride)
 // Only clears if this page still owns the override (the next page may have set it already)
 onBeforeUnmount(() => clearReadAccountOverride(readOverrideOwner))
+// A post deleted from a card (here, a board column, a thread) leaves the profile lists too
+const stopDeletedListen = onDeletedStatus((event) => profileStore.removeDeletedStatus(event))
+onBeforeUnmount(stopDeletedListen)
 
 const canSwitchAccounts = computed(
   () =>
@@ -91,10 +90,21 @@ type ProfileFieldToken = {
   verifiedAt: string | null
 }
 
+const presenceResolved = computed(() =>
+  resolvePresence({
+    mastodonUrl: profileStore.viewedProfile?.url,
+    fields: profileStore.viewedProfile?.fields,
+  }),
+)
+
 const fieldTokens = computed((): ProfileFieldToken[] =>
   (profileStore.viewedProfile?.fields || [])
-    .filter((f) => !INTERNAL_FIELD_NAMES.has(normalizeFieldKey(f.name || '')))
-    .filter((f) => !isPresenceField(f))
+    // Presence fields that became a chip are shown there; any other (a second Homepage,
+    // "Website: coming soon") is still an ordinary token
+    .filter((_, i) => !presenceResolved.value.consumed.has(i))
+    // NeoSpace's own fields (CSS, column layout) aren't profile content — same rules the
+    // CSS lookup uses, so "Style: Jazz" still shows and `custom_css` never leaks as a chip
+    .filter((f) => !isProfileCssField(f) && !isColumnsField(f))
     .map((f) => {
       // stripHtml decodes entities — the regex strip left "Q&amp;A" on screen
       const plainValue = stripHtml(f.value || '')
@@ -108,12 +118,7 @@ const fieldTokens = computed((): ProfileFieldToken[] =>
     .filter((f) => f.name.trim() || f.plainValue.trim()),
 )
 
-const presenceLinks = computed(() =>
-  buildPresenceLinks({
-    mastodonUrl: profileStore.viewedProfile?.url,
-    fields: profileStore.viewedProfile?.fields,
-  }),
-)
+const presenceLinks = computed(() => presenceResolved.value.links)
 
 const websiteFieldUrl = computed(
   () => presenceLinks.value.find((l) => l.kind === 'website')?.href || null,
@@ -143,12 +148,35 @@ const syncPresenceDraft = () => {
   presenceDraft.value = readPresenceDraft(profileStore.editForm.fields)
 }
 
+/** What the form looked like when editing began — leaving with a different one asks first */
+let editBaseline = ''
+const editSnapshot = () => {
+  const f = profileStore.editForm
+  return JSON.stringify([f.displayName, f.note, f.fields, f.locked, f.bot, f.discoverable, presenceDraft.value])
+}
+const hasUnsavedEdits = () =>
+  profileStore.isEditing &&
+  (editSnapshot() !== editBaseline ||
+    !!profileStore.editForm.avatar ||
+    !!profileStore.editForm.header)
+
+onBeforeRouteLeave(async () => {
+  if (!hasUnsavedEdits()) return true
+  return await useOverlayStore().openConfirm({
+    title: 'Discard unsaved changes?',
+    body: 'Your profile edits haven’t been saved.',
+    confirmLabel: 'Discard',
+    danger: true,
+  })
+})
+
 const startEdit = () => {
   profileStore.toggleEditMode()
   if (profileStore.isEditing) {
     syncPresenceDraft()
     // Presence lives in dedicated inputs; keep other fields editable
     profileStore.editForm.fields = profileStore.editForm.fields.filter((f) => !isPresenceField(f))
+    editBaseline = editSnapshot()
   }
 }
 
@@ -191,9 +219,14 @@ const clearImagePreviews = () => {
   avatarPreviewUrl.value = null
 }
 
+/** Animated headers / avatars hold still under Reduce motion (app setting or OS preference) */
+const reduceMotion = usePrefersReducedMotion()
+
 const profileHeaderUrl = computed(() => {
   if (headerPreviewUrl.value) return headerPreviewUrl.value
-  return profileStore.viewedProfile?.header || profileStore.viewedProfile?.headerStatic || null
+  const p = profileStore.viewedProfile
+  if (reduceMotion.value) return p?.headerStatic || p?.header || null
+  return p?.header || p?.headerStatic || null
 })
 
 /** Quoted + escaped so a header URL with `)`, quotes or spaces can't break the declaration */
@@ -203,15 +236,29 @@ const profileHeaderStyle = computed(() =>
     : undefined,
 )
 
-const profileAvatarUrl = computed(
-  () => avatarPreviewUrl.value || profileStore.viewedProfile?.avatar || '',
-)
+const profileAvatarUrl = computed(() => {
+  if (avatarPreviewUrl.value) return avatarPreviewUrl.value
+  const p = profileStore.viewedProfile
+  return (reduceMotion.value ? p?.avatarStatic || p?.avatar : p?.avatar) || ''
+})
 
+const SOFTWARE_NAMES: Record<string, string> = {
+  mastodon: 'Mastodon',
+  gotosocial: 'GoToSocial',
+  akkoma: 'Akkoma',
+  pleroma: 'Pleroma',
+  pixelfed: 'Pixelfed',
+}
+
+/**
+ * Only what we actually know: a local profile runs your server's detected software.
+ * A remote host's software isn't in the API, so no badge rather than a hostname guess.
+ */
 const softwareLabel = computed(() => {
-  const url = profileStore.viewedProfile?.url || instancesStore.activeAccount?.url || ''
-  if (/gotosocial|gts\./i.test(url)) return 'GoToSocial'
-  if (/akkoma|pleroma|misskey|pixelfed|friendica|peertube/i.test(url)) return 'Fediverse'
-  return 'Mastodon'
+  const acct = profileStore.viewedProfile?.acct || ''
+  if (!acct || acct.includes('@')) return ''
+  const software = instancesStore.activeAccount?.instanceInfo?.capabilities?.software
+  return (software && SOFTWARE_NAMES[software]) || ''
 })
 
 const fullHandle = computed(() => {
@@ -234,6 +281,41 @@ const postsJoinLine = computed(() => {
   return joined ? `${posts} · ${joined}` : posts
 })
 
+/** Moderation state: suspended / limited accounts get an explanation instead of "No posts yet." */
+const showLimited = ref(false)
+watch(
+  () => profileStore.viewedProfile?.id,
+  () => {
+    showLimited.value = false
+  },
+)
+const moderationNotice = computed(() => {
+  const p = profileStore.viewedProfile
+  if (!p) return ''
+  if (p.suspended) return 'This account is suspended.'
+  if (p.limited) return 'Hidden by your server’s moderators.'
+  return ''
+})
+const postsHiddenByModeration = computed(() => {
+  const p = profileStore.viewedProfile
+  if (!p || profileStore.isOwnProfile) return false
+  return !!p.suspended || (!!p.limited && !showLimited.value)
+})
+
+/** Host of a remote account (null for accounts on your own server) */
+const remoteProfileHost = computed(() => {
+  const acct = profileStore.viewedProfile?.acct || ''
+  return acct.includes('@') ? acct.split('@')[1] || null : null
+})
+
+const emptyPostsMessage = computed(() => {
+  const p = profileStore.viewedProfile
+  if (p?.locked && !relationship.value?.following && !profileStore.isOwnProfile) {
+    return 'Only approved followers can see posts.'
+  }
+  return 'No posts yet.'
+})
+
 const relationshipChips = computed(() => {
   const r = relationship.value
   if (!r) return [] as string[]
@@ -241,9 +323,116 @@ const relationshipChips = computed(() => {
   if (r.followedBy) chips.push('Follows you')
   if (r.muting) chips.push('Muted')
   if (r.blocking) chips.push('Blocked')
+  if (r.blockedBy) chips.push('Blocked you')
   if (r.domainBlocking) chips.push('Domain blocked')
   return chips
 })
+
+/** Set when this account migrated: where it went, as a handle the profile page can open */
+const movedTo = computed(() => {
+  const m = profileStore.viewedProfile?.moved
+  if (!m) return null
+  let acct = (m.acct || '').replace(/^@/, '')
+  if (!acct) return null
+  if (!acct.includes('@')) {
+    // `acct` is relative to the viewed profile's server
+    try {
+      const host = new URL(m.url || profileStore.viewedProfile?.url || '').hostname
+      if (host) acct = `${acct}@${host}`
+    } catch {
+      /* keep the bare handle */
+    }
+  }
+  return { acct, name: m.displayName || m.username || acct, to: `/profile?user=${encodeURIComponent(acct)}` }
+})
+
+const showRelationshipActions = computed(
+  () =>
+    !!profileStore.viewedProfile &&
+    !profileStore.isOwnProfile &&
+    instancesStore.hasAuthenticatedInstance &&
+    !!relationship.value,
+)
+const isRelationshipBusy = ref(false)
+
+const relationshipActionFailed = (e: unknown) => {
+  const friendly = mapErrorToMessage(e)
+  toastStore.show({ message: friendly.detail || friendly.title, duration: 4200 })
+}
+
+/** Mute / block / unmute / unblock — paint the Relationship the server returns */
+const runRelationshipAction = async (kind: 'mute' | 'unmute' | 'block' | 'unblock') => {
+  const p = profileStore.viewedProfile
+  if (!p || isRelationshipBusy.value) return
+  const handle = `@${p.acct}`
+  if (kind === 'mute' || kind === 'block') {
+    const ok = await useOverlayStore().openConfirm(
+      kind === 'mute'
+        ? {
+            title: `Mute ${handle}?`,
+            body: "You won't see their posts in your timelines.",
+            confirmLabel: 'Mute',
+            danger: true,
+          }
+        : {
+            title: `Block ${handle}?`,
+            body: "They won't be able to see your posts or interact with you.",
+            confirmLabel: 'Block',
+            danger: true,
+          },
+    )
+    if (!ok) return
+  }
+  // The confirm can outlive the page's profile — act only on the one that asked
+  if (profileStore.viewedProfile?.id !== p.id) return
+
+  isRelationshipBusy.value = true
+  try {
+    const rel = await profileStore.setRelationship(kind)
+    if (profileStore.viewedProfile?.id === p.id && rel) relationship.value = rel
+    toastStore.show({
+      message: {
+        mute: `Muted ${handle}`,
+        unmute: `Unmuted ${handle}`,
+        block: `Blocked ${handle}`,
+        unblock: `Unblocked ${handle}`,
+      }[kind],
+    })
+  } catch (e) {
+    relationshipActionFailed(e)
+  } finally {
+    isRelationshipBusy.value = false
+  }
+}
+
+const reportProfile = async () => {
+  const p = profileStore.viewedProfile
+  if (!p) return
+  const payload = await useOverlayStore().openReport({ accountAcct: p.acct })
+  if (!payload || profileStore.viewedProfile?.id !== p.id) return
+  try {
+    await profileStore.reportViewedAccount({
+      comment: payload.comment || undefined,
+      category: payload.category,
+      forward: payload.forward,
+    })
+    toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
+  } catch (e) {
+    logError('Report error:', e)
+    toastStore.show({ message: 'Failed to submit report. Please try again.' })
+  }
+}
+
+/** @mentions and #hashtags in a bio open in-app, not the remote server in a new tab */
+const onBioClick = (e: MouseEvent) => {
+  const anchor = (e.target as HTMLElement | null)?.closest('a')
+  if (!anchor) return
+  const link = inAppLinkFor(anchor)
+  if (!link) return
+  e.preventDefault()
+  if (link.kind === 'tag') router.push(`/groups/${encodeURIComponent(link.tag)}`)
+  else router.push({ path: '/profile', query: { user: link.acct } })
+}
 
 const copyHandle = async () => {
   try {
@@ -304,32 +493,29 @@ const openCompose = () => {
     placeholder: "What's new?",
     title: 'New post',
     onPosted: async () => {
-      await profileStore.fetchStatuses(true, tabFetchOpts.value)
+      await fetchStatusesGuarded(true, tabFetchOpts.value)
     },
   })
 }
 
-const tabFetchOpts = computed(() => {
-  if (profileTab.value === 'media') return { onlyMedia: true, excludeReplies: true }
-  if (profileTab.value === 'replies') return { excludeReplies: false, onlyMedia: false }
-  // posts + reposts: include boosts so the Reposts tab can filter them
-  return { excludeReplies: true, onlyMedia: false }
-})
+const tabFetchOpts = computed(() => optsForTab(profileTab.value))
 
 const postsQuery = ref('')
 /** Debounced find-in-feed query — filtering parses every loaded post */
 const postsFindQuery = useDebouncedValue(postsQuery, 150)
 
+/** What a tab shows — the server can't filter all of this, so pages can come back thin */
+const statusesForTab = (tab: typeof profileTab.value, list: mastodon.v1.Status[]) =>
+  tab === 'replies'
+    ? list.filter((s) => !!s.inReplyToId)
+    : tab === 'reposts'
+      ? list.filter((s) => !!s.reblog)
+      : tab === 'posts'
+        ? list.filter((s) => !s.inReplyToId && !s.reblog)
+        : list.filter((s) => !s.reblog)
+
 const visibleStatuses = computed(() => {
-  const list = profileStore.statuses
-  let filtered =
-    profileTab.value === 'replies'
-      ? list.filter((s) => !!s.inReplyToId)
-      : profileTab.value === 'reposts'
-        ? list.filter((s) => !!s.reblog)
-        : profileTab.value === 'posts'
-          ? list.filter((s) => !s.inReplyToId && !s.reblog)
-          : list.filter((s) => !s.reblog)
+  const filtered = statusesForTab(profileTab.value, profileStore.statuses)
 
   const q = postsFindQuery.value.trim().toLowerCase()
   if (!q) return filtered
@@ -348,15 +534,42 @@ const visibleStatuses = computed(() => {
   })
 })
 
-const optsForTab = (tab: typeof profileTab.value) => {
-  if (tab === 'media') return { onlyMedia: true, excludeReplies: true }
-  if (tab === 'replies') return { excludeReplies: false, onlyMedia: false }
-  return { excludeReplies: true, onlyMedia: false }
+type StatusFetchOpts = { excludeReplies?: boolean; onlyMedia?: boolean; excludeReblogs?: boolean }
+
+function optsForTab(tab: typeof profileTab.value): StatusFetchOpts {
+  if (tab === 'media') return { onlyMedia: true, excludeReplies: true, excludeReblogs: true }
+  if (tab === 'replies') return { excludeReplies: false, onlyMedia: false, excludeReblogs: true }
+  // Reposts has no server filter — it keeps boosts and relies on auto-paging
+  if (tab === 'reposts') return { excludeReplies: true, onlyMedia: false, excludeReblogs: false }
+  return { excludeReplies: true, onlyMedia: false, excludeReblogs: true }
 }
 
-const fetchStatusesGuarded = async (refresh: boolean, opts: { excludeReplies?: boolean; onlyMedia?: boolean }) => {
+/** Keep paging until a tab has this many matches (or the account runs out) */
+const MIN_TAB_MATCHES = 8
+const MAX_AUTO_PAGES = 5
+/** True while auto-paging between fetches, so the empty state doesn't flash */
+const isFillingTab = ref(false)
+
+/** A heavy booster's first page can hold zero posts — page on instead of "No posts yet." */
+const fillTabPages = async (ticket: { isCurrent: () => boolean }) => {
+  isFillingTab.value = true
+  try {
+    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
+      if (!ticket.isCurrent() || !profileStore.hasMoreStatuses) return
+      if (profileTab.value === 'human' || profileTab.value === 'insights') return
+      if (statusesForTab(profileTab.value, profileStore.statuses).length >= MIN_TAB_MATCHES) return
+      await profileStore.fetchStatuses(false, optsForTab(profileTab.value))
+    }
+  } finally {
+    if (ticket.isCurrent()) isFillingTab.value = false
+  }
+}
+
+const fetchStatusesGuarded = async (refresh: boolean, opts: StatusFetchOpts) => {
   const ticket = statusesRace.next()
   await profileStore.fetchStatuses(refresh, opts)
+  if (!ticket.isCurrent()) return false
+  await fillTabPages(ticket)
   return ticket.isCurrent()
 }
 
@@ -413,6 +626,7 @@ const messageUser = async () => {
 async function loadProfileFromRoute() {
   const ticket = profileRace.next()
   relationship.value = null
+  isFillingTab.value = false
   const userParam = route.query.user
   const username = typeof userParam === 'string' ? userParam : undefined
 
@@ -424,6 +638,8 @@ async function loadProfileFromRoute() {
   if (!ticket.isCurrent()) return
 
   profileTab.value = 'posts'
+  // First page of Posts can be thin (self-replies are filtered client-side) — top it up
+  void fillTabPages(statusesRace.next())
   // An unsaved header/avatar pick belongs to the profile it was made on
   if (!profileStore.isEditing) clearImagePreviews()
   syncProfileCss()
@@ -464,8 +680,10 @@ onMounted(async () => {
   profileRouteReady.value = true
 })
 
+// `account` switches the read override (set by the watcher above) — reload with it, or the
+// relationship and posts stay from the previous account
 watch(
-  () => route.query.user,
+  () => [route.query.user, route.query.account],
   async () => {
     if (!profileRouteReady.value || route.path !== '/profile') return
 
@@ -486,13 +704,22 @@ onUnmounted(() => {
   profileStore.clear()
 })
 
+/** Following a blocked / blocking account can't work — offer Unblock or disable Follow */
+const followBlocked = computed(() => !!relationship.value?.blocking || !!relationship.value?.blockedBy)
+
 const followLabel = computed(() => {
+  if (relationship.value?.blocking) return 'Unblock'
   if (relationship.value?.following) return 'Following'
   if (relationship.value?.requested) return 'Requested'
   return 'Follow'
 })
 
 const handleFollow = async () => {
+  if (relationship.value?.blocking) {
+    await runRelationshipAction('unblock')
+    return
+  }
+  if (relationship.value?.blockedBy) return
   if (relationship.value?.following) {
     const name = profileStore.viewedProfile?.displayName || profileStore.viewedProfile?.username || 'this account'
     const ok = await useOverlayStore().openConfirm({
@@ -515,11 +742,13 @@ const handleFollow = async () => {
       const rel = await profileStore.unfollowUser()
       if (stillViewing()) relationship.value = rel || null
     } else {
-      // Optimistic “Following” / “Requested” until the server answers
+      // Optimistic “Following” / “Requested” until the server answers — a locked
+      // account only ever gets a request, so don't flash “Following” first
+      const locked = !!profileStore.viewedProfile?.locked
       relationship.value = {
         ...(relationship.value || ({} as mastodon.v1.Relationship)),
-        following: true,
-        requested: false,
+        following: !locked,
+        requested: locked,
       } as mastodon.v1.Relationship
       const rel = await profileStore.followUser()
       if (stillViewing()) relationship.value = rel || null
@@ -579,6 +808,8 @@ const handleSaveProfile = async () => {
     await profileStore.updateProfile()
     // Saved — the server's avatar/header URLs replace the local previews
     clearImagePreviews()
+    editBaseline = ''
+    toastStore.show({ message: 'Profile saved' })
   } catch {
     profileStore.editForm.fields = prevFields
     // saveError is set in the store — keep the form open
@@ -587,6 +818,14 @@ const handleSaveProfile = async () => {
 
 const profileErrorFriendly = computed(() => {
   if (!profileStore.error) return null
+  // The store keeps the HTTP status: a 404 is a missing account, not a transient failure
+  if (profileStore.errorStatus === 404) {
+    return {
+      title: 'Account not found',
+      detail: 'This account doesn’t exist, or it was moved or deleted.',
+      retryable: false,
+    }
+  }
   return mapErrorToMessage(new Error(profileStore.error))
 })
 
@@ -650,6 +889,32 @@ useHead({
               <NeoIcon name="globe" :size="18" :stroke="1.75" />
               <span>{{ link.label }}</span>
             </a>
+            <template v-if="showRelationshipActions">
+              <button
+                type="button"
+                role="menuitem"
+                class="profile-menu-item"
+                :disabled="isRelationshipBusy"
+                @click="runRelationshipAction(relationship?.muting ? 'unmute' : 'mute')"
+              >
+                <NeoIcon name="eye-off" :size="18" :stroke="1.75" />
+                <span>{{ relationship?.muting ? 'Unmute' : 'Mute' }}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="profile-menu-item"
+                :disabled="isRelationshipBusy"
+                @click="runRelationshipAction(relationship?.blocking ? 'unblock' : 'block')"
+              >
+                <NeoIcon name="ban" :size="18" :stroke="1.75" />
+                <span>{{ relationship?.blocking ? 'Unblock' : 'Block' }}</span>
+              </button>
+              <button type="button" role="menuitem" class="profile-menu-item" @click="reportProfile">
+                <NeoIcon name="alert" :size="18" :stroke="1.75" />
+                <span>Report</span>
+              </button>
+            </template>
           </template>
         </NeoMenu>
       </template>
@@ -659,6 +924,7 @@ useHead({
     <FollowersModal 
       ref="followersModalRef" 
       :account-id="profileStore.viewedProfile?.id"
+      :account="profileStore.viewedProfile"
     />
     
     <p v-if="route.query.linked === '1' && !route.query.user" class="profile-linked-banner" role="status">
@@ -689,6 +955,10 @@ useHead({
 
     <!-- Profile Content -->
     <template v-else-if="profileStore.viewedProfile">
+      <p v-if="movedTo" class="profile-moved-banner" role="status">
+        {{ profileStore.viewedProfile.displayName || profileStore.viewedProfile.username }} has moved to
+        <NuxtLink :to="movedTo.to" class="profile-moved-banner__link">@{{ movedTo.acct }}</NuxtLink>
+      </p>
       <section class="profile-hero">
         <div
           v-if="profileHeaderUrl"
@@ -710,7 +980,8 @@ useHead({
                 placeholder="Display name"
               />
             </template>
-            <h1 v-if="canSwitchAccounts" class="profile-name profile-name--heading">
+            <!-- While editing, the display-name input above is the name (no stale duplicate heading) -->
+            <h1 v-if="!profileStore.isEditing && canSwitchAccounts" class="profile-name profile-name--heading">
               <button
                 type="button"
                 class="profile-name profile-name--switch"
@@ -733,13 +1004,13 @@ useHead({
                 <span class="sr-only">Switch account</span>
               </button>
             </h1>
-            <h1 v-else class="profile-name" v-html="safeProfileName" />
+            <h1 v-else-if="!profileStore.isEditing" class="profile-name" v-html="safeProfileName" />
 
             <p class="profile-handle">
               <button type="button" class="profile-handle__acct" :title="fullHandle" @click="copyHandle">
                 {{ fullHandle }}
               </button>
-              <span class="profile-handle__badge" :title="softwareLabel">{{ softwareLabel }}</span>
+              <span v-if="softwareLabel" class="profile-handle__badge" :title="softwareLabel">{{ softwareLabel }}</span>
               <span v-for="chip in relationshipChips" :key="chip" class="profile-chip profile-chip--rel">{{ chip }}</span>
               <span v-if="profileStore.viewedProfile.bot" class="profile-chip">bot</span>
               <span
@@ -791,6 +1062,7 @@ useHead({
         <div
           v-else-if="profileStore.viewedProfile.note"
           class="profile-bio"
+          @click="onBioClick"
           v-html="safeProfileNote"
         />
 
@@ -885,6 +1157,10 @@ useHead({
                 </svg>
                 <NeoIcon v-else name="globe" :size="14" :stroke="1.75" />
                 <span>{{ link.kind === 'website' ? link.hint || link.label : link.label }}</span>
+                <span v-if="link.verifiedAt" class="profile-token__verified" title="Verified">
+                  <span aria-hidden="true">✓</span>
+                  <span class="sr-only">Verified</span>
+                </span>
               </a>
             </div>
           </div>
@@ -902,11 +1178,12 @@ useHead({
                 :disabled="profileStore.isUpdating"
                 @click="handleSaveProfile"
               >
-                {{ profileStore.isUpdating ? 'Saving…' : 'Done' }}
+                {{ profileStore.isUpdating ? 'Saving…' : 'Save' }}
               </button>
               <button
                 type="button"
                 class="neo-btn neo-btn--secondary profile-cta__btn"
+                :disabled="profileStore.isUpdating"
                 @click="cancelEdit"
               >
                 Cancel
@@ -933,8 +1210,9 @@ useHead({
             <button
               type="button"
               class="neo-btn profile-cta__btn"
-              :class="relationship?.following || relationship?.requested ? 'neo-btn--secondary' : 'neo-btn--primary'"
-              :disabled="isFollowLoading"
+              :class="relationship?.following || relationship?.requested || movedTo ? 'neo-btn--secondary' : 'neo-btn--primary'"
+              :disabled="isFollowLoading || (!relationship?.blocking && followBlocked)"
+              :title="relationship?.blockedBy && !relationship?.blocking ? 'This account has blocked you' : undefined"
               :aria-pressed="!!(relationship?.following || relationship?.requested)"
               @click="handleFollow"
             >
@@ -1118,7 +1396,27 @@ useHead({
             <span class="profile-compose__post">Post</span>
           </button>
 
-          <section v-if="profileStore.pinnedStatuses.length && profileTab === 'posts'" class="profile-pinned">
+          <div v-if="moderationNotice" class="profile-moderation neo-card" role="status">
+            <p>{{ moderationNotice }}</p>
+            <button
+              v-if="profileStore.viewedProfile.limited && !profileStore.viewedProfile.suspended && !profileStore.isOwnProfile"
+              type="button"
+              class="neo-btn neo-btn--secondary"
+              @click="showLimited = !showLimited"
+            >
+              {{ showLimited ? 'Hide posts' : 'Show posts anyway' }}
+            </button>
+          </div>
+
+          <section
+            v-if="!postsHiddenByModeration && profileStore.pinnedStatuses.length && profileTab === 'posts'"
+            class="profile-pinned"
+            aria-label="Pinned posts"
+          >
+            <p class="profile-pinned__label">
+              <span aria-hidden="true">📌</span>
+              Pinned
+            </p>
             <RealPostCard
               v-for="status in profileStore.pinnedStatuses"
               :key="'pin-' + status.id"
@@ -1126,8 +1424,8 @@ useHead({
             />
           </section>
 
-          <section class="profile-posts-section">
-            <div v-if="profileStore.isLoadingStatuses && !visibleStatuses.length" class="profile-posts-loading" aria-busy="true">
+          <section v-if="!postsHiddenByModeration" class="profile-posts-section">
+            <div v-if="(profileStore.isLoadingStatuses || isFillingTab) && !visibleStatuses.length" class="profile-posts-loading" aria-busy="true">
               <FunLoader fill label="Loading posts" />
             </div>
 
@@ -1150,21 +1448,28 @@ useHead({
                         ? 'No replies yet.'
                         : profileTab === 'reposts'
                           ? 'No reposts yet.'
-                          : 'No posts yet.'
+                          : emptyPostsMessage
                 }}
               </p>
+              <a
+                v-if="remoteProfileHost && profileStore.viewedProfile.url && !profileStore.isOwnProfile"
+                :href="profileStore.viewedProfile.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="neo-btn neo-btn--ghost"
+              >Older posts may be on {{ remoteProfileHost }}</a>
             </div>
 
             <button
-              v-if="profileStore.hasMoreStatuses && !profileStore.isLoadingStatuses"
+              v-if="profileStore.hasMoreStatuses && !profileStore.isLoadingStatuses && !isFillingTab"
               type="button"
               class="neo-btn neo-btn--secondary profile-load-more"
-              @click="profileStore.fetchStatuses(false, tabFetchOpts)"
+              @click="fetchStatusesGuarded(false, tabFetchOpts)"
             >
               Load more
             </button>
             <p
-              v-else-if="profileStore.hasMoreStatuses && profileStore.isLoadingStatuses"
+              v-else-if="profileStore.hasMoreStatuses && (profileStore.isLoadingStatuses || isFillingTab)"
               class="profile-load-more profile-load-more--busy"
               aria-live="polite"
             >
@@ -1270,6 +1575,28 @@ useHead({
 
 .hidden-input {
   display: none;
+}
+
+.profile-moved-banner {
+  margin: 0.75rem 1rem 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: var(--neo-bg-tertiary);
+  border: 1px solid var(--neo-border-color);
+  color: var(--neo-text-primary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+
+  @media (min-width: 1024px) {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+.profile-moved-banner__link {
+  color: var(--neo-accent);
+  font-weight: var(--neo-font-weight-medium, 500);
+  word-break: break-all;
 }
 
 .profile-linked-banner {
@@ -1815,6 +2142,7 @@ useHead({
 }
 
 .profile-tabs-wrap {
+  min-width: 0;
   margin: 0.75rem 0 0;
   padding-bottom: 0.45rem;
   background: var(--neo-bg-primary);
@@ -1865,11 +2193,21 @@ useHead({
     display: flex;
     border-bottom: 1px solid var(--neo-border-color);
     gap: 0;
+    // Six tabs (own profile) don't fit 375px — scroll the strip instead of overflowing the page
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 
   :deep(.neo-tabs__tab) {
-    flex: 1;
-    height: 48px;
+    // Share the row when there's room; keep the label's natural width when there isn't
+    flex: 1 0 auto;
+    min-height: 48px;
+    white-space: nowrap;
     border: none;
     border-radius: 0;
     background: transparent;
@@ -1906,6 +2244,31 @@ useHead({
 .profile-pinned,
 .profile-posts-section {
   margin-top: 0;
+}
+
+.profile-pinned__label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+}
+
+.profile-moderation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.5rem;
+  padding: 0.75rem 1rem;
+
+  p {
+    margin: 0;
+  }
 }
 
 .profile-posts-loading {

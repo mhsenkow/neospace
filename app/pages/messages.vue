@@ -7,6 +7,7 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useInstancesStore } from '~/stores/instances'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useOverlayStore } from '~/stores/overlay'
+import { useToastStore } from '~/stores/toast'
 import { useAccountSearch } from '~/composables/useAccountSearch'
 import {
   openOrComposeDirect,
@@ -106,7 +107,8 @@ const archiveConversation = async (c: mastodon.v1.Conversation, e: Event) => {
   try {
     await conversationsStore.remove(c.id)
   } catch {
-    /* store sets error */
+    // The store restored the row; say why it's back (its `error` only renders on an empty inbox)
+    useToastStore().show({ message: 'Couldn’t remove that chat — try again', duration: 4200 })
   }
 }
 
@@ -126,9 +128,12 @@ const messageAccount = async (account: mastodon.v1.Account) => {
 const refreshInbox = async () => {
   if (!canView.value) return
   conversationsStore.resetQuietRefreshFailures()
+  // Suggestion chips only render for an empty / sparse inbox — don't page through up to 400
+  // followed accounts on every pull-to-refresh just to fill them (cached after first load)
+  const wantsSuggestions = !conversationsStore.conversations.length || isSparseInbox.value
   await Promise.all([
     conversationsStore.fetchConversations({ force: true }),
-    loadFollowing(true),
+    wantsSuggestions ? loadFollowing() : Promise.resolve(),
   ])
 }
 

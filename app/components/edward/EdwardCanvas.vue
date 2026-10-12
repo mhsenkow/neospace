@@ -1327,6 +1327,8 @@ const pinchDist = () => {
 }
 
 const onPointerDown = (e: PointerEvent) => {
+  // Right / middle click must not drag or "pick" — the context menu would open over the peek
+  if (e.pointerType === 'mouse' && e.button !== 0) return
   activePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
   if (activePtrs.size === 2) {
     // Second finger: switch from orbit/scroll to pinch, and never "tap" a face
@@ -1675,7 +1677,15 @@ const disposeScene = () => {
 
 const init = async () => {
   if (!hostEl.value) return
-  THREE = await import('three')
+  try {
+    THREE = await import('three')
+  } catch {
+    // Offline, or a deploy changed chunk hashes — say so instead of a blank void
+    if (!disposed) {
+      edward.setError('Couldn’t load the 3D view — check your connection and reopen Edward.')
+    }
+    return
+  }
   if (disposed || !hostEl.value) return
 
   reducedMotion = prefersReducedMotion.value
@@ -1695,7 +1705,8 @@ const init = async () => {
       // MSAA is costly on phone GPUs at DPR 1.5 — the glass hides the jaggies
       antialias: !isCompact(),
       alpha: false,
-      powerPreference: 'high-performance',
+      // Ambient lean-back mode: don't wake the discrete GPU on dual-GPU laptops
+      powerPreference: isCompact() ? 'low-power' : 'default',
     })
   } catch {
     edward.setError('Edward needs WebGL, and this browser/device won’t start it.')

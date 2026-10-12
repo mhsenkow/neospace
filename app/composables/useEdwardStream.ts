@@ -382,6 +382,13 @@ export function useEdwardStream() {
 
     ctx.selfAcct = (user.acct || '').replace(/^@/, '').toLowerCase() || null
     ctx.selfUsername = (user.username || '').toLowerCase() || null
+    try {
+      ctx.homeHost = instances.primaryInstance?.url
+        ? new URL(instances.primaryInstance.url).host.toLowerCase()
+        : null
+    } catch {
+      ctx.homeHost = null
+    }
 
     try {
       if (!groups.followedTags.length) {

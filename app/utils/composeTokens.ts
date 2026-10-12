@@ -15,6 +15,11 @@ export interface ComposeToken {
   end: number
   /** Text after the trigger character */
   query: string
+  /**
+   * End of the whole token when the caret sits inside it (`@al|ice`) — selecting a
+   * completion replaces [start, replaceEnd), not just the part before the caret.
+   */
+  replaceEnd?: number
 }
 
 export type ComposeSuggestion =
@@ -28,9 +33,17 @@ export const ALL_TOKEN_KINDS: readonly ComposeTokenKind[] = ['mention', 'hashtag
 const OPEN = `[\\s([{“"'‘]`
 const PATTERNS: Record<ComposeTokenKind, { re: RegExp; trigger: string }> = {
   mention: { re: new RegExp(`(?:^|${OPEN})@([a-zA-Z0-9_.@/-]*)$`), trigger: '@' },
-  hashtag: { re: new RegExp(`(?:^|${OPEN})#([\\p{L}\\p{N}_]+)$`, 'u'), trigger: '#' },
+  // Same character set as the group-tag validator: letters, combining marks, digits, _ · ZWNJ
+  hashtag: { re: new RegExp(`(?:^|${OPEN})#([\\p{L}\\p{M}\\p{N}_\\u00b7\\u200c]+)$`, 'u'), trigger: '#' },
   // ≥2 chars so ":)" / "10:30" / URLs (preceded by a word char) never open the list
   emoji: { re: new RegExp(`(?:^|${OPEN}):([a-zA-Z0-9_+-]{2,})$`), trigger: ':' },
+}
+
+/** Characters that continue a token after the caret (mirrors each pattern's body) */
+const CONTINUE: Record<ComposeTokenKind, RegExp> = {
+  mention: /^[a-zA-Z0-9_.@/-]+/,
+  hashtag: /^[\p{L}\p{M}\p{N}_\u00b7\u200c]+/u,
+  emoji: /^[a-zA-Z0-9_+-]+/,
 }
 
 /** The token ending at `caret`, if any (only the text before the caret matters). */
@@ -45,7 +58,16 @@ export function findComposeToken(
     const m = before.match(PATTERNS[kind].re)
     if (!m) continue
     const query = m[1] ?? ''
-    return { kind, start: end - query.length - 1, end, query }
+    // Caret in the middle of a token: remember where the rest of it ends. Trailing sentence
+    // punctuation (`@alice.`) isn't part of it.
+    const tail = text.slice(end).match(CONTINUE[kind])?.[0]?.replace(/[.\-/]+$/, '') ?? ''
+    return {
+      kind,
+      start: end - query.length - 1,
+      end,
+      query,
+      ...(tail ? { replaceEnd: end + tail.length } : {}),
+    }
   }
   return null
 }
@@ -76,7 +98,7 @@ export function applyToken(
   insert: string,
 ): { text: string; caret: number } {
   const before = text.slice(0, token.start)
-  const after = text.slice(token.end)
+  const after = text.slice(token.replaceEnd ?? token.end)
   // Don't stack a second space when one already follows the caret
   const gap = /^\s/.test(after) ? '' : ' '
   const next = `${before}${insert}${gap}${after}`

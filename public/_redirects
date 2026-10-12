@@ -1,2 +1,3 @@
-# Cloudflare Pages serves SPA fallback via 404.html (see scripts/spa-fallback.mjs).
+# Cloudflare Pages serves the SPA fallback itself (index.html, HTTP 200) because the build ships no
+# top-level 404.html — scripts/spa-fallback.mjs removes it.
 # Netlify-style /* /index.html 200 rules are not used here.

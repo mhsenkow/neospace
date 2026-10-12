@@ -124,7 +124,7 @@ describe('server capabilities matrix', () => {
     const caps = detectServerCapabilities(rows[0]!.meta)
     expect(serverSettingsUrl(caps, null, 'export')).toBeNull()
     expect(detectServerSoftware(null, null)).toBe('unknown')
-    expect(detectServerSoftware('4.2.0', null)).toBe('mastodon')
+    expect(detectServerSoftware('4.2.0', null)).toBe('unknown') // ambiguous bare semver (NS-072)
   })
 
   it('does not share mutable state between detections', () => {

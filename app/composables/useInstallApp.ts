@@ -4,6 +4,7 @@
  */
 
 import type { Ref } from 'vue'
+import { STANDALONE_MQ, isStandaloneNow } from '~/composables/useStandaloneShell'
 
 const DISMISS_KEY = 'neo-install-dismissed'
 
@@ -26,7 +27,8 @@ export function useInstallApp() {
   const { $pwa } = useNuxtApp()
   dismissed ??= ref(readDismissed())
   const dismissedRef = dismissed
-  const isStandalone = useMediaQuery('(display-mode: standalone)')
+  // Same definition as the shell: standalone, minimal-ui, fullscreen or iOS home-screen
+  const isStandalone = useMediaQuery(STANDALONE_MQ)
 
   const pwa = computed(
     () =>
@@ -47,11 +49,13 @@ export function useInstallApp() {
 
   const isIos = computed(() => {
     if (typeof navigator === 'undefined') return false
-    return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) return true
+    // iPadOS 13+ reports a Mac user agent — a touch screen tells it apart from a real Mac
+    return /Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1
   })
 
   const alreadyInstalled = computed(
-    () => !!pwa.value?.isPWAInstalled || isStandalone.value,
+    () => !!pwa.value?.isPWAInstalled || isStandalone.value || isStandaloneNow(),
   )
 
   const canNativeInstall = computed(() => !!pwa.value?.showInstallPrompt)

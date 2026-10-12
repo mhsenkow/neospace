@@ -284,7 +284,7 @@ localStorage:
 
 ## SPA routing on Cloudflare Pages
 
-Static export produces `index.html`. **`scripts/spa-fallback.mjs`** copies it to `404.html` so CF Pages serves the app shell for unknown paths. No Netlify-style `_redirects` rewrite — CF uses the 404 fallback pattern.
+Static export produces `index.html`. **`scripts/spa-fallback.mjs`** removes `404.html` / `200.html`: with no top-level `404.html`, CF Pages runs in SPA mode and serves the app shell for unknown paths with HTTP 200 (a copied `404.html` made deep links answer 404). No Netlify-style `_redirects` rewrite needed.
 
 ---
 

@@ -21,6 +21,7 @@ import {
 import {
   filterAndSortBalls,
   cycleEdwardSort,
+  stripSortTokens,
   type EdwardSortMode,
 } from '~/utils/edwardExplore'
 import { dialectForHost, type EdwardServerDialect } from '~/utils/edwardServers'
@@ -361,6 +362,8 @@ export const useEdwardStore = defineStore('edward', {
     setExploreSort(mode: EdwardSortMode) {
       // Picking shuffle again is the reshuffle gesture
       if (mode === 'shuffle' && this.exploreSort === 'shuffle') this.reshuffle()
+      // A `sort:` token in the query would otherwise win over the picked mode
+      this.exploreQuery = stripSortTokens(this.exploreQuery)
       this.exploreSort = mode
     },
 
@@ -404,6 +407,7 @@ export const useEdwardStore = defineStore('edward', {
     },
 
     cycleExploreSort() {
+      this.exploreQuery = stripSortTokens(this.exploreQuery)
       this.exploreSort = cycleEdwardSort(this.exploreSort)
     },
 

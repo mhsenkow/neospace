@@ -210,9 +210,9 @@ const openCompose = () => {
   justify-content: space-around;
   padding: 0.2rem 0.35rem;
   padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
-  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  // Solid fill — translucent + backdrop-filter flashes black on iOS while the
+  // auto-hide transform animates (same fix as MobileHeader)
+  background: var(--neo-bg-primary);
   border-top: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-header, 90);
   box-sizing: border-box;
@@ -238,6 +238,10 @@ const openCompose = () => {
     transition: color var(--neo-transition-fast), background-color var(--neo-transition-fast);
     position: relative;
     cursor: pointer;
+
+    &:active {
+      background: var(--neo-bg-hover);
+    }
 
     &.active {
       color: var(--neo-accent);

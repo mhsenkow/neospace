@@ -122,7 +122,7 @@ const handleSignIn = async () => {
         {{ liveData.stats.userCount.toLocaleString() }} monthly active
       </span>
       <span v-if="liveData.registrations === true" class="instance-card__open">Open to join</span>
-      <span v-else-if="liveData.registrations === false" class="instance-card__closed">Invite only</span>
+      <span v-else-if="liveData.registrations === false" class="instance-card__closed">Sign-ups closed</span>
       <span v-if="isGated" class="instance-card__gated">Public feed often needs sign-in</span>
     </div>
     <div v-else-if="loading" class="instance-card__stats instance-card__stats--muted">

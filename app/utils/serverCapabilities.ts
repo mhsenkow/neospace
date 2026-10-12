@@ -131,8 +131,8 @@ export function detectServerSoftware(
   if (hay.includes('pixelfed')) return 'pixelfed'
   if (/\bcompatible;/.test(v)) return 'unknown'
   if (/\+(glitch|hometown|chuckya)\b/.test(v) || src.includes('mastodon')) return 'mastodon'
-  // Plain semver with no source URL — the long-standing Mastodon shape
-  if (!src && /^\d+\.\d+(\.\d+)?/.test(v)) return 'mastodon'
+  // A bare semver with no source URL is ambiguous (Friendica, Sharkey, hand-rolled
+  // compatibles all report one) — stay `unknown` rather than enabling Mastodon-only behavior.
   return 'unknown'
 }
 

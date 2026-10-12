@@ -112,9 +112,11 @@ const ASK_RE = /\?{1,}|¿|\b(anyone|anybody|does anyone|how do|what if|why is)\b
 /** Cheeky spicy lexicon — cartoon moods, not graphic. */
 const EGGPLANT_RE =
   /🍆|\beggplant\b|\bdick\b|\bcock\b|\bpenis\b|\bhorny\b|\bdong\b|\bthicc?\b/i
-const PEACH_RE = /🍑|\bpeach\b|\bass\b|\bbutt\b|\bbooty\b|\bcake\b(?!\s*day)/i
+// No "peach" / "cake": peaches and birthday cakes are not spicy
+const PEACH_RE = /🍑|\bass\b|\bbutt\b|\bbooty\b/i
+// No cat emoji / "kitty": every #caturday photo would read as SPICY
 const KITTY_RE =
-  /🐱|😻|🐈|\bpussy\b|\bkitty\b|\bnsfw\b|\blewd\b|\bonlyfans\b|\bsfw\s*adjacent\b/i
+  /\bpussy\b|\bnsfw\b|\blewd\b|\bonlyfans\b|\bsfw\s*adjacent\b/i
 const BOOBY_RE =
   /🍒|👙|\bboob(?:s|ies)?\b|\btits?\b|\bbreasts?\b|\bnipple\b|\bboobie\b|\bcleavage\b/i
 

@@ -57,8 +57,15 @@ function tokenMatches(token: string, word: string): boolean {
 
 /** Tokenize so 'ai' does not match rain/Taiwan/mail, 'cat' does not match education */
 export function guessCategory(tag: string): GroupCategoryGuess {
-  const lower = tag.toLowerCase()
-  const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean)
+  // Split camelCase / letter-digit boundaries *before* lowercasing: most real tags are
+  // concatenated words (CatsOfMastodon, LinuxGaming) and would otherwise be one token
+  const tokens = tag
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-zA-Z])(\d)|(\d)([a-zA-Z])/g, '$1$3 $2$4')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
   for (const bucket of CATEGORY_KEYWORDS) {
     if (bucket.words.some((w) => tokens.some((t) => tokenMatches(t, w)))) {
       return bucket.category

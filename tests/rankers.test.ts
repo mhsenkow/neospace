@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { isPermanentSourceFailure, rankWhyLabel, sourceBackoffMs } from '../app/utils/rankedSources'
 import {
   emptyRankContext,
   interestScore,
+  qualifyAcct,
   rankFeed,
   tasteFrom,
   X_WEIGHTS,
@@ -62,7 +64,7 @@ describe('X-style', () => {
     const talked = post({ acct: 'b@ex.social', repliesCount: 8 })
     const out = rankFeed('x', [liked, talked], c)
     expect(out[0]!.status).toBe(talked)
-    expect(out[0]!.why).toContain('reply-heavy')
+    expect(out[0]!.why).toContain('Lots of replies')
   })
 
   it('drops out-of-network posts with no social proof', () => {
@@ -73,6 +75,12 @@ describe('X-style', () => {
     expect(rankFeed('x', [trending], c)).toHaveLength(1)
   })
 
+  it('keeps home-timeline posts in network even when the follow list is empty', () => {
+    const c = ctx()
+    const fromHome = post({ acct: 'friend@ex.social', _rankSource: 'home', favouritesCount: 4 })
+    expect(rankFeed('x', [fromHome], c)).toHaveLength(1)
+  })
+
   it('discounts repeat authors and balances in/out of network', () => {
     const c = ctx()
     c.following.add('fav@ex.social')
@@ -81,7 +89,8 @@ describe('X-style', () => {
     const ranked = rankFeed('x', [...mine, ...out], c)
     const firstFour = ranked.slice(0, 4).map((r) => r.status.account!.acct)
     expect(firstFour.filter((a) => a === 'fav@ex.social')).toHaveLength(2)
-    expect(ranked.some((r) => r.why.includes('author diversity'))).toBe(true)
+    // The demotion is not a reason you're seeing a post
+    expect(ranked.some((r) => r.why.includes('author diversity'))).toBe(false)
   })
 })
 
@@ -173,5 +182,111 @@ describe('ranked recipes', () => {
     expect(back.ranker).toBe('tiktok')
     const forged = btoa(JSON.stringify({ v: 1, n: 'x', s: 'home', r: 'evil' })).replace(/=+$/, '')
     expect(decodeAlgorithmShare(forged)?.r).toBeUndefined()
+  })
+})
+
+/** Production shapes: same-server accts carry no host (`me`, `bob`), remote ones do */
+describe('account identity (local vs remote)', () => {
+  const prodCtx = () => {
+    const c = emptyRankContext(NOW)
+    c.host = 'home.social'
+    c.selfAcct = qualifyAcct('alice', c.host)
+    c.viewerLang = 'en'
+    return c
+  }
+
+  it('qualifies same-server accts and leaves remote ones alone', () => {
+    expect(qualifyAcct('Bob', 'Home.Social')).toBe('bob@home.social')
+    expect(qualifyAcct('@bob@x.org', 'home.social')).toBe('bob@x.org')
+    expect(qualifyAcct('bob', null)).toBe('bob')
+  })
+
+  it('does not treat a mention of alice@other as a mention of you', () => {
+    const c = prodCtx()
+    c.following.add('bob@home.social')
+    const other = post({ acct: 'bob', mentions: [{ acct: 'alice@other.example' }], favouritesCount: 4 })
+    const mine = post({ acct: 'bob', mentions: [{ acct: 'alice' }], favouritesCount: 4 })
+    const [a, b] = [other, mine].map((st) => rankFeed('x', [st], c)[0]!)
+    expect(b!.score).toBeGreaterThan(a!.score * 5)
+    expect(a!.why).not.toContain('Mentions you')
+  })
+
+  it('does not treat a remote bob@x as the local bob you follow', () => {
+    const c = prodCtx()
+    c.following.add('bob@home.social')
+    c.mutuals.add('bob@home.social')
+    const local = post({ acct: 'bob', favouritesCount: 3, _rankSource: 'federated' })
+    const remote = post({ acct: 'bob@x.example', favouritesCount: 3, _rankSource: 'federated' })
+    const out = rankFeed('facebook', [remote, local], c)
+    expect(out[0]!.status).toBe(local)
+    expect(out[0]!.why[0]).toBe('a friend')
+    expect(out[1]!.why[0]).toBe('suggested')
+  })
+
+  it('credits a followed (non-mutual) booster instead of treating the post as a stranger', () => {
+    const c = prodCtx()
+    c.following.add('bob@home.social')
+    const boosted = post({ acct: 'booster-target@far.away', _rankSource: 'federated', favouritesCount: 3 })
+    const wrapper = post({ acct: 'bob', reblog: boosted })
+    const [r] = rankFeed('facebook', [wrapper], c)
+    expect(r!.why[0]).toBe('shared by someone you follow')
+  })
+})
+
+describe('hostile and degenerate inputs', () => {
+  const RANKER_IDS = ['x', 'facebook', 'tiktok'] as const
+
+  it('keeps every score finite and returns a permutation of what it keeps', () => {
+    const c = ctx()
+    c.following.add('a@ex.social')
+    c.mutuals.add('a@ex.social')
+    const nasty = [
+      post({ acct: 'a@ex.social', favouritesCount: -5, reblogsCount: -1e9, repliesCount: Number.NaN }),
+      post({ acct: 'a@ex.social', favouritesCount: Number.POSITIVE_INFINITY, repliesCount: -3 }),
+      post({ acct: 'a@ex.social', favouritesCount: -Infinity, ageH: 500 }),
+      post({ acct: 'a@ex.social', createdAt: 'not a date' }),
+      post({ acct: 'a@ex.social', createdAt: '2099-01-01T00:00:00Z', favouritesCount: 3 }),
+    ]
+    for (const id of RANKER_IDS) {
+      const out = rankFeed(id, nasty, c, () => 0.3)
+      for (const r of out) expect(Number.isFinite(r.score)).toBe(true)
+      const ids = out.map((r) => r.status.id)
+      expect(new Set(ids).size).toBe(ids.length)
+      for (const i of ids) expect(nasty.map((n) => n.id)).toContain(i)
+      expect(out).toHaveLength(nasty.length)
+    }
+  })
+
+  it('returns nothing for no candidates', () => {
+    for (const id of RANKER_IDS) expect(rankFeed(id, [], ctx())).toEqual([])
+  })
+
+  it('does not let a future-dated post stay fresh forever', () => {
+    const c = ctx()
+    c.following.add('a@ex.social')
+    const future = post({ acct: 'a@ex.social', createdAt: '2099-01-01T00:00:00Z', favouritesCount: 5 })
+    const now = post({ acct: 'a@ex.social', ageH: 0, favouritesCount: 5 })
+    const out = rankFeed('x', [future, now], c)
+    expect(out[0]!.status).toBe(now)
+  })
+
+  it('X no longer fetches local timelines it would discard', async () => {
+    const { RANKERS } = await import('../app/utils/rankers')
+    expect(RANKERS.x.sources).not.toContain('local')
+  })
+})
+
+describe('ranked source policy', () => {
+  it('retires endpoints that can never work and backs off the rest', () => {
+    for (const s of [401, 403, 404, 501]) expect(isPermanentSourceFailure(s)).toBe(true)
+    for (const s of [429, 500, 503, null, undefined]) expect(isPermanentSourceFailure(s)).toBe(false)
+    expect(sourceBackoffMs(1)).toBe(5_000)
+    expect(sourceBackoffMs(2)).toBe(10_000)
+    expect(sourceBackoffMs(20)).toBe(60_000)
+  })
+
+  it('never renders a dangling separator when a ranker gives no reasons', () => {
+    expect(rankWhyLabel('TikTok', [])).toBe('TikTok · Something new')
+    expect(rankWhyLabel('TikTok', ['', ' video '])).toBe('TikTok · video')
   })
 })

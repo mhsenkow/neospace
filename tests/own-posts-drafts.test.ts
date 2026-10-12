@@ -6,7 +6,11 @@ import { useOverlayStore } from '../app/stores/overlay'
 import { useEdwardStore } from '../app/stores/edward'
 import { edwardAuthorKey } from '../app/utils/edwardSemantics'
 import {
+  draftReplyTarget,
+  draftSaveMessage,
   draftStorageKey,
+  isRedraftSlot,
+  MAX_DRAFT_BYTES,
   migrateLegacyDraft,
   readDraft,
   writeDraft,
@@ -65,12 +69,92 @@ describe('drafts — account scoping', () => {
       attachments: [{ id: '1' }],
     })
     const raw = JSON.parse(store.getItem(draftStorageKey('a', 'new'))!)
-    expect(Object.keys(raw).sort()).toEqual(['spoiler', 'text', 'visibility'])
+    expect(Object.keys(raw).sort()).toEqual(['spoiler', 'text', 'updatedAt', 'v', 'visibility'])
     expect(readDraft(draftStorageKey('a', 'new'))).toEqual({
       text: 'x',
       spoiler: 'cw',
       visibility: 'unlisted',
     })
+  })
+})
+
+describe('drafts — long text is never silently truncated', () => {
+  let store: ReturnType<typeof memoryStorage>
+  beforeEach(() => {
+    store = memoryStorage()
+    vi.stubGlobal('localStorage', store)
+  })
+
+  it('round-trips a long Unicode draft intact', () => {
+    const text = `${'héllo 👩‍👩‍👧 日本語 '.repeat(800)}end`
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(8 * 1024)
+    const key = draftStorageKey('a', 'new')
+    expect(writeDraft(key, { text, spoiler: '', visibility: '' })).toEqual({ ok: true })
+    expect(readDraft(key)?.text).toBe(text)
+  })
+
+  it('measures UTF-8 bytes, not UTF-16 units', () => {
+    // ~21.8k UTF-16 units but ~65.5k bytes once encoded
+    const text = '日'.repeat(Math.ceil(MAX_DRAFT_BYTES / 3) + 10)
+    expect(text.length).toBeLessThan(MAX_DRAFT_BYTES)
+    expect(writeDraft(draftStorageKey('a', 'new'), { text, spoiler: '', visibility: '' })).toEqual({
+      ok: false,
+      reason: 'too-large',
+    })
+  })
+
+  it('reports an oversized draft and keeps the last good one instead of slicing', () => {
+    const key = draftStorageKey('a', 'new')
+    writeDraft(key, { text: 'saved earlier', spoiler: '', visibility: '' })
+    const result = writeDraft(key, { text: 'x'.repeat(MAX_DRAFT_BYTES + 1), spoiler: '', visibility: '' })
+    expect(result).toEqual({ ok: false, reason: 'too-large' })
+    expect(readDraft(key)?.text).toBe('saved earlier')
+    expect(draftSaveMessage('too-large')).toMatch(/too long/i)
+  })
+
+  it('reports storage failures (quota / private mode)', () => {
+    vi.stubGlobal('localStorage', {
+      ...store,
+      setItem: () => {
+        throw new Error('QuotaExceededError')
+      },
+    })
+    expect(writeDraft(draftStorageKey('a', 'new'), { text: 'hi', spoiler: '', visibility: '' })).toEqual({
+      ok: false,
+      reason: 'storage',
+    })
+    expect(draftSaveMessage('storage')).toMatch(/storage/i)
+  })
+})
+
+describe('drafts — reopening a saved draft', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('recovers the reply target from the draft key', () => {
+    expect(draftReplyTarget('reply:1234')).toBe('1234')
+    expect(draftReplyTarget('reply:')).toBeNull()
+    expect(draftReplyTarget('new')).toBeNull()
+    expect(draftReplyTarget('group:cats')).toBeNull()
+  })
+
+  it('only redraft slots are unreopenable', () => {
+    expect(isRedraftSlot('redraft:1')).toBe(true)
+    expect(isRedraftSlot('reply:1')).toBe(false)
+    expect(isRedraftSlot(null)).toBe(false)
+  })
+
+  it('keeps the reply id and slot together, and remounts when only the slot changes', () => {
+    const sheet = useComposeSheetStore()
+    sheet.show({ initialText: '@bob hi', draftSlot: 'reply:77', inReplyToId: draftReplyTarget('reply:77') })
+    expect(sheet.inReplyToId).toBe('77')
+    expect(sheet.draftSlot).toBe('reply:77')
+
+    // A different saved new-post draft while the sheet is open must not keep the old composer
+    sheet.show({ initialText: 'one', draftSlot: 'group:cats' })
+    const key = sheet.instanceKey
+    sheet.show({ initialText: 'two', draftSlot: 'group:dogs' })
+    expect(sheet.instanceKey).toBe(key + 1)
+    expect(sheet.initialText).toBe('two')
   })
 })
 

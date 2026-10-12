@@ -67,6 +67,12 @@ export type RankContext = {
   likedWords: Map<string, number>
   followedTags: Set<string>
   viewerLang: string | null
+  /**
+   * The viewer's instance host. Mastodon returns same-server accts without a
+   * host (`bob`), so accts are qualified with this before comparing — otherwise
+   * a followed local `bob` would match every remote `bob@elsewhere`.
+   */
+  host?: string | null
   now: number
 }
 
@@ -96,7 +102,7 @@ export const RANKERS: Record<
     tip: 'Like X/Twitter For You — replies count far more than likes, mixes people you follow with discoveries, and spreads authors out.',
     description:
       'Ranks like X’s open-sourced For You: a reply is worth ~27× a like, about half the feed is people you follow and half is discovery, and you rarely see the same author twice in a row.',
-    sources: ['home', 'trend', 'tag', 'local'],
+    sources: ['home', 'trend', 'tag'],
     needsAuth: true,
   },
   facebook: {
@@ -147,6 +153,20 @@ export function contentWords(text: string, max = 40): string[] {
 
 const norm = (acct?: string | null) => (acct || '').replace(/^@/, '').toLowerCase()
 
+/** `bob` -> `bob@host` (same-server accts carry no host); already-qualified accts pass through */
+export const qualifyAcct = (acct: string | null | undefined, host?: string | null) => {
+  const a = norm(acct)
+  return a && host && !a.includes('@') ? `${a}@${host.toLowerCase()}` : a
+}
+
+/** Counts from a misbehaving server can be negative or garbage — never let them reach the math */
+const count = (n: unknown) => Math.max(0, Number(n) || 0)
+
+/** Posts dated further ahead than this are clock skew or abuse, not "just now" */
+const FUTURE_SLACK_MS = 10 * 60_000
+/** Age assigned to untrusted future-dated posts (they decay and demote instead of staying fresh forever) */
+const FUTURE_POST_AGE_H = 48
+
 type Features = {
   author: string
   boostedBy: string | null
@@ -179,6 +199,9 @@ type Features = {
 /** Squash a count into a 0–1 "probability" relative to the author's reach */
 const p = (n: number, reach: number) => 1 - Math.exp(-n / reach)
 
+/** A NaN in a sort comparator scrambles the order — scores are always finite */
+const finite = (n: number) => (Number.isFinite(n) ? n : 0)
+
 export function features(s: RankStatus, ctx: RankContext): Features {
   const body = s.reblog || s
   const text = stripHtml(body.content || '')
@@ -187,15 +210,16 @@ export function features(s: RankStatus, ctx: RankContext): Features {
   const meta = (video?.meta || {}) as { original?: { duration?: number }; duration?: number }
   const followers = Math.max(0, Number(body.account?.followersCount) || 0)
   const created = Date.parse(body.createdAt || s.createdAt)
-  const self = norm(ctx.selfAcct)
+  const self = qualifyAcct(ctx.selfAcct, ctx.host)
+  const future = Number.isFinite(created) && created > ctx.now + FUTURE_SLACK_MS
   return {
-    author: norm(body.account?.acct),
-    boostedBy: s.reblog ? norm(s.account?.acct) : null,
-    favs: Number(body.favouritesCount) || 0,
-    boosts: Number(body.reblogsCount) || 0,
-    replies: Number(body.repliesCount) || 0,
+    author: qualifyAcct(body.account?.acct, ctx.host),
+    boostedBy: s.reblog ? qualifyAcct(s.account?.acct, ctx.host) : null,
+    favs: count(body.favouritesCount),
+    boosts: count(body.reblogsCount),
+    replies: count(body.repliesCount),
     followers,
-    ageH: Math.max(0, (ctx.now - (Number.isFinite(created) ? created : ctx.now)) / 3_600_000),
+    ageH: future ? FUTURE_POST_AGE_H : Math.max(0, (ctx.now - (Number.isFinite(created) ? created : ctx.now)) / 3_600_000),
     hasVideo: !!video,
     hasImage: media.some((m) => m.type === 'image'),
     videoSec: Number(meta.original?.duration ?? meta.duration) || 0,
@@ -208,7 +232,7 @@ export function features(s: RankStatus, ctx: RankContext): Features {
     isBot: !!body.account?.bot,
     cw: !!(body.sensitive || body.spoilerText?.trim()),
     language: (body.language || '').split('-')[0]!.toLowerCase() || null,
-    mentionsYou: !!self && (body.mentions || []).some((m) => norm(m.acct) === self || norm(m.acct).split('@')[0] === self.split('@')[0]),
+    mentionsYou: !!self && (body.mentions || []).some((m) => qualifyAcct(m.acct, ctx.host) === self),
     asks: /\?\s*(\S+\s*)?$|\?\s/.test(text),
     source: s._rankSource || 'federated',
     // ~√followers people actually see a post; a floor keeps tiny accounts sane
@@ -216,13 +240,11 @@ export function features(s: RankStatus, ctx: RankContext): Features {
   }
 }
 
-const isFollowed = (acct: string, ctx: RankContext) =>
-  ctx.following.has(acct) || ctx.following.has(acct.split('@')[0]!)
+const isFollowed = (acct: string, ctx: RankContext) => ctx.following.has(acct)
 
-const isMutual = (acct: string, ctx: RankContext) => ctx.mutuals.has(acct) || ctx.mutuals.has(acct.split('@')[0]!)
+const isMutual = (acct: string, ctx: RankContext) => ctx.mutuals.has(acct)
 
-const likedAuthorScore = (acct: string, ctx: RankContext) =>
-  Math.min(1, (ctx.likedAuthors.get(acct) || ctx.likedAuthors.get(acct.split('@')[0]!) || 0) / 3)
+const likedAuthorScore = (acct: string, ctx: RankContext) => Math.min(1, (ctx.likedAuthors.get(acct) || 0) / 3)
 
 /** 0–1 overlap with your interests (tags weigh more than words) */
 export function interestScore(f: Pick<Features, 'tags' | 'words'>, ctx: RankContext): number {
@@ -267,9 +289,14 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
   const scored: (RankedItem<S> & { f: Features; inNetwork: boolean })[] = []
   for (const s of statuses) {
     const f = features(s, ctx)
-    const self = norm(ctx.selfAcct)
+    const self = qualifyAcct(ctx.selfAcct, ctx.host)
     if (f.author && f.author === self) continue
-    const inNetwork = isFollowed(f.author, ctx) || (!!f.boostedBy && isFollowed(f.boostedBy, ctx))
+    // The home timeline is your network by construction — `following` is capped and
+    // empty when its fetch fails, so don't let that drop posts from people you follow
+    const inNetwork =
+      f.source === 'home' ||
+      isFollowed(f.author, ctx) ||
+      (!!f.boostedBy && isFollowed(f.boostedBy, ctx))
     const tagHit = f.tags.some((t) => ctx.followedTags.has(t))
     const liked = likedAuthorScore(f.author, ctx)
     // Out-of-network needs social proof (someone / something you're linked to)
@@ -285,12 +312,12 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
     const negative = Math.min(1, (f.isBot ? 0.25 : 0) + (f.tags.length > 6 ? 0.25 : 0) + (f.cw ? 0.05 : 0))
 
     const heads = [
-      { w: X_WEIGHTS.fav * pFav, why: 'likes' },
-      { w: X_WEIGHTS.retweet * pRt, why: 'reposts' },
-      { w: X_WEIGHTS.reply * pReply, why: 'reply-heavy' },
-      { w: X_WEIGHTS.goodProfileClick * goodProfileClick, why: 'an author you engage with' },
-      { w: X_WEIGHTS.goodClick * goodClick, why: 'worth opening' },
-      { w: X_WEIGHTS.replyEngagedByAuthor * authorEngages, why: 'the author may reply to you' },
+      { w: X_WEIGHTS.fav * pFav, why: 'Lots of likes' },
+      { w: X_WEIGHTS.retweet * pRt, why: 'Widely reposted' },
+      { w: X_WEIGHTS.reply * pReply, why: 'Lots of replies' },
+      { w: X_WEIGHTS.goodProfileClick * goodProfileClick, why: 'By someone you engage with' },
+      { w: X_WEIGHTS.goodClick * goodClick, why: 'Worth opening' },
+      { w: X_WEIGHTS.replyEngagedByAuthor * authorEngages, why: 'Mentions you' },
     ]
     let score = heads.reduce((a, h) => a + h.w, 0) + X_WEIGHTS.negativeFeedback * negative * 0.1
     // Recency: Earlybird-style decay (half-life ~8h)
@@ -301,8 +328,10 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
       .sort((a, b) => b.w - a.w)
       .slice(0, 2)
       .map((h) => h.why)
-    why.unshift(inNetwork ? 'in your network' : tagHit ? 'a tag you follow' : f.source === 'trend' ? 'trending' : 'social proof')
-    scored.push({ status: s, score, why, f, inNetwork })
+    why.unshift(
+      inNetwork ? 'From your network' : tagHit ? 'A tag you follow' : f.source === 'trend' ? 'From a trending topic' : 'Popular with people you follow',
+    )
+    scored.push({ status: s, score: finite(score), why, f, inNetwork })
   }
 
   // Author diversity: each further post by the same author counts for less
@@ -311,8 +340,8 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
   for (const item of scored) {
     const k = seenAuthor.get(item.f.author) || 0
     if (k) {
+      // A demotion, not a reason you're seeing the post — never surfaced in `why`
       item.score *= Math.max(0.25, Math.pow(0.5, k))
-      item.why.push('author diversity')
     }
     seenAuthor.set(item.f.author, k + 1)
   }
@@ -340,7 +369,7 @@ function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): Ra
   const scored: (RankedItem<S> & { f: Features })[] = []
   for (const s of statuses) {
     const f = features(s, ctx)
-    if (f.author && f.author === norm(ctx.selfAcct)) continue
+    if (f.author && f.author === qualifyAcct(ctx.selfAcct, ctx.host)) continue
     const why: string[] = []
     let closeness: number
     if (isMutual(f.author, ctx)) {
@@ -360,6 +389,9 @@ function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): Ra
     if (f.boostedBy && isMutual(f.boostedBy, ctx)) {
       closeness = Math.max(closeness, 0.85)
       why[0] = 'shared by a friend'
+    } else if (f.boostedBy && isFollowed(f.boostedBy, ctx)) {
+      closeness = Math.max(closeness, FB_CLOSENESS.following)
+      why[0] = 'shared by someone you follow'
     }
     // EdgeRank-era affinity: people you interact with rise
     const affinity = 1 + likedAuthorScore(f.author, ctx) * 0.8
@@ -379,7 +411,7 @@ function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): Ra
     if (f.hasCard && f.textLen < 40) score *= 0.6
     // Friends' posts stay relevant longer than a page's
     score *= Math.pow(0.5, f.ageH / (closeness >= 0.85 ? 36 : 18))
-    scored.push({ status: s, score, why: why.slice(0, 3), f })
+    scored.push({ status: s, score: finite(score), why: why.slice(0, 3), f })
   }
   scored.sort((a, b) => b.score - a.score)
   // No more than two in a row from the same person
@@ -404,7 +436,7 @@ function rankTikTok<S extends RankStatus>(statuses: S[], ctx: RankContext, rand:
   const scored: (RankedItem<S> & { f: Features; fresh: boolean })[] = []
   for (const s of statuses) {
     const f = features(s, ctx)
-    if (f.author && f.author === norm(ctx.selfAcct)) continue
+    if (f.author && f.author === qualifyAcct(ctx.selfAcct, ctx.host)) continue
     if (f.isBot) continue
     // Follower count is "not a direct factor": rates use a flat audience, not reach
     const audience = 12 + Math.min(40, f.ageH * 4)
@@ -431,7 +463,7 @@ function rankTikTok<S extends RankStatus>(statuses: S[], ctx: RankContext, rand:
     else if (f.hasImage) why.push('picture')
     if (pComment > 0.3) why.push('people are commenting')
     else if (pLike > 0.4) why.push('people love it')
-    scored.push({ status: s, score, why: why.slice(0, 2), f, fresh: f.favs + f.boosts + f.replies <= 1 && f.ageH < 6 })
+    scored.push({ status: s, score: finite(score), why: why.slice(0, 2), f, fresh: f.favs + f.boosts + f.replies <= 1 && f.ageH < 6 })
   }
   scored.sort((a, b) => b.score - a.score)
 
@@ -470,14 +502,14 @@ export function rankFeed<S extends RankStatus>(
 }
 
 /** Build the taste part of the context from posts you liked / bookmarked */
-export function tasteFrom(statuses: RankStatus[]) {
+export function tasteFrom(statuses: RankStatus[], host?: string | null) {
   const likedAuthors = new Map<string, number>()
   const likedTags = new Map<string, number>()
   const likedWords = new Map<string, number>()
   const bump = (m: Map<string, number>, k: string) => k && m.set(k, (m.get(k) || 0) + 1)
   for (const s of statuses) {
     const body = s.reblog || s
-    bump(likedAuthors, norm(body.account?.acct))
+    bump(likedAuthors, qualifyAcct(body.account?.acct, host))
     for (const t of body.tags || []) bump(likedTags, (t.name || '').toLowerCase())
     for (const w of contentWords(stripHtml(body.content || ''), 25)) bump(likedWords, w)
   }
@@ -493,6 +525,7 @@ export function emptyRankContext(now = Date.now()): RankContext {
     likedTags: new Map(),
     likedWords: new Map(),
     followedTags: new Set(),
+    host: null,
     viewerLang:
       typeof navigator !== 'undefined' && navigator.language
         ? navigator.language.split('-')[0]!.toLowerCase()

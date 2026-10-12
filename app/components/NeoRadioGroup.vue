@@ -22,6 +22,11 @@ const tabStop = computed(() =>
     : props.options[0]?.value,
 )
 
+const btnRefs = ref<(HTMLButtonElement | null)[]>([])
+const setBtnRef = (el: unknown, i: number) => {
+  btnRefs.value[i] = el as HTMLButtonElement | null
+}
+
 function select(value: string) {
   if (value === props.modelValue) return
   emit('update:modelValue', value)
@@ -45,7 +50,11 @@ function onKeydown(e: KeyboardEvent, index: number) {
     return
   }
   const opt = props.options[next]
-  if (opt) select(opt.value)
+  if (!opt) return
+  select(opt.value)
+  // Selection moves the roving tab stop — focus has to follow it, or the next arrow
+  // press computes the same `next` from the old button and stops
+  btnRefs.value[next]?.focus()
 }
 </script>
 
@@ -54,6 +63,7 @@ function onKeydown(e: KeyboardEvent, index: number) {
     <button
       v-for="(opt, i) in options"
       :key="opt.value"
+      :ref="(el) => setBtnRef(el, i)"
       type="button"
       class="neo-radio-group__btn"
       role="radio"
@@ -99,7 +109,12 @@ function onKeydown(e: KeyboardEvent, index: number) {
   &[aria-checked='true'] {
     background: var(--neo-bg-card, var(--neo-bg-primary));
     color: var(--neo-text-primary);
-    box-shadow: 0 0 0 1px var(--neo-border-color);
+    // Fill alone is ~1.2:1 against the track (WCAG 1.4.11) — add a dark ring,
+    // an accent underline and a weight change so the selection reads at ≥3:1
+    font-weight: 600;
+    box-shadow:
+      0 0 0 1px var(--neo-border-color-dark),
+      inset 0 -2px 0 var(--neo-accent);
   }
 
   &:hover:not([aria-checked='true']) {

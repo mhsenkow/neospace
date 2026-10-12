@@ -67,6 +67,44 @@ async function pngHasAlpha(bitmap: ImageBitmap): Promise<boolean> {
   }
 }
 
+const ascii = (b: Uint8Array, at: number, len: number) =>
+  String.fromCharCode(...b.subarray(at, at + len))
+
+/** Animated WebP (VP8X animation flag) or APNG (acTL chunk before IDAT) — canvas keeps only frame 1. */
+export function isAnimatedImageBytes(bytes: Uint8Array, mime: string): boolean {
+  if (mime === 'image/webp') {
+    return (
+      bytes.length >= 21 &&
+      ascii(bytes, 0, 4) === 'RIFF' &&
+      ascii(bytes, 8, 4) === 'WEBP' &&
+      ascii(bytes, 12, 4) === 'VP8X' &&
+      (bytes[20]! & 0x02) !== 0
+    )
+  }
+  if (mime === 'image/png') {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    let at = 8 // after the PNG signature
+    while (at + 8 <= bytes.length) {
+      const type = ascii(bytes, at + 4, 4)
+      if (type === 'acTL') return true
+      if (type === 'IDAT' || type === 'IEND') return false
+      at += 12 + view.getUint32(at, false)
+    }
+  }
+  return false
+}
+
+async function isAnimatedImage(file: File): Promise<boolean> {
+  if (file.type !== 'image/webp' && file.type !== 'image/png') return false
+  try {
+    // acTL sits before the first IDAT; 256KB covers large ICC profiles too
+    const head = new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer())
+    return isAnimatedImageBytes(head, file.type)
+  } catch {
+    return false
+  }
+}
+
 function toBlob(
   canvas: HTMLCanvasElement,
   type: string,
@@ -79,7 +117,7 @@ function toBlob(
 
 /**
  * Downscale / recompress a still image per quality preset.
- * GIF and non-images are returned unchanged.
+ * GIF, animated WebP/APNG and non-images are returned unchanged.
  */
 export async function prepareComposeImage(
   file: File,
@@ -95,6 +133,7 @@ export async function prepareComposeImage(
 
   if (!file.type.startsWith('image/') || file.type === 'image/gif') return passthrough()
   if (typeof createImageBitmap === 'undefined') return passthrough()
+  if (await isAnimatedImage(file)) return passthrough()
 
   const preset = PRESETS[normalizeMediaUploadQuality(quality)]
 
@@ -130,6 +169,7 @@ export async function prepareComposeImage(
       bitmap.close()
       return passthrough()
     }
+    ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(bitmap, 0, 0, w, h)
     bitmap.close()
 

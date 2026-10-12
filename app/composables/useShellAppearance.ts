@@ -13,6 +13,7 @@ import {
   LINE_OPTIONS,
   resolveTheme,
 } from '~/utils/appearance'
+import { osSchemeTick } from '~/utils/osScheme'
 
 const SIDEBAR_RAIL_KEY = 'neospace_sidebar_rail'
 
@@ -64,6 +65,8 @@ export function useShellAppearance() {
   const currentThemeLabel = computed(() => {
     const theme = settingsStore.localPreferences.theme
     if (theme === 'auto') {
+      // matchMedia isn't reactive — re-evaluate when the OS scheme / contrast flips
+      void osSchemeTick.value
       const resolved = resolveTheme('auto')
       const name = THEME_OPTIONS.find((t) => t.id === resolved)?.label || resolved
       return `Auto · ${name}`

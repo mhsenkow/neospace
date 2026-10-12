@@ -7,6 +7,7 @@ import SearchHighlight from '~/components/search/SearchHighlight.vue'
 import { stripHtml } from '~/utils/stripHtml'
 import { formatCompactRelativeTime } from '~/utils/relativeTime'
 import { formatCount } from '~/utils/searchQuery'
+import { useInstancesStore } from '~/stores/instances'
 
 const props = withDefaults(
   defineProps<{
@@ -21,6 +22,10 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{ follow: [account: mastodon.v1.Account, e: Event]; open: [] }>()
+
+// Your own account can turn up in results — never offer to follow yourself
+const instancesStore = useInstancesStore()
+const isSelf = computed(() => props.account.id === instancesStore.currentUser?.id)
 
 const name = computed(() => props.account.displayName || props.account.username)
 const bio = computed(() => (props.account.note ? stripHtml(props.account.note) : ''))
@@ -64,7 +69,7 @@ const followLabel = computed(() =>
       </span>
     </NuxtLink>
     <button
-      v-if="canFollow"
+      v-if="canFollow && !isSelf"
       type="button"
       class="neo-btn neo-btn--sm search-person__follow"
       :class="relationship?.following || relationship?.requested ? 'neo-btn--secondary' : 'neo-btn--primary'"

@@ -115,6 +115,16 @@ export default defineNuxtConfig({
       },
       meta: [
         { name: 'description', content: 'NeoSpace — a multi-column Fediverse client.' },
+        // Link unfurls (Mastodon cards etc.) — absolute image URL, 1200×630 under public/
+        { property: 'og:site_name', content: 'NeoSpace' },
+        { property: 'og:type', content: 'website' },
+        { property: 'og:title', content: 'NeoSpace' },
+        { property: 'og:description', content: 'A multi-column Fediverse client — feeds, groups, and multi-server logins.' },
+        { property: 'og:image', content: 'https://neospace.ibm.io/og-image.png' },
+        { property: 'og:image:width', content: '1200' },
+        { property: 'og:image:height', content: '630' },
+        { property: 'og:image:alt', content: 'NeoSpace — a multi-column Fediverse client' },
+        { name: 'twitter:card', content: 'summary_large_image' },
         // interactive-widget: Android Chrome resizes the layout when the soft
         // keyboard opens so fixed composers (DMs / reply dock) stay visible.
         {
@@ -122,8 +132,9 @@ export default defineNuxtConfig({
           content:
             'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content',
         },
-        { name: 'theme-color', content: '#faf9f7', media: '(prefers-color-scheme: light)' },
-        { name: 'theme-color', content: '#1a1a18', media: '(prefers-color-scheme: dark)' },
+        // Match the light / dark themes' --neo-bg-primary (prepaint.js refines this per theme)
+        { name: 'theme-color', content: '#f2f2f0', media: '(prefers-color-scheme: light)' },
+        { name: 'theme-color', content: '#161616', media: '(prefers-color-scheme: dark)' },
         { name: 'mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },

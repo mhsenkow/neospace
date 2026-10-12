@@ -6,6 +6,8 @@
  * Guest mode must default to an instance that still allows public reads.
  */
 
+import { isClientError, isTimeoutError, isUnexpectedResponseError } from '~/utils/friendlyError'
+
 export const DEFAULT_PUBLIC_INSTANCE = 'https://fosstodon.org'
 
 /** Hosts known to gate unauthenticated public timeline access */
@@ -59,6 +61,18 @@ export function normalizeServer(raw: string): string | null {
   value = value.replace(/\/.*$/, '')
   value = value.replace(/\/+$/, '')
 
+  // IDN hosts (bücher.social, кириллица.example): convert to punycode first, then validate
+  // the ASCII form — the URL parser also rejects forbidden host characters for us
+  if (/[^\x00-\x7f]/.test(value)) {
+    try {
+      const host = new URL(`https://${value}`).hostname
+      if (host.includes('/') || host.includes('@')) return null
+      value = host
+    } catch {
+      return null
+    }
+  }
+
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value)) {
     return null
   }
@@ -79,16 +93,21 @@ export function friendlyServerError(err: unknown): string {
   if (lower.includes('already watching') || lower.includes('already connected')) {
     return 'You’re already connected to this server.'
   }
+  // Branch on the client's error kinds before any wording: masto's raw text ("The server
+  // returned data with an unknown encoding…", "Request timed out") never reaches the user
+  if (isTimeoutError(err)) {
+    return 'That server took too long to respond. Try again in a moment.'
+  }
+  if (isUnexpectedResponseError(err)) {
+    return "That doesn't look like a Mastodon-compatible server."
+  }
   if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('cors')) {
     return "We couldn't reach that server. Check the name and your internet connection, then try again."
   }
   if (lower.includes('404') || lower.includes('not found')) {
     return "We couldn't find that server. Double-check the spelling — it usually looks like mastodon.social."
   }
-  if (lower.includes('timeout')) {
-    return 'That server took too long to respond. Try again in a moment.'
-  }
-  if (message && message.length < 120 && !lower.includes('error:')) {
+  if (!isClientError(err) && message && message.length < 120 && !lower.includes('error:')) {
     return message
   }
   return "Something went wrong connecting to that server. Please try again."

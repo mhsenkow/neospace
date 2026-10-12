@@ -5,15 +5,21 @@
  */
 
 import type { mastodon } from 'masto'
+import type { Ref } from 'vue'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useComposeMedia } from '~/composables/useComposeMedia'
-import { COMPOSE_MEDIA_ACCEPT } from '~/utils/composeConstants'
+import {
+  COMPOSE_MEDIA_ACCEPT,
+  COMPOSE_PREVIEWABLE_IMAGE,
+  composeAttachmentIcon,
+} from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { useKeyboardBottomInset } from '~/composables/useKeyboardViewport'
 import { mapComposeError } from '~/utils/friendlyError'
 import { mastodonLength } from '~/utils/mastodonLength'
 import { buildDirectBody, normalizeRecipientAccts } from '~/utils/dmHelpers'
+import { useDraft } from '~/composables/useDraft'
 
 const props = withDefaults(
   defineProps<{
@@ -29,6 +35,11 @@ const props = withDefaults(
      * parent owns keyboard inset + bottom positioning.
      */
     embedded?: boolean
+    /**
+     * Stable per-conversation slot. Set → the typed text survives remounts (switching
+     * the DM pane to Profile, rotating across the desktop/mobile breakpoint).
+     */
+    draftSlot?: string
   }>(),
   { embedded: false },
 )
@@ -41,6 +52,21 @@ const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 
 const content = ref('')
+
+// Text-only draft, restored on mount. Attachments and the pending bubble can't be
+// persisted (media ids are server-bound), but what was typed is never thrown away.
+const draft = props.draftSlot ? useDraft(toRef(props, 'draftSlot') as Ref<string>) : null
+if (draft) {
+  onMounted(() => {
+    if (!content.value) content.value = draft.text.value
+  })
+}
+/** Write the draft immediately (empty text removes it) — send / failure paths */
+const persistDraftNow = (fallback = '') => {
+  if (!draft) return
+  draft.text.value = content.value || fallback
+  draft.flush()
+}
 const isSending = ref(false)
 const error = ref<string | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -168,7 +194,11 @@ const mentionList = computed(() =>
 )
 
 /** Mentions are added on send, so they count toward the limit */
-const projectedLen = computed(() => mastodonLength(buildDirectBody(content.value, mentionList.value)))
+const projectedLen = computed(() =>
+  mastodonLength(buildDirectBody(content.value, mentionList.value), {
+    urlWeight: instancesStore.statusUrlWeight,
+  }),
+)
 
 const remaining = computed(() => maxChars.value - projectedLen.value)
 const overLimit = computed(() => remaining.value < 0)
@@ -205,7 +235,11 @@ const autosize = () => {
   el.style.height = `${Math.min(el.scrollHeight, max)}px`
 }
 
-watch(content, () => {
+watch(content, (value) => {
+  if (draft) {
+    draft.text.value = value
+    draft.scheduleSave()
+  }
   // Single nextTick — avoid double autosize from @input + watch
   void nextTick(autosize)
 })
@@ -228,6 +262,7 @@ const postBody = async (body: string, ids: string[]) => {
       throw new Error('Unexpected response from server')
     }
     pendingSend.value = null
+    persistDraftNow()
     emit('posted', result)
     textareaRef.value?.focus()
   } catch (e: unknown) {
@@ -237,6 +272,8 @@ const postBody = async (body: string, ids: string[]) => {
     })
     if (pendingSend.value) {
       pendingSend.value = { ...pendingSend.value, delivery: 'failed' }
+      // The bubble dies with this component — keep the words recoverable
+      persistDraftNow(pendingSend.value.text)
     }
   } finally {
     isSending.value = false
@@ -412,10 +449,13 @@ onMounted(() => {
               playsinline
             />
             <img
-              v-else-if="item.previewUrl"
+              v-else-if="item.previewUrl && COMPOSE_PREVIEWABLE_IMAGE.test(item.file.type)"
               :src="item.previewUrl"
               alt=""
             />
+            <span v-else class="chat-composer__thumb-icon" aria-hidden="true">{{
+              composeAttachmentIcon(item.file.type)
+            }}</span>
             <div v-if="item.uploading" class="chat-composer__thumb-overlay">
               Uploading…
             </div>
@@ -720,6 +760,15 @@ onMounted(() => {
     height: 100%;
     object-fit: cover;
   }
+}
+
+.chat-composer__thumb-icon {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
 }
 
 .chat-composer__thumb-overlay {

@@ -1,0 +1,193 @@
+[
+  {
+    "scenario": "home-desktop",
+    "theme": "light",
+    "cards": 2,
+    "feedChildren": [
+      [
+        {
+          "tag": "ARTICLE",
+          "role": null
+        },
+        {
+          "tag": "ARTICLE",
+          "role": null
+        },
+        {
+          "tag": "DIV",
+          "role": null
+        },
+        {
+          "tag": "DIV",
+          "role": "status"
+        }
+      ]
+    ],
+    "focusToken": "",
+    "overflow": false,
+    "tablists": [
+      {
+        "width": 0,
+        "scrollWidth": 0,
+        "overflowX": "visible"
+      }
+    ],
+    "errors": [],
+    "violations": [
+      {
+        "id": "aria-required-children",
+        "impact": "critical",
+        "count": 1,
+        "targets": [
+          [
+            ".column-posts"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "scenario": "home-mobile",
+    "theme": "light",
+    "cards": 2,
+    "feedChildren": [
+      [
+        {
+          "tag": "ARTICLE",
+          "role": null
+        },
+        {
+          "tag": "ARTICLE",
+          "role": null
+        },
+        {
+          "tag": "DIV",
+          "role": null
+        },
+        {
+          "tag": "DIV",
+          "role": "status"
+        }
+      ]
+    ],
+    "focusToken": "",
+    "overflow": false,
+    "tablists": [
+      {
+        "width": 344,
+        "scrollWidth": 344,
+        "overflowX": "visible"
+      }
+    ],
+    "errors": [],
+    "violations": [
+      {
+        "id": "aria-required-children",
+        "impact": "critical",
+        "count": 1,
+        "targets": [
+          [
+            ".column-posts"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "scenario": "profile-mobile",
+    "theme": "light",
+    "cards": 4,
+    "feedChildren": [],
+    "focusToken": "",
+    "overflow": false,
+    "tablists": [
+      {
+        "width": 360,
+        "scrollWidth": 465,
+        "overflowX": "visible"
+      }
+    ],
+    "errors": [],
+    "violations": []
+  },
+  {
+    "scenario": "search-mobile",
+    "theme": "light",
+    "cards": 0,
+    "feedChildren": [],
+    "focusToken": "",
+    "overflow": false,
+    "tablists": [
+      {
+        "width": 336,
+        "scrollWidth": 336,
+        "overflowX": "auto"
+      }
+    ],
+    "errors": [],
+    "violations": []
+  },
+  {
+    "scenario": "y-home",
+    "theme": "y",
+    "cards": 2,
+    "feedChildren": [
+      [
+        {
+          "tag": "ARTICLE",
+          "role": null
+        },
+        {
+          "tag": "ARTICLE",
+          "role": null
+        },
+        {
+          "tag": "DIV",
+          "role": null
+        },
+        {
+          "tag": "DIV",
+          "role": "status"
+        }
+      ]
+    ],
+    "focusToken": "",
+    "overflow": false,
+    "tablists": [
+      {
+        "width": 0,
+        "scrollWidth": 0,
+        "overflowX": "visible"
+      }
+    ],
+    "errors": [],
+    "violations": [
+      {
+        "id": "aria-required-children",
+        "impact": "critical",
+        "count": 1,
+        "targets": [
+          [
+            ".column-posts"
+          ]
+        ]
+      },
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "count": 3,
+        "targets": [
+          [
+            ".sidebar__logo > .neo-mark.neo-mark--on[data-v-4eb56e7e=\"\"] > .neo-mark__glyph[data-v-4eb56e7e=\"\"]"
+          ],
+          [
+            ".nav-badge--corner"
+          ],
+          [
+            ".sidebar__link--badge > .nav-badge[data-v-2182add2=\"\"][aria-hidden=\"true\"]"
+          ]
+        ]
+      }
+    ]
+  }
+]

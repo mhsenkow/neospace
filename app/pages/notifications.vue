@@ -7,7 +7,7 @@ import type { mastodon } from 'masto'
 import { plainTextLowerOf, plainTextOf } from '~/utils/plainText'
 import { clipGraphemes } from '~/utils/stripHtml'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
-import { notifIconName, notifLabel } from '~/utils/notifHelpers'
+import { notifHasActor, notifIconName, notifLabel } from '~/utils/notifHelpers'
 import { groupActorLabel } from '~/utils/notifGroup'
 import { getMainScroller } from '~/utils/pageScroll'
 import { useMobileViewport } from '~/composables/useBreakpoint'
@@ -53,13 +53,16 @@ const FILTER_KEYS: NotificationFilterType[] = [
   'update',
 ]
 
-const applyFilterFromRoute = () => {
+/** Returns true when the route changed the active filter (the list needs a refetch) */
+const applyFilterFromRoute = (): boolean => {
+  const before = notificationsStore.filter
   const raw = String(route.query.filter || '')
   if (FILTER_KEYS.includes(raw as NotificationFilterType)) {
     notificationsStore.setFilter(raw as NotificationFilterType)
   } else {
     notificationsStore.setFilter('all')
   }
+  return notificationsStore.filter !== before
 }
 
 const filters: { key: NotificationFilterType; label: string; icon: NeoIconName }[] = [
@@ -82,7 +85,11 @@ const sortOptions: { key: SortOrder; label: string }[] = [
 ]
 
 const grouped = computed(() => notificationsStore.groupedByTime)
-const groupOrder = ['Today', 'Yesterday', 'This Week', 'Older']
+const GROUP_ORDER = ['Today', 'Yesterday', 'This Week', 'Older']
+// Oldest first reads Older → Today, not just reversed rows inside Today-first buckets
+const groupOrder = computed(() =>
+  notificationsStore.sortOrder === 'oldest' ? [...GROUP_ORDER].reverse() : GROUP_ORDER,
+)
 
 const notifMatchesQuery = (notif: {
   type: string
@@ -91,7 +98,9 @@ const notifMatchesQuery = (notif: {
 }) => {
   const q = findQuery.value.trim().toLowerCase()
   if (!q) return true
-  const name = `${notif.account?.displayName || ''} ${notif.account?.username || ''} ${notif.account?.acct || ''}`.toLowerCase()
+  const name = notifHasActor(notif.type)
+    ? `${notif.account?.displayName || ''} ${notif.account?.username || ''} ${notif.account?.acct || ''}`.toLowerCase()
+    : ''
   const action = notifLabel(notif.type).toLowerCase()
   return name.includes(q) || action.includes(q) || plainTextLowerOf(notif.status).includes(q)
 }
@@ -100,7 +109,7 @@ const filteredGrouped = computed(() => {
   const q = findQuery.value.trim()
   if (!q) return grouped.value
   const out: typeof grouped.value = {}
-  for (const label of groupOrder) {
+  for (const label of groupOrder.value) {
     const items = grouped.value[label]
     if (!items?.length) continue
     const hit = items.filter(notifMatchesQuery)
@@ -110,7 +119,7 @@ const filteredGrouped = computed(() => {
 })
 
 const visibleGroups = computed(() =>
-  groupOrder.filter(g => filteredGrouped.value[g]?.length)
+  groupOrder.value.filter(g => filteredGrouped.value[g]?.length)
 )
 
 const filteredNotifCount = computed(() =>
@@ -126,7 +135,11 @@ const searchStatusText = computed(() => {
 })
 
 const selectFilter = (key: NotificationFilterType) => {
+  if (key === notificationsStore.filter) return
   notificationsStore.setFilter(key)
+  // Filters are applied by the server (types[]) — a client-side filter only ever saw
+  // the first page of everything and showed "Nothing here" with older matches unloaded
+  void notificationsStore.fetchNotifications(true)
   const query = { ...route.query }
   if (key === 'all') delete query.filter
   else query.filter = key
@@ -159,9 +172,13 @@ const handleClearAll = async () => {
   })
   if (!ok) return
   try {
-    await notificationsStore.clearAll()
+    const { failedHosts } = await notificationsStore.clearAll()
     actionsMenuOpen.value = false
-    toastStore.show({ message: 'Notifications cleared' })
+    toastStore.show({
+      message: failedHosts.length
+        ? `Cleared notifications, but not on ${failedHosts.join(', ')}`
+        : 'Notifications cleared',
+    })
   } catch {
     toastStore.show({ message: 'Couldn’t clear notifications' })
   }
@@ -255,6 +272,7 @@ const rejectFollowRequest = async (notif: ExtendedNotification, e?: Event) => {
 /** Avatar / name → their profile (e.g. who liked your comment) */
 const openNotifProfile = (notif: ExtendedNotification, e?: Event) => {
   e?.stopPropagation()
+  if (!notifHasActor(notif.type)) return
   const acct = notif.account?.acct
   if (acct) {
     router.push({
@@ -290,7 +308,9 @@ const openNotification = (notif: ExtendedNotification) => {
   }
 
   const acct = notif.account?.acct
-  if (acct) router.push({ path: '/profile', query: { user: acct, ...via } })
+  if (acct && notifHasActor(notif.type)) {
+    router.push({ path: '/profile', query: { user: acct, ...via } })
+  }
 }
 
 /** Show @handle when display name alone would hide who they are */
@@ -346,7 +366,8 @@ watch(useMobileViewport(), () => bindLoadObserver(loadTrigger.value), { flush: '
 watch(
   () => route.query.filter,
   () => {
-    applyFilterFromRoute()
+    // Back / forward between filter URLs
+    if (applyFilterFromRoute() && canView.value) void notificationsStore.fetchNotifications(true)
   },
 )
 
@@ -548,7 +569,7 @@ const chromeTitle = computed(() => {
               </div>
 
               <button
-                v-if="notif.account"
+                v-if="notif.account && notifHasActor(notif.type)"
                 type="button"
                 class="notif-item__avatar"
                 :aria-label="`Open profile: ${notif.account.displayName || notif.account.username || notif.account.acct}`"
@@ -573,7 +594,7 @@ const chromeTitle = computed(() => {
                       <span class="sr-only">Unread</span>
                     </span>
                     <button
-                      v-if="notif.account"
+                      v-if="notif.account && notifHasActor(notif.type)"
                       type="button"
                       class="notif-item__name"
                       @click="openNotifProfile(notif, $event)"

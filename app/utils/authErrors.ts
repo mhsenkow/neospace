@@ -11,7 +11,9 @@ const KNOWN: Record<string, string> = {
   invalid_grant:
     'That authorization code expired. Please start sign-in again from the beginning.',
   invalid_client:
-    'NeoSpace couldn’t connect to this server. Try again, or contact your server admin.',
+    'Try again — NeoSpace will reconnect to this server.',
+  invalid_scope:
+    'This server doesn’t allow everything NeoSpace asks for. Try again, or pick a different server.',
   invalid_request:
     'Something interrupted sign-in. Please try again from the beginning.',
   unauthorized_client:
@@ -29,6 +31,9 @@ export function friendlyAuthError(raw: string): string {
   }
   if (lower.includes('no pending') || lower.includes('no authorization')) {
     return 'This sign-in link expired. Please start again from the sign-in page.'
+  }
+  if (/timed? ?out|timeout|aborted/.test(lower)) {
+    return 'The server took too long to respond. Try again in a moment.'
   }
   if (lower.includes('missing oauth') || lower.includes('missing pkce')) {
     return 'Something interrupted sign-in. Please try again from the beginning.'

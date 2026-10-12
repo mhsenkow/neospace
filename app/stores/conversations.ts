@@ -8,8 +8,7 @@ import type { mastodon } from 'masto'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { useInstancesStore } from './instances'
 import { logWarn } from '~/utils/log'
-import { findExactOneToOne, stripLeadingMentionText } from '~/utils/dmHelpers'
-import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
+import { dmPreviewText, findExactOneToOne } from '~/utils/dmHelpers'
 
 const PAGE_LIMIT = 40
 const POLL_MS = 45_000
@@ -216,11 +215,19 @@ export const useConversationsStore = defineStore('conversations', {
     },
 
     async remove(conversationId: string) {
+      // Optimistic: the row leaves immediately, and comes back in place if the server refuses
+      const index = this.conversations.findIndex((c) => c.id === conversationId)
+      const removed = index === -1 ? null : this.conversations[index]!
+      if (removed) this.conversations = this.conversations.filter((c) => c.id !== conversationId)
       try {
         const client = inboxClient()
         await client.v1.conversations.$select(conversationId).remove()
-        this.conversations = this.conversations.filter((c) => c.id !== conversationId)
       } catch (e: unknown) {
+        if (removed && !this.conversations.some((c) => c.id === conversationId)) {
+          const next = [...this.conversations]
+          next.splice(Math.min(index, next.length), 0, removed)
+          this.conversations = next
+        }
         this.error = e instanceof Error ? e.message : 'Could not remove conversation'
         throw e
       }
@@ -232,17 +239,15 @@ export const useConversationsStore = defineStore('conversations', {
 
     previewFor(c: mastodon.v1.Conversation, myId?: string | null, myAcct?: string | null): string {
       const status = c.lastStatus
-      if (!status?.content) return 'No messages yet'
+      if (!status) return 'No messages yet'
       let clipped = previewCache.get(status)
       if (clipped === undefined) {
         // Incoming DMs open with "@me" — strip our own handle too
         const participantAccts = [...(c.accounts || []).map((a) => a.acct), myAcct || '']
-        clipped = clipGraphemes(
-          stripLeadingMentionText(stripHtml(status.content), participantAccts),
-          120,
-        )
+        clipped = dmPreviewText(status, participantAccts)
         previewCache.set(status, clipped)
       }
+      if (!clipped) return 'No messages yet'
       const mine =
         (!!myId && status.account.id === myId) ||
         (!!myAcct && status.account.acct?.toLowerCase() === myAcct.toLowerCase())

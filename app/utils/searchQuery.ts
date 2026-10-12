@@ -17,6 +17,13 @@ const REMOTE_HANDLE_RE = /^@?([\w.-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})$
 const LOCAL_HANDLE_RE = /^@([\w.]+)$/
 const TAG_RE = /^#([\p{L}\p{N}_]+)$/u
 const HOST_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$/i
+/** Scheme-less share-sheet link: `host.tld/path` (the path is what makes it a link) */
+const BARE_URL_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S+$/i
+/**
+ * File / language extensions that look like a TLD but are never a fediverse server
+ * ("node.js", "vue.js", "config.json", "main.ts") — those are searches, not hosts.
+ */
+const NOT_A_TLD = /\.(?:js|jsx|ts|tsx|mjs|cjs|json|css|scss|html|htm|php|java|vue|txt|yml|yaml|toml|exe|zip|pdf|png|jpe?g|gif|svg|mp3|mp4|docx?|csv|xml)$/i
 /** A bare word Mastodon would accept as a hashtag (tag-timeline fallback) */
 const TAG_WORD_RE = /^[\p{L}][\p{L}\p{N}_]*$/u
 
@@ -24,14 +31,22 @@ const TAG_WORD_RE = /^[\p{L}][\p{L}\p{N}_]*$/u
 export function detectIntent(raw: string): SearchIntent {
   const q = raw.trim()
   if (URL_RE.test(q)) return { kind: 'url', url: q }
+  // "mastodon.social/@user/1234" pasted from a mobile share sheet
+  if (BARE_URL_RE.test(q) && !NOT_A_TLD.test(q.split('/')[0]!)) return { kind: 'url', url: `https://${q}` }
   const remote = q.match(REMOTE_HANDLE_RE)
   if (remote) return { kind: 'handle', acct: `${remote[1]}@${remote[2]!.toLowerCase()}`, remote: true }
   const local = q.match(LOCAL_HANDLE_RE)
   if (local) return { kind: 'handle', acct: local[1]!, remote: false }
   const tag = q.match(TAG_RE)
   if (tag) return { kind: 'tag', tag: tag[1]! }
-  if (HOST_RE.test(q)) return { kind: 'host', host: q.toLowerCase() }
+  if (HOST_RE.test(q) && !NOT_A_TLD.test(q)) return { kind: 'host', host: q.toLowerCase() }
   return { kind: 'text' }
+}
+
+/** The text to send to server search: scheme-less links get `https://` so they resolve */
+export function resolvableQuery(raw: string): string {
+  const intent = detectIntent(raw)
+  return intent.kind === 'url' ? intent.url : raw
 }
 
 /** Tag a query could browse as a timeline: `#linux` or a single word `linux` */

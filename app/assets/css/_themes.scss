@@ -37,7 +37,14 @@
   --neo-bg-elevated: #{$face};
   --neo-bg-tertiary: #{$hair};
   --neo-bg-card: #{$face};
-  --neo-bg-overlay: color-mix(in srgb, #{$ink} 45%, transparent);
+  // Black scrim in every theme — an `$ink`-based one is a white veil in dark schemes
+  @if $scheme == dark {
+    --neo-bg-overlay: rgb(0 0 0 / 0.55);
+  } @else {
+    --neo-bg-overlay: rgb(0 0 0 / 0.4);
+  }
+  // One scrim recipe for every modal / sheet backdrop
+  --neo-scrim: var(--neo-bg-overlay);
   --neo-bg-hover: #{$hair};
   --neo-bg-active: #{$rule};
 
@@ -59,6 +66,9 @@
   --neo-chrome-label: var(--neo-text-primary);
 
   --neo-accent: #{$accent};
+  // Shared keyboard-focus ring — defined for every theme so rules without a fallback work
+  // too. Themes with a muted accent (beta) override it.
+  --neo-focus: var(--neo-accent);
   // One accent-hover mix; link + hover aliases reuse it
   --neo-accent-hover: color-mix(in srgb, #{$accent} 82%, #{$ink});
   --neo-text-link: var(--neo-accent-hover);
@@ -141,6 +151,8 @@
     dark
   );
   --neo-border-width: 2px;
+  // Floor for data-line overrides (they use max() against it)
+  --neo-theme-border-width: 2px;
   // Hair (#666) stays the border; as a fill it put muted text at 2.6:1
   --neo-bg-tertiary: #262626;
   --neo-bg-hover: #262626;
@@ -269,6 +281,7 @@
 [data-theme='brutal'] {
   // hair must stay light — it's used for panel chrome; borders use rule (black)
   // Accent #d00000 keeps white-on-accent and link contrast ≥4.5:1
+  // Danger is its own red (#b00020, 7:1 on white) — a black danger read as ordinary ink
   @include neo-from-braun(
     #ffffff,
     #ffffff,
@@ -277,10 +290,12 @@
     #000000,
     #f2f2f2,
     #d00000,
-    #000000,
+    #b00020,
     light
   );
   --neo-border-width: 3px;
+  // Floor for data-line overrides (they use max() against it)
+  --neo-theme-border-width: 3px;
   --neo-border-color: #000000;
   --neo-border-color-light: #000000;
   --neo-border-color-dark: #000000;
@@ -328,6 +343,8 @@
   --neo-text-inverse: #0b1a22;
   --neo-text-on-accent: #0b1a22;
   --neo-border-width: 2px;
+  // Floor for data-line overrides (they use max() against it)
+  --neo-theme-border-width: 2px;
   // Brighter danger for ≥4.5:1 on tank bg
   --neo-danger: #ff6b6b;
   --neo-danger-soft: color-mix(in srgb, #ff6b6b 14%, transparent);
@@ -335,6 +352,7 @@
 
 [data-theme='nes'] {
   // Neutral canvas — classic NES blue kept as decoration only (fails as page bg)
+  // Danger (#8a0020) is deliberately not the accent red, so destructive actions don't look primary
   @include neo-from-braun(
     #f0f0f0,
     #f8f8f8,
@@ -343,10 +361,12 @@
     #000000,
     #dee2e6,
     #d00000,
-    #d00000,
+    #8a0020,
     light
   );
   --neo-border-width: 3px;
+  // Floor for data-line overrides (they use max() against it)
+  --neo-theme-border-width: 3px;
   --neo-radius-sm: 0;
   --neo-radius-md: 0;
   --neo-radius-lg: 0;
@@ -408,7 +428,8 @@
   --neo-bg-hover: #080808;
   --neo-bg-tertiary: #16181c;
   --neo-text-inverse: #0f1419;
-  --neo-text-on-accent: #ffffff;
+  // White on #1d9bf0 is only ~3:1 — the logo mark and nav badges need ≥4.5:1 (X ink is ~6.2:1)
+  --neo-text-on-accent: #0f1419;
   --neo-accent-hover: #1a8cd8;
   --neo-text-link: #1d9bf0;
   --neo-text-link-hover: #4cb1f5;
@@ -433,7 +454,8 @@
   --neo-chrome-btn-tracking: 0.01em;
   --neo-chrome-btn-weight: 500;
   --neo-chrome-heading-tracking: -0.02em;
-  --neo-chrome-card-shadow: none;
+  // A zero shadow, not `none` — `none` is invalid inside the comma list `.neo-card` builds
+  --neo-chrome-card-shadow: 0 0 0 0 transparent;
   --neo-chrome-border-width: 1px;
   --neo-leading-body: 1.5;
   --neo-leading-ui: 1.35;
@@ -620,7 +642,7 @@ html[data-ui='military'] .sidebar__link,
 html[data-ui='military'] .mobile-sidebar__link,
 html[data-ui='military'] .mobile-sidebar__action,
 html[data-ui='military'] .mobile-header__logo .neo-mark__glyph,
-html[data-ui='military'] .settings-nav__item,
+html[data-ui='military'] .settings-nav-item,
 html[data-ui='military'] .settings-subheading,
 html[data-ui='military'] .neo-btn,
 html[data-ui='military'] .add-column-menu__title,
@@ -775,9 +797,8 @@ html[data-ui='nyt'] h1 {
 
 // UI chrome controls
 .neo-btn,
-.settings-nav__item,
+.settings-nav-item,
 .settings-subheading,
-.settings-segmented__btn,
 .add-column-menu__title,
 .add-column-menu__item,
 .accounts-section__head h3,
@@ -832,6 +853,9 @@ html[data-line='crayon'] .neo-input {
 }
 
 // ============================================
+// html[data-font=…] / html[data-font-size=…] (0,1,1) tie with the html[data-ui=…] chrome
+// blocks and come later, so Book / Dyslexic measure + leading and the per-size leading
+// actually apply instead of losing to neo-chrome-base. (Sans stays the 0,1,0 fallback.)
 // Typography — data-font (chrome-aware via JS;
 // these are fallbacks when JS hasn't run yet)
 // ============================================
@@ -844,14 +868,14 @@ html[data-line='crayon'] .neo-input {
   --neo-body-tracking: 0;
 }
 
-[data-font='serif'] {
+html[data-font='serif'] {
   --neo-font-family: Georgia, 'Times New Roman', Times, serif;
   --neo-font-family-heading: var(--neo-font-family);
   --neo-leading-body: 1.55;
   --neo-body-tracking: 0;
 }
 
-[data-font='book'] {
+html[data-font='book'] {
   --neo-font-family: Palatino, 'Palatino Linotype', Georgia, serif;
   --neo-font-family-heading: var(--neo-font-family);
   --neo-leading-body: 1.65;
@@ -859,14 +883,14 @@ html[data-line='crayon'] .neo-input {
   --neo-measure: 52ch;
 }
 
-[data-font='mono'] {
+html[data-font='mono'] {
   --neo-font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
   --neo-font-family-heading: var(--neo-font-family);
   --neo-leading-body: 1.45;
   --neo-body-tracking: 0;
 }
 
-[data-font='dyslexic'] {
+html[data-font='dyslexic'] {
   --neo-font-family: OpenDyslexic, 'Comic Sans MS', Arial, sans-serif;
   --neo-font-family-heading: var(--neo-font-family);
   --neo-leading-body: 1.7;
@@ -920,36 +944,32 @@ html[data-theme='nes'] {
 }
 
 // ============================================
-// Font size scale
+// Font size scale — sets only --neo-font-size-base; main.scss gives `html` the
+// font-size from it, so the Dense rule (which lowers the token) really shrinks the root
 // ============================================
 
-[data-font-size='small'] {
+html[data-font-size='small'] {
   --neo-font-size-base: 0.875rem;
   --neo-leading-body: 1.45;
-  font-size: 0.875rem;
 }
 
-[data-font-size='medium'] {
+html[data-font-size='medium'] {
   --neo-font-size-base: 0.9375rem;
-  font-size: 0.9375rem;
 }
 
-[data-font-size='large'] {
+html[data-font-size='large'] {
   --neo-font-size-base: 1.0625rem;
   --neo-leading-body: 1.55;
-  font-size: 1.0625rem;
 }
 
-[data-font-size='xlarge'] {
+html[data-font-size='xlarge'] {
   --neo-font-size-base: 1.1875rem;
   --neo-leading-body: 1.6;
-  font-size: 1.1875rem;
 }
 
-[data-font-size='xxlarge'] {
+html[data-font-size='xxlarge'] {
   --neo-font-size-base: 1.3125rem;
   --neo-leading-body: 1.65;
-  font-size: 1.3125rem;
 }
 
 // ============================================
@@ -1004,7 +1024,7 @@ html[data-radius='jagged'] {
   --neo-card-radius: var(--neo-radius-md);
   --neo-input-radius: min(12px, var(--neo-radius-md));
   --neo-compose-radius: var(--neo-radius-md);
-  --neo-card-extra-shadow: none;
+  --neo-card-extra-shadow: 0 0 0 0 transparent;
 }
 
 // ============================================
@@ -1015,24 +1035,26 @@ html[data-line='clean'] {
   --neo-border-style: solid;
 }
 
+// Line styles never thin a theme's own hard edge (Contrast 2px, Brutal/NES 3px, Tank 2px):
+// widths resolve with max() against --neo-theme-border-width
 html[data-line='ink'] {
-  --neo-border-width: 2px;
+  --neo-border-width: max(2px, var(--neo-theme-border-width, 0px));
   --neo-border-width-thick: 3px;
   --neo-border-style: solid;
-  --neo-chrome-border-width: 2px;
+  --neo-chrome-border-width: max(2px, var(--neo-theme-border-width, 0px));
 }
 
 html[data-line='dashed'] {
   --neo-border-style: dashed;
-  --neo-border-width: 1.5px;
-  --neo-chrome-border-width: 1.5px;
+  --neo-border-width: max(1.5px, var(--neo-theme-border-width, 0px));
+  --neo-chrome-border-width: max(1.5px, var(--neo-theme-border-width, 0px));
 }
 
 html[data-line='crayon'] {
-  --neo-border-width: 2.5px;
+  --neo-border-width: max(2.5px, var(--neo-theme-border-width, 0px));
   --neo-border-width-thick: 3.5px;
   --neo-border-style: solid;
-  --neo-chrome-border-width: 2.5px;
+  --neo-chrome-border-width: max(2.5px, var(--neo-theme-border-width, 0px));
 }
 
 html[data-line='ink'] .neo-card,

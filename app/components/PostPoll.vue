@@ -21,7 +21,40 @@ const emit = defineEmits<{
 const groupName = `poll-${useId()}`
 const selected = ref<number[]>([])
 
-const showVoting = computed(() => props.canVote && !props.poll.expired && !props.poll.voted)
+// Shared clock: Date.now() inside a computed isn't reactive, so tick while the poll is open
+const now = ref(Date.now())
+let tick: ReturnType<typeof setInterval> | null = null
+const expiresAtMs = computed(() => {
+  const at = props.poll.expiresAt ? Date.parse(props.poll.expiresAt) : NaN
+  return Number.isFinite(at) ? at : null
+})
+const isClosed = computed(
+  () => !!props.poll.expired || (expiresAtMs.value !== null && expiresAtMs.value <= now.value),
+)
+onMounted(() => {
+  tick = setInterval(() => {
+    now.value = Date.now()
+    if (isClosed.value && tick) {
+      clearInterval(tick)
+      tick = null
+    }
+  }, 30_000)
+})
+onUnmounted(() => {
+  if (tick) clearInterval(tick)
+})
+
+const instances = useInstancesStore()
+
+const showVoting = computed(() => props.canVote && !isClosed.value && !props.poll.voted)
+
+// Picks belong to the account that made them — switching accounts starts clean
+watch(
+  () => instances.activeAccountId,
+  () => {
+    selected.value = []
+  },
+)
 
 // A refreshed poll (another card, server update) invalidates stale picks
 watch(
@@ -35,6 +68,15 @@ const denominator = computed(() => {
   const voters = props.poll.votersCount ?? props.poll.votesCount
   if (voters != null && voters > 0) return voters
   return props.poll.options.reduce((sum, o) => sum + (o.votesCount || 0), 0)
+})
+
+/** Multiple-choice polls count people (votersCount) separately from selections */
+const totalLabel = computed(() => {
+  const voters = props.poll.votersCount
+  if (props.poll.multiple && voters != null) {
+    return `${voters.toLocaleString()} ${voters === 1 ? 'person' : 'people'}`
+  }
+  return `${denominator.value.toLocaleString()} ${denominator.value === 1 ? 'vote' : 'votes'}`
 })
 
 const percent = (votes: number | null | undefined) => {
@@ -63,10 +105,10 @@ const submit = () => {
 }
 
 const closesLabel = computed(() => {
-  if (props.poll.expired) return 'Closed'
-  const at = props.poll.expiresAt ? Date.parse(props.poll.expiresAt) : NaN
-  if (!Number.isFinite(at)) return 'Open'
-  const mins = Math.max(1, Math.round((at - Date.now()) / 60000))
+  if (isClosed.value) return 'Closed'
+  const at = expiresAtMs.value
+  if (at === null) return 'Open'
+  const mins = Math.max(1, Math.round((at - now.value) / 60000))
   if (mins < 60) return `Closes in ${mins}m`
   const hours = Math.round(mins / 60)
   if (hours < 48) return `Closes in ${hours}h`
@@ -117,19 +159,20 @@ const closesLabel = computed(() => {
         v-for="(option, optionIdx) in poll.options"
         :key="optionIdx"
         class="status-poll-option"
-        role="meter"
-        :aria-valuenow="percent(option.votesCount)"
-        aria-valuemin="0"
-        aria-valuemax="100"
+        :role="countsHidden ? undefined : 'meter'"
+        :aria-valuenow="countsHidden ? undefined : percent(option.votesCount)"
+        :aria-valuemin="countsHidden ? undefined : 0"
+        :aria-valuemax="countsHidden ? undefined : 100"
         :aria-label="
           countsHidden
-            ? `${option.title}${isOwnVote(optionIdx) ? ' (your vote)' : ''}`
+            ? undefined
             : `${option.title}: ${percent(option.votesCount)}%${isOwnVote(optionIdx) ? ' (your vote)' : ''}`
         "
       >
         <span class="status-poll-title">
           {{ option.title }}
           <span v-if="isOwnVote(optionIdx)" class="status-poll-own" aria-hidden="true">✓</span>
+          <span v-if="countsHidden && isOwnVote(optionIdx)" class="sr-only">(your vote)</span>
         </span>
         <span v-if="!countsHidden" class="status-poll-votes">
           {{ percent(option.votesCount) }}%
@@ -143,8 +186,9 @@ const closesLabel = computed(() => {
       </div>
       <p class="status-poll-info">
         <template v-if="!countsHidden">
-          {{ denominator }} {{ denominator === 1 ? 'vote' : 'votes' }} ·
+          {{ totalLabel }} ·
         </template>
+        <template v-else>Results hidden until the poll closes · </template>
         {{ closesLabel }}
         <template v-if="poll.voted"> · You voted</template>
       </p>

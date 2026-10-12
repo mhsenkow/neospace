@@ -92,6 +92,13 @@ import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { usePostActions } from '~/composables/usePostActions'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
+import { provenOwnStatus, sameActingAccount, type ActingAccount } from '~/utils/statusOwnership'
+import { buildDeletedStatusEvent, type DeletedStatusEvent } from '~/utils/deletedStatus'
+import { emitDeletedStatus } from '~/composables/useDeletedStatus'
+import { discardRedraftSnapshot, redraftSlot, saveRedraftSnapshot } from '~/utils/redraft'
+import { draftSaveMessage } from '~/composables/useDraft'
+import { httpStatusFrom } from '~/utils/friendlyError'
+import { logError } from '~/utils/log'
 
 /** Reply couldn't import the post: say which server, and offer its own web page (does the import server-side) */
 const replyHandOff = (uri: string) => {
@@ -125,8 +132,11 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
-  /** Own post deleted (plain delete or delete & redraft) — hosts may drop it from their lists */
-  deleted: [statusId: string]
+  /**
+   * Own post deleted (plain delete or delete & redraft). Every mounted surface also gets
+   * the same account-scoped event through `onDeletedStatus` — hosts rarely need this.
+   */
+  deleted: [event: DeletedStatusEvent]
 }>()
 
 const statusStore = useStatusStore()
@@ -340,24 +350,21 @@ const isOwnPost = computed(() => {
     displayStatus.value.account.acct === user.acct
 })
 
+/** The signed-in account actions are bound to — captured before any await, revalidated after. */
+const actingAccount = (): ActingAccount | null => {
+  const account = instancesStore.activeAccount
+  if (!instancesStore.isAuthenticated || !account?.user) return null
+  return { id: account.id, url: account.url, userId: account.user.id }
+}
+
 /**
- * Own post on the acting server — only then are its id and our account id valid for
- * delete / pin. (A foreign post by a same-named user must never get these actions.)
+ * Own post with proven provenance: the author is the acting account AND the post carries
+ * an origin tag matching the acting account's server. Untagged posts and same-id authors
+ * on other servers never get delete / pin (their ids mean something else here).
  */
-const canManageOwn = computed(() => {
-  const user = instancesStore.currentUser
-  if (!instancesStore.isAuthenticated || !user) return false
-  if (displayStatus.value.account.id !== user.id) return false
-  const ext = props.status as ExtendedStatus
-  const sourceUrl = (props.status.reblog ? displayStatus.value : ext) as ExtendedStatus
-  const from = sourceUrl._instanceUrl || ext._instanceUrl
-  if (!from) return true
-  try {
-    return hostOf(from) === hostOf(activeCredentials().url)
-  } catch {
-    return false
-  }
-})
+const canManageOwn = computed(() =>
+  provenOwnStatus(displayStatus.value, props.status as ExtendedStatus, actingAccount()),
+)
 
 /** Mastodon only pins public / unlisted posts; reblog rows can't be pinned */
 const canPin = computed(
@@ -644,7 +651,7 @@ const handleMute = async () => {
       fromActive ? undefined : { acct },
     )
   } catch (e) {
-    console.error('Mute error:', e)
+    logError('Mute error:', e)
     toastStore.show({ message: 'Couldn’t mute that account. Try again from your home server.' })
   } finally {
     isMuting.value = false
@@ -681,7 +688,7 @@ const handleBlock = async () => {
       fromActive ? undefined : { acct },
     )
   } catch (e) {
-    console.error('Block error:', e)
+    logError('Block error:', e)
     toastStore.show({ message: 'Couldn’t block that account. Try again from your home server.' })
   } finally {
     isBlocking.value = false
@@ -723,7 +730,7 @@ const handleReport = async () => {
     )
     toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
   } catch (e) {
-    console.error('Report error:', e)
+    logError('Report error:', e)
     toastStore.show({ message: 'Failed to submit report. Please try again.' })
   } finally {
     isMenuOpen.value = false
@@ -735,8 +742,45 @@ const removed = ref(false)
 const isDeleting = ref(false)
 const isPinning = ref(false)
 
+/** What a management action was confirmed against — checked again after every await. */
+interface ManageTarget {
+  account: ActingAccount
+  statusId: string
+  uri: string | null
+  url: string | null
+}
+
+const captureManageTarget = (): ManageTarget | null => {
+  const account = actingAccount()
+  if (!account || !canManageOwn.value) return null
+  const s = displayStatus.value
+  return { account, statusId: s.id, uri: s.uri || null, url: s.url || null }
+}
+
+/** Same account, same post, still provably ours — false after an account switch mid-flow */
+const stillManageable = (target: ManageTarget) =>
+  sameActingAccount(target.account, actingAccount()) &&
+  canManageOwn.value &&
+  displayStatus.value.id === target.statusId
+
+const accountChangedToast = (what: string) =>
+  toastStore.show({ message: `Your account changed — ${what}.` })
+
+/** Drop the card and tell every other mounted surface (board, profile, thread) */
+const announceDeleted = (target: ManageTarget) => {
+  removed.value = true
+  const event = buildDeletedStatusEvent(
+    { id: target.statusId, uri: target.uri, url: target.url },
+    target.account,
+  )
+  emit('deleted', event)
+  emitDeletedStatus(event)
+}
+
 const handleDelete = async () => {
-  if (!canManageOwn.value || isDeleting.value) return
+  if (isDeleting.value) return
+  const target = captureManageTarget()
+  if (!target) return
   isMenuOpen.value = false
   const ok = await overlayStore.openConfirm({
     title: 'Delete this post?',
@@ -745,12 +789,14 @@ const handleDelete = async () => {
     danger: true,
   })
   if (!ok) return
-  const id = displayStatus.value.id
+  if (!stillManageable(target)) {
+    accountChangedToast('nothing was deleted')
+    return
+  }
   isDeleting.value = true
   try {
-    await statusStore.deleteStatus(id)
-    removed.value = true
-    emit('deleted', id)
+    await statusStore.deleteStatus(target.statusId, target.account.id)
+    announceDeleted(target)
     toastStore.show({ message: 'Post deleted', duration: 2500 })
   } catch (e) {
     toastStore.show({ message: e instanceof Error ? e.message : 'Couldn’t delete post' })
@@ -761,7 +807,9 @@ const handleDelete = async () => {
 
 /** Delete, then reopen the text (and CW / visibility / reply target) in the composer */
 const handleRedraft = async () => {
-  if (!canManageOwn.value || isDeleting.value) return
+  if (isDeleting.value) return
+  const target = captureManageTarget()
+  if (!target) return
   isMenuOpen.value = false
   const s = displayStatus.value
   const lost = [s.mediaAttachments?.length ? 'attached media' : '', s.poll ? 'the poll' : '']
@@ -774,20 +822,83 @@ const handleRedraft = async () => {
     danger: true,
   })
   if (!ok) return
+  if (!stillManageable(target)) {
+    accountChangedToast('nothing was deleted')
+    return
+  }
   isDeleting.value = true
+  const accountId = target.account.id
   try {
-    // Read the source first: if this fails nothing is deleted and nothing is lost
-    const source = await statusStore.fetchStatusSource(s.id)
-    const deleted = await statusStore.deleteStatus(s.id)
-    removed.value = true
-    emit('deleted', s.id)
+    // 1. Read the source as the captured account. Only "this server has no source API"
+    //    may fall back to the rendered HTML — offline / auth / unknown mean we never read
+    //    the post, so nothing is deleted and the original stays put.
+    const source = await statusStore.fetchStatusSource(target.statusId, accountId)
+    if (!source.ok && source.reason !== 'unsupported') {
+      toastStore.show({
+        message:
+          source.reason === 'auth'
+            ? 'Couldn’t read your post — sign in again. It was not deleted.'
+            : source.reason === 'network'
+              ? 'Couldn’t reach your server. Your post was not deleted.'
+              : 'Couldn’t read your post, so it was not deleted.',
+        ...(source.reason === 'auth'
+          ? {}
+          : { actionLabel: 'Retry', onAction: () => void handleRedraft() }),
+      })
+      return
+    }
+    if (!stillManageable(target)) {
+      accountChangedToast('nothing was deleted')
+      return
+    }
+
+    const snapshot = {
+      text: source.ok ? source.text : stripHtml(s.content),
+      spoilerText: source.ok ? source.spoilerText : s.spoilerText ?? '',
+      visibility: s.visibility,
+    }
+    // 2. Save a recoverable copy BEFORE the destructive call; no copy, no delete.
+    const saved = saveRedraftSnapshot(accountId, target.statusId, snapshot)
+    if (!saved.ok) {
+      toastStore.show({ message: `${draftSaveMessage(saved.reason)} The post was not deleted.`, duration: 6000 })
+      return
+    }
+
+    // 3. Delete as the same captured account.
+    let deleted: { text: string | null; spoilerText: string | null }
+    try {
+      deleted = await statusStore.deleteStatus(target.statusId, accountId)
+    } catch (e) {
+      // A server answer means the post still exists — drop the copy. No answer (network)
+      // is ambiguous, so the snapshot stays recoverable.
+      if (httpStatusFrom(e) != null) discardRedraftSnapshot(accountId, target.statusId)
+      throw e
+    }
+    announceDeleted(target)
+
+    // The server's copy of the text is closest to what was posted when /source was unavailable
+    if (!source.ok && (deleted.text || deleted.spoilerText)) {
+      snapshot.text = deleted.text ?? snapshot.text
+      snapshot.spoilerText = deleted.spoilerText ?? snapshot.spoilerText
+      saveRedraftSnapshot(accountId, target.statusId, snapshot)
+    }
+
+    // 4. The composer posts as whoever is active — only open it for the captured account.
+    //    The snapshot stays in Drafts until it is posted or discarded.
+    if (!sameActingAccount(target.account, actingAccount())) {
+      toastStore.show({
+        message: 'Post deleted. Switch back to that account to finish your redraft — it’s saved in Drafts.',
+        duration: 6000,
+      })
+      return
+    }
     composeSheet.show({
       title: 'Redraft',
-      initialText: source?.text ?? deleted.text ?? stripHtml(s.content),
-      spoilerText: source?.spoilerText ?? deleted.spoilerText ?? s.spoilerText ?? '',
+      initialText: snapshot.text,
+      spoilerText: snapshot.spoilerText,
       visibility: s.visibility,
       inReplyToId: s.inReplyToId || null,
-      draftSlot: `redraft:${s.id}`,
+      draftSlot: redraftSlot(target.statusId),
     })
   } catch (e) {
     toastStore.show({ message: e instanceof Error ? e.message : 'Couldn’t delete post' })
@@ -797,12 +908,16 @@ const handleRedraft = async () => {
 }
 
 const handleTogglePin = async () => {
-  if (!canPin.value || isPinning.value) return
+  if (isPinning.value) return
+  const target = captureManageTarget()
+  if (!target || !canPin.value) return
   isPinning.value = true
   const s = displayStatus.value
   const want = !s.pinned
   try {
-    const updated = want ? await statusStore.pinStatus(s.id) : await statusStore.unpinStatus(s.id)
+    const updated = want
+      ? await statusStore.pinStatus(target.statusId, target.account.id)
+      : await statusStore.unpinStatus(target.statusId, target.account.id)
     s.pinned = updated?.pinned ?? want
     toastStore.show({ message: want ? 'Pinned to your profile' : 'Unpinned', duration: 2400 })
   } catch (e) {
@@ -825,6 +940,7 @@ const handleVote = async (choices: number[]) => {
   if (!poll || isVoting.value || poll.expired || poll.voted || !choices.length) return
   if (!requireAuth()) return
   isVoting.value = true
+  let refresh: (() => Promise<mastodon.v1.Poll | null>) | null = null
   try {
     // Vote on the server that owns the status: remote polls need the local copy's poll id
     const ctx = await getActionContext()
@@ -842,10 +958,29 @@ const handleVote = async (choices: number[]) => {
       localPoll.options.length === poll.options.length &&
       localPoll.options.every((o, i) => o.title === poll.options[i]?.title)
     if (!same) throw new Error('Poll mismatch')
+    refresh = async () => (await ctx.client.v1.polls.$select(localPoll.id).fetch()) ?? null
     const updated = await ctx.client.v1.polls.$select(localPoll.id).votes.create({ choices })
     displayStatus.value.poll = updated
     toastStore.show({ message: 'Vote sent', duration: 2200 })
-  } catch {
+  } catch (e) {
+    // "Already voted" (another tab/device): pull the real poll state instead of a vague failure
+    const text = e instanceof Error ? e.message : ''
+    const code = (e as { statusCode?: number; status?: number } | null)?.statusCode ?? (e as { status?: number } | null)?.status
+    if (refresh && (code === 422 || /already voted|expired/i.test(text))) {
+      try {
+        const fresh = await refresh()
+        if (fresh) {
+          displayStatus.value.poll = fresh
+          toastStore.show({
+            message: fresh.voted ? 'You already voted in this poll' : 'This poll has closed',
+            duration: 3000,
+          })
+          return
+        }
+      } catch {
+        // fall through to the generic message
+      }
+    }
     toastStore.show({
       message: 'Couldn’t send your vote — it may have closed, or your server can’t reach this poll.',
     })
@@ -939,6 +1074,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       m.description ||
       (images.length > 1 ? `Image ${i + 1} of ${images.length}` : 'Image without description'),
     caption: m.description?.trim() || undefined,
+    preview: m.previewUrl && m.previewUrl !== m.url ? m.previewUrl : undefined,
   }))
   const index = images.findIndex((m) => m.id === media.id)
   const current = items[index]

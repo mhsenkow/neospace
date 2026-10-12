@@ -10,7 +10,11 @@ import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel, safeHttpUrl } from '~/utils/dmHelpers'
+import { compareId } from '~/utils/compareId'
 import { createRaceGuard } from '~/composables/useRace'
+import { CHAT_DRAFT_PREFIX } from '~/composables/useDraft'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
+import { dropDeletedStatus, matchesDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import {
   activeClient,
@@ -77,7 +81,11 @@ const preferReducedMotion = () =>
 /** Chronological chat messages */
 const chatMessages = computed(() => {
   if (!focusStatus.value) return [] as mastodon.v1.Status[]
-  return [...ancestors.value, focusStatus.value, ...descendants.value]
+  // The API returns descendants depth-first — branched DMs would render out of time order
+  // (and `.at(-1)` wouldn't be the newest message). Snowflake ids sort chronologically.
+  return [...ancestors.value, focusStatus.value, ...descendants.value].sort((a, b) =>
+    compareId(a.id, b.id),
+  )
 })
 
 const threadQuery = ref('')
@@ -391,6 +399,11 @@ const bubbleMentionAccts = computed(() =>
 /** Stable per conversation — re-keying on every new message wiped the draft and focus */
 const chatThreadKey = computed(() => chatMessages.value[0]?.id || focusStatus.value?.id || '')
 
+/** Same slot for the desktop and mobile composers, and across Chat ↔ Profile flips */
+const chatDraftSlot = computed(() =>
+  chatThreadKey.value ? `${CHAT_DRAFT_PREFIX}${chatThreadKey.value}` : undefined,
+)
+
 const threadTitle = computed(() => {
   if (!focusStatus.value) return 'Thread'
   if (!isDirectThread.value) return 'Thread'
@@ -421,8 +434,18 @@ const replyTarget = computed(() => {
 /** Mentions prepended on send — keep the reply field empty (Threads / ChatComposer) */
 const replyMentionAccts = computed(() => {
   if (isDirectThread.value) return recipientAccts.value
-  const acct = focusStatus.value?.account?.acct
-  return acct ? [acct] : []
+  const focus = focusStatus.value
+  if (!focus) return []
+  // Reply to the author (unless that's you) and keep everyone else the post mentions
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const acct of [focus.account?.acct, ...(focus.mentions || []).map((m) => m.acct)]) {
+    const key = (acct || '').toLowerCase()
+    if (!key || key === myAcct.value || seen.has(key)) continue
+    seen.add(key)
+    out.push(acct as string)
+  }
+  return out
 })
 
 const dayLabelFor = (status: mastodon.v1.Status, index: number) => {
@@ -439,6 +462,16 @@ const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
   if (index === 0) return true
   const prev = visibleChatMessages.value[index - 1]
   return !prev || prev.account.id !== status.account.id
+}
+
+/** Stamp the last bubble of a run, or any bubble followed by a >5 minute gap */
+const BUBBLE_TIME_GAP_MS = 5 * 60_000
+const showBubbleTime = (status: mastodon.v1.Status, index: number) => {
+  const next = visibleChatMessages.value[index + 1]
+  if (!next) return true
+  if (next.account.id !== status.account.id) return true
+  const gap = new Date(next.createdAt).getTime() - new Date(status.createdAt).getTime()
+  return !(gap >= 0 && gap <= BUBBLE_TIME_GAP_MS)
 }
 
 /** Resolved local id for public inline reply (foreign URLs) */
@@ -567,12 +600,48 @@ const isNearPageBottom = (slack = 200) => {
   return doc.scrollHeight - window.scrollY - window.innerHeight <= slack
 }
 
+let stopImageFollow: (() => void) | null = null
+
+/**
+ * Lazy bubble images have no intrinsic size, so as they load they push the newest
+ * message under the composer. For a few seconds after landing at the end, re-pin on
+ * each image load — but only while the reader is still at the bottom.
+ */
+const followImagesToEnd = () => {
+  stopImageFollow?.()
+  const root = document
+  const onLoad = (e: Event) => {
+    const t = e.target
+    if (!(t instanceof HTMLImageElement) || !t.closest('.chat-stream')) return
+    if (isNearPageBottom(400)) chatEndEl.value?.scrollIntoView({ block: 'end', behavior: 'auto' })
+  }
+  root.addEventListener('load', onLoad, true)
+  const timer = window.setTimeout(() => stopImageFollow?.(), 4000)
+  stopImageFollow = () => {
+    root.removeEventListener('load', onLoad, true)
+    window.clearTimeout(timer)
+    stopImageFollow = null
+  }
+}
+
 const scrollChatToEnd = async () => {
   await nextTick()
   chatEndEl.value?.scrollIntoView({
     block: 'end',
     behavior: preferReducedMotion() ? 'auto' : 'smooth',
   })
+  if (typeof window !== 'undefined') followImagesToEnd()
+}
+
+/** A DM opened for an older message (e.g. from a notification): bring it into view and flash it */
+const scrollToChatMessage = async (id: string) => {
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`.chat-stream [data-status-id="${CSS.escape(id)}"]`)
+  if (!el) return false
+  el.scrollIntoView({ block: 'center', behavior: preferReducedMotion() ? 'auto' : 'smooth' })
+  el.classList.add('msg-target')
+  window.setTimeout(() => el.classList.remove('msg-target'), 2200)
+  return true
 }
 
 /**
@@ -585,6 +654,8 @@ let keyboardFollowsChat = true
 const onReplyFieldFocus = () => {
   keyboardFollowsChat = isNearPageBottom()
 }
+/** The find bar hides while *another* field has the keyboard up — never under its own focus */
+const threadSearchFocused = ref(false)
 const onThreadSearchFocus = () => {
   keyboardFollowsChat = false
 }
@@ -696,7 +767,11 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
       if (!ticket.isCurrent()) return
       const behavior = preferReducedMotion() ? 'auto' : 'smooth'
       if (thread.status.visibility === 'direct') {
-        await scrollChatToEnd()
+        const lastId = thread.descendants.at(-1)?.id ?? thread.status.id
+        const olderTarget = thread.status.id !== lastId && thread.descendants.length > 0
+        if (!(olderTarget && (await scrollToChatMessage(thread.status.id)))) {
+          await scrollChatToEnd()
+        }
       } else {
         focusEl.value?.scrollIntoView({ block: 'center', behavior })
         focusEl.value?.focus?.({ preventScroll: true })
@@ -742,12 +817,8 @@ const onReplyPosted = async (status: mastodon.v1.Status) => {
   })
 }
 
-/** A message deleted from its bubble menu — drop it now instead of on the next poll */
-const onMessageDeleted = (statusId: string) => {
-  ancestors.value = ancestors.value.filter((s) => s.id !== statusId)
-  descendants.value = descendants.value.filter((s) => s.id !== statusId)
-  if (focusStatus.value?.id !== statusId) return
-  // The focused post is gone (its context would 404) — move to what's left
+/** The focused post is gone (its context would 404) — move to what's left */
+const leaveDeletedFocus = () => {
   const rest = [...ancestors.value, ...descendants.value]
   const next = rest.at(-1)
   if (next) {
@@ -759,6 +830,24 @@ const onMessageDeleted = (statusId: string) => {
     })
   } else void router.push('/messages')
 }
+
+/** A message deleted from its bubble menu — drop it now instead of on the next poll */
+const onMessageDeleted = (statusId: string) => {
+  ancestors.value = ancestors.value.filter((s) => s.id !== statusId)
+  descendants.value = descendants.value.filter((s) => s.id !== statusId)
+  if (focusStatus.value?.id !== statusId) return
+  leaveDeletedFocus()
+}
+
+/** Any post deleted elsewhere in the app (card menu on this thread, board, profile) */
+const onPostDeleted = (event: DeletedStatusEvent) => {
+  const focusGone = !!focusStatus.value && matchesDeletedStatus(focusStatus.value, event)
+  ancestors.value = dropDeletedStatus(ancestors.value, event)
+  descendants.value = dropDeletedStatus(descendants.value, event)
+  if (focusGone) leaveDeletedFocus()
+}
+const stopDeletedListen = onDeletedStatus(onPostDeleted)
+onBeforeUnmount(stopDeletedListen)
 
 const goProfile = () => {
   const person = peekSeed.value || otherParticipant.value
@@ -789,12 +878,25 @@ const startThreadPoll = () => {
   }, 40_000)
 }
 
+/** Catch a DM up as soon as the tab is visible again, instead of waiting out the 40s poll */
+let lastVisibleCatchUp = 0
+const onVisibilityChange = () => {
+  if (document.hidden || !isDirectThread.value) return
+  const now = Date.now()
+  if (now - lastVisibleCatchUp < 5_000) return
+  lastVisibleCatchUp = now
+  void loadThread({ quiet: true })
+}
+
 onMounted(() => {
   void loadThread().then(() => startThreadPoll())
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   stopThreadPoll()
+  stopImageFollow?.()
   loadRace.abort()
   peekRace.abort()
   peekStatusesRace.abort()
@@ -861,7 +963,7 @@ useHead({
       <SubviewChrome
         v-if="isDirectThread && focusStatus"
         class="thread-subview"
-        :back-action="() => router.push('/messages')"
+        back-fallback="/messages"
       >
         <template #title>
           <!-- The person button replaces SubviewChrome's h1 — keep a page heading -->
@@ -927,8 +1029,10 @@ useHead({
       </SubviewChrome>
 
       <div
-        v-if="focusStatus && !isLoading && !error && !keyboardOpen"
+        v-if="focusStatus && !isLoading && !error && (!keyboardOpen || threadSearchFocused)"
         class="thread-search neo-sticky-bar neo-sticky-bar--under-chrome"
+        @focusin="threadSearchFocused = true"
+        @focusout="threadSearchFocused = false"
       >
         <label class="thread-search__field">
           <span class="sr-only">{{ isDirectThread ? 'Search conversation' : 'Search thread' }}</span>
@@ -968,7 +1072,7 @@ useHead({
       <div
         id="dm-context-panel"
         class="dm-context-panel"
-        role="tabpanel"
+        :role="showDmContextChrome ? 'tabpanel' : undefined"
         :aria-labelledby="
           showDmContextChrome
             ? dmPane === 'chat'
@@ -1015,7 +1119,9 @@ useHead({
             <MessageBubble
               :status="status"
               :mine="isMine(status)"
+              :data-status-id="status.id"
               :show-meta="showBubbleMeta(status, index)"
+              :show-time="showBubbleTime(status, index)"
               :participant-accts="bubbleMentionAccts"
               @deleted="onMessageDeleted"
             />
@@ -1036,7 +1142,7 @@ useHead({
           <div
             v-if="otherParticipants.length > 1"
             class="dm-profile-peek__chips"
-            role="radiogroup"
+            role="group"
             aria-label="People in this conversation"
           >
             <button
@@ -1045,8 +1151,8 @@ useHead({
               type="button"
               class="dm-profile-peek__chip"
               :class="{ 'dm-profile-peek__chip--active': p.id === peekSeed?.id }"
-              role="radio"
-              :aria-checked="p.id === peekSeed?.id"
+              :aria-pressed="p.id === peekSeed?.id"
+              :disabled="!p.id"
               @click="p.id && selectPeekPerson(p.id)"
             >
               <img
@@ -1121,6 +1227,7 @@ useHead({
       <ChatComposer
         v-if="!showDmContextChrome && canReply && replyTarget"
         :key="chatThreadKey"
+        :draft-slot="chatDraftSlot"
         :in-reply-to-id="replyTarget.id"
         :recipient-accts="recipientAccts"
         placeholder="Message…"
@@ -1145,6 +1252,7 @@ useHead({
         <ChatComposer
           v-if="dmPane === 'chat' && canReply && replyTarget"
           :key="chatThreadKey"
+          :draft-slot="chatDraftSlot"
           embedded
           :in-reply-to-id="replyTarget.id"
           :recipient-accts="recipientAccts"
@@ -1653,6 +1761,14 @@ useHead({
     color: var(--neo-text-muted);
     padding-right: 0.35rem;
   }
+}
+
+// Briefly flag the message a notification pointed at (bubble is a child component: :deep)
+.chat-stream :deep(.msg-target) {
+  outline: 2px solid var(--neo-accent);
+  outline-offset: 3px;
+  border-radius: var(--neo-radius-md, 8px);
+  transition: outline-color 0.6s ease;
 }
 
 .chat-stream {

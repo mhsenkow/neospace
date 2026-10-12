@@ -8,7 +8,6 @@ import {
   FEEDBACK_GITHUB_REPO,
   FEEDBACK_JSON_MAX_BYTES,
   FEEDBACK_KIND_LABELS,
-  FEEDBACK_SCREENSHOT_SERVER_MAX,
   FEEDBACK_TITLE_MAX,
   FEEDBACK_BODY_MAX,
   GITHUB_ISSUE_BODY_BUDGET,
@@ -45,8 +44,18 @@ const ALLOWED_HOSTS = new Set([
   'neospace-dc4.pages.dev',
 ])
 
-function originAllowed(origin: string | null): boolean {
+/**
+ * Same-origin requests are always fine: it covers `wrangler pages dev` (:8788),
+ * `nuxt dev` on any port and previews without hand-keeping every local port. The
+ * lists below add the production host and Pages previews for cross-origin callers.
+ */
+function originAllowed(origin: string | null, requestUrl?: string): boolean {
   if (!origin) return false
+  try {
+    if (requestUrl && origin === new URL(requestUrl).origin) return true
+  } catch {
+    /* malformed request URL — fall through to the allowlist */
+  }
   if (ALLOWED_ORIGINS.has(origin)) return true
   try {
     const host = new URL(origin).hostname
@@ -218,22 +227,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
 
   const origin = request.headers.get('Origin')
-  if (!originAllowed(origin)) {
+  if (!originAllowed(origin, request.url)) {
     return json({ error: 'Forbidden origin', code: 'FORBIDDEN_ORIGIN' }, 403)
-  }
-
-  const ip = clientIp(request)
-  const rawIp = rawClientIp(request)
-  const rateKey = ip ? `feedback:${ip}` : `feedback:local:${origin}`
-  const rate = allowRequest(rateKey, RATE_LIMIT, RATE_WINDOW_MS)
-  if (!rate.allowed) {
-    const headers: Record<string, string> = {}
-    if (rate.retryAfterSec) headers['Retry-After'] = String(rate.retryAfterSec)
-    return json(
-      { error: 'Too many notes — try again later', code: 'RATE_LIMITED' },
-      429,
-      headers,
-    )
   }
 
   if (!env.GITHUB_TOKEN) {
@@ -278,12 +273,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const payload = {
     title: str(fields.title),
     body: str(fields.body),
+    // Screenshots accepted for forward-compat but never inlined (GitHub strips data: images)
     imageBase64: str(fields.imageBase64),
     href: str(fields.href),
     kind: str(fields.kind),
     turnstileToken: str(fields.turnstileToken),
   }
 
+  const rawIp = rawClientIp(request)
   if (env.TURNSTILE_SECRET_KEY) {
     const token = payload.turnstileToken.trim()
     if (!token) {
@@ -299,17 +296,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
+  // Charge the isolate bucket only after validation + Turnstile (NS-437)
+  const ip = clientIp(request)
+  const rateKey = ip ? `feedback:${ip}` : `feedback:local:${origin}`
+  const rate = allowRequest(rateKey, RATE_LIMIT, RATE_WINDOW_MS)
+  if (!rate.allowed) {
+    const headers: Record<string, string> = {}
+    if (rate.retryAfterSec) headers['Retry-After'] = String(rate.retryAfterSec)
+    return json(
+      { error: 'Too many notes — try again later', code: 'RATE_LIMITED' },
+      429,
+      headers,
+    )
+  }
+
   const title =
     payload.title.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, FEEDBACK_TITLE_MAX) ||
     'NeoSpace feedback'
-  const escapeMd = (s: string) =>
-    s
-      .replace(/(^|[^a-zA-Z0-9_])@/g, '$1&#64;')
-      .replace(/(^|[^a-zA-Z0-9_])#(\d+)/g, '$1&#35;$2')
-  const rawUserBody = escapeMd((payload.body || '(no description)').trim()).slice(
-    0,
-    FEEDBACK_BODY_MAX,
-  )
+  // Fence alone stops @mentions / #issue cross-refs — don't entity-escape inside ```text (NS-436)
+  const rawUserBody = (payload.body || '(no description)').trim().slice(0, FEEDBACK_BODY_MAX)
   const fencedBody = ['```text', rawUserBody.replace(/```/g, "'''"), '```'].join('\n')
 
   const kindRaw = (payload.kind || 'other').trim().toLowerCase()
@@ -332,19 +337,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let body = `${fencedBody}\n\n${meta}`
 
-  const dataUrl =
-    payload.imageBase64 && payload.imageBase64.length < FEEDBACK_SCREENSHOT_SERVER_MAX
-      ? screenshotDataUrl(payload.imageBase64)
-      : null
-  if (dataUrl) {
-    const withShot = `${body}\n\n![screenshot](${dataUrl})`
-    if (withShot.length <= GITHUB_ISSUE_BODY_BUDGET) {
-      body = withShot
-    } else {
-      body += `\n\n_(screenshot omitted — too large for GitHub issue body)_`
-    }
-  } else if (payload.imageBase64) {
-    body += `\n\n_(screenshot omitted — too large or not a PNG/JPEG/WebP/GIF)_`
+  // GitHub sanitizer drops data: image sources — never inline screenshots (NS-435).
+  // Re-enable via R2 (or similar) when a public screenshot URL binding exists.
+  if (payload.imageBase64) {
+    body += `\n\n_(screenshot not attached — image hosting is not configured for leave-a-note)_`
   }
   body = body.slice(0, GITHUB_ISSUE_BODY_BUDGET)
 

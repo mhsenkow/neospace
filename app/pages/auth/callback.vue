@@ -6,7 +6,8 @@
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
 import { friendlyAuthError } from '~/utils/authErrors'
-import { clearPendingAuth, sanitizeReturnTo } from '~/utils/oauthPkce'
+import { clearPendingAuth, peekPendingAuth, sanitizeReturnTo } from '~/utils/oauthPkce'
+import { useToastStore } from '~/stores/toast'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +17,21 @@ const instancesStore = useInstancesStore()
 const error = ref<string | null>(null)
 const status = ref('Signing you in…')
 const errorHeadingRef = ref<HTMLElement | null>(null)
+
+// Leaving the page cancels an in-flight token exchange promptly
+const authAbort = new AbortController()
+onBeforeUnmount(() => authAbort.abort())
+
+/** Where "Back to sign in" goes — captured before the pending record is cleared */
+const retryTarget = ref<{ add: boolean; returnTo: string | null }>({ add: false, returnTo: null })
+
+const loginUrl = () => {
+  const q = new URLSearchParams()
+  if (retryTarget.value.add) q.set('add', '1')
+  if (retryTarget.value.returnTo) q.set('returnTo', retryTarget.value.returnTo)
+  const qs = q.toString()
+  return qs ? `/login?${qs}` : '/login'
+}
 
 const scrubUrl = () => {
   if (typeof window === 'undefined') return
@@ -31,10 +47,26 @@ onMounted(async () => {
   // Repeated params arrive as arrays — only a single string is a real code/state
   const code = typeof route.query.code === 'string' ? route.query.code : ''
   const errorParam = route.query.error ? String(route.query.error) : ''
+  const stateParam = typeof route.query.state === 'string' ? route.query.state : null
+  // Capture add mode / returnTo before anything clears the pending record
+  const pendingAtStart = peekPendingAuth(stateParam)
+  retryTarget.value = {
+    add: !!pendingAtStart?.addMode,
+    returnTo: sanitizeReturnTo(pendingAtStart?.returnTo),
+  }
+
+  // Pressing "Deny" is a choice, not a failure: go back to sign-in with a neutral note
+  if (errorParam === 'access_denied') {
+    clearPendingAuth(stateParam)
+    scrubUrl()
+    useToastStore().show({ message: 'Sign-in cancelled', duration: 3500 })
+    await router.replace(loginUrl())
+    return
+  }
 
   if (errorParam) {
     error.value = friendlyAuthError(errorParam)
-    clearPendingAuth()
+    clearPendingAuth(stateParam)
     scrubUrl()
     await nextTick()
     errorHeadingRef.value?.focus()
@@ -43,7 +75,7 @@ onMounted(async () => {
 
   if (!code) {
     error.value = 'This sign-in link is incomplete. Please try again from the sign-in page.'
-    clearPendingAuth()
+    clearPendingAuth(stateParam)
     scrubUrl()
     await nextTick()
     errorHeadingRef.value?.focus()
@@ -54,7 +86,7 @@ onMounted(async () => {
     status.value = 'Finishing up…'
     instancesStore.loadFromStorage()
     const state = typeof route.query.state === 'string' ? route.query.state : null
-    const result = await instancesStore.completeAuth(code, state)
+    const result = await instancesStore.completeAuth(code, state, { signal: authAbort.signal })
     const instance = result.instance
     const pending = result.pending
 
@@ -84,7 +116,7 @@ onMounted(async () => {
     await router.replace(returnTo || defaultPath)
   } catch (e: any) {
     error.value = friendlyAuthError(e.message || 'Authentication failed')
-    clearPendingAuth()
+    clearPendingAuth(stateParam)
     scrubUrl()
     await nextTick()
     errorHeadingRef.value?.focus()
@@ -92,13 +124,7 @@ onMounted(async () => {
 })
 
 const handleRetry = () => {
-  let wasAdd = false
-  try {
-    wasAdd = sessionStorage.getItem('neospace_auth_add') === '1'
-  } catch {
-    /* storage blocked */
-  }
-  router.push(wasAdd ? '/login?add=1' : '/login')
+  router.push(loginUrl())
 }
 
 useHead({

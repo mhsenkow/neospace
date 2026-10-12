@@ -32,6 +32,20 @@ const mainHandle = computed(() => {
   return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
 })
 
+/** Add mode returns to where it was opened from: returnTo, else the previous page, else Profile */
+const goBack = () => {
+  if (returnTo.value) return router.push(returnTo.value)
+  if (typeof window !== 'undefined' && window.history.length > 1 && window.history.state?.back) {
+    return router.back()
+  }
+  return router.push('/profile')
+}
+const backLabel = computed(() =>
+  returnTo.value || (typeof window !== 'undefined' && window.history.state?.back)
+    ? '← Back'
+    : '← Back to profile',
+)
+
 /** Bumped by Cancel / bfcache restore so a slow app-registration can't redirect afterwards */
 let loginAttempt = 0
 
@@ -86,10 +100,6 @@ const startLogin = async (url: string) => {
   pickerRef.value?.setError(null)
 
   try {
-    if (typeof window !== 'undefined') {
-      if (isAddMode.value) sessionStorage.setItem('neospace_auth_add', '1')
-      else sessionStorage.removeItem('neospace_auth_add')
-    }
     const authUrl = await instancesStore.loginWithInstance(url, {
       addMode: isAddMode.value,
       returnTo: returnTo.value,
@@ -120,20 +130,20 @@ definePageMeta({
       <header class="login__brand">
         <span class="login__mark" aria-hidden="true">NS</span>
         <h1 class="login__wordmark">
-          {{ isAddMode ? 'Link a server' : 'Sign in' }}
+          {{ isAddMode ? 'Add account' : 'Sign in' }}
         </h1>
         <p class="login__lede">
           <template v-if="isAddMode">
             <template v-if="mainHandle">
               Linked under <strong>{{ mainHandle }}</strong>.
             </template>
-            Choose another server to add.
+            Choose the server for the account you want to add — it can be one you’re already on.
           </template>
           <template v-else>
             Choose your server. Approve NeoSpace, then you’re in.
           </template>
         </p>
-        <NuxtLink v-if="isAddMode" to="/profile" class="login__back">← Back to profile</NuxtLink>
+        <a v-if="isAddMode" href="#" class="login__back" @click.prevent="goBack">{{ backLabel }}</a>
       </header>
 
       <div v-if="isConnecting" class="login__connecting" role="status" aria-live="polite">
@@ -148,13 +158,15 @@ definePageMeta({
       <template v-else>
         <ServerPicker
           ref="pickerRef"
-          :submit-label="isAddMode ? 'Link this server' : 'Sign in on this server'"
+          :submit-label="isAddMode ? 'Add account on this server' : 'Sign in on this server'"
           @select="startLogin"
         />
 
         <footer class="login__footer">
           <p>New to Mastodon?</p>
           <div class="login__footer-links">
+            <NuxtLink v-if="!isAddMode" to="/">Just browse</NuxtLink>
+            <span v-if="!isAddMode" aria-hidden="true">·</span>
             <NuxtLink to="/explore">Browse servers by interest</NuxtLink>
             <span aria-hidden="true">·</span>
             <a href="https://joinmastodon.org/servers" target="_blank" rel="noopener">

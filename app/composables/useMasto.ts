@@ -45,6 +45,12 @@ export function clearClientCache(url?: string) {
 /** Small LRU bound — several accounts on one host each keep their own client. */
 const CLIENT_CACHE_MAX = 16
 
+/**
+ * Per-request ceiling for cached clients. Without it one hung server keeps
+ * `verifyAllInstances` (and so `isInitialized`) pending and every column blank.
+ */
+export const CLIENT_TIMEOUT_MS = 15_000
+
 function cachedClient(url: string, accessToken?: string | null): mastodon.rest.Client {
   const normalized = normalizeUrl(url)
   const key = cacheKey(normalized, accessToken)
@@ -58,6 +64,7 @@ function cachedClient(url: string, accessToken?: string | null): mastodon.rest.C
   client = createRestClient({
     url: normalized,
     accessToken: accessToken || undefined,
+    timeout: CLIENT_TIMEOUT_MS,
   })
   clientCache.set(key, client)
   while (clientCache.size > CLIENT_CACHE_MAX) {
@@ -119,10 +126,36 @@ export function activeCredentials(): { url: string; accessToken: string } {
   return { url: normalizeUrl(account.url), accessToken: account.accessToken }
 }
 
+/**
+ * Credentials for one specific connected account — ignores the active account and
+ * the read override, so work started as account A (media uploads) stays with A.
+ */
+export function credentialsFor(accountId: string): { url: string; accessToken: string } {
+  const store = useInstancesStore()
+  const instance = store.instances.find((i) => i.id === accountId)
+  if (!instance?.url || !instance.accessToken) throw new Error('That account is no longer signed in')
+  return { url: normalizeUrl(instance.url), accessToken: instance.accessToken }
+}
+
 /** Authenticated client for the active account */
 export function activeClient(): mastodon.rest.Client {
   const { url, accessToken } = activeCredentials()
   return cachedClient(url, accessToken)
+}
+
+/**
+ * The signed-in slot to read a host as: the active account when it lives there, otherwise any
+ * slot on that host that still has a token — `getInstanceByUrl` alone returns the *first* slot,
+ * which is the wrong account (or an expired, token-less one) when two accounts share a server.
+ */
+export function readerForUrl(url: string): { accessToken: string } | null {
+  const store = useInstancesStore()
+  const target = normalizeUrl(url).toLowerCase()
+  const sameHost = (u: string | undefined) => !!u && normalizeUrl(u).toLowerCase() === target
+  const active = store.activeAccount
+  if (active?.accessToken && sameHost(active.url)) return { accessToken: active.accessToken }
+  const other = store.instances.find((i) => !!i.accessToken && sameHost(i.url))
+  return other?.accessToken ? { accessToken: other.accessToken } : null
 }
 
 /**
@@ -136,14 +169,14 @@ export function publicClient(url?: string | null): mastodon.rest.Client {
 
   if (preferred) {
     const preferredUrl = normalizeUrl(preferred)
-    const authed = store.getInstanceByUrl(preferredUrl)
+    const authed = readerForUrl(preferredUrl)
     if (authed?.accessToken) {
       return cachedClient(preferredUrl, authed.accessToken)
     }
   }
 
   const resolved = resolvePublicInstanceUrl(preferred)
-  const matching = store.getInstanceByUrl(resolved)
+  const matching = readerForUrl(resolved)
   return cachedClient(resolved, matching?.accessToken)
 }
 

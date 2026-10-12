@@ -3,6 +3,7 @@ import { useInstancesStore } from '~/stores/instances'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
 import { stripHtml } from '~/utils/stripHtml'
+import { plainDisplayName } from '~/utils/displayName'
 
 const emit = defineEmits<{
   watched: [domain: string]
@@ -227,14 +228,22 @@ const formatDate = (dateStr: string) => {
                 />
                 <div class="post-content">
                   <div class="post-header">
-                    <strong>{{ status.account.displayName || status.account.username }}</strong>
+                    <strong>{{ plainDisplayName(status.account.displayName, status.account.username) }}</strong>
                     <span class="handle">@{{ status.account.acct }}</span>
                     <span class="time">{{ formatDate(status.createdAt) }}</span>
                   </div>
-                  <p class="post-text">{{ stripHtml(status.content) }}</p>
-                  
-                  <!-- Media preview -->
-                  <div v-if="status.mediaAttachments?.length" class="media-preview">
+                  <!-- A content warning keeps the body (and its media) collapsed before sign-up -->
+                  <p v-if="status.spoilerText?.trim()" class="post-text post-text--cw">
+                    <span class="sr-only">Content warning: </span>CW: {{ status.spoilerText }}
+                  </p>
+                  <p v-else class="post-text">{{ stripHtml(status.content) }}</p>
+
+                  <!-- Media preview (sensitive thumbnails stay blurred) -->
+                  <div
+                    v-if="status.mediaAttachments?.length && !status.spoilerText?.trim()"
+                    class="media-preview"
+                    :class="{ 'media-preview--sensitive': status.sensitive }"
+                  >
                     <img 
                       v-for="media in status.mediaAttachments.slice(0, 2)" 
                       :key="media.id"
@@ -307,7 +316,7 @@ const formatDate = (dateStr: string) => {
 .preview-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--neo-scrim);
   backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
@@ -338,7 +347,9 @@ const formatDate = (dateStr: string) => {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 1.5rem 2rem;
-  background: var(--neo-preview-accent);
+  // Theme accent keeps text contrast known; the server's own colour is a thin identifying stripe
+  background: var(--neo-accent);
+  border-bottom: 4px solid var(--neo-preview-accent);
   color: var(--neo-text-on-accent);
 }
 
@@ -582,6 +593,17 @@ const formatDate = (dateStr: string) => {
     object-fit: cover;
     border-radius: 8px;
   }
+
+  &--sensitive img {
+    filter: blur(14px);
+    // Keep the blur from bleeding past the thumbnail edge
+    clip-path: inset(0 round 8px);
+  }
+}
+
+.post-text--cw {
+  font-style: italic;
+  color: var(--neo-text-secondary);
 }
 
 .no-posts {
@@ -633,7 +655,7 @@ const formatDate = (dateStr: string) => {
 }
 
 .action-btn--watch {
-  background: var(--neo-preview-accent);
+  background: var(--neo-accent);
   color: var(--neo-text-on-accent);
 
   &:hover:not(:disabled) {
@@ -652,11 +674,11 @@ const formatDate = (dateStr: string) => {
 
 .action-btn--join {
   background: transparent;
-  border: 2px solid var(--neo-preview-accent);
-  color: var(--neo-preview-accent);
+  border: 2px solid var(--neo-accent);
+  color: var(--neo-accent);
 
   &:hover {
-    background: color-mix(in srgb, var(--neo-preview-accent) 10%, transparent);
+    background: color-mix(in srgb, var(--neo-accent) 10%, transparent);
   }
 }
 

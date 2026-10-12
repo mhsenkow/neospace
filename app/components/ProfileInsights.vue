@@ -210,7 +210,9 @@ const kpi = computed(() => {
   const t = report.value?.totals
   if (!t) return []
   return [
-    { label: 'Posts', value: formatCompact(t.posts) },
+    // The mix waffle counts boosts; every other number here does not — say so
+    { label: 'Posts (excl. boosts)', value: formatCompact(t.posts) },
+    { label: 'Boosts shared', value: formatCompact(t.boosts) },
     { label: 'Engagement', value: formatCompact(t.engagement) },
     { label: 'Avg / post', value: formatCompact(t.avgEngagement) },
     { label: 'Favourites', value: formatCompact(t.favourites) },

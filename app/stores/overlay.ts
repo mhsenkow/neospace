@@ -10,6 +10,8 @@ export type LightboxItem = {
   alt: string
   /** The author's own description, shown as a visible caption when present */
   caption?: string
+  /** Small cached preview shown while the full-size `src` loads */
+  preview?: string
 }
 
 export type LightboxState = {

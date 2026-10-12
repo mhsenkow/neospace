@@ -10,6 +10,13 @@
 
 const MAX_CSS_CHARS = 50_000
 const SCOPE = '.chaos-active #main-content'
+/**
+ * Appended to every non-empty skin. #main-content is `position: static`, so an
+ * absolutely positioned descendant (`top:0;left:0;width:100vw;height:100vh`) would
+ * otherwise be placed against the viewport and cover the sidebar, tab bar and
+ * dialogs. Containing paint + a stacking context pins skin content inside the page area.
+ */
+export const SKIN_CONTAINMENT = `${SCOPE}{position:relative;contain:paint;isolation:isolate;z-index:0}`
 
 /**
  * Decode CSS escapes in ONE pass (so `\5c 75rl(` can't decode twice into
@@ -26,6 +33,10 @@ function decodeCssEscapes(input: string): string {
     })
     .replace(/\\/g, '')
 }
+
+/** A char that can't be part of an identifier — what may precede a property name */
+const NOT_IDENT = '[^a-zA-Z0-9_\\-\\u0080-\\uffff]'
+const Z_INDEX_LIMIT = 100
 
 const SAFE_POSITION = /^\s*(?:static|relative|absolute|sticky|-webkit-sticky)\s*(?:!\s*important\s*)?$/i
 
@@ -74,17 +85,30 @@ export function sanitizeProfileCss(raw: string): string {
 
   // position:fixed escapes #main-content and can overlay the sidebar / dialogs
   // (clickjacking). Anything but a known-safe keyword — incl. var(--p) — is
-  // pinned to absolute.
-  css = css.replace(/(^|[;{\s])position\s*:\s*([^;}]*)/gi, (m, pre: string, value: string) =>
+  // pinned to absolute. Match after any non-identifier char (a `*/` marker, `:`),
+  // not just `;{ `, so `/* blocked … */position:fixed` can't slip past; the
+  // lookbehind keeps `background-position` / `--position` out of it.
+  css = css.replace(new RegExp(`(^|${NOT_IDENT})position\\s*:\\s*([^;}]*)`, 'gi'), (m, pre: string, value: string) =>
     SAFE_POSITION.test(value) ? m : `${pre}position: absolute`,
   )
+  // Stacking is contained by SKIN_CONTAINMENT; still keep z-index sane (no 2147483647)
+  css = css.replace(new RegExp(`(^|${NOT_IDENT})z-index\\s*:\\s*([^;}]*)`, 'gi'), (_m, pre: string, value: string) => {
+    const v = value.trim()
+    const int = /^([+-]?\d+)\s*(!\s*important)?$/i.exec(v)
+    if (int) {
+      const n = Math.max(-Z_INDEX_LIMIT, Math.min(Z_INDEX_LIMIT, parseInt(int[1]!, 10)))
+      return `${pre}z-index: ${n}${int[2] ? ' !important' : ''}`
+    }
+    return /^auto\s*(!\s*important)?$/i.test(v) ? `${pre}z-index: ${v}` : `${pre}z-index: auto`
+  })
 
   css = css.trim()
   if (!css) return ''
 
   // Scope every rule under .chaos-active #main-content so profile CSS
   // cannot restyle the shell (sidebar, settings, overlays).
-  return scopeCss(css, SCOPE)
+  const scoped = scopeCss(css, SCOPE)
+  return scoped ? scoped + SKIN_CONTAINMENT : ''
 }
 
 const IDENT_CHAR = /[a-zA-Z0-9_\-\u0080-￿]/
@@ -143,9 +167,11 @@ function scopeSelectors(prelude: string, scope: string): string | null {
   for (const raw of prelude.split(',')) {
     let s = raw.trim()
     if (s.startsWith(scope)) s = s.slice(scope.length).trim()
-    // `~ x` / `+ x` after the scope prefix would select the shell's siblings
-    if (/^[~+]/.test(s)) continue
-    parts.push(s ? `${scope} ${s}` : scope)
+    // An empty part (`, x{}`) or the bare scope would style #main-content itself
+    // (pointing the containment rule at the author); `~ x` / `+ x` after the scope
+    // prefix would select the shell's siblings
+    if (!s || /^[~+]/.test(s)) continue
+    parts.push(`${scope} ${s}`)
   }
   return parts.length ? parts.join(', ') : null
 }

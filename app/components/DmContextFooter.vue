@@ -87,10 +87,12 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
 .dm-context-footer {
   display: inline-flex;
   align-items: center;
-  gap: 0;
+  // Hit areas are 32×44 (see ::before) — the gap keeps neighbours from overlapping
+  gap: 10px;
 }
 
 .dm-context-footer__tab {
+  position: relative;
   display: grid;
   place-items: center;
   width: 22px;
@@ -99,25 +101,29 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: var(--neo-text-tertiary);
-  opacity: 0.55;
+  // Full opacity: tertiary text at 0.55 dropped below 3:1 against the bar
+  color: var(--neo-text-secondary);
   cursor: pointer;
 
+  // Touch target: 44px tall without growing the 22px visual chip
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -11px -5px;
+  }
+
   &[aria-selected='true'] {
-    color: var(--neo-text-secondary);
-    opacity: 0.9;
-    background: color-mix(in srgb, var(--neo-text-primary) 6%, transparent);
+    color: var(--neo-text-primary);
+    background: color-mix(in srgb, var(--neo-text-primary) 10%, transparent);
   }
 
   &:hover {
-    opacity: 0.85;
-    color: var(--neo-text-secondary);
+    color: var(--neo-text-primary);
   }
 
   &:focus-visible {
-    outline: 1px solid var(--neo-focus, var(--neo-accent));
-    outline-offset: 1px;
-    opacity: 1;
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 2px;
   }
 }
 </style>

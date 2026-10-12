@@ -13,6 +13,8 @@ export type PresenceLink = {
   href: string
   /** Short handle/host shown in tooltips */
   hint: string
+  /** Mastodon's rel=me verification time for the field this link came from */
+  verifiedAt?: string | null
 }
 
 const SOURCE_LABELS: Record<Exclude<PresenceKind, 'mastodon'>, string> = {
@@ -149,7 +151,7 @@ export function hintFromHref(href: string): string {
   }
 }
 
-type FieldLike = { name?: string | null; value?: string | null }
+type FieldLike = { name?: string | null; value?: string | null; verifiedAt?: string | null }
 
 export function isPresenceField(field: FieldLike): boolean {
   if (kindFromFieldName(field.name || '')) return true
@@ -227,11 +229,16 @@ export function mergePresenceIntoFields(
   return [...other.slice(0, cap), ...presence.slice(0, room)].slice(0, cap)
 }
 
-export function buildPresenceLinks(opts: {
+/**
+ * Presence chips for a profile, plus which metadata fields they came from. Fields that did
+ * NOT become a chip (a second "Homepage", a "Website: coming soon") stay ordinary tokens.
+ */
+export function resolvePresence(opts: {
   mastodonUrl?: string | null
   fields?: FieldLike[] | null
-}): PresenceLink[] {
+}): { links: PresenceLink[]; consumed: Set<number> } {
   const links: PresenceLink[] = []
+  const consumed = new Set<number>()
   const seen = new Set<PresenceKind>()
 
   if (opts.mastodonUrl) {
@@ -244,11 +251,25 @@ export function buildPresenceLinks(opts: {
     seen.add('mastodon')
   }
 
-  const draft = readPresenceDraft(opts.fields || [])
+  // First field per kind wins — by label ("Bluesky"), else by URL host (same rule as the editor)
+  const hits: Partial<Record<Exclude<PresenceKind, 'mastodon'>, { raw: string; index: number }>> = {}
+  ;(opts.fields || []).forEach((f, index) => {
+    const byName = kindFromFieldName(f.name || '')
+    const url = extractHttpUrl(f.value || '') || stripHtml(f.value || '').trim()
+    if (byName && url && !hits[byName]) {
+      hits[byName] = { raw: url, index }
+      return
+    }
+    if (url) {
+      const byUrl = kindFromUrl(url)
+      if (byUrl && !hits[byUrl]) hits[byUrl] = { raw: url, index }
+    }
+  })
+
   for (const kind of ['bluesky', 'seenu', 'website'] as const) {
-    const raw = draft[kind]
-    if (!raw) continue
-    const href = normalizePresenceInput(kind, raw)
+    const hit = hits[kind]
+    if (!hit) continue
+    const href = normalizePresenceInput(kind, hit.raw)
     if (!href || seen.has(kind)) continue
     // Avoid duplicating mastodon URL as "website"
     if (kind === 'website' && opts.mastodonUrl && href === opts.mastodonUrl) continue
@@ -257,9 +278,18 @@ export function buildPresenceLinks(opts: {
       label: SOURCE_LABELS[kind],
       href,
       hint: hintFromHref(href),
+      verifiedAt: opts.fields?.[hit.index]?.verifiedAt || null,
     })
+    consumed.add(hit.index)
     seen.add(kind)
   }
 
-  return links
+  return { links, consumed }
+}
+
+export function buildPresenceLinks(opts: {
+  mastodonUrl?: string | null
+  fields?: FieldLike[] | null
+}): PresenceLink[] {
+  return resolvePresence(opts).links
 }

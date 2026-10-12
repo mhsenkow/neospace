@@ -12,9 +12,12 @@ import { useInstancesStore } from './instances'
 import { useSettingsStore } from './settings'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { guessCategory as guessCategoryUtil } from '~/utils/guessCategory'
-import { isValidHashtag, normalizeHashtagInput } from '~/utils/hashtag'
+import { normalizeHashtagInput } from '~/utils/hashtag'
+import { resolvePublicInstanceUrl } from '~/utils/instances'
 import { logWarn, logError } from '~/utils/log'
-import { cursorPage } from '~/utils/linkHeader'
+import { cursorPage, nextMaxIdFromLink } from '~/utils/linkHeader'
+import { formatTagAsName as formatTagName } from '~/utils/tagName'
+import { tagIsFiltered } from '~/utils/tagFilters'
 
 /** Prevent concurrent initializeGroups races that double-push trending tags */
 let groupsInitPromise: Promise<void> | null = null
@@ -34,6 +37,56 @@ export const GROUP_TAG_MAX = 100
 
 export function isGroupTagName(tag: string): boolean {
   return !!tag && tag.length <= GROUP_TAG_MAX && GROUP_TAG_RE.test(tag)
+}
+
+/** A tag worth offering as a new group: valid for the API and not just digits (`#2024`) */
+export const isOfferableGroupTag = (tag: string) => isGroupTagName(tag) && /[\p{L}_]/u.test(tag)
+
+/**
+ * Join/leave for one tag run one after another, and the newest click decides the
+ * outcome: a Join + Undo fired close together can't land on the server in the
+ * opposite order of what the UI shows.
+ */
+const tagTails = new Map<string, Promise<unknown>>()
+const tagIntents = new Map<string, number>()
+function serializeTag<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = tagTails.get(key) ?? Promise.resolve()
+  const run = prev.catch(() => {}).then(fn)
+  const tail = run.catch(() => {})
+  tagTails.set(key, tail)
+  void tail.then(() => {
+    if (tagTails.get(key) === tail) tagTails.delete(key)
+  })
+  return run
+}
+const bumpIntent = (key: string) => {
+  const n = (tagIntents.get(key) || 0) + 1
+  tagIntents.set(key, n)
+  return n
+}
+const isLatestIntent = (key: string, n: number) => tagIntents.get(key) === n
+
+/**
+ * One page of a hashtag timeline plus where the next one starts. The Link header
+ * says whether more exists — `length === 20` ended the feed early on any short page
+ * (hidden/filtered statuses, servers with smaller caps). Servers that send no Link
+ * header at all fall back to "a full page means more".
+ */
+const TAG_PAGE = 20
+async function tagTimelinePage(
+  client: mastodon.rest.Client,
+  tag: string,
+  maxId?: string | null,
+): Promise<{ items: mastodon.v1.Status[]; nextMaxId: string | null }> {
+  const res = await client.v1.timelines.tag
+    .$select(tagPath(tag))
+    .list.$raw({ limit: TAG_PAGE, ...(maxId ? { maxId } : {}) })
+  const items = Array.isArray(res.data) ? res.data : []
+  const link = res.headers?.get('link')
+  if (link == null) {
+    return { items, nextMaxId: items.length >= TAG_PAGE ? (items[items.length - 1]?.id ?? null) : null }
+  }
+  return { items, nextMaxId: nextMaxIdFromLink(link) }
 }
 
 /** Path segment for `$select` — masto.js joins it into the URL unescaped */
@@ -89,6 +142,10 @@ interface GroupsState {
   maxId: string | null
   /** Followed-tags fetch failed — membership flags may be stale */
   followedTagsError: string | null
+  /** Group timeline failure — separate from `error` so a background re-init can't wipe it */
+  timelineError: string | null
+  /** Host the "Trending on …" tags actually came from */
+  trendingHost: string | null
   /** Per-tag join/leave in flight */
   pendingTags: Record<string, boolean>
   /** Per-tag timeline + scroll cache when navigating back */
@@ -470,6 +527,8 @@ export const useGroupsStore = defineStore('groups', {
     hasMore: true,
     maxId: null,
     followedTagsError: null,
+    timelineError: null,
+    trendingHost: null,
     pendingTags: {},
     timelineCache: {},
   }),
@@ -579,7 +638,7 @@ export const useGroupsStore = defineStore('groups', {
      * Initialize groups - curated + live trending hashtags from your server.
      * Single-flight so home + columns + menu can't race and double-push tags.
      */
-    async initializeGroups(force = false) {
+    async initializeGroups(force = false, retried = false) {
       const accountKey = useInstancesStore().activeAccountId || null
       if (
         !force &&
@@ -639,6 +698,36 @@ export const useGroupsStore = defineStore('groups', {
       } finally {
         groupsInitPromise = null
       }
+      // Joined while another account's init was in flight: that result is not ours — load again
+      const nowKey = useInstancesStore().activeAccountId || null
+      if (!retried && nowKey === accountKey && groupsInitializedFor !== accountKey && !this.error) {
+        await this.initializeGroups(true, true)
+      }
+    },
+
+    /**
+     * The active account changed: its memberships, followed tags and cached
+     * timelines are not the previous account's. Drops everything account-specific,
+     * keeps featured + trending tags, and reloads.
+     */
+    async resetForAccountSwitch() {
+      this.followedTags = []
+      this.followedTagsError = null
+      this.timelineCache = {}
+      this.pendingTags = {}
+      this.groups = this.groups
+        .filter((g) => g.featured || g.trending)
+        .map((g) => ({ ...g, isMember: false }))
+      await this.initializeGroups(true)
+    },
+
+    /** A filter changed after trends loaded — hide tags it now covers (and nothing else) */
+    refilterTrending() {
+      const filters = useSettingsStore().filters || []
+      const keep = (g: Group) =>
+        g.featured || g.isMember || !g.trending || !tagIsFiltered(g.tag, filters)
+      if (this.groups.every(keep)) return
+      this.groups = this.groups.filter(keep)
     },
 
     /** Collapse duplicate tags (prefer member + trending + featured flags) */
@@ -685,15 +774,31 @@ export const useGroupsStore = defineStore('groups', {
         const tags = await client.v1.trends.tags.list({ limit: 20 })
         if (!tags?.length) return
 
-        const filterKeywords = (settingsStore.filters || [])
-          .flatMap((f) => (f.keywords || []).map((k) => (k.keyword || '').toLowerCase().trim()))
-          .filter(Boolean)
+        const filters = settingsStore.filters || []
+
+        // Tags that dropped off the server's trends must not stay "Trending" with a stale count
+        const wasTrending = new Set(this.groups.filter((g) => g.trending).map((g) => g.tag.toLowerCase()))
+        for (const g of this.groups) {
+          g.trending = false
+          g.postsCount = undefined
+        }
+        this.trendingHost = (() => {
+          try {
+            return new URL(
+              instancesStore.isAuthenticated
+                ? instancesStore.activeAccount?.url || ''
+                : resolvePublicInstanceUrl(instancesStore.activeAccount?.url || null),
+            ).hostname
+          } catch {
+            return null
+          }
+        })()
 
         for (const tag of tags) {
           const name = tag.name
           const key = name.toLowerCase()
 
-          if (filterKeywords.some((kw) => key.includes(kw))) {
+          if (tagIsFiltered(name, filters)) {
             continue
           }
 
@@ -738,6 +843,11 @@ export const useGroupsStore = defineStore('groups', {
             postsCount: uses,
           })
         }
+        // Carried-over trending entries that no longer trend and aren't yours
+        this.groups = this.groups.filter((g) => {
+          const key = g.tag.toLowerCase()
+          return g.trending || g.featured || g.isMember || !!this.pendingTags[key] || !wasTrending.has(key)
+        })
       } catch (e: any) {
         logWarn('Trending tags unavailable:', e?.message || e)
       }
@@ -794,7 +904,7 @@ export const useGroupsStore = defineStore('groups', {
               tag: tag.name,
               name: this.formatTagAsName(tag.name),
               icon: '🏷️',
-              category: 'other',
+              category: this.guessCategory(tag.name),
               isMember: true,
               featured: false
             })
@@ -820,6 +930,7 @@ export const useGroupsStore = defineStore('groups', {
       }
 
       const key = tag.toLowerCase()
+      const intent = bumpIntent(key)
       this.pendingTags = { ...this.pendingTags, [key]: true }
 
       // Look the group up again after each await — init/dedupe replace `groups`
@@ -829,8 +940,9 @@ export const useGroupsStore = defineStore('groups', {
       if (before) before.isMember = true
 
       try {
-        const client = this.getClient()
-        const result = await client.v1.tags.$select(tagPath(tag)).follow()
+        const result = await serializeTag(key, () => this.getClient().v1.tags.$select(tagPath(tag)).follow())
+        // A newer Join/Leave click for this tag decides the final state — don't overwrite it
+        if (!isLatestIntent(key, intent)) return result
 
         const current = findGroup()
         if (current) {
@@ -841,7 +953,7 @@ export const useGroupsStore = defineStore('groups', {
             tag: result.name,
             name: this.formatTagAsName(result.name),
             icon: '🏷️',
-            category: 'other',
+            category: this.guessCategory(result.name),
             isMember: true,
             featured: false
           })
@@ -854,14 +966,18 @@ export const useGroupsStore = defineStore('groups', {
 
         return result
       } catch (e: any) {
-        const current = findGroup()
-        if (current) current.isMember = wasMember
+        if (isLatestIntent(key, intent)) {
+          const current = findGroup()
+          if (current) current.isMember = wasMember
+        }
         logError('Failed to join group:', e)
         throw e
       } finally {
-        const next = { ...this.pendingTags }
-        delete next[key]
-        this.pendingTags = next
+        if (isLatestIntent(key, intent)) {
+          const next = { ...this.pendingTags }
+          delete next[key]
+          this.pendingTags = next
+        }
       }
     },
 
@@ -875,6 +991,7 @@ export const useGroupsStore = defineStore('groups', {
       }
 
       const key = tag.toLowerCase()
+      const intent = bumpIntent(key)
       this.pendingTags = { ...this.pendingTags, [key]: true }
       const findGroup = () => this.groups.find((g) => g.tag.toLowerCase() === key)
       const before = findGroup()
@@ -884,21 +1001,24 @@ export const useGroupsStore = defineStore('groups', {
       this.followedTags = this.followedTags.filter((t) => t.name.toLowerCase() !== key)
 
       try {
-        const client = this.getClient()
-        await client.v1.tags.$select(tagPath(tag)).unfollow()
+        await serializeTag(key, () => this.getClient().v1.tags.$select(tagPath(tag)).unfollow())
       } catch (e: any) {
-        const current = findGroup()
-        if (current) current.isMember = wasMember
-        // Put back only this tag — a whole-list snapshot would undo other joins
-        if (removed && !this.followedTags.some((t) => t.name.toLowerCase() === key)) {
-          this.followedTags = [...this.followedTags, removed]
+        if (isLatestIntent(key, intent)) {
+          const current = findGroup()
+          if (current) current.isMember = wasMember
+          // Put back only this tag — a whole-list snapshot would undo other joins
+          if (removed && !this.followedTags.some((t) => t.name.toLowerCase() === key)) {
+            this.followedTags = [...this.followedTags, removed]
+          }
         }
         logError('Failed to leave group:', e)
         throw e
       } finally {
-        const next = { ...this.pendingTags }
-        delete next[key]
-        this.pendingTags = next
+        if (isLatestIntent(key, intent)) {
+          const next = { ...this.pendingTags }
+          delete next[key]
+          this.pendingTags = next
+        }
       }
     },
 
@@ -916,7 +1036,7 @@ export const useGroupsStore = defineStore('groups', {
       }
 
       this.isLoadingTimeline = true
-      this.error = null
+      this.timelineError = null
       this.currentGroupTag = tag
 
       try {
@@ -924,9 +1044,8 @@ export const useGroupsStore = defineStore('groups', {
         const fetchAccount =
           instancesStore.activeAccount ||
           instancesStore.instances.find((i) => i.accessToken)
-        const statuses = await client.v1.timelines.tag.$select(tagPath(tag)).list({
-          limit: 20
-        })
+        const page = await tagTimelinePage(client, tag)
+        const statuses = page.items
 
         if (requestId !== timelineRequestId || this.currentGroupTag !== tag) return
 
@@ -939,14 +1058,11 @@ export const useGroupsStore = defineStore('groups', {
             }))
           : statuses
         
-        if (statuses.length > 0) {
-          this.maxId = statuses[statuses.length - 1]?.id ?? null
-        }
-        
-        this.hasMore = statuses.length === 20
+        this.maxId = page.nextMaxId
+        this.hasMore = page.nextMaxId !== null
       } catch (e: any) {
         if (requestId !== timelineRequestId) return
-        this.error = e.message || 'Failed to fetch group timeline'
+        this.timelineError = e.message || 'Failed to fetch group timeline'
         logError('Group timeline error:', e)
       } finally {
         if (requestId === timelineRequestId) this.isLoadingTimeline = false
@@ -969,10 +1085,8 @@ export const useGroupsStore = defineStore('groups', {
         const fetchAccount =
           instancesStore.activeAccount ||
           instancesStore.instances.find((i) => i.accessToken)
-        const statuses = await client.v1.timelines.tag.$select(tagPath(tag)).list({
-          maxId: this.maxId,
-          limit: 20
-        })
+        const page = await tagTimelinePage(client, tag, this.maxId)
+        const statuses = page.items
 
         if (requestId !== timelineRequestId || this.currentGroupTag !== tag) return
 
@@ -985,10 +1099,9 @@ export const useGroupsStore = defineStore('groups', {
               }))
             : statuses
           this.groupTimeline = [...this.groupTimeline, ...tagged]
-          this.maxId = statuses[statuses.length - 1]?.id ?? null
         }
-        
-        this.hasMore = statuses.length === 20
+        this.maxId = page.nextMaxId
+        this.hasMore = page.nextMaxId !== null
       } catch (e: any) {
         if (requestId !== timelineRequestId) return
         logError('Load more error:', e)
@@ -1006,70 +1119,54 @@ export const useGroupsStore = defineStore('groups', {
       const q = normalizeHashtagInput(query)
       if (!q) return []
 
-      try {
-        const instancesStore = useInstancesStore()
-        const client = instancesStore.isAuthenticated
-          ? this.getClient()
-          : this.getPublicClient()
+      // Errors propagate: "search failed" must look different from "no such tag"
+      const instancesStore = useInstancesStore()
+      const client = instancesStore.isAuthenticated
+        ? this.getClient()
+        : this.getPublicClient()
 
-        const results = await client.v2.search.list({
-          q,
-          type: 'hashtags',
-          limit: 20,
-        })
+      const results = await client.v2.search.list({
+        q,
+        type: 'hashtags',
+        limit: 20,
+      })
 
-        const mapped = results.hashtags.map((tag) => {
-          const existing = this.groups.find(
-            (g) => g.tag.toLowerCase() === tag.name.toLowerCase(),
-          )
-          if (existing) return existing
+      const mapped = results.hashtags.map((tag) => {
+        const existing = this.groups.find(
+          (g) => g.tag.toLowerCase() === tag.name.toLowerCase(),
+        )
+        if (existing) return existing
 
-          return {
-            tag: tag.name,
-            name: this.formatTagAsName(tag.name),
-            description: `Join #${tag.name} as a group`,
-            icon: '🏷️',
-            category: this.guessCategory(tag.name),
-            isMember: false,
-            featured: false,
-            trending: false,
-          }
-        })
-
-        const exact = q.toLowerCase()
-        if (isValidHashtag(q) && !mapped.some((g) => g.tag.toLowerCase() === exact)) {
-          const existing = this.groups.find((g) => g.tag.toLowerCase() === exact)
-          mapped.unshift(
-            existing || {
-              tag: q,
-              name: this.formatTagAsName(q),
-              description: `Start following #${q}`,
-              icon: '➕',
-              category: this.guessCategory(q),
-              isMember: false,
-              featured: false,
-              trending: false,
-            },
-          )
+        return {
+          tag: tag.name,
+          name: this.formatTagAsName(tag.name),
+          description: `Join #${tag.name} as a group`,
+          icon: '🏷️',
+          category: this.guessCategory(tag.name),
+          isMember: false,
+          featured: false,
+          trending: false,
         }
+      })
 
-        return mapped
-      } catch (e: any) {
-        logError('Group search error:', e)
-        if (!isValidHashtag(q)) return []
-        return [
-          {
+      const exact = q.toLowerCase()
+      if (isOfferableGroupTag(q) && !mapped.some((g) => g.tag.toLowerCase() === exact)) {
+        const existing = this.groups.find((g) => g.tag.toLowerCase() === exact)
+        mapped.unshift(
+          existing || {
             tag: q,
             name: this.formatTagAsName(q),
             description: `Start following #${q}`,
             icon: '➕',
-            category: this.guessCategory(q) as GroupCategory,
+            category: this.guessCategory(q),
             isMember: false,
             featured: false,
             trending: false,
           },
-        ]
+        )
       }
+
+      return mapped
     },
 
     cacheTimeline(tag: string, scrollY = 0) {
@@ -1110,7 +1207,7 @@ export const useGroupsStore = defineStore('groups', {
       this.maxId = cached.maxId
       this.hasMore = cached.hasMore
       this.currentGroupTag = tag
-      this.error = null
+      this.timelineError = null
       return cached.scrollY
     },
 
@@ -1129,7 +1226,7 @@ export const useGroupsStore = defineStore('groups', {
         tag: cleanTag,
         name: name || this.formatTagAsName(cleanTag),
         icon: icon || '🏷️',
-        category: 'other',
+        category: this.guessCategory(cleanTag),
         isMember: false,
         featured: false
       })
@@ -1139,18 +1236,7 @@ export const useGroupsStore = defineStore('groups', {
      * Format a hashtag as a readable group name
      */
     formatTagAsName(tag: string): string {
-      // Convert camelCase and snake_case to spaces; keep all-caps tokens (LGBTQ, NixOS)
-      return tag
-        .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .replace(/_/g, ' ')
-        .split(' ')
-        .filter(Boolean)
-        .map((word) => {
-          if (word.length > 1 && word === word.toUpperCase()) return word
-          if (/^[A-Z]{2,}[a-z]/.test(word)) return word // e.g. NixOS
-          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-        })
-        .join(' ')
+      return formatTagName(tag)
     },
 
     /**
@@ -1164,7 +1250,7 @@ export const useGroupsStore = defineStore('groups', {
       this.currentGroupTag = null
       this.maxId = null
       this.hasMore = true
-      this.error = null
+      this.timelineError = null
     },
 
     /** Prepend a freshly posted status onto the open group timeline */

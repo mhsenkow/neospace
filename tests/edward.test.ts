@@ -45,15 +45,43 @@ describe('lookupAcctFor', () => {
 })
 
 describe('affinityScore follow match', () => {
-  it('matches followed accounts by local part as before', () => {
+  const input = { mentionAccts: [], tagNames: [], preview: '', isBoost: false }
+
+  it('matches followed accounts by full handle', () => {
     const ctx = emptyAffinityContext()
     ctx.following.add('alice@far.example')
-    const input = { mentionAccts: [], tagNames: [], preview: '', isBoost: false }
-    expect(affinityScore({ ...input, authorAcct: 'alice' }, ctx)).toBeCloseTo(0.38)
-    expect(affinityScore({ ...input, authorAcct: 'carol' }, ctx)).toBe(0)
-    // Set grows after first use — the cached local parts must follow
+    expect(affinityScore({ ...input, authorAcct: 'alice@far.example' }, ctx)).toBeCloseTo(0.38)
+    expect(affinityScore({ ...input, authorAcct: 'carol@far.example' }, ctx)).toBe(0)
+    // Set grows after first use — the cached keys must follow
     ctx.following.add('carol@far.example')
-    expect(affinityScore({ ...input, authorAcct: 'carol' }, ctx)).toBeCloseTo(0.38)
+    expect(affinityScore({ ...input, authorAcct: 'carol@far.example' }, ctx)).toBeCloseTo(0.38)
+  })
+
+  it('does not treat a same-named account on another server as someone you follow', () => {
+    const ctx = emptyAffinityContext()
+    ctx.homeHost = 'my.server'
+    ctx.following.add('alice')
+    ctx.following.add('bob@far.example')
+    expect(affinityScore({ ...input, authorAcct: 'alice@elsewhere.net' }, ctx)).toBe(0)
+    expect(affinityScore({ ...input, authorAcct: 'bob@other.net' }, ctx)).toBe(0)
+    // Your own server's alice (bare, or qualified with your host) still matches
+    expect(affinityScore({ ...input, authorAcct: 'alice' }, ctx)).toBeCloseTo(0.38)
+    expect(affinityScore({ ...input, authorAcct: 'alice@my.server' }, ctx)).toBeCloseTo(0.38)
+  })
+
+  it('does not mark other servers\' namesakes as you or as mentioning you', () => {
+    const ctx = emptyAffinityContext()
+    ctx.homeHost = 'my.server'
+    ctx.selfAcct = 'me'
+    ctx.selfUsername = 'me'
+    expect(affinityScore({ ...input, authorAcct: 'me@elsewhere.net' }, ctx)).toBe(0)
+    expect(affinityScore({ ...input, authorAcct: 'me' }, ctx)).toBeCloseTo(0.55)
+    expect(
+      affinityScore({ ...input, authorAcct: 'zed@x.net', mentionAccts: ['me@elsewhere.net'] }, ctx),
+    ).toBe(0)
+    expect(
+      affinityScore({ ...input, authorAcct: 'zed@x.net', mentionAccts: ['me@my.server'] }, ctx),
+    ).toBeCloseTo(0.48)
   })
 })
 

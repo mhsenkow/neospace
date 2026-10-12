@@ -386,6 +386,8 @@ const applySize = (next: number) => {
   if (Math.abs(clamped - renderSize.value) < 4) return
   renderSize.value = clamped
   layout = computeLayout(segments, clamped)
+  // Reduced motion has no rAF loop: repaint the still at the new size
+  if (mounted && prefersReducedMotion()) nextTick(drawStill)
 }
 
 const syncFluidSize = () => {

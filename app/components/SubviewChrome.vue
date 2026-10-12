@@ -9,9 +9,12 @@ const props = withDefaults(
     title?: string
     /** Override default history back → home fallback */
     backAction?: () => void
+    /** Where Back goes when there's no in-app history to return to (default: Home) */
+    backFallback?: string
   }>(),
   {
     title: '',
+    backFallback: '/',
   },
 )
 
@@ -28,7 +31,7 @@ const goBack = () => {
     router.back()
     return
   }
-  router.push('/')
+  router.push(props.backFallback)
 }
 </script>
 

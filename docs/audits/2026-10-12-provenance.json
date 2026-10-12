@@ -1,0 +1,5759 @@
+{
+  "reviewedCommit": "069e5a4",
+  "count": 700,
+  "currentReview": 100,
+  "carryForward": 600,
+  "evidenceCounts": {
+    "C": 74,
+    "I": 32,
+    "R": 7,
+    "A": 587
+  },
+  "sourceFingerprints": {
+    "Dockerfile": "bea3b5c5eb9785abd6bcd90fcaba89a9b0028517a07627773575c08c1bab9281",
+    "app/app.vue": "d024cc0878516dda740dc2e2759a1b52752082a609fe6e3defa1070818d05b6e",
+    "app/assets/css/_structural.scss": "f6c03cc5d575e5f0e8627e59278c20593c5113ccd0c0456e97bf8b254d3d0606",
+    "app/assets/css/_themes.scss": "1c73ced423d7cb6be067e5b69ddb8dca4e0f42fd52a7dad7d1842c88d30e4c3f",
+    "app/assets/css/_variables.scss": "ddae53956c06fbbdac2f3a2a4465e851f46e7fdc2d669579d7e2ed18f4b83b06",
+    "app/assets/css/main.scss": "120d7bb40869390d4f6cb7d96c29f5e79434f748b6ac582eca1bd3bb43c79348",
+    "app/components/AccountSwitcher.vue": "0f3da3e8f7d77d30284311406859095c67b40eb3f818ce8787f9e721084b02b9",
+    "app/components/AccountSwitcherSheet.vue": "8479e41f4dbf65747f14b6987032eba2a6233b83557c928469bb4a25706c3719",
+    "app/components/ChromeButton.vue": "bfc45d04eec17bb0225982c6086d4674a879bf18e709f988310b8a79b3de0929",
+    "app/components/ColumnChrome.vue": "42700c0b9d1db844f3c3def02db5d859e08c9fc632fc7cbce72922d7b9ced7fe",
+    "app/components/ComposeGroupPicker.vue": "c82645a64afd74d16a6150ce6dcf7b65a0c4da9bedb53b7d8a0dcb2f35c8f25f",
+    "app/components/DmContextFooter.vue": "51305e9a12f3bd6359eadc415d622132afe3a7bc6529fe8caae02078ec3bfc4e",
+    "app/components/FollowersModal.vue": "60b2adc7e88016d75ea52f4987fa3bc7380a1e03fcc05434613c5a425121c3c0",
+    "app/components/FunLoader.vue": "145967f275aeecd10289d3c88b85c7489a3b857cc6d381cc163abd8bd77138b9",
+    "app/components/GroupCard.vue": "8ed6a79fd43479bec9c48e9b929fd07db20040093e583b8ad27a551476aef407",
+    "app/components/InstallAppBanner.vue": "d72ac27590e7565476766fad2a34ab448681efd3a0142f7728258982c3baac17",
+    "app/components/InstanceCard.vue": "20ca3b302a589e0cb6d66b244b69394ccc1792266334888c850564dda4f9bff5",
+    "app/components/InstanceManager.vue": "e3a5e5ffff6406e5d4e159154ecef64dd0075de00e833acd8fc6f0578a16f845",
+    "app/components/InstancePreview.vue": "eb57d0ee83cf8213d385a5ce0782b9b4c71abd2a11785b00a2ef56e7f3c32daa",
+    "app/components/MessageBubble.vue": "192dbb4f7d1b6e05bfea5293840c61c5c97ea12551090aab8bbd89c304adf30f",
+    "app/components/NeoLightbox.vue": "31df5ec35845be817fb4e5769ab00728f5452e9a992d5e70d28274a6c7ae76bd",
+    "app/components/NeoMark.vue": "b06ea60941bd566923fa60d69630530a45e8f09a80ece004cb02e1bfe6fcf85b",
+    "app/components/NeoMenu.vue": "9d572e6d96bc4d3966b347029b564f3df559f48f6a72ffe0bf353cb82372eef4",
+    "app/components/NeoOverlayHost.vue": "9bc367488f9389ab3de2d68854730c1ec3d6a621ad1ebad2f0659a54193200c3",
+    "app/components/NeoRadioGroup.vue": "f55b96863c159ef706860170580c4e207f4d60830f1ea166139663b8a2f32db6",
+    "app/components/NeoReport.vue": "5c75e68ea4c79e4e845a3786f91c4b9fab34e4698afbe30ab6bd60d782ddd51d",
+    "app/components/NeoSheet.vue": "789886a597f6b7c094e767036386e281197a058e0cc9d670c99a15f599fa30f3",
+    "app/components/NeoSheetHeader.vue": "2861f26c44bd9dfc2a9d1d69c2c9b212c71175bec5e426ed2b717f3da06e4657",
+    "app/components/NeoTabs.vue": "8d9363ba40626163fe1f701ed79900ff10c1f92320e01757ec366a4ddadbd692",
+    "app/components/NeoToastHost.vue": "3f30a59245a55995c501b2ed4bac82a56ed74ccad33f387dab3a09c0b709bcc4",
+    "app/components/PanelColumn.vue": "e561c1543d62c963dd02234a7f101b9d40ff967cf7cafd1e53be593155ae7806",
+    "app/components/PostActionSheet.vue": "55e696242084d8280713c49ecc7d80d72e238e9b5fc9578c0e5664cb5e889afa",
+    "app/components/PreviewCard.vue": "7ed50965a7b0709c1057206093268e7f2a758ee3ffc475537e2b9ed511323423",
+    "app/components/ProfileHumanBadges.vue": "933185115df5af69f529aa89fd9b54feb2e7373ead4aa408425e0fcfab6aab12",
+    "app/components/ProfileInsights.vue": "507e9a642ba2e40174b6de23747f74d213fe4736c37f8d2ad59bed4d39046022",
+    "app/components/ProfilePeekCard.vue": "c8d5657b2c8278679316f2707925b37f2baf16936cfa3395184fe2796ff670eb",
+    "app/components/RecipientPicker.vue": "b7f5292e155c84ea364161d42202874a4f7166ee3a818f7546f9e84791b47fae",
+    "app/components/ServerPicker.vue": "6b4a56d6ae4973c2b4bf847b501d213eda6c39044d63abc89007159cc6a03982",
+    "app/components/SubviewChrome.vue": "149c8df1e16edf0baa69d83716cbe94da6919e7f793dc01a3fdf61c6e1208d0a",
+    "app/components/SuiteMenu.vue": "dfe0976ccfc9d7d1f7542157db417ce5d5733c56c715f0462ccb54fed45ec94a",
+    "app/components/ThemeSwatch.vue": "210a40a4b795b4ca2d0cff6422a2568876a1e5ffda1d45fba5b39e8bbc1d99dd",
+    "app/components/edward/EdwardCanvas.vue": "e759038c321f03ea9ab98b4b64116fac9ece17a6de2d1329bd21941e925566a7",
+    "app/components/search/SearchPersonRow.vue": "0763ca54816249a3d8d0a16b50e8f3e4a0c7a1d76021f5701429f3bd83bd9420",
+    "app/components/search/SearchTagRow.vue": "0d22e43c9b818c313a2abda9d2621b158ac4e629ad84855b3bcfd1933af17651",
+    "app/components/shell/DesktopSidebar.vue": "c32931e449c0b8a0a2e0705be38ab059c55be38c7a5807d90efe21fb11a454f9",
+    "app/components/shell/MobileDrawer.vue": "1e20e58a0abc33b5431f0b582f7728e42e76eeddbd4863f974aa12dd158a2161",
+    "app/components/shell/MobileHeader.vue": "57b562ae39d8ac9c3a7375ab06a6d1cbcba402c4ce1b44e0a3dcf7fd35a95629",
+    "app/components/shell/MobileTabBar.vue": "c3e288736437f00e923c7f29df56fb3783f01edeec01af356e4629f46fae81f7",
+    "app/composables/useAccountSearch.ts": "c995d8f054ee3996b416ab0fbd997daecf0211b0a95f0c9d62f24f9f2b21956d",
+    "app/composables/useAccountsManager.ts": "c19056e299ee77858b152927d03b2ce6b6d5f6616c9dd3f303f05dbd00f19404",
+    "app/composables/useAppShellHeight.ts": "b2aa663691cd98c785269823bce8d75f32c5c1fd5e7c4b3e1cf547a633287e37",
+    "app/composables/useAutoHideNav.ts": "315ab483c6ee22a04e7ad5f0c7985781b567bf4de0e5b1e7ec6b35f7e4b00979",
+    "app/composables/useColumnDnd.ts": "a9a93abcaed756572600e0336f18c18e092d2678129cc1c4fe361d0ca2aefcd5",
+    "app/composables/useComposedStatus.ts": "2602a9f2e5d3edd95d76d017122be5cea959f2da248ebd11480027f123088c4f",
+    "app/composables/useCuratedInstances.ts": "593d141132d00475153e1f1e38fbc1f677e7c18e8355509615b8fde96fc0cedd",
+    "app/composables/useFediverseSearch.ts": "1a3a0354a3578e39f75d0318316c44d49e4c5ad9131b5c8b2703b8e7bedf3fdb",
+    "app/composables/useFeedKeyboard.ts": "987816092ede33c5481570aeaa941751f5dc23c1af29fbbcbf84300977cb7d60",
+    "app/composables/useFeedbackNotes.ts": "6422d4fe45b4574b59ec9974f3e5bbeb42bb335109b1f2befe365f7fc46f77e1",
+    "app/composables/useFocusTrap.ts": "2e9ff58439a123b8f7a14dd1950870f5395cfa4b6c45e9a715c9418e4c7ae471",
+    "app/composables/useGroupSearch.ts": "a2237ba2f771d14f5323747f616c09f22e7f257724c99a4e6de887eb00992aa1",
+    "app/composables/useHorizontalRail.ts": "7b90cfdd1ce5013c6cfa206b12118567865f70b6242d580497ce2e473bc4c984",
+    "app/composables/useInstallApp.ts": "c990b503099e0950ff48bdd0a41a65583a37442268786903a1c82f06d2b88e81",
+    "app/composables/useKeyboardViewport.ts": "ba46021703c8525639d5779987eae7f3ba7f60bee2f245e135be5009c8574dae",
+    "app/composables/useLinkedProfileFeed.ts": "31f9990114ca8d8adb3968710e48f7059015cc1bdcb8fffae08dd3badde505fc",
+    "app/composables/useLoomHandoff.ts": "7929f53fe9c7b4ce398536255a98c8a7d4d0805bead50e666a7a71ea51b4b41c",
+    "app/composables/useMasto.ts": "5a0f09adf55f9957f7ec39534b79a85d48f0125b625362db380b92fec69ee430",
+    "app/composables/usePager.ts": "5f405e3aa52b542ac4f49e95cbfaaeda61e93434c5e34fd0cb88ebd6ad6afda6",
+    "app/composables/usePostActions.ts": "91f811a999566d89b09ac8fbc284ef49ca6e3fd7283e21724390d406dd56c4c0",
+    "app/composables/usePrefersReducedMotion.ts": "19e5134cf61230c3e98bc50db8a63d6c423db3e8026bc849c6d3aac6a3fadd20",
+    "app/composables/useRankedFeed.ts": "60663d305accde906ae924ab286db3c59cec61b2d062fd37f29104fddfca45ad",
+    "app/composables/useRecentSearches.ts": "128a6d01a9666f22e6d0f347610243b13ccff4f3734a502f409812d19c52d3d4",
+    "app/composables/useScrollLock.ts": "0a56ca8d68ef59745071f665d24e13a578e544f42e96ea79caccb885b89ea997",
+    "app/composables/useSearchDiscovery.ts": "30837c0c19b180df6eda533682eb66aa0bc594a6f023409856e5d732290caea7",
+    "app/composables/useShellAppearance.ts": "30b72d0ce12b7f0d0a104f794e07adfacec8807567356fc8195032c691ca3193",
+    "app/error.vue": "a5f0972a1b704e21d9dd9610bf123d469fb4b8054682fda1f61531b9229cbdc8",
+    "app/layouts/default.vue": "1248b89a8b86c87d59063a2cba2da9e4539804b2cbcdb24edefa0cc92aed561c",
+    "app/pages/algorithms/import.vue": "32f0a74c0c9b60533ee08dd873aaad8cb99db5643ef8dd8c12b0580f3a03a18f",
+    "app/pages/auth/callback.vue": "a60a30835b1bfa4fbf7a3c5bfb102d1b029dc15072da8a2a4fb93c6315bfb84d",
+    "app/pages/groups/index.vue": "0c4854e658a60bfc6dbc158fee9416a0cde4638dd9dd3437aeb065f55c4d65f9",
+    "app/pages/index.vue": "47a097336a2c9bab3d880c3b1d16e93b371e88413aabc6fb3d6ec8a8b0c2aefd",
+    "app/pages/login.vue": "b6fec25f103080a79d9abd12690d80371ad83b175a3bb7a81bb72c5ad022a37e",
+    "app/pages/messages.vue": "1705089237c280cf59c9529f80ce36e0a9eb840cbcfc506d4b1891e123b0de87",
+    "app/pages/profile.vue": "6b26127f80602390e791d723f7bc571da7d6f33c6c5611f38144a751408f36a7",
+    "app/pages/status/[id].vue": "ba60334a4efafaa21b732c5eecd86add8b1154a438b69e508f8741ca7e2f1bec",
+    "app/plugins/mount-signal.client.ts": "46193dc5d661489385e418e8d10787a61a1c0d68ee321d41797022e7aad37660",
+    "app/plugins/pwa-rescue.client.ts": "562b16a610b932408d33db39aeb74158e0fba5cabed048e328612db4a8a2f9ad",
+    "app/stores/algorithms.ts": "ddb651ff6e4106e00cb905b272c9a32a36dd97f8c874f6fa8b1afb4ee4518d09",
+    "app/stores/composeHandoff.ts": "dc646d6627ca2e5f6c657438ffe7113df93b15c57fff4799dff7eb8263012dab",
+    "app/stores/conversations.ts": "073ab89a07c42ceadcbf031f0536cdff3b155fef19309b34590bdc8a28486507",
+    "app/stores/groups.ts": "e522d92dc7a3d44287ff597d88a9b62fde81902fd717c4b9a474fddd8e18653f",
+    "app/stores/insights.ts": "9a3543945787bca7a7becfc44207b42915105d333f949cac03ee5b62889cc93e",
+    "app/stores/notifications.ts": "8ac6b927cf64d1e5d34f30714e33633614ef5d89d9045080597d7acae43d3434",
+    "app/stores/settings.ts": "c4f76ad2922205531a91101189cfbe4b5f58c995087f46355ba446a1d6fc316c",
+    "app/stores/theme.ts": "286654cfcb2a444525b7a057ed41ee9bb0a0d5b2acd28072db2e68a30921c569",
+    "app/stores/toast.ts": "c4c91c5e49ce8575dd088af488a4207da3d921d4ec1e01ad1b464ebfa08ddf12",
+    "app/utils/algorithms.ts": "c560fcc7405e7625d61e66dcc44e75520446d03f6ce4c42e7e721d365694eeb6",
+    "app/utils/appearance.ts": "dccde8b52653f317a8144be8e96a40f403bba668ac328e3e5db50130fe8d48a9",
+    "app/utils/authErrors.ts": "32c97852fcd3224980a7b537a48c313903d47f884c978ce04d86bd1859a61ea1",
+    "app/utils/composeConstants.ts": "f3a9f942e055a0811dede4e49c179133f7fd2b91f3a338f182553acd9234bde5",
+    "app/utils/dmHelpers.ts": "ab5ed9c055d5b3b87e44622b49561ecf94d06b96a5089a18dfef8d7662a2ec07",
+    "app/utils/dmMentions.ts": "53220c6e681ed1d80a80963c6afe08049e85336a44136ec34b8ff26489074a01",
+    "app/utils/edwardAffinity.ts": "d3471644e9e729b131a17fa7f2cbf617bb769e82ccd502dd052fb288e317f3a7",
+    "app/utils/edwardExplore.ts": "56c0186761f5b2949247fd052605b499c99c27c307b853438872900b2bc19faa",
+    "app/utils/edwardFaces.ts": "3036d8984c649b72724679a924111b4373ff72ad48a5bc8deccd5f86fa129170",
+    "app/utils/edwardVoice.ts": "006b9c351f1aafd0e055ab4fd51813dd0afd408fffa06065712587d33d07ea54",
+    "app/utils/emojify.ts": "02b729298bfd6aec0635304ed1fa8cb9d7bf6535e173367d37bdcce2e02a53b8",
+    "app/utils/friendlyError.ts": "7bbdd38f310e415c173b41a1d68ece3c653110ebd20a1c1cf46a5246ea58d457",
+    "app/utils/guessCategory.ts": "89b31e37679a9245071dde8e6734e6341730b281f31f3c549e81fd48e79fa559",
+    "app/utils/hashtag.ts": "7116e2e8ee1e1a47bd44727ab65170e89e8d6205348fb7a9195613e4db15469b",
+    "app/utils/insights.ts": "b1f92b5b0a722b3c22c05299146e8ebbdfa5d3ba48c7be1fb413e78389740d29",
+    "app/utils/instances.ts": "084f377cc78d26c0a046c882e2d24675e61a7da72b746d44764bfb79bc03c410",
+    "app/utils/linkHeader.ts": "5a04a94830459fcfd2288dd7371ee200f2de4c93789bcabf4a815e5f6f124636",
+    "app/utils/log.ts": "0bddacec453277712bd173983ce3c2ab836c3670ce88c8ca6e84009d64fdc5d1",
+    "app/utils/loomExport.ts": "9ee969190d2a657e77c6a9d500093017d1974ef0970b5ca2b30ae775bbe244d2",
+    "app/utils/mastoGuard.ts": "eb720374281156be4620fe6118e9f38d9c7390303a851ee19521b9ec20d0c472",
+    "app/utils/mastodonLength.ts": "fcd67b212cb09349519a0f9e81c1646c488e016f5dd0b1f24a50ded3caed530a",
+    "app/utils/neoIcons.ts": "d1e07e8f4b494f92029a054ebb67aaf65796e509d72653a513848d118b67a6b5",
+    "app/utils/notebookHandoff.ts": "937250740bc0711105ad1244d865f8028b5c1fa5385af40295b649c14b3c8dc0",
+    "app/utils/notifGroup.ts": "10f3be2c5855a7f73188c70560a95159a3f8052afb7f6b935791ab3d2de07bc4",
+    "app/utils/notifHelpers.ts": "de54d2e4bef88461beda2b1818f7eed37717acac899055d074002ad7bec11427",
+    "app/utils/oauthPkce.ts": "336c5011a608027b54ca7c92aa6014a9c5111e88b719c196496f9996e7bfec84",
+    "app/utils/peertube.ts": "ed1432b1899440536aa177d79ef6668797f960b9f994c7a47edea9d869cc15b9",
+    "app/utils/prepareComposeImage.ts": "4766010976b340c4be3916329432382282ff644248c509105ca30310ee95e21b",
+    "app/utils/profileSources.ts": "d76f75d69ac9992f55185a133cf47df927ebb57edb70425d94babb3e8a03c128",
+    "app/utils/rankers.ts": "f493520a971ba0c9197b62a30b61c210991eee7f57a0ac0dc5cdf7d17988ecd7",
+    "app/utils/relativeTime.ts": "318479bcb1585c712329b5a1b46d5ba6da7d78bca7d6fa107a0b6f8b1b5c0182",
+    "app/utils/sanitizeCss.ts": "96b4aefb52b5831481733af5e43d880a9fad70d96b46a7a6426e011fb8562c27",
+    "app/utils/sanitizeHtml.ts": "59b9bff7b278508829e79c68e9ee387eaf5d28eea6acc8954a6d51e1762816ef",
+    "app/utils/searchQuery.ts": "c9236c1dcb987a727ac4dfac87adea434b55a8d3b942a3e7e99317496e4b4b43",
+    "app/utils/sharedRaf.ts": "025ef0ec0b6f19fe2222094a25425c1c38df57ebf58663963e3fd023e7dd0437",
+    "app/utils/statusIdentity.ts": "c1927a017d8108aea46c7353e09a74658215a8420442cbd80b3129d7cc7006ca",
+    "app/utils/stripHtml.ts": "44a8446a3defdacb6e6aebeb3b2350a112fe65703159a44d46f6fbf7dbb6d5ea",
+    "app/utils/suiteLook.ts": "94e37cfe7a8a7636d5fa81f5c29d4504364528c67ad5cbfc653453b4c35a9253",
+    "functions/api/feedback.ts": "ae0871c8dad9b6d01e2e95caaf312413c890ffa008c308d3e294363165f45a92",
+    "functions/tsconfig.json": "bceab4cbf6b7e1d60e92a2a77c3cbc4cb1d42a3f647ab32022aee6101008b707",
+    "nuxt.config.ts": "35a5ee9883c48444f7a6dca03690c1df5e01f80ec6a321c618d8aefe1663dc09",
+    "public/boot/prepaint.js": "2f0a2db445e1befc36c0639690a0849cc06c676183f6386bc9c29c300d5924d3",
+    "scripts/spa-fallback.mjs": "82a7fb437a3fb2786040627700315d68e035f3627838af0b48516a9b60e3b0e3",
+    "tests/discovery.test.ts": "72dd33b8fc3b8f60391e67aa405a1d19508d10810b9c0edb1959e35c4dbb6663",
+    "tests/edward.test.ts": "b161b17528c636e6dfe5de9d3d5602b651e2c1e2e0c1ad439097fd50184e657e",
+    "tests/inbox.test.ts": "b7c8f9d55bd091697cd3b5839efcc0ff7a191ac75ad3782a6d3ab768cfce078c",
+    "tests/rankers.test.ts": "f03ef7ceca9ab325521ee9dcff97b3b05766e042ae45f54946755a6755387eac",
+    "tests/smoke.test.ts": "79b2bd8ca685dd9e9b44680e4106c68c8fd906821f57fcc11a47e43a6837539f"
+  },
+  "items": [
+    {
+      "id": "NS-001",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/TimelineColumn.vue",
+      "sourceLine": null,
+      "currentLine": 892
+    },
+    {
+      "id": "NS-002",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/TimelineColumn.vue",
+      "sourceLine": null,
+      "currentLine": 916
+    },
+    {
+      "id": "NS-003",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/TimelineColumn.vue",
+      "sourceLine": null,
+      "currentLine": 301
+    },
+    {
+      "id": "NS-004",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/TimelineColumn.vue",
+      "sourceLine": null,
+      "currentLine": 563
+    },
+    {
+      "id": "NS-005",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 738
+    },
+    {
+      "id": "NS-006",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 763
+    },
+    {
+      "id": "NS-007",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 763
+    },
+    {
+      "id": "NS-008",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 362
+    },
+    {
+      "id": "NS-009",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 129
+    },
+    {
+      "id": "NS-010",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 347
+    },
+    {
+      "id": "NS-011",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/journeys/smoke.spec.ts",
+      "sourceLine": null,
+      "currentLine": 23
+    },
+    {
+      "id": "NS-012",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/journeys/compose-feed.spec.ts",
+      "sourceLine": null,
+      "currentLine": 10
+    },
+    {
+      "id": "NS-013",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "e2e/journeys/smoke.spec.ts",
+      "sourceLine": null,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-014",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/helpers/mockApi.ts",
+      "sourceLine": null,
+      "currentLine": 57
+    },
+    {
+      "id": "NS-015",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/journeys/smoke.spec.ts",
+      "sourceLine": null,
+      "currentLine": 10
+    },
+    {
+      "id": "NS-016",
+      "origin": "current-pass",
+      "evidence": "R",
+      "source": "app/components/TimelineColumn.vue",
+      "sourceLine": null,
+      "currentLine": 791
+    },
+    {
+      "id": "NS-017",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/journeys/smoke.spec.ts",
+      "sourceLine": null,
+      "currentLine": 50
+    },
+    {
+      "id": "NS-018",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/journeys/smoke.spec.ts",
+      "sourceLine": null,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-019",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "playwright.config.ts",
+      "sourceLine": null,
+      "currentLine": 12
+    },
+    {
+      "id": "NS-020",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "playwright.config.ts",
+      "sourceLine": null,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-021",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsDrafts.vue",
+      "sourceLine": null,
+      "currentLine": 53
+    },
+    {
+      "id": "NS-022",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsDrafts.vue",
+      "sourceLine": null,
+      "currentLine": 53
+    },
+    {
+      "id": "NS-023",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsDrafts.vue",
+      "sourceLine": null,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-024",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealComposeBox.vue",
+      "sourceLine": null,
+      "currentLine": 281
+    },
+    {
+      "id": "NS-025",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useDraft.ts",
+      "sourceLine": null,
+      "currentLine": 72
+    },
+    {
+      "id": "NS-026",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useDraft.ts",
+      "sourceLine": null,
+      "currentLine": 32
+    },
+    {
+      "id": "NS-027",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/composables/useDraft.ts",
+      "sourceLine": null,
+      "currentLine": 93
+    },
+    {
+      "id": "NS-028",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/composables/useDraft.ts",
+      "sourceLine": null,
+      "currentLine": 207
+    },
+    {
+      "id": "NS-029",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/composables/useDraft.ts",
+      "sourceLine": null,
+      "currentLine": 144
+    },
+    {
+      "id": "NS-030",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsDrafts.vue",
+      "sourceLine": null,
+      "currentLine": 62
+    },
+    {
+      "id": "NS-031",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 247
+    },
+    {
+      "id": "NS-032",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 224
+    },
+    {
+      "id": "NS-033",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 285
+    },
+    {
+      "id": "NS-034",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/mediaUpload.ts",
+      "sourceLine": null,
+      "currentLine": 99
+    },
+    {
+      "id": "NS-035",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useComposeMedia.ts",
+      "sourceLine": null,
+      "currentLine": 187
+    },
+    {
+      "id": "NS-036",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/composables/useComposeMedia.ts",
+      "sourceLine": null,
+      "currentLine": 50
+    },
+    {
+      "id": "NS-037",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 175
+    },
+    {
+      "id": "NS-038",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/mediaUpload.ts",
+      "sourceLine": null,
+      "currentLine": 52
+    },
+    {
+      "id": "NS-039",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "tests/mediaUpload.test.ts",
+      "sourceLine": null,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-040",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/composables/useComposeMedia.ts",
+      "sourceLine": null,
+      "currentLine": 190
+    },
+    {
+      "id": "NS-041",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-042",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/RealComposeBox.vue",
+      "sourceLine": null,
+      "currentLine": 1127
+    },
+    {
+      "id": "NS-043",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-044",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/PostPoll.vue",
+      "sourceLine": null,
+      "currentLine": 65
+    },
+    {
+      "id": "NS-045",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/PostPoll.vue",
+      "sourceLine": null,
+      "currentLine": 22
+    },
+    {
+      "id": "NS-046",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/PostPoll.vue",
+      "sourceLine": null,
+      "currentLine": 34
+    },
+    {
+      "id": "NS-047",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealComposeBox.vue",
+      "sourceLine": null,
+      "currentLine": 300
+    },
+    {
+      "id": "NS-048",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/PostPoll.vue",
+      "sourceLine": null,
+      "currentLine": 46
+    },
+    {
+      "id": "NS-049",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/PostPoll.vue",
+      "sourceLine": null,
+      "currentLine": 97
+    },
+    {
+      "id": "NS-050",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 823
+    },
+    {
+      "id": "NS-051",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/stores/status.ts",
+      "sourceLine": null,
+      "currentLine": 301
+    },
+    {
+      "id": "NS-052",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsScheduledPosts.vue",
+      "sourceLine": null,
+      "currentLine": 54
+    },
+    {
+      "id": "NS-053",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsScheduledPosts.vue",
+      "sourceLine": null,
+      "currentLine": 109
+    },
+    {
+      "id": "NS-054",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/settings/SettingsScheduledPosts.vue",
+      "sourceLine": null,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-055",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/settings/SettingsScheduledPosts.vue",
+      "sourceLine": null,
+      "currentLine": 32
+    },
+    {
+      "id": "NS-056",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/settings/SettingsScheduledPosts.vue",
+      "sourceLine": null,
+      "currentLine": 43
+    },
+    {
+      "id": "NS-057",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/scheduledPosts.ts",
+      "sourceLine": null,
+      "currentLine": 25
+    },
+    {
+      "id": "NS-058",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/settings/SettingsScheduledPosts.vue",
+      "sourceLine": null,
+      "currentLine": 16
+    },
+    {
+      "id": "NS-059",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/scheduledPosts.ts",
+      "sourceLine": null,
+      "currentLine": 32
+    },
+    {
+      "id": "NS-060",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/RealComposeBox.vue",
+      "sourceLine": null,
+      "currentLine": 703
+    },
+    {
+      "id": "NS-061",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useComposeAutocomplete.ts",
+      "sourceLine": null,
+      "currentLine": 140
+    },
+    {
+      "id": "NS-062",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useComposeAutocomplete.ts",
+      "sourceLine": null,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-063",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useComposeAutocomplete.ts",
+      "sourceLine": null,
+      "currentLine": 161
+    },
+    {
+      "id": "NS-064",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/composeTokens.ts",
+      "sourceLine": null,
+      "currentLine": 73
+    },
+    {
+      "id": "NS-065",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/composables/useComposeAutocomplete.ts",
+      "sourceLine": null,
+      "currentLine": 171
+    },
+    {
+      "id": "NS-066",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/composeTokens.ts",
+      "sourceLine": null,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-067",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/composeTokens.ts",
+      "sourceLine": null,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-068",
+      "origin": "current-pass",
+      "evidence": "R",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": null,
+      "currentLine": 239
+    },
+    {
+      "id": "NS-069",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/ComposeAutocomplete.vue",
+      "sourceLine": null,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-070",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealComposeBox.vue",
+      "sourceLine": null,
+      "currentLine": 510
+    },
+    {
+      "id": "NS-071",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/serverCapabilities.ts",
+      "sourceLine": null,
+      "currentLine": 46
+    },
+    {
+      "id": "NS-072",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/serverCapabilities.ts",
+      "sourceLine": null,
+      "currentLine": 134
+    },
+    {
+      "id": "NS-073",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/instanceInfo.ts",
+      "sourceLine": null,
+      "currentLine": 12
+    },
+    {
+      "id": "NS-074",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/instanceInfo.ts",
+      "sourceLine": null,
+      "currentLine": 84
+    },
+    {
+      "id": "NS-075",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/serverCapabilities.ts",
+      "sourceLine": null,
+      "currentLine": 23
+    },
+    {
+      "id": "NS-076",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/oauthApp.ts",
+      "sourceLine": null,
+      "currentLine": 5
+    },
+    {
+      "id": "NS-077",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/oauthApp.ts",
+      "sourceLine": null,
+      "currentLine": 59
+    },
+    {
+      "id": "NS-078",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/oauthApp.ts",
+      "sourceLine": null,
+      "currentLine": 52
+    },
+    {
+      "id": "NS-079",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/oauthApp.ts",
+      "sourceLine": null,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-080",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/oauthApp.ts",
+      "sourceLine": null,
+      "currentLine": 26
+    },
+    {
+      "id": "NS-081",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/loadFonts.ts",
+      "sourceLine": null,
+      "currentLine": 9
+    },
+    {
+      "id": "NS-082",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/utils/loadFonts.ts",
+      "sourceLine": null,
+      "currentLine": 10
+    },
+    {
+      "id": "NS-083",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/loadFonts.ts",
+      "sourceLine": null,
+      "currentLine": 140
+    },
+    {
+      "id": "NS-084",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "tests/loadFonts.test.ts",
+      "sourceLine": null,
+      "currentLine": 4
+    },
+    {
+      "id": "NS-085",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/utils/loadFonts.ts",
+      "sourceLine": null,
+      "currentLine": 128
+    },
+    {
+      "id": "NS-086",
+      "origin": "current-pass",
+      "evidence": "R",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": null,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-087",
+      "origin": "current-pass",
+      "evidence": "R",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": null,
+      "currentLine": 394
+    },
+    {
+      "id": "NS-088",
+      "origin": "current-pass",
+      "evidence": "R",
+      "source": "app/pages/profile.vue",
+      "sourceLine": null,
+      "currentLine": 1060
+    },
+    {
+      "id": "NS-089",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/RealPostCard.vue",
+      "sourceLine": null,
+      "currentLine": 1672
+    },
+    {
+      "id": "NS-090",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "app/components/SettingsModal.vue",
+      "sourceLine": null,
+      "currentLine": 1
+    },
+    {
+      "id": "NS-091",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": ".github/workflows/ci.yml",
+      "sourceLine": null,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-092",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "package.json",
+      "sourceLine": null,
+      "currentLine": 21
+    },
+    {
+      "id": "NS-093",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": ".github/workflows/ci.yml",
+      "sourceLine": null,
+      "currentLine": 29
+    },
+    {
+      "id": "NS-094",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "package.json",
+      "sourceLine": null,
+      "currentLine": 11
+    },
+    {
+      "id": "NS-095",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": ".github/workflows/ci.yml",
+      "sourceLine": null,
+      "currentLine": 36
+    },
+    {
+      "id": "NS-096",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": ".github/workflows/ci.yml",
+      "sourceLine": null,
+      "currentLine": 20
+    },
+    {
+      "id": "NS-097",
+      "origin": "current-pass",
+      "evidence": "I",
+      "source": "playwright.config.ts",
+      "sourceLine": null,
+      "currentLine": 1
+    },
+    {
+      "id": "NS-098",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "e2e/helpers/mockApi.ts",
+      "sourceLine": null,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-099",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "app/components/FeedbackNotes.vue",
+      "sourceLine": null,
+      "currentLine": 221
+    },
+    {
+      "id": "NS-100",
+      "origin": "current-pass",
+      "evidence": "C",
+      "source": "public/_headers",
+      "sourceLine": null,
+      "currentLine": 7
+    },
+    {
+      "id": "NS-101",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/composables/useMasto.ts",
+      "sourceLine": 1135,
+      "currentLine": 58
+    },
+    {
+      "id": "NS-102",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcher.vue",
+      "sourceLine": 1183,
+      "currentLine": 165
+    },
+    {
+      "id": "NS-103",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/auth/callback.vue",
+      "sourceLine": 1120,
+      "currentLine": 94
+    },
+    {
+      "id": "NS-104",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/auth/callback.vue",
+      "sourceLine": 1121,
+      "currentLine": 35
+    },
+    {
+      "id": "NS-105",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/oauthPkce.ts",
+      "sourceLine": 1122,
+      "currentLine": 150
+    },
+    {
+      "id": "NS-106",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useMasto.ts",
+      "sourceLine": 1132,
+      "currentLine": 139
+    },
+    {
+      "id": "NS-107",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/instances.ts",
+      "sourceLine": 1157,
+      "currentLine": 62
+    },
+    {
+      "id": "NS-108",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/instances.ts",
+      "sourceLine": 1159,
+      "currentLine": 91
+    },
+    {
+      "id": "NS-109",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1161,
+      "currentLine": 121
+    },
+    {
+      "id": "NS-110",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1162,
+      "currentLine": 205
+    },
+    {
+      "id": "NS-111",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1163,
+      "currentLine": 208
+    },
+    {
+      "id": "NS-112",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/login.vue",
+      "sourceLine": 1175,
+      "currentLine": 123
+    },
+    {
+      "id": "NS-113",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/login.vue",
+      "sourceLine": 1176,
+      "currentLine": 136
+    },
+    {
+      "id": "NS-114",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/login.vue",
+      "sourceLine": 1177,
+      "currentLine": 155
+    },
+    {
+      "id": "NS-115",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcher.vue",
+      "sourceLine": 1184,
+      "currentLine": 160
+    },
+    {
+      "id": "NS-116",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcher.vue",
+      "sourceLine": 1185,
+      "currentLine": 70
+    },
+    {
+      "id": "NS-117",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1186,
+      "currentLine": 22
+    },
+    {
+      "id": "NS-118",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1187,
+      "currentLine": 143
+    },
+    {
+      "id": "NS-119",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1188,
+      "currentLine": 178
+    },
+    {
+      "id": "NS-120",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1189,
+      "currentLine": 176
+    },
+    {
+      "id": "NS-121",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1190,
+      "currentLine": 316
+    },
+    {
+      "id": "NS-122",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1191,
+      "currentLine": 87
+    },
+    {
+      "id": "NS-123",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1192,
+      "currentLine": 173
+    },
+    {
+      "id": "NS-124",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1193,
+      "currentLine": 240
+    },
+    {
+      "id": "NS-125",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1202,
+      "currentLine": 229
+    },
+    {
+      "id": "NS-126",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1203,
+      "currentLine": 132
+    },
+    {
+      "id": "NS-127",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1214,
+      "currentLine": 234
+    },
+    {
+      "id": "NS-128",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1215,
+      "currentLine": 122
+    },
+    {
+      "id": "NS-129",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1216,
+      "currentLine": 209
+    },
+    {
+      "id": "NS-130",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useCuratedInstances.ts",
+      "sourceLine": 1227,
+      "currentLine": 17
+    },
+    {
+      "id": "NS-131",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/friendlyError.ts",
+      "sourceLine": 1231,
+      "currentLine": 37
+    },
+    {
+      "id": "NS-132",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/friendlyError.ts",
+      "sourceLine": 1232,
+      "currentLine": 96
+    },
+    {
+      "id": "NS-133",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/authErrors.ts",
+      "sourceLine": 1236,
+      "currentLine": 6
+    },
+    {
+      "id": "NS-134",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/auth/callback.vue",
+      "sourceLine": 1124,
+      "currentLine": 104
+    },
+    {
+      "id": "NS-135",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/auth/callback.vue",
+      "sourceLine": 1125,
+      "currentLine": 17
+    },
+    {
+      "id": "NS-136",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/auth/callback.vue",
+      "sourceLine": 1126,
+      "currentLine": 55
+    },
+    {
+      "id": "NS-137",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/instances.ts",
+      "sourceLine": 1158,
+      "currentLine": 59
+    },
+    {
+      "id": "NS-138",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/instances.ts",
+      "sourceLine": 1160,
+      "currentLine": 12
+    },
+    {
+      "id": "NS-139",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1164,
+      "currentLine": 190
+    },
+    {
+      "id": "NS-140",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1165,
+      "currentLine": 51
+    },
+    {
+      "id": "NS-141",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1166,
+      "currentLine": 232
+    },
+    {
+      "id": "NS-142",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1167,
+      "currentLine": 255
+    },
+    {
+      "id": "NS-143",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1168,
+      "currentLine": 235
+    },
+    {
+      "id": "NS-144",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1169,
+      "currentLine": 314
+    },
+    {
+      "id": "NS-145",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1170,
+      "currentLine": 514
+    },
+    {
+      "id": "NS-146",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1171,
+      "currentLine": 35
+    },
+    {
+      "id": "NS-147",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ServerPicker.vue",
+      "sourceLine": 1172,
+      "currentLine": 115
+    },
+    {
+      "id": "NS-148",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/login.vue",
+      "sourceLine": 1178,
+      "currentLine": 53
+    },
+    {
+      "id": "NS-149",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/login.vue",
+      "sourceLine": 1179,
+      "currentLine": 156
+    },
+    {
+      "id": "NS-150",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/login.vue",
+      "sourceLine": 1180,
+      "currentLine": 158
+    },
+    {
+      "id": "NS-151",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1194,
+      "currentLine": 159
+    },
+    {
+      "id": "NS-152",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1195,
+      "currentLine": 153
+    },
+    {
+      "id": "NS-153",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcherSheet.vue",
+      "sourceLine": 1196,
+      "currentLine": 101
+    },
+    {
+      "id": "NS-154",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcher.vue",
+      "sourceLine": 1197,
+      "currentLine": 137
+    },
+    {
+      "id": "NS-155",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/AccountSwitcher.vue",
+      "sourceLine": 1198,
+      "currentLine": 199
+    },
+    {
+      "id": "NS-156",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAccountsManager.ts",
+      "sourceLine": 1199,
+      "currentLine": 4
+    },
+    {
+      "id": "NS-157",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1204,
+      "currentLine": 118
+    },
+    {
+      "id": "NS-158",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1205,
+      "currentLine": 112
+    },
+    {
+      "id": "NS-159",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1206,
+      "currentLine": 287
+    },
+    {
+      "id": "NS-160",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1207,
+      "currentLine": 305
+    },
+    {
+      "id": "NS-161",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1208,
+      "currentLine": 229
+    },
+    {
+      "id": "NS-162",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1209,
+      "currentLine": 411
+    },
+    {
+      "id": "NS-163",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1210,
+      "currentLine": 183
+    },
+    {
+      "id": "NS-164",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceManager.vue",
+      "sourceLine": 1211,
+      "currentLine": 710
+    },
+    {
+      "id": "NS-165",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceCard.vue",
+      "sourceLine": 1217,
+      "currentLine": 36
+    },
+    {
+      "id": "NS-166",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstanceCard.vue",
+      "sourceLine": 1218,
+      "currentLine": 26
+    },
+    {
+      "id": "NS-167",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1219,
+      "currentLine": 58
+    },
+    {
+      "id": "NS-168",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1220,
+      "currentLine": 102
+    },
+    {
+      "id": "NS-169",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1221,
+      "currentLine": 179
+    },
+    {
+      "id": "NS-170",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1222,
+      "currentLine": 187
+    },
+    {
+      "id": "NS-171",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1223,
+      "currentLine": 160
+    },
+    {
+      "id": "NS-172",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstancePreview.vue",
+      "sourceLine": 1224,
+      "currentLine": 206
+    },
+    {
+      "id": "NS-173",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useCuratedInstances.ts",
+      "sourceLine": 1228,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-174",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/mastoGuard.ts",
+      "sourceLine": 1237,
+      "currentLine": 42
+    },
+    {
+      "id": "NS-175",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 690,
+      "currentLine": 247
+    },
+    {
+      "id": "NS-176",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAppShellHeight.ts",
+      "sourceLine": 691,
+      "currentLine": 18
+    },
+    {
+      "id": "NS-177",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 692,
+      "currentLine": 268
+    },
+    {
+      "id": "NS-178",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 693,
+      "currentLine": 219
+    },
+    {
+      "id": "NS-179",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 694,
+      "currentLine": 85
+    },
+    {
+      "id": "NS-180",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 695,
+      "currentLine": 227
+    },
+    {
+      "id": "NS-181",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/plugins/pwa-rescue.client.ts",
+      "sourceLine": 700,
+      "currentLine": 23
+    },
+    {
+      "id": "NS-182",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/error.vue",
+      "sourceLine": 701,
+      "currentLine": 35
+    },
+    {
+      "id": "NS-183",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/appearance.ts",
+      "sourceLine": 709,
+      "currentLine": 282
+    },
+    {
+      "id": "NS-184",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 710,
+      "currentLine": 126
+    },
+    {
+      "id": "NS-185",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 711,
+      "currentLine": 133
+    },
+    {
+      "id": "NS-186",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 712,
+      "currentLine": 664
+    },
+    {
+      "id": "NS-187",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 729,
+      "currentLine": 175
+    },
+    {
+      "id": "NS-188",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 730,
+      "currentLine": 235
+    },
+    {
+      "id": "NS-189",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileHeader.vue",
+      "sourceLine": 745,
+      "currentLine": 72
+    },
+    {
+      "id": "NS-190",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileTabBar.vue",
+      "sourceLine": 749,
+      "currentLine": 213
+    },
+    {
+      "id": "NS-191",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 755,
+      "currentLine": 128
+    },
+    {
+      "id": "NS-192",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 756,
+      "currentLine": 334
+    },
+    {
+      "id": "NS-193",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoSheet.vue",
+      "sourceLine": 770,
+      "currentLine": 84
+    },
+    {
+      "id": "NS-194",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/toast.ts",
+      "sourceLine": 782,
+      "currentLine": 7
+    },
+    {
+      "id": "NS-195",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoToastHost.vue",
+      "sourceLine": 783,
+      "currentLine": 93
+    },
+    {
+      "id": "NS-196",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoToastHost.vue",
+      "sourceLine": 784,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-197",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useScrollLock.ts",
+      "sourceLine": 794,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-198",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 810,
+      "currentLine": 394
+    },
+    {
+      "id": "NS-199",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 696,
+      "currentLine": 301
+    },
+    {
+      "id": "NS-200",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 697,
+      "currentLine": 424
+    },
+    {
+      "id": "NS-201",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/error.vue",
+      "sourceLine": 702,
+      "currentLine": 36
+    },
+    {
+      "id": "NS-202",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/error.vue",
+      "sourceLine": 703,
+      "currentLine": 29
+    },
+    {
+      "id": "NS-203",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/error.vue",
+      "sourceLine": 704,
+      "currentLine": 67
+    },
+    {
+      "id": "NS-204",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/error.vue",
+      "sourceLine": 705,
+      "currentLine": 15
+    },
+    {
+      "id": "NS-205",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/app.vue",
+      "sourceLine": 706,
+      "currentLine": 44
+    },
+    {
+      "id": "NS-206",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 713,
+      "currentLine": 485
+    },
+    {
+      "id": "NS-207",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 714,
+      "currentLine": 241
+    },
+    {
+      "id": "NS-208",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 715,
+      "currentLine": 255
+    },
+    {
+      "id": "NS-209",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 716,
+      "currentLine": 372
+    },
+    {
+      "id": "NS-210",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 717,
+      "currentLine": 365
+    },
+    {
+      "id": "NS-211",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 718,
+      "currentLine": 350
+    },
+    {
+      "id": "NS-212",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 719,
+      "currentLine": 384
+    },
+    {
+      "id": "NS-213",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 720,
+      "currentLine": 101
+    },
+    {
+      "id": "NS-214",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 721,
+      "currentLine": 472
+    },
+    {
+      "id": "NS-215",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 722,
+      "currentLine": 286
+    },
+    {
+      "id": "NS-216",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 723,
+      "currentLine": 652
+    },
+    {
+      "id": "NS-217",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 724,
+      "currentLine": 96
+    },
+    {
+      "id": "NS-218",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 725,
+      "currentLine": 174
+    },
+    {
+      "id": "NS-219",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/DesktopSidebar.vue",
+      "sourceLine": 726,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-220",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 731,
+      "currentLine": 164
+    },
+    {
+      "id": "NS-221",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 732,
+      "currentLine": 175
+    },
+    {
+      "id": "NS-222",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 733,
+      "currentLine": 168
+    },
+    {
+      "id": "NS-223",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 734,
+      "currentLine": 218
+    },
+    {
+      "id": "NS-224",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 735,
+      "currentLine": 121
+    },
+    {
+      "id": "NS-225",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 736,
+      "currentLine": 326
+    },
+    {
+      "id": "NS-226",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 737,
+      "currentLine": 243
+    },
+    {
+      "id": "NS-227",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 738,
+      "currentLine": 296
+    },
+    {
+      "id": "NS-228",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 739,
+      "currentLine": 357
+    },
+    {
+      "id": "NS-229",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 740,
+      "currentLine": 149
+    },
+    {
+      "id": "NS-230",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileDrawer.vue",
+      "sourceLine": 741,
+      "currentLine": 840
+    },
+    {
+      "id": "NS-231",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileHeader.vue",
+      "sourceLine": 746,
+      "currentLine": 110
+    },
+    {
+      "id": "NS-232",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileTabBar.vue",
+      "sourceLine": 750,
+      "currentLine": 108
+    },
+    {
+      "id": "NS-233",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileTabBar.vue",
+      "sourceLine": 751,
+      "currentLine": 227
+    },
+    {
+      "id": "NS-234",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/shell/MobileTabBar.vue",
+      "sourceLine": 752,
+      "currentLine": 76
+    },
+    {
+      "id": "NS-235",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 757,
+      "currentLine": 301
+    },
+    {
+      "id": "NS-236",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 758,
+      "currentLine": 155
+    },
+    {
+      "id": "NS-237",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 759,
+      "currentLine": 65
+    },
+    {
+      "id": "NS-238",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 760,
+      "currentLine": 308
+    },
+    {
+      "id": "NS-239",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 761,
+      "currentLine": 438
+    },
+    {
+      "id": "NS-240",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoMenu.vue",
+      "sourceLine": 762,
+      "currentLine": 36
+    },
+    {
+      "id": "NS-241",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoTabs.vue",
+      "sourceLine": 765,
+      "currentLine": 129
+    },
+    {
+      "id": "NS-242",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoTabs.vue",
+      "sourceLine": 766,
+      "currentLine": 139
+    },
+    {
+      "id": "NS-243",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoTabs.vue",
+      "sourceLine": 767,
+      "currentLine": 59
+    },
+    {
+      "id": "NS-244",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoSheet.vue",
+      "sourceLine": 772,
+      "currentLine": 21
+    },
+    {
+      "id": "NS-245",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoSheetHeader.vue",
+      "sourceLine": 773,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-246",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 785,
+      "currentLine": 406
+    },
+    {
+      "id": "NS-247",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_structural.scss",
+      "sourceLine": 786,
+      "currentLine": 224
+    },
+    {
+      "id": "NS-248",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/toast.ts",
+      "sourceLine": 787,
+      "currentLine": 55
+    },
+    {
+      "id": "NS-249",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoToastHost.vue",
+      "sourceLine": 788,
+      "currentLine": 68
+    },
+    {
+      "id": "NS-250",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoToastHost.vue",
+      "sourceLine": 789,
+      "currentLine": 120
+    },
+    {
+      "id": "NS-251",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/toast.ts",
+      "sourceLine": 790,
+      "currentLine": 70
+    },
+    {
+      "id": "NS-252",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFocusTrap.ts",
+      "sourceLine": 791,
+      "currentLine": 94
+    },
+    {
+      "id": "NS-253",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFocusTrap.ts",
+      "sourceLine": 795,
+      "currentLine": 25
+    },
+    {
+      "id": "NS-254",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useKeyboardViewport.ts",
+      "sourceLine": 796,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-255",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useKeyboardViewport.ts",
+      "sourceLine": 797,
+      "currentLine": 251
+    },
+    {
+      "id": "NS-256",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useKeyboardViewport.ts",
+      "sourceLine": 798,
+      "currentLine": 104
+    },
+    {
+      "id": "NS-257",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAppShellHeight.ts",
+      "sourceLine": 799,
+      "currentLine": 11
+    },
+    {
+      "id": "NS-258",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAutoHideNav.ts",
+      "sourceLine": 800,
+      "currentLine": 174
+    },
+    {
+      "id": "NS-259",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/usePrefersReducedMotion.ts",
+      "sourceLine": 801,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-260",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useInstallApp.ts",
+      "sourceLine": 804,
+      "currentLine": 73
+    },
+    {
+      "id": "NS-261",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useInstallApp.ts",
+      "sourceLine": 805,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-262",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useInstallApp.ts",
+      "sourceLine": 806,
+      "currentLine": 29
+    },
+    {
+      "id": "NS-263",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/InstallAppBanner.vue",
+      "sourceLine": 807,
+      "currentLine": 29
+    },
+    {
+      "id": "NS-264",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/SuiteMenu.vue",
+      "sourceLine": 811,
+      "currentLine": 197
+    },
+    {
+      "id": "NS-265",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/SuiteMenu.vue",
+      "sourceLine": 812,
+      "currentLine": 142
+    },
+    {
+      "id": "NS-266",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/SuiteMenu.vue",
+      "sourceLine": 813,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-267",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FunLoader.vue",
+      "sourceLine": 816,
+      "currentLine": 490
+    },
+    {
+      "id": "NS-268",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FunLoader.vue",
+      "sourceLine": 817,
+      "currentLine": 382
+    },
+    {
+      "id": "NS-269",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/sharedRaf.ts",
+      "sourceLine": 819,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-270",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/neoIcons.ts",
+      "sourceLine": 820,
+      "currentLine": 49
+    },
+    {
+      "id": "NS-271",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/relativeTime.ts",
+      "sourceLine": 821,
+      "currentLine": 60
+    },
+    {
+      "id": "NS-272",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/relativeTime.ts",
+      "sourceLine": 822,
+      "currentLine": 89
+    },
+    {
+      "id": "NS-273",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ChromeButton.vue",
+      "sourceLine": 825,
+      "currentLine": 21
+    },
+    {
+      "id": "NS-274",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoOverlayHost.vue",
+      "sourceLine": 826,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-275",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 228,
+      "currentLine": 1366
+    },
+    {
+      "id": "NS-276",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 231,
+      "currentLine": 1370
+    },
+    {
+      "id": "NS-277",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 235,
+      "currentLine": 302
+    },
+    {
+      "id": "NS-278",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 236,
+      "currentLine": 1355
+    },
+    {
+      "id": "NS-279",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 244,
+      "currentLine": 621
+    },
+    {
+      "id": "NS-280",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 245,
+      "currentLine": 945
+    },
+    {
+      "id": "NS-281",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 246,
+      "currentLine": 1210
+    },
+    {
+      "id": "NS-282",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 248,
+      "currentLine": 991
+    },
+    {
+      "id": "NS-283",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 249,
+      "currentLine": 2417
+    },
+    {
+      "id": "NS-284",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 250,
+      "currentLine": 769
+    },
+    {
+      "id": "NS-285",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 251,
+      "currentLine": 686
+    },
+    {
+      "id": "NS-286",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFeedKeyboard.ts",
+      "sourceLine": 260,
+      "currentLine": 14
+    },
+    {
+      "id": "NS-287",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 273,
+      "currentLine": 96
+    },
+    {
+      "id": "NS-288",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 274,
+      "currentLine": 816
+    },
+    {
+      "id": "NS-289",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 275,
+      "currentLine": 775
+    },
+    {
+      "id": "NS-290",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 276,
+      "currentLine": 298
+    },
+    {
+      "id": "NS-291",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 277,
+      "currentLine": 458
+    },
+    {
+      "id": "NS-292",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 278,
+      "currentLine": 143
+    },
+    {
+      "id": "NS-293",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 279,
+      "currentLine": 846
+    },
+    {
+      "id": "NS-294",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFeedKeyboard.ts",
+      "sourceLine": 286,
+      "currentLine": 33
+    },
+    {
+      "id": "NS-295",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ColumnChrome.vue",
+      "sourceLine": 288,
+      "currentLine": 42
+    },
+    {
+      "id": "NS-296",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useHorizontalRail.ts",
+      "sourceLine": 291,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-297",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 237,
+      "currentLine": 1368
+    },
+    {
+      "id": "NS-298",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 240,
+      "currentLine": 1367
+    },
+    {
+      "id": "NS-299",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 252,
+      "currentLine": 1874
+    },
+    {
+      "id": "NS-300",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 253,
+      "currentLine": 1677
+    },
+    {
+      "id": "NS-301",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 254,
+      "currentLine": 1622
+    },
+    {
+      "id": "NS-302",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 255,
+      "currentLine": 135
+    },
+    {
+      "id": "NS-303",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 256,
+      "currentLine": 1769
+    },
+    {
+      "id": "NS-304",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 257,
+      "currentLine": 1917
+    },
+    {
+      "id": "NS-305",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 258,
+      "currentLine": 1417
+    },
+    {
+      "id": "NS-306",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/index.vue",
+      "sourceLine": 259,
+      "currentLine": 1421
+    },
+    {
+      "id": "NS-307",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 280,
+      "currentLine": 282
+    },
+    {
+      "id": "NS-308",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 281,
+      "currentLine": 789
+    },
+    {
+      "id": "NS-309",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 282,
+      "currentLine": 988
+    },
+    {
+      "id": "NS-310",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PanelColumn.vue",
+      "sourceLine": 283,
+      "currentLine": 1397
+    },
+    {
+      "id": "NS-311",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFeedKeyboard.ts",
+      "sourceLine": 287,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-312",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useColumnDnd.ts",
+      "sourceLine": 289,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-313",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ColumnChrome.vue",
+      "sourceLine": 290,
+      "currentLine": 14
+    },
+    {
+      "id": "NS-314",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useHorizontalRail.ts",
+      "sourceLine": 292,
+      "currentLine": 21
+    },
+    {
+      "id": "NS-315",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/linkHeader.ts",
+      "sourceLine": 293,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-316",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/statusIdentity.ts",
+      "sourceLine": 294,
+      "currentLine": 108
+    },
+    {
+      "id": "NS-317",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/utils/edwardAffinity.ts",
+      "sourceLine": 547,
+      "currentLine": 108
+    },
+    {
+      "id": "NS-318",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 451,
+      "currentLine": 26
+    },
+    {
+      "id": "NS-319",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/SuiteMenu.vue",
+      "sourceLine": 453,
+      "currentLine": 28
+    },
+    {
+      "id": "NS-320",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 481,
+      "currentLine": 1496
+    },
+    {
+      "id": "NS-321",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 483,
+      "currentLine": 489
+    },
+    {
+      "id": "NS-322",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 484,
+      "currentLine": 1696
+    },
+    {
+      "id": "NS-323",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 485,
+      "currentLine": 1105
+    },
+    {
+      "id": "NS-324",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 486,
+      "currentLine": 1515
+    },
+    {
+      "id": "NS-325",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 488,
+      "currentLine": 664
+    },
+    {
+      "id": "NS-326",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 489,
+      "currentLine": 1676
+    },
+    {
+      "id": "NS-327",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 490,
+      "currentLine": 1700
+    },
+    {
+      "id": "NS-328",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 492,
+      "currentLine": 1329
+    },
+    {
+      "id": "NS-329",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 493,
+      "currentLine": 1459
+    },
+    {
+      "id": "NS-330",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardAffinity.ts",
+      "sourceLine": 548,
+      "currentLine": 150
+    },
+    {
+      "id": "NS-331",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardFaces.ts",
+      "sourceLine": 549,
+      "currentLine": 116
+    },
+    {
+      "id": "NS-332",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardExplore.ts",
+      "sourceLine": 553,
+      "currentLine": 348
+    },
+    {
+      "id": "NS-333",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardExplore.ts",
+      "sourceLine": 554,
+      "currentLine": 518
+    },
+    {
+      "id": "NS-334",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/edward.test.ts",
+      "sourceLine": 564,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-335",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 487,
+      "currentLine": 851
+    },
+    {
+      "id": "NS-336",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 491,
+      "currentLine": 1582
+    },
+    {
+      "id": "NS-337",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 494,
+      "currentLine": 1846
+    },
+    {
+      "id": "NS-338",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 495,
+      "currentLine": 1278
+    },
+    {
+      "id": "NS-339",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 496,
+      "currentLine": 956
+    },
+    {
+      "id": "NS-340",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 499,
+      "currentLine": 1950
+    },
+    {
+      "id": "NS-341",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 500,
+      "currentLine": 1923
+    },
+    {
+      "id": "NS-342",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/edward/EdwardCanvas.vue",
+      "sourceLine": 501,
+      "currentLine": 1944
+    },
+    {
+      "id": "NS-343",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardFaces.ts",
+      "sourceLine": 550,
+      "currentLine": 87
+    },
+    {
+      "id": "NS-344",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardExplore.ts",
+      "sourceLine": 555,
+      "currentLine": 129
+    },
+    {
+      "id": "NS-345",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardExplore.ts",
+      "sourceLine": 556,
+      "currentLine": 396
+    },
+    {
+      "id": "NS-346",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardFaces.ts",
+      "sourceLine": 559,
+      "currentLine": 963
+    },
+    {
+      "id": "NS-347",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/edwardVoice.ts",
+      "sourceLine": 561,
+      "currentLine": 40
+    },
+    {
+      "id": "NS-348",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1244,
+      "currentLine": 1027
+    },
+    {
+      "id": "NS-349",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1332,
+      "currentLine": 95
+    },
+    {
+      "id": "NS-350",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1334,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-351",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1245,
+      "currentLine": 583
+    },
+    {
+      "id": "NS-352",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1247,
+      "currentLine": 616
+    },
+    {
+      "id": "NS-353",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1248,
+      "currentLine": 91
+    },
+    {
+      "id": "NS-354",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1249,
+      "currentLine": 1141
+    },
+    {
+      "id": "NS-355",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1250,
+      "currentLine": 1040
+    },
+    {
+      "id": "NS-356",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1251,
+      "currentLine": 797
+    },
+    {
+      "id": "NS-357",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1252,
+      "currentLine": 688
+    },
+    {
+      "id": "NS-358",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1253,
+      "currentLine": 816
+    },
+    {
+      "id": "NS-359",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1254,
+      "currentLine": 1057
+    },
+    {
+      "id": "NS-360",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1255,
+      "currentLine": 946
+    },
+    {
+      "id": "NS-361",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1256,
+      "currentLine": 919
+    },
+    {
+      "id": "NS-362",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/guessCategory.ts",
+      "sourceLine": 1266,
+      "currentLine": 60
+    },
+    {
+      "id": "NS-363",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1274,
+      "currentLine": 82
+    },
+    {
+      "id": "NS-364",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1275,
+      "currentLine": 284
+    },
+    {
+      "id": "NS-365",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1276,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-366",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1277,
+      "currentLine": 160
+    },
+    {
+      "id": "NS-367",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/GroupCard.vue",
+      "sourceLine": 1290,
+      "currentLine": 63
+    },
+    {
+      "id": "NS-368",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/GroupCard.vue",
+      "sourceLine": 1291,
+      "currentLine": 172
+    },
+    {
+      "id": "NS-369",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1315,
+      "currentLine": 199
+    },
+    {
+      "id": "NS-370",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1317,
+      "currentLine": 207
+    },
+    {
+      "id": "NS-371",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1319,
+      "currentLine": 182
+    },
+    {
+      "id": "NS-372",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1320,
+      "currentLine": 186
+    },
+    {
+      "id": "NS-373",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1321,
+      "currentLine": 334
+    },
+    {
+      "id": "NS-374",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1322,
+      "currentLine": 89
+    },
+    {
+      "id": "NS-375",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1323,
+      "currentLine": 276
+    },
+    {
+      "id": "NS-376",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1335,
+      "currentLine": 77
+    },
+    {
+      "id": "NS-377",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1336,
+      "currentLine": 179
+    },
+    {
+      "id": "NS-378",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1337,
+      "currentLine": 173
+    },
+    {
+      "id": "NS-379",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1338,
+      "currentLine": 168
+    },
+    {
+      "id": "NS-380",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1339,
+      "currentLine": 195
+    },
+    {
+      "id": "NS-381",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1344,
+      "currentLine": 64
+    },
+    {
+      "id": "NS-382",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1345,
+      "currentLine": 147
+    },
+    {
+      "id": "NS-383",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1346,
+      "currentLine": 104
+    },
+    {
+      "id": "NS-384",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1347,
+      "currentLine": 147
+    },
+    {
+      "id": "NS-385",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1348,
+      "currentLine": 440
+    },
+    {
+      "id": "NS-386",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1349,
+      "currentLine": 251
+    },
+    {
+      "id": "NS-387",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/algorithms.ts",
+      "sourceLine": 1355,
+      "currentLine": 244
+    },
+    {
+      "id": "NS-388",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/algorithms.ts",
+      "sourceLine": 1357,
+      "currentLine": 230
+    },
+    {
+      "id": "NS-389",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/algorithms.ts",
+      "sourceLine": 1358,
+      "currentLine": 97
+    },
+    {
+      "id": "NS-390",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/algorithms/import.vue",
+      "sourceLine": 1363,
+      "currentLine": 70
+    },
+    {
+      "id": "NS-391",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/algorithms/import.vue",
+      "sourceLine": 1364,
+      "currentLine": 53
+    },
+    {
+      "id": "NS-392",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/algorithms/import.vue",
+      "sourceLine": 1365,
+      "currentLine": 66
+    },
+    {
+      "id": "NS-393",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/rankers.test.ts",
+      "sourceLine": 1387,
+      "currentLine": 42
+    },
+    {
+      "id": "NS-394",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/rankers.test.ts",
+      "sourceLine": 1388,
+      "currentLine": null
+    },
+    {
+      "id": "NS-395",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1389,
+      "currentLine": null
+    },
+    {
+      "id": "NS-396",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/rankers.test.ts",
+      "sourceLine": 1390,
+      "currentLine": 164
+    },
+    {
+      "id": "NS-397",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/discovery.test.ts",
+      "sourceLine": 1391,
+      "currentLine": 87
+    },
+    {
+      "id": "NS-398",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1257,
+      "currentLine": 556
+    },
+    {
+      "id": "NS-399",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1258,
+      "currentLine": 1039
+    },
+    {
+      "id": "NS-400",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1259,
+      "currentLine": 1030
+    },
+    {
+      "id": "NS-401",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1260,
+      "currentLine": 66
+    },
+    {
+      "id": "NS-402",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1261,
+      "currentLine": 1120
+    },
+    {
+      "id": "NS-403",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1262,
+      "currentLine": 453
+    },
+    {
+      "id": "NS-404",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/groups.ts",
+      "sourceLine": 1263,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-405",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/guessCategory.ts",
+      "sourceLine": 1267,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-406",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/guessCategory.ts",
+      "sourceLine": 1268,
+      "currentLine": 61
+    },
+    {
+      "id": "NS-407",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useGroupSearch.ts",
+      "sourceLine": 1271,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-408",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1279,
+      "currentLine": 139
+    },
+    {
+      "id": "NS-409",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1280,
+      "currentLine": 288
+    },
+    {
+      "id": "NS-410",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1281,
+      "currentLine": 35
+    },
+    {
+      "id": "NS-411",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1282,
+      "currentLine": 270
+    },
+    {
+      "id": "NS-412",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1283,
+      "currentLine": 17
+    },
+    {
+      "id": "NS-413",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1284,
+      "currentLine": 167
+    },
+    {
+      "id": "NS-414",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1285,
+      "currentLine": 433
+    },
+    {
+      "id": "NS-415",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/groups/index.vue",
+      "sourceLine": 1286,
+      "currentLine": 442
+    },
+    {
+      "id": "NS-416",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/GroupCard.vue",
+      "sourceLine": 1292,
+      "currentLine": 206
+    },
+    {
+      "id": "NS-417",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/GroupCard.vue",
+      "sourceLine": 1293,
+      "currentLine": 127
+    },
+    {
+      "id": "NS-418",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/GroupCard.vue",
+      "sourceLine": 1294,
+      "currentLine": 16
+    },
+    {
+      "id": "NS-419",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/GroupCard.vue",
+      "sourceLine": 1295,
+      "currentLine": 188
+    },
+    {
+      "id": "NS-420",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1324,
+      "currentLine": 313
+    },
+    {
+      "id": "NS-421",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1325,
+      "currentLine": 118
+    },
+    {
+      "id": "NS-422",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1326,
+      "currentLine": 128
+    },
+    {
+      "id": "NS-423",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1327,
+      "currentLine": 484
+    },
+    {
+      "id": "NS-424",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/rankers.ts",
+      "sourceLine": 1328,
+      "currentLine": 223
+    },
+    {
+      "id": "NS-425",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1340,
+      "currentLine": 59
+    },
+    {
+      "id": "NS-426",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRankedFeed.ts",
+      "sourceLine": 1341,
+      "currentLine": 221
+    },
+    {
+      "id": "NS-427",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1350,
+      "currentLine": 85
+    },
+    {
+      "id": "NS-428",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1351,
+      "currentLine": 210
+    },
+    {
+      "id": "NS-429",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/algorithms.ts",
+      "sourceLine": 1352,
+      "currentLine": 411
+    },
+    {
+      "id": "NS-430",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/algorithms.ts",
+      "sourceLine": 1359,
+      "currentLine": 75
+    },
+    {
+      "id": "NS-431",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/algorithms.ts",
+      "sourceLine": 1360,
+      "currentLine": 51
+    },
+    {
+      "id": "NS-432",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/algorithms/import.vue",
+      "sourceLine": 1366,
+      "currentLine": 74
+    },
+    {
+      "id": "NS-433",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/algorithms/import.vue",
+      "sourceLine": 1367,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-434",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1398,
+      "currentLine": 221
+    },
+    {
+      "id": "NS-435",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1400,
+      "currentLine": 335
+    },
+    {
+      "id": "NS-436",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1401,
+      "currentLine": 305
+    },
+    {
+      "id": "NS-437",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1402,
+      "currentLine": 225
+    },
+    {
+      "id": "NS-438",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1403,
+      "currentLine": 35
+    },
+    {
+      "id": "NS-439",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFeedbackNotes.ts",
+      "sourceLine": 1425,
+      "currentLine": 50
+    },
+    {
+      "id": "NS-440",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/log.ts",
+      "sourceLine": 1428,
+      "currentLine": 50
+    },
+    {
+      "id": "NS-441",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/composables/useLoomHandoff.ts",
+      "sourceLine": 1433,
+      "currentLine": 190
+    },
+    {
+      "id": "NS-442",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/utils/notebookHandoff.ts",
+      "sourceLine": 1436,
+      "currentLine": 36
+    },
+    {
+      "id": "NS-443",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useLoomHandoff.ts",
+      "sourceLine": 1437,
+      "currentLine": 78
+    },
+    {
+      "id": "NS-444",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/composeHandoff.ts",
+      "sourceLine": 1438,
+      "currentLine": 341
+    },
+    {
+      "id": "NS-445",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "nuxt.config.ts",
+      "sourceLine": 1449,
+      "currentLine": 43
+    },
+    {
+      "id": "NS-446",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/plugins/mount-signal.client.ts",
+      "sourceLine": 1453,
+      "currentLine": 2
+    },
+    {
+      "id": "NS-447",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "nuxt.config.ts",
+      "sourceLine": 1457,
+      "currentLine": 116
+    },
+    {
+      "id": "NS-448",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "scripts/spa-fallback.mjs",
+      "sourceLine": 1465,
+      "currentLine": 23
+    },
+    {
+      "id": "NS-449",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "Dockerfile",
+      "sourceLine": 1467,
+      "currentLine": 3
+    },
+    {
+      "id": "NS-450",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/smoke.test.ts",
+      "sourceLine": 1494,
+      "currentLine": 329
+    },
+    {
+      "id": "NS-451",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1404,
+      "currentLine": 327
+    },
+    {
+      "id": "NS-452",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1405,
+      "currentLine": 64
+    },
+    {
+      "id": "NS-453",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "functions/api/feedback.ts",
+      "sourceLine": 1407,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-454",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/usePostActions.ts",
+      "sourceLine": 306,
+      "currentLine": 157
+    },
+    {
+      "id": "NS-455",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/usePostActions.ts",
+      "sourceLine": 351,
+      "currentLine": 238
+    },
+    {
+      "id": "NS-456",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/composeConstants.ts",
+      "sourceLine": 394,
+      "currentLine": 12
+    },
+    {
+      "id": "NS-457",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/composeConstants.ts",
+      "sourceLine": 399,
+      "currentLine": 9
+    },
+    {
+      "id": "NS-458",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/prepareComposeImage.ts",
+      "sourceLine": 400,
+      "currentLine": 96
+    },
+    {
+      "id": "NS-459",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PreviewCard.vue",
+      "sourceLine": 406,
+      "currentLine": 74
+    },
+    {
+      "id": "NS-460",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/peertube.ts",
+      "sourceLine": 407,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-461",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoLightbox.vue",
+      "sourceLine": 411,
+      "currentLine": 174
+    },
+    {
+      "id": "NS-462",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoLightbox.vue",
+      "sourceLine": 412,
+      "currentLine": 138
+    },
+    {
+      "id": "NS-463",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 421,
+      "currentLine": 76
+    },
+    {
+      "id": "NS-464",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 422,
+      "currentLine": 587
+    },
+    {
+      "id": "NS-465",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/stripHtml.ts",
+      "sourceLine": 434,
+      "currentLine": 13
+    },
+    {
+      "id": "NS-466",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/mastodonLength.ts",
+      "sourceLine": 435,
+      "currentLine": 6
+    },
+    {
+      "id": "NS-467",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/emojify.ts",
+      "sourceLine": 437,
+      "currentLine": 57
+    },
+    {
+      "id": "NS-468",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/prepareComposeImage.ts",
+      "sourceLine": 401,
+      "currentLine": 133
+    },
+    {
+      "id": "NS-469",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/prepareComposeImage.ts",
+      "sourceLine": 402,
+      "currentLine": 106
+    },
+    {
+      "id": "NS-470",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/composeConstants.ts",
+      "sourceLine": 403,
+      "currentLine": 6
+    },
+    {
+      "id": "NS-471",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PreviewCard.vue",
+      "sourceLine": 408,
+      "currentLine": 104
+    },
+    {
+      "id": "NS-472",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoLightbox.vue",
+      "sourceLine": 413,
+      "currentLine": 158
+    },
+    {
+      "id": "NS-473",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 423,
+      "currentLine": 258
+    },
+    {
+      "id": "NS-474",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 424,
+      "currentLine": 227
+    },
+    {
+      "id": "NS-475",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 425,
+      "currentLine": 104
+    },
+    {
+      "id": "NS-476",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 426,
+      "currentLine": 137
+    },
+    {
+      "id": "NS-477",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ComposeGroupPicker.vue",
+      "sourceLine": 427,
+      "currentLine": 477
+    },
+    {
+      "id": "NS-478",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PostActionSheet.vue",
+      "sourceLine": 430,
+      "currentLine": 33
+    },
+    {
+      "id": "NS-479",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/PostActionSheet.vue",
+      "sourceLine": 431,
+      "currentLine": 22
+    },
+    {
+      "id": "NS-480",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/mastodonLength.ts",
+      "sourceLine": 436,
+      "currentLine": 10
+    },
+    {
+      "id": "NS-481",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/emojify.ts",
+      "sourceLine": 438,
+      "currentLine": 45
+    },
+    {
+      "id": "NS-482",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/sanitizeHtml.ts",
+      "sourceLine": 439,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-483",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/sanitizeHtml.ts",
+      "sourceLine": 440,
+      "currentLine": 116
+    },
+    {
+      "id": "NS-484",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/hashtag.ts",
+      "sourceLine": 441,
+      "currentLine": 25
+    },
+    {
+      "id": "NS-485",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useComposedStatus.ts",
+      "sourceLine": 442,
+      "currentLine": 13
+    },
+    {
+      "id": "NS-486",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 833,
+      "currentLine": 620
+    },
+    {
+      "id": "NS-487",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 835,
+      "currentLine": 691
+    },
+    {
+      "id": "NS-488",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 863,
+      "currentLine": 323
+    },
+    {
+      "id": "NS-489",
+      "origin": "october-9-carry-forward",
+      "evidence": "R",
+      "source": "app/utils/sanitizeCss.ts",
+      "sourceLine": 884,
+      "currentLine": 78
+    },
+    {
+      "id": "NS-490",
+      "origin": "october-9-carry-forward",
+      "evidence": "R",
+      "source": "app/utils/sanitizeCss.ts",
+      "sourceLine": 885,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-491",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 836,
+      "currentLine": 691
+    },
+    {
+      "id": "NS-492",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 837,
+      "currentLine": 237
+    },
+    {
+      "id": "NS-493",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 838,
+      "currentLine": 38
+    },
+    {
+      "id": "NS-494",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 839,
+      "currentLine": 38
+    },
+    {
+      "id": "NS-495",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 840,
+      "currentLine": 97
+    },
+    {
+      "id": "NS-496",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 841,
+      "currentLine": 813
+    },
+    {
+      "id": "NS-497",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 842,
+      "currentLine": 210
+    },
+    {
+      "id": "NS-498",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 845,
+      "currentLine": 495
+    },
+    {
+      "id": "NS-499",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 848,
+      "currentLine": 64
+    },
+    {
+      "id": "NS-500",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 850,
+      "currentLine": 588
+    },
+    {
+      "id": "NS-501",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 854,
+      "currentLine": 196
+    },
+    {
+      "id": "NS-502",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 855,
+      "currentLine": 794
+    },
+    {
+      "id": "NS-503",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 865,
+      "currentLine": 1142
+    },
+    {
+      "id": "NS-504",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 866,
+      "currentLine": 1121
+    },
+    {
+      "id": "NS-505",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 869,
+      "currentLine": 713
+    },
+    {
+      "id": "NS-506",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 870,
+      "currentLine": 905
+    },
+    {
+      "id": "NS-507",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/insights.ts",
+      "sourceLine": 891,
+      "currentLine": 201
+    },
+    {
+      "id": "NS-508",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/insights.ts",
+      "sourceLine": 892,
+      "currentLine": 198
+    },
+    {
+      "id": "NS-509",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/insights.ts",
+      "sourceLine": 893,
+      "currentLine": 118
+    },
+    {
+      "id": "NS-510",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/insights.ts",
+      "sourceLine": 895,
+      "currentLine": 168
+    },
+    {
+      "id": "NS-511",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/loomExport.ts",
+      "sourceLine": 901,
+      "currentLine": 88
+    },
+    {
+      "id": "NS-512",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 905,
+      "currentLine": 313
+    },
+    {
+      "id": "NS-513",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 906,
+      "currentLine": 80
+    },
+    {
+      "id": "NS-514",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 907,
+      "currentLine": 136
+    },
+    {
+      "id": "NS-515",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 908,
+      "currentLine": 88
+    },
+    {
+      "id": "NS-516",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 909,
+      "currentLine": 270
+    },
+    {
+      "id": "NS-517",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfileHumanBadges.vue",
+      "sourceLine": 920,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-518",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFediverseSearch.ts",
+      "sourceLine": 926,
+      "currentLine": 407
+    },
+    {
+      "id": "NS-519",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFediverseSearch.ts",
+      "sourceLine": 927,
+      "currentLine": 485
+    },
+    {
+      "id": "NS-520",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFediverseSearch.ts",
+      "sourceLine": 928,
+      "currentLine": 473
+    },
+    {
+      "id": "NS-521",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/searchQuery.ts",
+      "sourceLine": 930,
+      "currentLine": 19
+    },
+    {
+      "id": "NS-522",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/searchQuery.ts",
+      "sourceLine": 931,
+      "currentLine": 15
+    },
+    {
+      "id": "NS-523",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useFediverseSearch.ts",
+      "sourceLine": 935,
+      "currentLine": 187
+    },
+    {
+      "id": "NS-524",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAccountSearch.ts",
+      "sourceLine": 958,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-525",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 843,
+      "currentLine": 217
+    },
+    {
+      "id": "NS-526",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 851,
+      "currentLine": 373
+    },
+    {
+      "id": "NS-527",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 852,
+      "currentLine": 380
+    },
+    {
+      "id": "NS-528",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 853,
+      "currentLine": 396
+    },
+    {
+      "id": "NS-529",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 856,
+      "currentLine": 257
+    },
+    {
+      "id": "NS-530",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 857,
+      "currentLine": 1499
+    },
+    {
+      "id": "NS-531",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 858,
+      "currentLine": 748
+    },
+    {
+      "id": "NS-532",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 859,
+      "currentLine": 664
+    },
+    {
+      "id": "NS-533",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 867,
+      "currentLine": 312
+    },
+    {
+      "id": "NS-534",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 868,
+      "currentLine": 413
+    },
+    {
+      "id": "NS-535",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 871,
+      "currentLine": 1032
+    },
+    {
+      "id": "NS-536",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 872,
+      "currentLine": 926
+    },
+    {
+      "id": "NS-537",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 873,
+      "currentLine": 1080
+    },
+    {
+      "id": "NS-538",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 874,
+      "currentLine": 1199
+    },
+    {
+      "id": "NS-539",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/profileSources.ts",
+      "sourceLine": 879,
+      "currentLine": 86
+    },
+    {
+      "id": "NS-540",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/profileSources.ts",
+      "sourceLine": 880,
+      "currentLine": 97
+    },
+    {
+      "id": "NS-541",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/profileSources.ts",
+      "sourceLine": 881,
+      "currentLine": 120
+    },
+    {
+      "id": "NS-542",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/sanitizeCss.ts",
+      "sourceLine": 886,
+      "currentLine": 143
+    },
+    {
+      "id": "NS-543",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/sanitizeCss.ts",
+      "sourceLine": 887,
+      "currentLine": 186
+    },
+    {
+      "id": "NS-544",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/sanitizeCss.ts",
+      "sourceLine": 888,
+      "currentLine": 61
+    },
+    {
+      "id": "NS-545",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/insights.ts",
+      "sourceLine": 894,
+      "currentLine": 152
+    },
+    {
+      "id": "NS-546",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/insights.ts",
+      "sourceLine": 896,
+      "currentLine": 173
+    },
+    {
+      "id": "NS-547",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/insights.ts",
+      "sourceLine": 897,
+      "currentLine": 192
+    },
+    {
+      "id": "NS-548",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfileInsights.vue",
+      "sourceLine": 898,
+      "currentLine": 163
+    },
+    {
+      "id": "NS-549",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfileInsights.vue",
+      "sourceLine": 899,
+      "currentLine": 465
+    },
+    {
+      "id": "NS-550",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfileInsights.vue",
+      "sourceLine": 900,
+      "currentLine": 189
+    },
+    {
+      "id": "NS-551",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/loomExport.ts",
+      "sourceLine": 902,
+      "currentLine": 165
+    },
+    {
+      "id": "NS-552",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 910,
+      "currentLine": 367
+    },
+    {
+      "id": "NS-553",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 911,
+      "currentLine": 303
+    },
+    {
+      "id": "NS-554",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 912,
+      "currentLine": 183
+    },
+    {
+      "id": "NS-555",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 913,
+      "currentLine": 380
+    },
+    {
+      "id": "NS-556",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/FollowersModal.vue",
+      "sourceLine": 914,
+      "currentLine": 66
+    },
+    {
+      "id": "NS-557",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfilePeekCard.vue",
+      "sourceLine": 917,
+      "currentLine": 71
+    },
+    {
+      "id": "NS-558",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfilePeekCard.vue",
+      "sourceLine": 918,
+      "currentLine": 49
+    },
+    {
+      "id": "NS-559",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfilePeekCard.vue",
+      "sourceLine": 919,
+      "currentLine": 57
+    },
+    {
+      "id": "NS-560",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/profile.vue",
+      "sourceLine": 921,
+      "currentLine": 277
+    },
+    {
+      "id": "NS-561",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ProfileHumanBadges.vue",
+      "sourceLine": 922,
+      "currentLine": 71
+    },
+    {
+      "id": "NS-562",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/searchQuery.ts",
+      "sourceLine": 933,
+      "currentLine": 79
+    },
+    {
+      "id": "NS-563",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/searchQuery.ts",
+      "sourceLine": 934,
+      "currentLine": 106
+    },
+    {
+      "id": "NS-564",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/search/SearchPersonRow.vue",
+      "sourceLine": 949,
+      "currentLine": 57
+    },
+    {
+      "id": "NS-565",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/search/SearchPersonRow.vue",
+      "sourceLine": 950,
+      "currentLine": 38
+    },
+    {
+      "id": "NS-566",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/search/SearchPersonRow.vue",
+      "sourceLine": 951,
+      "currentLine": 33
+    },
+    {
+      "id": "NS-567",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/search/SearchTagRow.vue",
+      "sourceLine": 952,
+      "currentLine": 24
+    },
+    {
+      "id": "NS-568",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/search/SearchTagRow.vue",
+      "sourceLine": 953,
+      "currentLine": 42
+    },
+    {
+      "id": "NS-569",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/searchQuery.ts",
+      "sourceLine": 954,
+      "currentLine": 180
+    },
+    {
+      "id": "NS-570",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAccountSearch.ts",
+      "sourceLine": 959,
+      "currentLine": 85
+    },
+    {
+      "id": "NS-571",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/usePager.ts",
+      "sourceLine": 960,
+      "currentLine": 92
+    },
+    {
+      "id": "NS-572",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useSearchDiscovery.ts",
+      "sourceLine": 961,
+      "currentLine": 69
+    },
+    {
+      "id": "NS-573",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRecentSearches.ts",
+      "sourceLine": 962,
+      "currentLine": 36
+    },
+    {
+      "id": "NS-574",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useRecentSearches.ts",
+      "sourceLine": 963,
+      "currentLine": 37
+    },
+    {
+      "id": "NS-575",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useLinkedProfileFeed.ts",
+      "sourceLine": 964,
+      "currentLine": 84
+    },
+    {
+      "id": "NS-576",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/components/NeoRadioGroup.vue",
+      "sourceLine": 573,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-577",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 579,
+      "currentLine": 166
+    },
+    {
+      "id": "NS-578",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 580,
+      "currentLine": 870
+    },
+    {
+      "id": "NS-579",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoRadioGroup.vue",
+      "sourceLine": 574,
+      "currentLine": 99
+    },
+    {
+      "id": "NS-580",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 582,
+      "currentLine": 903
+    },
+    {
+      "id": "NS-581",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 587,
+      "currentLine": 347
+    },
+    {
+      "id": "NS-582",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 588,
+      "currentLine": 56
+    },
+    {
+      "id": "NS-583",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 593,
+      "currentLine": 764
+    },
+    {
+      "id": "NS-584",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 603,
+      "currentLine": 128
+    },
+    {
+      "id": "NS-585",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": 624,
+      "currentLine": 623
+    },
+    {
+      "id": "NS-586",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_structural.scss",
+      "sourceLine": 638,
+      "currentLine": 9
+    },
+    {
+      "id": "NS-587",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": 639,
+      "currentLine": 76
+    },
+    {
+      "id": "NS-588",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": 641,
+      "currentLine": 280
+    },
+    {
+      "id": "NS-589",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": 642,
+      "currentLine": 40
+    },
+    {
+      "id": "NS-590",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": 643,
+      "currentLine": 1025
+    },
+    {
+      "id": "NS-591",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_themes.scss",
+      "sourceLine": 648,
+      "currentLine": 430
+    },
+    {
+      "id": "NS-592",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 650,
+      "currentLine": 40
+    },
+    {
+      "id": "NS-593",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 651,
+      "currentLine": 155
+    },
+    {
+      "id": "NS-594",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/appearance.ts",
+      "sourceLine": 664,
+      "currentLine": 273
+    },
+    {
+      "id": "NS-595",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/suiteLook.ts",
+      "sourceLine": 669,
+      "currentLine": 58
+    },
+    {
+      "id": "NS-596",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/settings.ts",
+      "sourceLine": 670,
+      "currentLine": 508
+    },
+    {
+      "id": "NS-597",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "public/boot/prepaint.js",
+      "sourceLine": 679,
+      "currentLine": 4
+    },
+    {
+      "id": "NS-598",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "public/boot/prepaint.js",
+      "sourceLine": 680,
+      "currentLine": 43
+    },
+    {
+      "id": "NS-599",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "nuxt.config.ts",
+      "sourceLine": 681,
+      "currentLine": 125
+    },
+    {
+      "id": "NS-600",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoRadioGroup.vue",
+      "sourceLine": 575,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-601",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoRadioGroup.vue",
+      "sourceLine": 576,
+      "currentLine": 115
+    },
+    {
+      "id": "NS-602",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_structural.scss",
+      "sourceLine": 653,
+      "currentLine": 173
+    },
+    {
+      "id": "NS-603",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_variables.scss",
+      "sourceLine": 654,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-604",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_structural.scss",
+      "sourceLine": 655,
+      "currentLine": 14
+    },
+    {
+      "id": "NS-605",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 656,
+      "currentLine": 265
+    },
+    {
+      "id": "NS-606",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/_structural.scss",
+      "sourceLine": 657,
+      "currentLine": 158
+    },
+    {
+      "id": "NS-607",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 658,
+      "currentLine": 194
+    },
+    {
+      "id": "NS-608",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 659,
+      "currentLine": 739
+    },
+    {
+      "id": "NS-609",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 660,
+      "currentLine": null
+    },
+    {
+      "id": "NS-610",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/assets/css/main.scss",
+      "sourceLine": 661,
+      "currentLine": 65
+    },
+    {
+      "id": "NS-611",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useShellAppearance.ts",
+      "sourceLine": 673,
+      "currentLine": 119
+    },
+    {
+      "id": "NS-612",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useShellAppearance.ts",
+      "sourceLine": 674,
+      "currentLine": 60
+    },
+    {
+      "id": "NS-613",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/ThemeSwatch.vue",
+      "sourceLine": 675,
+      "currentLine": 8
+    },
+    {
+      "id": "NS-614",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/theme.ts",
+      "sourceLine": 676,
+      "currentLine": 30
+    },
+    {
+      "id": "NS-615",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "public/boot/prepaint.js",
+      "sourceLine": 682,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-616",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 971,
+      "currentLine": 930
+    },
+    {
+      "id": "NS-617",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 972,
+      "currentLine": 78
+    },
+    {
+      "id": "NS-618",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 974,
+      "currentLine": 1145
+    },
+    {
+      "id": "NS-619",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/DmContextFooter.vue",
+      "sourceLine": 1035,
+      "currentLine": 93
+    },
+    {
+      "id": "NS-620",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/composables/useAccountSearch.ts",
+      "sourceLine": 1039,
+      "currentLine": 48
+    },
+    {
+      "id": "NS-621",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1053,
+      "currentLine": 122
+    },
+    {
+      "id": "NS-622",
+      "origin": "october-9-carry-forward",
+      "evidence": "C",
+      "source": "app/layouts/default.vue",
+      "sourceLine": 1054,
+      "currentLine": 135
+    },
+    {
+      "id": "NS-623",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 973,
+      "currentLine": 78
+    },
+    {
+      "id": "NS-624",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 975,
+      "currentLine": 864
+    },
+    {
+      "id": "NS-625",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 976,
+      "currentLine": 422
+    },
+    {
+      "id": "NS-626",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 978,
+      "currentLine": 913
+    },
+    {
+      "id": "NS-627",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 979,
+      "currentLine": 1174
+    },
+    {
+      "id": "NS-628",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 980,
+      "currentLine": 662
+    },
+    {
+      "id": "NS-629",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 981,
+      "currentLine": 786
+    },
+    {
+      "id": "NS-630",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 982,
+      "currentLine": 787
+    },
+    {
+      "id": "NS-631",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 983,
+      "currentLine": 570
+    },
+    {
+      "id": "NS-632",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 984,
+      "currentLine": 697
+    },
+    {
+      "id": "NS-633",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 988,
+      "currentLine": 969
+    },
+    {
+      "id": "NS-634",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 989,
+      "currentLine": 1036
+    },
+    {
+      "id": "NS-635",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1004,
+      "currentLine": 259
+    },
+    {
+      "id": "NS-636",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1005,
+      "currentLine": 329
+    },
+    {
+      "id": "NS-637",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1006,
+      "currentLine": 183
+    },
+    {
+      "id": "NS-638",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1007,
+      "currentLine": 268
+    },
+    {
+      "id": "NS-639",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1008,
+      "currentLine": 210
+    },
+    {
+      "id": "NS-640",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1009,
+      "currentLine": 259
+    },
+    {
+      "id": "NS-641",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1010,
+      "currentLine": 313
+    },
+    {
+      "id": "NS-642",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/messages.vue",
+      "sourceLine": 1040,
+      "currentLine": 129
+    },
+    {
+      "id": "NS-643",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/messages.vue",
+      "sourceLine": 1041,
+      "currentLine": 106
+    },
+    {
+      "id": "NS-644",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/conversations.ts",
+      "sourceLine": 1042,
+      "currentLine": 235
+    },
+    {
+      "id": "NS-645",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/conversations.ts",
+      "sourceLine": 1043,
+      "currentLine": 240
+    },
+    {
+      "id": "NS-646",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/dmHelpers.ts",
+      "sourceLine": 1044,
+      "currentLine": 38
+    },
+    {
+      "id": "NS-647",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/notifHelpers.ts",
+      "sourceLine": 1055,
+      "currentLine": 39
+    },
+    {
+      "id": "NS-648",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/notifHelpers.ts",
+      "sourceLine": 1058,
+      "currentLine": 31
+    },
+    {
+      "id": "NS-649",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1059,
+      "currentLine": 145
+    },
+    {
+      "id": "NS-650",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1065,
+      "currentLine": 356
+    },
+    {
+      "id": "NS-651",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1066,
+      "currentLine": 249
+    },
+    {
+      "id": "NS-652",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1067,
+      "currentLine": 562
+    },
+    {
+      "id": "NS-653",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1068,
+      "currentLine": 330
+    },
+    {
+      "id": "NS-654",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoReport.vue",
+      "sourceLine": 1087,
+      "currentLine": 51
+    },
+    {
+      "id": "NS-655",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/inbox.test.ts",
+      "sourceLine": 1101,
+      "currentLine": 1
+    },
+    {
+      "id": "NS-656",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 985,
+      "currentLine": 169
+    },
+    {
+      "id": "NS-657",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 986,
+      "currentLine": 997
+    },
+    {
+      "id": "NS-658",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 987,
+      "currentLine": 636
+    },
+    {
+      "id": "NS-659",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 990,
+      "currentLine": 1026
+    },
+    {
+      "id": "NS-660",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 991,
+      "currentLine": 985
+    },
+    {
+      "id": "NS-661",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 992,
+      "currentLine": 952
+    },
+    {
+      "id": "NS-662",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 993,
+      "currentLine": 1219
+    },
+    {
+      "id": "NS-663",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 994,
+      "currentLine": 723
+    },
+    {
+      "id": "NS-664",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 995,
+      "currentLine": 499
+    },
+    {
+      "id": "NS-665",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 996,
+      "currentLine": 872
+    },
+    {
+      "id": "NS-666",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 997,
+      "currentLine": 885
+    },
+    {
+      "id": "NS-667",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 998,
+      "currentLine": 264
+    },
+    {
+      "id": "NS-668",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 999,
+      "currentLine": 1247
+    },
+    {
+      "id": "NS-669",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 1000,
+      "currentLine": 394
+    },
+    {
+      "id": "NS-670",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 1001,
+      "currentLine": 832
+    },
+    {
+      "id": "NS-671",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/status/[id].vue",
+      "sourceLine": 1011,
+      "currentLine": 437
+    },
+    {
+      "id": "NS-672",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1012,
+      "currentLine": 60
+    },
+    {
+      "id": "NS-673",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1013,
+      "currentLine": 241
+    },
+    {
+      "id": "NS-674",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1014,
+      "currentLine": 313
+    },
+    {
+      "id": "NS-675",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1015,
+      "currentLine": 120
+    },
+    {
+      "id": "NS-676",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1016,
+      "currentLine": 220
+    },
+    {
+      "id": "NS-677",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1017,
+      "currentLine": 188
+    },
+    {
+      "id": "NS-678",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1018,
+      "currentLine": 433
+    },
+    {
+      "id": "NS-679",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/MessageBubble.vue",
+      "sourceLine": 1019,
+      "currentLine": 348
+    },
+    {
+      "id": "NS-680",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/DmContextFooter.vue",
+      "sourceLine": 1036,
+      "currentLine": 71
+    },
+    {
+      "id": "NS-681",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/messages.vue",
+      "sourceLine": 1045,
+      "currentLine": 383
+    },
+    {
+      "id": "NS-682",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/messages.vue",
+      "sourceLine": 1046,
+      "currentLine": 464
+    },
+    {
+      "id": "NS-683",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/messages.vue",
+      "sourceLine": 1047,
+      "currentLine": 338
+    },
+    {
+      "id": "NS-684",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/pages/messages.vue",
+      "sourceLine": 1048,
+      "currentLine": 406
+    },
+    {
+      "id": "NS-685",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/dmHelpers.ts",
+      "sourceLine": 1050,
+      "currentLine": 54
+    },
+    {
+      "id": "NS-686",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/notifGroup.ts",
+      "sourceLine": 1073,
+      "currentLine": 33
+    },
+    {
+      "id": "NS-687",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1077,
+      "currentLine": 301
+    },
+    {
+      "id": "NS-688",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1078,
+      "currentLine": 147
+    },
+    {
+      "id": "NS-689",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/utils/notifHelpers.ts",
+      "sourceLine": 1079,
+      "currentLine": 5
+    },
+    {
+      "id": "NS-690",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/stores/notifications.ts",
+      "sourceLine": 1080,
+      "currentLine": 289
+    },
+    {
+      "id": "NS-691",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoReport.vue",
+      "sourceLine": 1088,
+      "currentLine": 95
+    },
+    {
+      "id": "NS-692",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoReport.vue",
+      "sourceLine": 1089,
+      "currentLine": 34
+    },
+    {
+      "id": "NS-693",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/NeoReport.vue",
+      "sourceLine": 1090,
+      "currentLine": 77
+    },
+    {
+      "id": "NS-694",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/RecipientPicker.vue",
+      "sourceLine": 1093,
+      "currentLine": 231
+    },
+    {
+      "id": "NS-695",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/RecipientPicker.vue",
+      "sourceLine": 1094,
+      "currentLine": 197
+    },
+    {
+      "id": "NS-696",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/RecipientPicker.vue",
+      "sourceLine": 1095,
+      "currentLine": 61
+    },
+    {
+      "id": "NS-697",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/RecipientPicker.vue",
+      "sourceLine": 1096,
+      "currentLine": 287
+    },
+    {
+      "id": "NS-698",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/RecipientPicker.vue",
+      "sourceLine": 1097,
+      "currentLine": 231
+    },
+    {
+      "id": "NS-699",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "app/components/RecipientPicker.vue",
+      "sourceLine": 1098,
+      "currentLine": 112
+    },
+    {
+      "id": "NS-700",
+      "origin": "october-9-carry-forward",
+      "evidence": "A",
+      "source": "tests/inbox.test.ts",
+      "sourceLine": 1102,
+      "currentLine": 111
+    }
+  ]
+}

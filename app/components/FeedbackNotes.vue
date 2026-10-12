@@ -11,7 +11,6 @@ import {
   FEEDBACK_TITLE_MAX,
   getDiagnosticLogPreview,
   getGitHubNewIssueUrl,
-  prepareScreenshot,
   type FeedbackKind,
 } from '~/utils/feedback'
 import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
@@ -42,7 +41,6 @@ const { open, close } = useFeedbackNotes()
 const kind = ref<FeedbackKind>('ux')
 const title = ref('')
 const body = ref('')
-const shot = ref<string | null>(null)
 /** Opt-in: diagnostic logs are public once filed, so default off */
 const includeLogs = ref(false)
 const logPreview = ref('')
@@ -52,7 +50,6 @@ const fallbackUrl = ref<string | null>(null)
 const turnstileToken = ref<string | null>(null)
 const turnstileWidgetId = ref<string | null>(null)
 const bodyRef = ref<HTMLTextAreaElement | null>(null)
-const fileRef = ref<HTMLInputElement | null>(null)
 const titleRef = ref<HTMLInputElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 const overlayRef = ref<HTMLElement | null>(null)
@@ -85,9 +82,7 @@ const reset = () => {
   title.value = ''
   body.value = ''
   kind.value = 'ux'
-  shot.value = null
   includeLogs.value = false
-  if (fileRef.value) fileRef.value.value = ''
 }
 
 const tryClose = () => {
@@ -161,15 +156,6 @@ const onFormKeydown = (e: KeyboardEvent) => {
   }
 }
 
-const onUpload = async (file: File | undefined) => {
-  if (!file) return
-  try {
-    shot.value = await prepareScreenshot(file)
-  } catch (e) {
-    showToast(e instanceof Error ? e.message : 'Could not read that image.')
-  }
-}
-
 const submit = async () => {
   if (!canSubmit.value) return
   busy.value = true
@@ -181,9 +167,10 @@ const submit = async () => {
   try {
     const url = await createGitHubIssue(fullTitle, fullBody, {
       kind: kind.value,
-      imageBase64: shot.value,
       turnstileToken: turnstileToken.value,
       includeLogs: includeLogs.value,
+      // Exactly what the preview showed (new log lines after opening the preview aren't smuggled in)
+      logSnapshot: includeLogs.value ? logPreview.value : undefined,
     })
     showToast('Note filed as a GitHub issue')
     fallbackUrl.value = url
@@ -288,7 +275,7 @@ onUnmounted(() => {
 
           <p v-if="!keyboardOpen" class="notes-panel__lede">
             Files as a <strong>public</strong> GitHub issue on NeoSpace — bugs, UX, ideas.
-            The current page URL and any screenshot are included.
+            The current page URL is included. Screenshots aren’t attached yet.
           </p>
 
           <fieldset v-if="!keyboardOpen" class="notes-kinds">
@@ -347,36 +334,6 @@ onUnmounted(() => {
           <p id="neospace-note-body-count" class="notes-counter">
             {{ body.length }}/{{ FEEDBACK_BODY_MAX }}
           </p>
-
-          <div v-if="!keyboardOpen" class="notes-shot-row">
-            <input
-              id="neospace-note-shot"
-              ref="fileRef"
-              type="file"
-              accept="image/*"
-              class="notes-file"
-              @change="onUpload(($event.target as HTMLInputElement).files?.[0])"
-            />
-            <label for="neospace-note-shot" class="notes-shot-btn">
-              {{ shot ? 'Replace screenshot' : 'Attach screenshot' }}
-            </label>
-            <button
-              v-if="shot"
-              type="button"
-              class="notes-shot-clear"
-              aria-label="Remove screenshot"
-              @click="shot = null"
-            >
-              Remove
-            </button>
-          </div>
-
-          <img
-            v-if="shot && !keyboardOpen"
-            :src="shot"
-            alt="Screenshot preview"
-            class="notes-preview"
-          />
 
           <div v-if="!keyboardOpen" class="notes-logs">
             <label class="notes-logs__toggle" for="neospace-note-logs">
@@ -694,14 +651,6 @@ onUnmounted(() => {
   max-height: 8rem;
 }
 
-.notes-file {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  overflow: hidden;
-}
-
 .notes-logs {
   flex-shrink: 0;
   margin-bottom: 0.5rem;
@@ -732,62 +681,6 @@ onUnmounted(() => {
   font-size: 0.6875rem;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.notes-shot-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-  margin-bottom: 0.5rem;
-  border-radius: 4px;
-
-  &:focus-within .notes-shot-btn {
-    outline: 2px solid var(--neo-focus, var(--neo-accent));
-    outline-offset: 2px;
-    box-shadow: 0 0 0 4px var(--neo-bg-primary);
-    border-color: var(--neo-focus, var(--neo-accent));
-  }
-}
-
-.notes-shot-btn {
-  padding: 0.4rem 0.65rem;
-  font-size: 0.75rem;
-  color: var(--neo-text-secondary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--neo-text-primary);
-    border-color: var(--neo-accent);
-  }
-}
-
-.notes-shot-clear {
-  font-size: 0.75rem;
-  color: var(--neo-text-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--neo-text-primary);
-  }
-}
-
-.notes-preview {
-  display: block;
-  max-height: 6rem;
-  width: auto;
-  max-width: 100%;
-  margin-bottom: 0.75rem;
-  flex-shrink: 0;
-  border-radius: 4px;
-  border: 1px solid var(--neo-border-color);
-  object-fit: contain;
-  background: var(--neo-bg-tertiary);
 }
 
 .notes-actions {

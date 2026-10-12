@@ -59,11 +59,12 @@ export function formatRelativeTime(
 
   for (const { amount, unit } of DIVISIONS) {
     if (Math.abs(duration) < amount) {
-      return rtf.format(Math.round(duration), unit)
+      // Truncate: rounding turned 59.6s into "60 seconds ago" instead of "1 minute ago"
+      return rtf.format(Math.trunc(duration), unit)
     }
     duration /= amount
   }
-  return rtf.format(Math.round(duration), 'year')
+  return rtf.format(Math.trunc(duration), 'year')
 }
 
 const COMPACT_UNITS: { seconds: number; unit: 'minute' | 'hour' | 'day' }[] = [
@@ -94,7 +95,7 @@ export function formatCompactRelativeTime(
         return cachedFormat(
           `n|${loc}|${unit}`,
           () => new Intl.NumberFormat(loc, { style: 'unit', unit, unitDisplay: 'narrow' }),
-        ).format(Math.round(elapsed / seconds))
+        ).format(Math.floor(elapsed / seconds))
       }
     }
     return getRtf(loc).format(0, 'second')

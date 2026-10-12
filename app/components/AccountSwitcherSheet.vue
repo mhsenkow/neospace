@@ -6,6 +6,7 @@
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
+import { plainDisplayName } from '~/utils/displayName'
 
 const instancesStore = useInstancesStore()
 const { open: openAccounts } = useAccountsManager()
@@ -84,9 +85,12 @@ const makeMain = (id: string) => {
   closeMenu()
 }
 
+/** Accounts whose revoke request is still running — blocks a second confirm and shows progress */
+const signingOut = ref<Record<string, boolean>>({})
+
 const signOutAccount = async (id: string) => {
   const account = accounts.value.find((a) => a.id === id)
-  if (!account) return
+  if (!account || signingOut.value[id]) return
   const ok = await useOverlayStore().openConfirm({
     title: 'Sign out?',
     body: `Sign out of ${handleOf(account)}? You can keep watching public posts.`,
@@ -94,7 +98,14 @@ const signOutAccount = async (id: string) => {
     danger: true,
   })
   if (!ok) return
-  await instancesStore.logoutInstance(id)
+  signingOut.value = { ...signingOut.value, [id]: true }
+  try {
+    await instancesStore.logoutInstance(id)
+  } finally {
+    const next = { ...signingOut.value }
+    delete next[id]
+    signingOut.value = next
+  }
   if (!accounts.value.length) closeMenu()
 }
 
@@ -140,7 +151,7 @@ onUnmounted(() => {
           <header class="acct-sheet__header">
             <h2 id="acct-sheet-title" class="acct-sheet__title">Accounts</h2>
             <p class="acct-sheet__subtitle">
-              Switch which server you’re posting as. Feeds still mix across signed-in accounts.
+              Switch which account you post and read as.
             </p>
           </header>
 
@@ -170,18 +181,19 @@ onUnmounted(() => {
                   </span>
                 </span>
                 <span class="acct-sheet__avatar-name">
-                  {{ account.user?.displayName || account.user?.username }}
+                  {{ plainDisplayName(account.user?.displayName, account.user?.username) }}
                   <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
                 </span>
-                <span class="acct-sheet__avatar-host">{{ handleOf(account) }}</span>
+                <span class="acct-sheet__avatar-host" :title="handleOf(account)">{{ hostOf(account) }}</span>
               </button>
               <button
                 type="button"
                 class="acct-sheet__signout"
+                :disabled="signingOut[account.id]"
                 :aria-label="`Sign out of ${handleOf(account)}`"
                 @click="signOutAccount(account.id)"
               >
-                Sign out
+                {{ signingOut[account.id] ? 'Signing out…' : 'Sign out' }}
               </button>
             </li>
 
@@ -194,8 +206,7 @@ onUnmounted(() => {
                 <span class="acct-sheet__avatar-ring acct-sheet__avatar-ring--add">
                   <NeoIcon name="plus" :size="22" :stroke="2" />
                 </span>
-                <span class="acct-sheet__avatar-name">Add</span>
-                <span class="acct-sheet__avatar-host">server</span>
+                <span class="acct-sheet__avatar-name">Add account</span>
               </button>
             </li>
           </ul>
@@ -217,7 +228,7 @@ onUnmounted(() => {
                 />
                 <span class="acct-sheet__row-text">
                   <span class="acct-sheet__row-name">
-                    {{ account.user?.displayName || account.user?.username }}
+                    {{ plainDisplayName(account.user?.displayName, account.user?.username) }}
                     <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
                   </span>
                   <span class="acct-sheet__row-handle">{{ handleOf(account) }}</span>
@@ -229,6 +240,15 @@ onUnmounted(() => {
                 >
                   <NeoIcon name="check" :size="18" :stroke="2.5" />
                 </span>
+              </button>
+              <button
+                type="button"
+                class="acct-sheet__signout"
+                :disabled="signingOut[account.id]"
+                :aria-label="`Sign out of ${handleOf(account)}`"
+                @click="signOutAccount(account.id)"
+              >
+                {{ signingOut[account.id] ? 'Signing out…' : 'Sign out' }}
               </button>
             </li>
           </ul>
@@ -251,10 +271,10 @@ onUnmounted(() => {
               class="acct-sheet__action"
               @click="addAccount"
             >
-              Add another server
+              Add account
             </button>
             <button type="button" class="acct-sheet__action" @click="manage">
-              Manage servers
+              Accounts &amp; servers
             </button>
           </div>
         </div>
@@ -313,7 +333,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   border: none;
-  background: color-mix(in srgb, var(--neo-text-primary) 42%, transparent);
+  background: var(--neo-scrim);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -485,9 +505,14 @@ onUnmounted(() => {
   padding: 0.15rem 0.35rem;
   border-radius: 6px;
 
-  &:hover {
+  &:hover:not(:disabled) {
     color: var(--neo-danger);
     background: color-mix(in srgb, var(--neo-danger) 10%, transparent);
+  }
+
+  &:disabled {
+    cursor: progress;
+    opacity: 0.7;
   }
 }
 
@@ -513,10 +538,15 @@ onUnmounted(() => {
   > li {
     margin: 0;
     padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
   }
 }
 
 .acct-sheet__row {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.75rem;

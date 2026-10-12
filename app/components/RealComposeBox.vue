@@ -3,15 +3,20 @@
  * Compose — Threads-easy posting: drag/drop, paste, previews, Cmd+Enter
  */
 
-import { useStatusStore, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from '~/stores/status'
+import { useStatusStore, POLL_MIN_OPTIONS } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
-import { COMPOSE_MEDIA_ACCEPT } from '~/utils/composeConstants'
+import {
+  COMPOSE_MEDIA_ACCEPT,
+  COMPOSE_PREVIEWABLE_IMAGE,
+  composeAttachmentIcon,
+} from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
-import { useDraft } from '~/composables/useDraft'
+import { draftSaveMessage, useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
+import { checkLocalSchedule, localTimeZoneLabel, scheduleCheckMessage } from '~/utils/scheduledPosts'
 import { useComposeAutocomplete } from '~/composables/useComposeAutocomplete'
 import type { ComposeSuggestion } from '~/utils/composeTokens'
 import { useOverlayStore } from '~/stores/overlay'
@@ -91,6 +96,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   posted: [status: mastodon.v1.Status]
+  /** A post was queued for later rather than published */
+  scheduled: [status: mastodon.v1.ScheduledStatus]
 }>()
 
 const statusStore = useStatusStore()
@@ -176,6 +183,14 @@ const scheduledAtIso = computed(() => {
   if (!Number.isFinite(when.getTime())) return undefined
   return when.toISOString()
 })
+/** Why the picked time can't be used (nonexistent DST time, invalid) — null when fine/unset */
+const scheduleProblem = computed(() => {
+  const local = scheduledLocal.value.trim()
+  if (!local) return null
+  const check = checkLocalSchedule(local, 0)
+  return check.ok || check.reason === 'too-soon' ? null : scheduleCheckMessage(check.reason)
+})
+const scheduleZone = computed(() => (hasSchedule.value ? localTimeZoneLabel(scheduledAtIso.value ?? Date.now()) : ''))
 
 const isScheduledResult = (
   result: mastodon.v1.Status | mastodon.v1.ScheduledStatus,
@@ -210,6 +225,9 @@ const {
   text: draftText,
   spoiler: draftSpoiler,
   visibility: draftVisibility,
+  saveError: draftSaveError,
+  conflict: draftConflict,
+  resolveConflict: resolveDraftConflict,
   restore: restoreDraft,
   clear: clearDraft,
   flush: flushDraft,
@@ -227,6 +245,21 @@ const applyDraft = () => {
   if (draftVisibility.value && !isLockedDirect.value) {
     visibility.value = draftVisibility.value
   }
+}
+
+/** Autosave couldn't keep the whole draft — say so instead of losing text quietly */
+const draftWarning = computed(() =>
+  draftSaveError.value ? draftSaveMessage(draftSaveError.value) : '',
+)
+
+/** Another tab saved different text into this draft — take theirs or keep ours */
+const resolveConflictChoice = (choice: 'theirs' | 'mine') => {
+  const theirs = resolveDraftConflict(choice)
+  if (!theirs) return
+  content.value = theirs.text
+  spoilerText.value = theirs.spoiler
+  showCW.value = !!theirs.spoiler
+  if (theirs.visibility && !isLockedDirect.value) visibility.value = theirs.visibility
 }
 
 const persistDraft = () => {
@@ -259,6 +292,8 @@ const {
   mediaOptimizeSummary,
   peerTubeHint,
   dismissPeerTubeHint,
+  accountSwitchNotice,
+  dismissAccountSwitchNotice,
   retryUpload,
   cancelUpload,
   setDescription,
@@ -285,7 +320,7 @@ const hasOwnContent = computed(() => {
 })
 
 // ── Poll (not persisted with drafts — like attachments, scalars only) ──
-const POLL_DURATIONS = [
+const POLL_DURATION_CHOICES = [
   { seconds: 5 * 60, label: '5 minutes' },
   { seconds: 30 * 60, label: '30 minutes' },
   { seconds: 60 * 60, label: '1 hour' },
@@ -294,6 +329,26 @@ const POLL_DURATIONS = [
   { seconds: 3 * 24 * 60 * 60, label: '3 days' },
   { seconds: 7 * 24 * 60 * 60, label: '7 days' },
 ] as const
+// Server-advertised limits (poll options, option length, duration bounds) — Mastodon defaults otherwise
+const pollLimits = computed(() => instancesStore.composePollLimits)
+const POLL_MAX_OPTIONS_LIVE = computed(() => pollLimits.value.maxOptions)
+/** Only durations the selected server accepts; its own bounds are offered if none of the presets fit */
+const POLL_DURATIONS = computed(() => {
+  const { minExpiration: min, maxExpiration: max } = pollLimits.value
+  const fit: { seconds: number; label: string }[] = POLL_DURATION_CHOICES.filter(
+    (d) => d.seconds >= min && d.seconds <= max,
+  ).map((d) => ({ ...d }))
+  if (!fit.length) {
+    fit.push({ seconds: min, label: formatPollSeconds(min) })
+    if (max !== min) fit.push({ seconds: max, label: formatPollSeconds(max) })
+  }
+  return fit
+})
+const formatPollSeconds = (secs: number) => {
+  if (secs % 86400 === 0) return `${secs / 86400} day${secs === 86400 ? '' : 's'}`
+  if (secs % 3600 === 0) return `${secs / 3600} hour${secs === 3600 ? '' : 's'}`
+  return `${Math.max(1, Math.round(secs / 60))} minutes`
+}
 const showPoll = ref(false)
 const pollOptions = ref<string[]>(['', ''])
 const pollDuration = ref<number>(24 * 60 * 60)
@@ -307,28 +362,54 @@ const pollHasDuplicates = computed(() => {
   const opts = filledPollOptions.value
   return new Set(opts.map((o) => o.toLowerCase())).size !== opts.length
 })
-/** 2–4 distinct, non-empty options */
+const pollTooLong = computed(() =>
+  filledPollOptions.value.some((o) => [...o].length > pollLimits.value.maxCharactersPerOption),
+)
+/** 2–N distinct, non-empty options within the server's length / duration limits */
 const pollValid = computed(() => {
   if (!showPoll.value) return true
   const n = filledPollOptions.value.length
-  return n >= POLL_MIN_OPTIONS && n <= POLL_MAX_OPTIONS && !pollHasDuplicates.value
+  return (
+    n >= POLL_MIN_OPTIONS &&
+    n <= POLL_MAX_OPTIONS_LIVE.value &&
+    !pollTooLong.value &&
+    POLL_DURATIONS.value.some((d) => d.seconds === pollDuration.value) &&
+    !pollHasDuplicates.value
+  )
 })
 const pollError = computed(() => {
   if (!showPoll.value) return ''
   if (hasMedia.value) return 'Polls can’t include photos or video — remove one.'
   if (pollHasDuplicates.value) return 'Poll options must be different.'
+  if (pollTooLong.value) {
+    return `Poll options can be at most ${pollLimits.value.maxCharactersPerOption} characters on this server.`
+  }
   return ''
 })
+
+// Account switch / metadata refresh can drop the chosen duration out of range — snap to the nearest allowed
+watch(
+  POLL_DURATIONS,
+  (list) => {
+    if (list.some((d) => d.seconds === pollDuration.value)) return
+    pollDuration.value = list.reduce((best, d) =>
+      Math.abs(d.seconds - pollDuration.value) < Math.abs(best.seconds - pollDuration.value) ? d : best,
+    ).seconds
+  },
+  { immediate: true },
+)
 
 const resetPoll = () => {
   showPoll.value = false
   pollOptions.value = ['', '']
-  pollDuration.value = 24 * 60 * 60
+  pollDuration.value = POLL_DURATIONS.value.some((d) => d.seconds === 24 * 60 * 60)
+    ? 24 * 60 * 60
+    : (POLL_DURATIONS.value[POLL_DURATIONS.value.length - 1]?.seconds ?? 24 * 60 * 60)
   pollMultiple.value = false
 }
 
 const addPollOption = () => {
-  if (pollOptions.value.length < POLL_MAX_OPTIONS) pollOptions.value = [...pollOptions.value, '']
+  if (pollOptions.value.length < POLL_MAX_OPTIONS_LIVE.value) pollOptions.value = [...pollOptions.value, '']
 }
 const removePollOption = (idx: number) => {
   if (pollOptions.value.length <= POLL_MIN_OPTIONS) return
@@ -372,6 +453,7 @@ const compactExpanded = computed(
 )
 
 const maxLength = computed(() => instancesStore.statusMaxCharacters)
+const urlOpts = computed(() => ({ urlWeight: instancesStore.statusUrlWeight }))
 
 const groupTagSuffix = computed(() => {
   const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
@@ -397,7 +479,7 @@ const mentionPrefixLen = computed(() => {
       'i',
     ).test(` ${scratch} `)
     if (!already) {
-      added += mastodonLength(mention) + (scratch ? 1 : 0)
+      added += mastodonLength(mention, urlOpts.value) + (scratch ? 1 : 0)
       scratch = scratch ? `${mention} ${scratch}` : mention
     }
   }
@@ -412,7 +494,11 @@ const characterCount = computed(() => {
     body = `${body.trim()}${body.trim() ? '\n\n' : ''}${quote}`
   }
   const cw = showCW.value ? spoilerText.value : ''
-  return mastodonLength(body) + mentionPrefixLen.value + (cw ? mastodonLength(cw) : 0)
+  return (
+    mastodonLength(body, urlOpts.value) +
+    mentionPrefixLen.value +
+    (cw ? mastodonLength(cw, urlOpts.value) : 0)
+  )
 })
 const isOverLimit = computed(() => characterCount.value > effectiveMaxLength.value)
 const isNearLimit = computed(
@@ -537,6 +623,37 @@ const clearSchedule = () => {
   scheduledLocal.value = ''
 }
 
+// While the popup is open, re-place it when the viewport or on-screen keyboard changes
+// (resize / visualViewport) — never touches focus or the caret.
+let placementRaf = 0
+const replaceMentionPopup = () => {
+  if (placementRaf) return
+  placementRaf = requestAnimationFrame(() => {
+    placementRaf = 0
+    syncMentionPlacement()
+  })
+}
+const unwatchPlacement = ref<(() => void) | null>(null)
+const stopPlacementWatch = () => {
+  unwatchPlacement.value?.()
+  unwatchPlacement.value = null
+  if (placementRaf) cancelAnimationFrame(placementRaf)
+  placementRaf = 0
+}
+const startPlacementWatch = () => {
+  if (unwatchPlacement.value || typeof window === 'undefined') return
+  const vv = window.visualViewport
+  window.addEventListener('resize', replaceMentionPopup)
+  vv?.addEventListener('resize', replaceMentionPopup)
+  vv?.addEventListener('scroll', replaceMentionPopup)
+  unwatchPlacement.value = () => {
+    window.removeEventListener('resize', replaceMentionPopup)
+    vv?.removeEventListener('resize', replaceMentionPopup)
+    vv?.removeEventListener('scroll', replaceMentionPopup)
+  }
+}
+onBeforeUnmount(stopPlacementWatch)
+
 const formatScheduleAnnounce = (iso: string) => {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -556,12 +673,14 @@ const autocomplete = useComposeAutocomplete({
 const {
   items: suggestions,
   searching: mentionSearching,
+  outcome: mentionOutcome,
   index: mentionIndex,
   open: mentionOpen,
   listShown: mentionListShown,
 } = autocomplete
 const suggestionKind = computed(() => autocomplete.token.value?.kind ?? 'mention')
 const activeMentionId = computed(() => autocomplete.activeId(mentionListId))
+watch(mentionOpen, (isOpen) => (isOpen ? startPlacementWatch() : stopPlacementWatch()))
 
 const submitShortcutTitle = computed(() => {
   if (isUploading.value) return 'Waiting for uploads…'
@@ -659,8 +778,8 @@ const handlePost = async () => {
         ? 'direct'
         : visibility.value
 
-    if (hasSchedule.value && !scheduledAtIso.value) {
-      throw new Error('Pick a valid schedule time')
+    if (hasSchedule.value && (!scheduledAtIso.value || scheduleProblem.value)) {
+      throw new Error(scheduleProblem.value || 'Pick a valid schedule time')
     }
 
     const quotedStatusId = props.quoteContext?.id?.trim() || undefined
@@ -702,6 +821,7 @@ const handlePost = async () => {
     resetForm()
     if (isScheduledResult(result)) {
       announcePosted(`Scheduled for ${formatScheduleAnnounce(result.scheduledAt)}`)
+      emit('scheduled', result)
     } else {
       emit('posted', result)
       announcePosted(props.inReplyToId ? 'Reply posted' : 'Posted')
@@ -907,18 +1027,32 @@ defineExpose({
   canPost,
   isPosting,
   submitLabel,
-  /** Anything the user would lose by closing — own text, CW, or attachments */
+  /** Anything the user would lose by closing — own text, CW, attachments, poll, or schedule */
   isDirty: computed(
     () =>
       hasOwnContent.value ||
       hasMedia.value ||
       (showCW.value && !!spoilerText.value.trim()) ||
-      (showPoll.value && filledPollOptions.value.length > 0),
+      (showPoll.value && filledPollOptions.value.length > 0) ||
+      hasSchedule.value,
   ),
-  /** "Save draft and close" — write the (text-only) draft now; attachments aren't restored */
-  saveDraft: () => {
+  /** Text or CW a draft can actually keep */
+  hasDraftText: computed(() => hasOwnContent.value || (showCW.value && !!spoilerText.value.trim())),
+  /** Edits a text-only draft would drop (named for the close dialog) */
+  unsavedExtras: computed(() => {
+    const out: string[] = []
+    if (hasMedia.value) out.push('attachments')
+    if (showPoll.value && filledPollOptions.value.length > 0) out.push('poll')
+    if (hasSchedule.value) out.push('scheduled time')
+    return out
+  }),
+  /**
+   * "Save draft and close" — write the (text-only) draft now; attachments, poll and
+   * schedule aren't restored. Returns an error message when it couldn't be stored.
+   */
+  saveDraft: (): string | null => {
     persistDraft()
-    flushDraft()
+    return flushDraft() ? null : draftSaveMessage(draftSaveError.value || 'storage')
   },
   /** Confirmed "Discard" — drop the saved draft too, or it comes back next open */
   discardDraft: () => clearDraft(),
@@ -990,6 +1124,7 @@ defineExpose({
           :items="suggestions"
           :kind="suggestionKind"
           :searching="mentionSearching"
+          :outcome="mentionOutcome"
           :active-index="mentionIndex"
           :flip-up="mentionFlipUp"
           @select="insertSuggestion"
@@ -1081,6 +1216,7 @@ defineExpose({
           :items="suggestions"
           :kind="suggestionKind"
           :searching="mentionSearching"
+          :outcome="mentionOutcome"
           :active-index="mentionIndex"
           :flip-up="mentionFlipUp"
           @select="insertSuggestion"
@@ -1124,7 +1260,7 @@ defineExpose({
           v-model="pollOptions[idx]"
           type="text"
           class="compose-poll__input neo-input"
-          maxlength="50"
+          :maxlength="pollLimits.maxCharactersPerOption"
           :placeholder="`Option ${idx + 1}`"
           :aria-label="`Poll option ${idx + 1}`"
         />
@@ -1140,7 +1276,7 @@ defineExpose({
       </div>
       <div class="compose-poll__settings">
         <button
-          v-if="pollOptions.length < POLL_MAX_OPTIONS"
+          v-if="pollOptions.length < POLL_MAX_OPTIONS_LIVE"
           type="button"
           class="compose-poll__add"
           @click="addPollOption"
@@ -1202,13 +1338,13 @@ defineExpose({
         }"
       >
         <img
-          v-if="item.file.type.startsWith('image/')"
+          v-if="COMPOSE_PREVIEWABLE_IMAGE.test(item.file.type)"
           :src="item.previewUrl"
           alt=""
           class="compose-media__thumb"
         />
         <div v-else class="compose-media__video">
-          <span aria-hidden="true">🎬</span>
+          <span aria-hidden="true">{{ composeAttachmentIcon(item.file.type) }}</span>
           <span class="compose-media__video-name">{{ item.file.name }}</span>
         </div>
         <div
@@ -1280,6 +1416,23 @@ defineExpose({
     </div>
 
     <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ postAnnounce || uploadAnnounce }}</p>
+
+    <div v-if="accountSwitchNotice" class="compose-handoff" role="status" @click.stop>
+      <span>{{ accountSwitchNotice }}</span>
+      <button type="button" class="compose-handoff__dismiss" @click="dismissAccountSwitchNotice">Dismiss</button>
+    </div>
+
+    <div v-if="draftWarning" class="compose-error" role="status" @click.stop>{{ draftWarning }}</div>
+
+    <div v-if="draftConflict" class="compose-handoff" role="alert" @click.stop>
+      <span>This draft was changed in another tab.</span>
+      <button type="button" class="compose-handoff__dismiss" @click="resolveConflictChoice('theirs')">
+        Use other version
+      </button>
+      <button type="button" class="compose-handoff__dismiss" @click="resolveConflictChoice('mine')">
+        Keep mine
+      </button>
+    </div>
 
     <div v-if="handoffNotice" class="compose-handoff" role="status">
       <span>{{ handoffNotice }}</span>
@@ -1390,6 +1543,8 @@ defineExpose({
           >
             ×
           </button>
+          <span v-if="hasSchedule" class="compose-schedule__zone">{{ scheduleZone }}</span>
+          <span v-if="scheduleProblem" class="compose-schedule__zone" role="alert">{{ scheduleProblem }}</span>
         </div>
 
         <label v-if="!isDirectCompose && !compact" class="compose-language">
@@ -2382,6 +2537,12 @@ defineExpose({
   &:valid:not([value='']) {
     border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
   }
+}
+
+.compose-schedule__zone {
+  font-size: 0.6875rem;
+  color: var(--neo-text-muted);
+  align-self: center;
 }
 
 .compose-schedule__clear {

@@ -112,12 +112,13 @@ export type EdwardStatusLike = {
   poll?: unknown
   card?: { url?: string | null; title?: string | null } | null
   mediaAttachments?: { previewUrl?: string | null; url?: string | null }[] | null
-  mentions?: { acct?: string | null; username?: string | null }[] | null
+  mentions?: { acct?: string | null; username?: string | null; url?: string | null }[] | null
   tags?: { name?: string | null }[] | null
   account?: {
     acct?: string | null
     displayName?: string | null
     username?: string | null
+    url?: string | null
     bot?: boolean | null
   } | null
   language?: string | null
@@ -245,6 +246,11 @@ export function statusToEdwardBall(
     'someone'
   const label = displayName.slice(0, 48)
   const acct = (body.account?.acct || '').replace(/^@/, '')
+  // Affinity compares full handles: a bare acct is only "you" / "someone you follow"
+  // when it lives on your own server, not on whichever server served the post
+  const sourceUrl = status._instanceUrl || null
+  const homeUrl = affinityCtx?.homeHost ? `https://${affinityCtx.homeHost}` : null
+  const affinityAuthor = lookupAcctFor(acct, body.account?.url, sourceUrl, homeUrl)
 
   const media = body.mediaAttachments?.[0]
   const mediaUrl = media?.previewUrl || media?.url || null
@@ -255,11 +261,14 @@ export function statusToEdwardBall(
   const mentionAccts = (body.mentions || [])
     .map((m) => m?.acct || m?.username || '')
     .filter(Boolean)
+  const qualifiedMentions = (body.mentions || [])
+    .map((m) => lookupAcctFor(m?.acct || m?.username || '', m?.url, sourceUrl, homeUrl))
+    .filter(Boolean)
 
   const aff = affinityDetail(
     {
-      authorAcct: acct,
-      mentionAccts,
+      authorAcct: affinityAuthor,
+      mentionAccts: qualifiedMentions,
       tagNames,
       preview: moodText,
       isBoost: kind === 'boost',

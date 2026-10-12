@@ -10,6 +10,8 @@ const props = defineProps<{
   items: ComposeSuggestion[]
   kind: ComposeTokenKind
   searching?: boolean
+  /** How the last lookup ended — empty and failed are announced differently */
+  outcome?: 'pending' | 'results' | 'empty' | 'failed'
   activeIndex: number
   /** Open upward when there isn't room below (keyboard / bottom sheet) */
   flipUp?: boolean
@@ -27,10 +29,19 @@ const KIND_LABEL: Record<ComposeTokenKind, string> = {
 const label = computed(() => `${KIND_LABEL[props.kind]} suggestions`)
 
 /** Polite announcement — focus stays in the textarea, so say what appeared */
+const KIND_PLURAL: Record<ComposeTokenKind, string> = {
+  mention: 'people',
+  hashtag: 'hashtags',
+  emoji: 'emoji',
+}
 const statusText = computed(() => {
-  if (props.searching && !props.items.length) return 'Looking up…'
+  if (props.searching && !props.items.length) return `Looking up ${KIND_PLURAL[props.kind]}…`
   const n = props.items.length
-  if (!n) return ''
+  if (!n) {
+    if (props.outcome === 'failed') return `Couldn’t look up ${KIND_PLURAL[props.kind]}. Keep typing to try again.`
+    if (props.outcome === 'empty') return `No matching ${KIND_PLURAL[props.kind]}`
+    return ''
+  }
   const active = props.items[props.activeIndex]
   const lead = `${n} ${n === 1 ? 'suggestion' : 'suggestions'}`
   if (!active) return lead
@@ -49,7 +60,7 @@ const usesLabel = (uses: number | null) =>
 
 <template>
   <div
-    v-if="searching || items.length"
+    v-if="searching || items.length || outcome === 'failed'"
     :id="id"
     class="compose-autocomplete"
     :class="{ 'compose-autocomplete--up': flipUp }"
@@ -62,6 +73,9 @@ const usesLabel = (uses: number | null) =>
       aria-hidden="true"
     >
       Looking up…
+    </p>
+    <p v-else-if="!items.length && outcome === 'failed'" class="compose-autocomplete__status">
+      Couldn’t load suggestions — keep typing to retry.
     </p>
     <button
       v-for="(item, idx) in items"

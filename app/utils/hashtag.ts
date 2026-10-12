@@ -1,7 +1,7 @@
 import type { mastodon } from 'masto'
 
-/** Mastodon hashtag rules — letters, numbers, underscores; no leading digits-only junk. */
-const HASHTAG_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/
+/** Mastodon hashtag rules — Unicode letters, numbers, underscores; at least one non-digit. */
+export const HASHTAG_RE = /^[\p{L}\p{N}_]*[\p{L}_][\p{L}\p{N}_]*$/u
 
 export function normalizeHashtagInput(raw: string): string {
   return raw.trim().replace(/^#/, '')

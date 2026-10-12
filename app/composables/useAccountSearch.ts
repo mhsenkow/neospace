@@ -6,6 +6,8 @@ import type { mastodon } from 'masto'
 import { activeClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useInstancesStore } from '~/stores/instances'
+import { cursorPage } from '~/utils/linkHeader'
+import { logWarn } from '~/utils/log'
 
 const FOLLOWING_PAGE = 80
 const FOLLOWING_MAX = 400
@@ -20,6 +22,8 @@ export function useAccountSearch() {
   const followingError = ref<string | null>(null)
   const searchRace = createRaceGuard()
   let searchTimer: ReturnType<typeof setTimeout> | null = null
+  /** Account the cached `following` list belongs to — A's follows must never suggest for B */
+  let followingOwner: string | null = null
 
   const loadFollowing = async (force = false) => {
     if (!instancesStore.currentUser?.id || !instancesStore.hasAuthenticatedInstance) {
@@ -27,7 +31,8 @@ export function useAccountSearch() {
       followingError.value = null
       return
     }
-    if (following.value.length && !force) return
+    const owner = instancesStore.activeAccountId
+    if (following.value.length && !force && followingOwner === owner) return
     isLoadingFollowing.value = true
     followingError.value = null
     try {
@@ -36,26 +41,37 @@ export function useAccountSearch() {
       const collected: mastodon.v1.Account[] = []
       let maxId: string | undefined
 
+      const seen = new Set<string>()
+
+      // Following paginates by follow-row id from the Link header, not account id
       while (collected.length < FOLLOWING_MAX) {
-        const batch = await client.v1.accounts.$select(userId).following.list({
-          limit: FOLLOWING_PAGE,
-          maxId,
-        })
-        const list = Array.isArray(batch) ? batch : []
-        if (!list.length) break
-        collected.push(...list)
-        if (list.length < FOLLOWING_PAGE) break
-        maxId = list[list.length - 1]?.id
-        if (!maxId) break
+        const page = await cursorPage(
+          client.v1.accounts.$select(userId).following.list.$raw({
+            limit: FOLLOWING_PAGE,
+            ...(maxId ? { maxId } : {}),
+          }),
+        )
+        if (!page.items.length) break
+        for (const a of page.items) {
+          if (seen.has(a.id)) continue
+          seen.add(a.id)
+          collected.push(a)
+        }
+        if (!page.nextMaxId || page.nextMaxId === maxId) break
+        maxId = page.nextMaxId
       }
 
+      // Switched accounts mid-load — this list is for the previous one
+      if (instancesStore.activeAccountId !== owner) return
       following.value = collected
+      followingOwner = owner
     } catch (e) {
-      console.warn('Failed to load following:', e)
+      if (instancesStore.activeAccountId !== owner) return
+      logWarn('Failed to load following:', e)
       following.value = []
       followingError.value = 'Couldn’t load people you follow'
     } finally {
-      isLoadingFollowing.value = false
+      if (instancesStore.activeAccountId === owner) isLoadingFollowing.value = false
     }
   }
 
@@ -88,7 +104,7 @@ export function useAccountSearch() {
         results.value = Array.isArray(found) ? found : []
       } catch (e) {
         if (!ticket.isCurrent()) return
-        console.warn('Account search failed:', e)
+        logWarn('Account search failed:', e)
         results.value = []
         error.value = 'Search failed — try again'
       } finally {
@@ -108,6 +124,18 @@ export function useAccountSearch() {
     isSearching.value = false
     error.value = null
   }
+
+  // Suggestions are per account: drop A's follows/results when the active account changes
+  watch(
+    () => instancesStore.activeAccountId,
+    () => {
+      following.value = []
+      followingOwner = null
+      followingError.value = null
+      isLoadingFollowing.value = false
+      clear()
+    },
+  )
 
   onUnmounted(() => {
     if (searchTimer) clearTimeout(searchTimer)

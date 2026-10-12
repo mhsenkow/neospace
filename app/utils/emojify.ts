@@ -3,6 +3,8 @@
  * <img> tags using only URLs from the provided emoji list.
  */
 
+import { prefersReducedMotion } from '~/utils/reducedMotion'
+
 export type EmojiInput = {
   shortcode: string
   url: string
@@ -26,23 +28,27 @@ function isHttpUrl(url: string): boolean {
  * @param text - Plain text (default) or already-sanitized HTML
  * @param emojis - Allowlisted custom emoji from the status/account
  * @param opts.escape - Escape HTML first (default true). Pass false for sanitized status HTML.
+ * @param opts.reduceMotion - Use each emoji's `staticUrl` (first frame). Defaults to the
+ *   OS `prefers-reduced-motion` setting or NeoSpace's Reduce motion setting.
  */
 export function emojify(
   text: string,
   emojis: EmojiInput[] | null | undefined,
-  opts?: { escape?: boolean },
+  opts?: { escape?: boolean; reduceMotion?: boolean },
 ): string {
   if (!text) return ''
   const shouldEscape = opts?.escape !== false
   let out = shouldEscape ? escapeHtml(text) : text
   if (!emojis?.length) return out
 
+  const reduceMotion = opts?.reduceMotion ?? prefersReducedMotion()
   const byCode = new Map<string, string>()
   for (const e of emojis) {
     const code = e?.shortcode?.trim()
     const url = e?.url?.trim()
     if (!code || !url || !isHttpUrl(url)) continue
-    byCode.set(code.toLowerCase(), url)
+    const still = reduceMotion ? e.staticUrl?.trim() : ''
+    byCode.set(code.toLowerCase(), still && isHttpUrl(still) ? still : url)
   }
   if (!byCode.size) return out
 

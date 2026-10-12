@@ -8,6 +8,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
+import { logError } from '~/utils/log'
 
 export type ColumnFeedType =
   | 'home'
@@ -337,7 +338,7 @@ export const useColumnsStore = defineStore('columns', {
           if (entry) return entry
         }
       } catch (e) {
-        console.error('Failed to load columns config:', e)
+        logError('Failed to load columns config:', e)
       }
       return null
     },
@@ -375,7 +376,7 @@ export const useColumnsStore = defineStore('columns', {
         // Clear legacy so we don't keep resurrecting old single-device layout
         localStorage.removeItem(LEGACY_STORAGE_KEY)
       } catch (e) {
-        console.error('Failed to save columns config:', e)
+        logError('Failed to save columns config:', e)
       }
     },
 

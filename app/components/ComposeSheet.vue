@@ -7,6 +7,8 @@
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
+import { isRedraftSlot } from '~/composables/useDraft'
+import { useToastStore } from '~/stores/toast'
 import { emitComposedStatus } from '~/composables/useComposedStatus'
 import type { mastodon } from 'masto'
 import type RealComposeBox from '~/components/RealComposeBox.vue'
@@ -21,23 +23,38 @@ const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(sheetO
   lockScroll: true,
 })
 
+/** "attachments, poll and scheduled time" */
+const listOf = (items: string[]) =>
+  items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items[0] || ''
+
 const requestClose = async () => {
-  // Own text, CW or attachments — a prefilled "@handle " or photo-only post counts right
+  // Own text, CW, attachments, poll or schedule — a prefilled "@handle " alone doesn't count
   const compose = composeRef.value
   if (compose?.isDirty) {
+    const extras: string[] = compose.unsavedExtras ?? []
+    // A redraft's saved slot is keyed to a deleted post — it could never be reopened.
+    // Text-less edits (poll / schedule only) leave nothing a draft could keep.
+    const canSave = !isRedraftSlot(sheet.draftSlot) && !!compose.hasDraftText
+    const extrasNote = extras.length ? ` Your ${listOf(extras)} won’t be saved with it.` : ''
     const choice = await overlayStore.openChoice({
       title: 'Close this post?',
-      body: sheet.draftSlot
-        ? 'Your post will be lost.'
-        : 'Save it as a draft to finish later, or discard it. Attached media and polls are not saved with drafts.',
-      // A redraft's saved slot is keyed to a deleted post — it could never be reopened
-      secondaryLabel: sheet.draftSlot ? undefined : 'Save draft and close',
+      body: canSave
+        ? `Save it as a draft to finish later, or discard it. Drafts keep text, content warning and visibility only.${extrasNote}`
+        : extras.length && !compose.hasDraftText
+          ? `Your ${listOf(extras)} will be lost.`
+          : `Your post will be lost.${extrasNote}`,
+      secondaryLabel: canSave ? 'Save draft and close' : undefined,
       confirmLabel: 'Discard',
       danger: true,
     })
     if (choice === 'cancel') return
     if (choice === 'secondary') {
-      compose.saveDraft()
+      // Never close on a draft that didn't save — the text would be gone
+      const failure = compose.saveDraft()
+      if (failure) {
+        useToastStore().show({ message: failure, duration: 6000 })
+        return
+      }
     } else {
       // Otherwise the autosaved draft reappears next time this composer opens
       compose.discardDraft()
@@ -56,6 +73,20 @@ useFocusTrap(panelRef, sheetOpen, {
 const onPosted = (status: mastodon.v1.Status) => {
   emitComposedStatus(status)
   sheet.posted(status)
+}
+
+/** Queued for later: nothing to navigate to — close with a clear confirmation */
+const onScheduled = (scheduled: mastodon.v1.ScheduledStatus) => {
+  let when = scheduled.scheduledAt
+  try {
+    when = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+      new Date(scheduled.scheduledAt),
+    )
+  } catch {
+    // keep ISO
+  }
+  useToastStore().show({ message: `Scheduled for ${when}`, duration: 3500 })
+  sheet.hide()
 }
 
 const sheetTitleId = 'compose-sheet-title'
@@ -108,7 +139,7 @@ const onPick = async (account: mastodon.v1.Account) => {
     }
     const existing = conversations.findDirectWith(account.id)
     if (existing?.lastStatus?.id) {
-      if (existing.unread) await conversations.markRead(existing.id)
+      if (existing.unread) void conversations.markRead(existing.id)
       sheet.hide()
       await router.push(`/status/${existing.lastStatus.id}`)
       return
@@ -218,6 +249,7 @@ const onPick = async (account: mastodon.v1.Account) => {
             :quote-context="sheet.contextPost && sheet.quoteUrl ? sheet.contextPost : undefined"
             :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
             @posted="onPosted"
+            @scheduled="onScheduled"
             @vue:updated="syncHeaderActions"
           />
         </div>

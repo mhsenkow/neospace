@@ -7,6 +7,7 @@ import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { useGroupSearch } from '~/composables/useGroupSearch'
 import { useKeyboardViewport } from '~/composables/useKeyboardViewport'
+import { isValidHashtag } from '~/utils/hashtag'
 
 const props = withDefaults(
   defineProps<{
@@ -73,7 +74,7 @@ const showSearchHits = computed(
 const queryTag = computed(() => {
   const raw = query.value.trim().replace(/^#/, '').toLowerCase()
   if (!raw || raw.length < 2) return null
-  if (!/^[a-z0-9_]+$/i.test(raw)) return null
+  if (!isValidHashtag(raw)) return null
   return raw
 })
 
@@ -584,7 +585,7 @@ const toggle = () => {
   border: none;
   background: transparent;
   color: var(--neo-text-primary);
-  font-size: 0.9375rem;
+  font-size: max(16px, 1rem); // iOS zooms the page on focus below 16px
   outline: none;
 
   &::placeholder {

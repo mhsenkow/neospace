@@ -49,7 +49,9 @@ export function useFeedbackNotes() {
   if (import.meta.client) {
     watch(open, (isOpen) => {
       if (isOpen && !historyPushed.value) {
-        history.pushState({ neoFeedback: true }, '')
+        // Keep vue-router's history.state (back/current/position/scroll) — replacing it left
+        // Forward landing on an entry the router doesn't know after closing
+        history.pushState({ ...(history.state ?? {}), neoFeedback: true }, '')
         historyPushed.value = true
       }
     })

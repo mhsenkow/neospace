@@ -345,7 +345,7 @@ export function parseEdwardExplore(input: string): EdwardExploreParsed {
     }
 
     if (lower.startsWith('#')) {
-      const tag = lower.slice(1).replace(/[^a-z0-9_]/g, '')
+      const tag = lower.slice(1).replace(/[^\p{L}\p{N}_]/gu, '')
       if (tag) out.tags.add(tag)
       continue
     }
@@ -530,6 +530,22 @@ export function filterAndSortBalls(
     parsed,
     sort,
   }
+}
+
+const BARE_SORT_TOKENS = new Set(['near', 'loud', 'new', 'gems', 'shuffle', 'surprise'])
+
+/**
+ * Remove explicit sort tokens (`sort:loud`, bare `loud`) so a sort picked from the
+ * toolbar isn't silently overridden by the query text.
+ */
+export function stripSortTokens(query: string): string {
+  return query
+    .split(/\s+/)
+    .filter((tok) => {
+      const lower = tok.toLowerCase()
+      return tok && !lower.startsWith('sort:') && !BARE_SORT_TOKENS.has(lower)
+    })
+    .join(' ')
 }
 
 export function cycleEdwardSort(current: EdwardSortMode): EdwardSortMode {

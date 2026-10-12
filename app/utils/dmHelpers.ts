@@ -6,6 +6,7 @@ import type { mastodon } from 'masto'
 import { useConversationsStore } from '~/stores/conversations'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { accountHandle } from '~/composables/useAccountSearch'
+import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
 
 /** Exact 1:1 DM with this account — never fall back to a group thread */
 export function findExactOneToOne<T extends { accounts?: { id: string }[] | null }>(
@@ -35,7 +36,8 @@ export async function openOrComposeDirect(
   const existing = conversations.findDirectWith(account.id)
   const statusId = existing?.lastStatus?.id
   if (statusId) {
-    if (existing?.unread) await conversations.markRead(existing.id)
+    // Optimistic locally; the round-trip must not delay opening the chat
+    if (existing?.unread) void conversations.markRead(existing.id)
     await router.push(`/status/${statusId}`)
     return 'opened' as const
   }
@@ -126,6 +128,30 @@ export function stripLeadingMentionText(text: string, accts: readonly string[]):
     out = out.slice(m[0].length).trimStart()
   }
   return out
+}
+
+/**
+ * Inbox preview for a DM's last status: content-warned messages show only the warning,
+ * media-only messages (whose text is just "@them") say what was sent. '' = nothing to show.
+ */
+export function dmPreviewText(
+  status: Pick<mastodon.v1.Status, 'content' | 'spoilerText' | 'mediaAttachments'>,
+  accts: readonly string[],
+): string {
+  const cw = (status.spoilerText || '').trim()
+  if (cw) return `CW: ${clipGraphemes(cw, 100)}`
+  const text = stripLeadingMentionText(stripHtml(status.content || ''), accts)
+  if (text) return clipGraphemes(text, 120)
+  const media = status.mediaAttachments || []
+  if (!media.length) return ''
+  const kinds = new Set(media.map((m) => m.type))
+  if (kinds.size === 1) {
+    const only = [...kinds][0]
+    if (only === 'image') return media.length > 1 ? `${media.length} photos` : 'Photo'
+    if (only === 'video' || only === 'gifv') return 'Video'
+    if (only === 'audio') return 'Audio'
+  }
+  return 'Attachment'
 }
 
 /** Only http(s) URLs are safe to put in an href/src from server or query data */

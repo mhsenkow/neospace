@@ -61,22 +61,32 @@ type CardLike = {
   providerName?: string | null
 }
 
-/** Resolve a PeerTube-only embed URL from a Mastodon preview card. */
-export function resolvePeerTubeEmbed(card: CardLike): string | null {
-  const fromUrl = peerTubeEmbedUrl(card.url)
-  if (fromUrl) return fromUrl
-
-  if (card.embedUrl) {
-    const fromEmbed = peerTubeEmbedUrl(card.embedUrl)
-    if (fromEmbed) return fromEmbed
+/** True when the card's oEmbed html iframes `origin` (PeerTube serves its own embeds). */
+function htmlEmbedsOrigin(html: string | null | undefined, origin: string): boolean {
+  const src = extractHttpsIframeSrc(html)
+  if (!src) return false
+  try {
+    return new URL(src).origin === origin
+  } catch {
+    return false
   }
+}
 
-  if (isPeerTubeProvider(card.providerName) || card.type === 'video') {
-    const fromHtml = extractHttpsIframeSrc(card.html)
-    if (fromHtml) {
-      const normalized = peerTubeEmbedUrl(fromHtml)
-      if (normalized) return normalized
-      if (isPeerTubeProvider(card.providerName)) return fromHtml
+/**
+ * Resolve a PeerTube-only embed URL from a Mastodon preview card.
+ * A matching URL path alone is not enough (`wikipedia.org/w/…`): the card must be
+ * a video card that PeerTube vouches for (provider name, or its own same-origin iframe).
+ */
+export function resolvePeerTubeEmbed(card: CardLike): string | null {
+  if (card.type !== 'video') return null
+
+  const candidates = [card.url, card.embedUrl, extractHttpsIframeSrc(card.html)]
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    const embed = peerTubeEmbedUrl(candidate)
+    if (!embed) continue
+    if (isPeerTubeProvider(card.providerName) || htmlEmbedsOrigin(card.html, new URL(embed).origin)) {
+      return embed
     }
   }
 

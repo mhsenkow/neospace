@@ -69,7 +69,8 @@ const openSearch = () => {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: var(--neo-safe-top, env(safe-area-inset-top, 0px)) 0.35rem 0;
+  padding: var(--neo-safe-top, env(safe-area-inset-top, 0px)) max(0.35rem, env(safe-area-inset-right, 0px)) 0
+    max(0.35rem, env(safe-area-inset-left, 0px));
   // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
@@ -107,7 +108,14 @@ const openSearch = () => {
     text-decoration: none;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
-    &:hover {
+    // iOS keeps :hover after a tap — only fill on real hover devices
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-hover);
+      }
+    }
+
+    &:active {
       background: var(--neo-bg-hover);
     }
 

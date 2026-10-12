@@ -3,10 +3,10 @@
  * so chrome can pad under the status bar (Safari-in-tab is fine; standalone isn’t).
  */
 
-const STANDALONE_MQ =
+export const STANDALONE_MQ =
   '(display-mode: standalone), (display-mode: minimal-ui), (display-mode: fullscreen)'
 
-function isStandaloneNow(): boolean {
+export function isStandaloneNow(): boolean {
   if (typeof window === 'undefined') return false
   try {
     if (window.matchMedia?.(STANDALONE_MQ).matches) return true

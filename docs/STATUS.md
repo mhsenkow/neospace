@@ -116,6 +116,8 @@ Code is ready in `functions/api/feedback.ts` and `app/composables/useFeedbackNot
 
 When `TURNSTILE_SECRET_KEY` is set, the API **requires** a valid token. Both keys must be set for end-to-end enforcement.
 
+**Production verification (NS-434):** Turnstile is optional by design — missing `TURNSTILE_SECRET_KEY` does **not** refuse traffic; the in-isolate rate limiter (5 notes/hour/IP bucket) still applies. That Map is local to each Cloudflare isolate / colo, so spam scales with IPs × isolates. For enforceable global limits, add a Cloudflare WAF / Rate limiting rule on `POST /api/feedback` (recommended: ~5–10/hour per IP at the edge) in addition to Turnstile. Screenshots are intentionally not attached to GitHub issues (GitHub strips `data:` images); re-enable only with public object hosting (e.g. R2).
+
 ### GITHUB_TOKEN (leave-a-note → issues)
 
 ```bash

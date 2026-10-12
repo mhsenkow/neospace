@@ -3,7 +3,7 @@
  * APG tabs: tablist / tab / tabpanel with arrow-key navigation.
  */
 
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 export type NeoTab = { id: string; label: string }
 
@@ -77,6 +77,21 @@ function onTabKeydown(e: KeyboardEvent, index: number) {
   const el = listRef.value?.querySelector<HTMLElement>(`#${CSS.escape(tabId(tab.id))}`)
   el?.focus()
 }
+
+/** Narrow screens scroll the tab strip — keep the selected tab in view (no page scroll) */
+function revealActive() {
+  const list = listRef.value
+  if (!list || list.scrollWidth <= list.clientWidth) return
+  const el = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+  if (!el) return
+  const left = el.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft
+  if (left < list.scrollLeft) list.scrollLeft = left
+  else if (left + el.offsetWidth > list.scrollLeft + list.clientWidth) {
+    list.scrollLeft = left + el.offsetWidth - list.clientWidth
+  }
+}
+onMounted(revealActive)
+watch(activeId, () => nextTick(revealActive))
 
 watch(
   () => props.tabs,

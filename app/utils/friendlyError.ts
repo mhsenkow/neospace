@@ -30,20 +30,72 @@ function statusFrom(err: unknown): number | null {
   return httpStatusFrom(err)
 }
 
+/** Only the browser's own offline signal counts — a failed fetch alone can be CORS, DNS or TLS on a dead remote */
 function isOffline(err: unknown): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
   if (!err || typeof err !== 'object') return false
-  const e = err as { name?: string; message?: string; code?: string }
-  if (e.name === 'TypeError' && /fetch|network|failed/i.test(e.message || '')) return true
-  if (e.code === 'NETWORK_ERROR') return true
-  return false
+  return (err as { code?: string }).code === 'NETWORK_ERROR'
 }
+
+/** fetch() rejected while the browser is online: the server (not the user's connection) is the problem */
+function isUnreachable(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { name?: string; message?: string }
+  return e.name === 'TypeError' && /fetch|network|failed|load failed/i.test(e.message || '')
+}
+
+function errorName(err: unknown): string {
+  return err && typeof err === 'object' && typeof (err as { name?: unknown }).name === 'string'
+    ? (err as { name: string }).name
+    : ''
+}
+
+const errorMessage = (err: unknown) =>
+  err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+
+/** masto / transport failures whose raw wording must never reach the user */
+export function isTimeoutError(err: unknown): boolean {
+  const name = errorName(err)
+  return (
+    name === 'MastoTimeoutError' ||
+    name === 'TimeoutError' ||
+    /timed? ?out|signal timed out/i.test(errorMessage(err))
+  )
+}
+
+export function isUnexpectedResponseError(err: unknown): boolean {
+  return errorName(err) === 'MastoUnexpectedError' || /unknown encoding/i.test(errorMessage(err))
+}
+
+/** Transport-layer errors raised by the API client (masto) rather than authored by this app */
+export const isClientError = (err: unknown) => errorName(err).startsWith('Masto') || /unsafe api path/i.test(errorMessage(err))
 
 export function mapErrorToMessage(err: unknown): FriendlyError {
   if (isOffline(err)) {
     return {
       title: 'You appear to be offline',
       detail: 'Check your connection and try again.',
+      retryable: true,
+    }
+  }
+  if (isTimeoutError(err)) {
+    return {
+      title: 'Took too long',
+      detail: 'The server took too long to respond. Try again in a moment.',
+      retryable: true,
+    }
+  }
+  if (isUnexpectedResponseError(err)) {
+    return {
+      title: 'Unexpected response',
+      detail: 'The server sent an unexpected response. It may be down or not Mastodon-compatible.',
+      retryable: true,
+    }
+  }
+  if (isUnreachable(err)) {
+    return {
+      title: 'Couldn’t reach the server',
+      detail: 'It may be down or blocking requests from this site. Try again in a bit.',
       retryable: true,
     }
   }
@@ -93,8 +145,11 @@ export function mapErrorToMessage(err: unknown): FriendlyError {
     }
   }
 
-  const detail =
-    err instanceof Error && err.message
+  // App-authored messages ("Poll options must be different") are safe and useful; raw
+  // client/transport wording ("Unsafe API path segment") is never echoed
+  const detail = isClientError(err)
+    ? 'The server couldn’t complete that. Try again in a moment.'
+    : err instanceof Error && err.message
       ? err.message
       : typeof err === 'string'
         ? err

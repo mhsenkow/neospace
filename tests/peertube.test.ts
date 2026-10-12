@@ -42,6 +42,7 @@ describe('resolvePeerTubeEmbed', () => {
     expect(
       resolvePeerTubeEmbed({
         url: `https://my.tube/videos/watch/${id}`,
+        type: 'video',
         providerName: 'PeerTube',
       }),
     ).toBe(`https://my.tube/videos/embed/${id}`)
@@ -54,6 +55,35 @@ describe('resolvePeerTubeEmbed', () => {
         html: `<iframe src="https://my.tube/videos/embed/${id}"></iframe>`,
       }),
     ).toBe(`https://my.tube/videos/embed/${id}`)
+  })
+
+  it('requires a video card vouched for by PeerTube, not just a matching path', () => {
+    const id = '52a10666-3a18-4e73-93da-e8d3c12c305a'
+    // Path-only look-alike (e.g. wikipedia.org/w/<x>) is a plain link card
+    expect(resolvePeerTubeEmbed({ url: 'https://en.wikipedia.org/w/index.php', type: 'link' })).toBeNull()
+    expect(resolvePeerTubeEmbed({ url: `https://wiki.example/w/${id}`, type: 'video' })).toBeNull()
+    expect(
+      resolvePeerTubeEmbed({ url: `https://my.tube/w/${id}`, type: 'link', providerName: 'PeerTube' }),
+    ).toBeNull()
+    // Same-origin iframe in the card html also counts
+    expect(
+      resolvePeerTubeEmbed({
+        url: `https://my.tube/w/${id}`,
+        type: 'video',
+        html: `<iframe src="https://my.tube/videos/embed/${id}"></iframe>`,
+      }),
+    ).toBe(`https://my.tube/videos/embed/${id}`)
+  })
+
+  it('never returns a raw foreign iframe src, even for PeerTube-named providers', () => {
+    expect(
+      resolvePeerTubeEmbed({
+        url: 'https://my.tube/',
+        type: 'video',
+        providerName: 'PeerTube',
+        html: '<iframe src="https://evil.example/phish"></iframe>',
+      }),
+    ).toBeNull()
   })
 
   it('does not embed arbitrary non-PeerTube video cards', () => {

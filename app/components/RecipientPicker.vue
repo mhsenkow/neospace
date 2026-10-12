@@ -5,6 +5,7 @@
 
 import type { mastodon } from 'masto'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
+import { useInstancesStore } from '~/stores/instances'
 
 const props = withDefaults(
   defineProps<{
@@ -49,9 +50,13 @@ const localMatches = computed(() => {
   })
 })
 
+const instancesStore = useInstancesStore()
+const selfId = computed(() => instancesStore.currentUser?.id ?? null)
+
 const displayAccounts = computed(() => {
   if (!hasQuery.value) return following.value
-  const seen = new Set<string>()
+  // Never offer yourself: picking your own account would start a DM to nobody
+  const seen = new Set<string>(selfId.value ? [selfId.value] : [])
   const merged: mastodon.v1.Account[] = []
   for (const a of localMatches.value) {
     if (seen.has(a.id)) continue
@@ -291,7 +296,7 @@ onUnmounted(() => clear())
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--neo-text-quaternary);
+  color: var(--neo-text-tertiary);
 }
 
 .recipient-picker__status {

@@ -39,6 +39,7 @@ const localError = ref<string | null>(null)
 const peekLoading = ref(false)
 const peekTitle = ref<string | null>(null)
 const peekOpen = ref<boolean | null>(null)
+const peekApproval = ref(false)
 const peekUsers = ref<number | null>(null)
 const peekHost = ref<string | null>(null)
 const peekGated = ref(false)
@@ -64,15 +65,23 @@ const openCustom = async () => {
 const clearPeek = () => {
   peekTitle.value = null
   peekOpen.value = null
+  peekApproval.value = false
   peekUsers.value = null
   peekHost.value = null
   peekGated.value = false
   peekFailed.value = false
 }
 
+/** Peek once typing pauses (~1s) or on blur — not on every keystroke of a partial host */
+const PEEK_IDLE_MS = 1000
 const schedulePeek = () => {
   if (peekTimer) clearTimeout(peekTimer)
-  peekTimer = setTimeout(runPeek, 420)
+  peekTimer = setTimeout(runPeek, PEEK_IDLE_MS)
+}
+const peekNow = () => {
+  if (peekTimer) clearTimeout(peekTimer)
+  peekTimer = null
+  if (showCustom.value && query.value.trim()) void runPeek()
 }
 
 const runPeek = async () => {
@@ -87,11 +96,13 @@ const runPeek = async () => {
   peekLoading.value = true
   const ticket = peekRace.next()
   try {
-    const info = await instancesStore.fetchInstanceInfo(host)
+    // Failures aren't cached: the host may just be unfinished
+    const info = await instancesStore.fetchInstanceInfo(host, { cacheFailure: false })
     if (!ticket.isCurrent() || peekHost.value !== host) return
     if (info) {
       peekTitle.value = info.title || host
       peekOpen.value = info.registrations ?? null
+      peekApproval.value = !!info.approvalRequired
       peekUsers.value = info.stats?.userCount ?? null
       peekFailed.value = false
       localError.value = null
@@ -113,8 +124,8 @@ const peekAnnouncement = computed(() => {
   if (!peekTitle.value) return ''
   const bits = [peekTitle.value]
   if (peekUsers.value != null) bits.push(`${peekUsers.value.toLocaleString()} monthly active`)
-  if (peekOpen.value === true) bits.push('registrations open')
-  else if (peekOpen.value === false) bits.push('registrations closed')
+  if (peekOpen.value === true) bits.push(peekApproval.value ? 'sign-ups open, approval required' : 'sign-ups open')
+  else if (peekOpen.value === false) bits.push('sign-ups closed')
   return bits.join(', ')
 })
 
@@ -147,7 +158,7 @@ const submitCustom = () => {
 const onCatalogHit = (domain: string) => {
   query.value = domain
   localError.value = null
-  schedulePeek()
+  peekNow()
 }
 
 defineExpose({
@@ -196,31 +207,27 @@ onUnmounted(() => {
           :disabled="disabled"
           :aria-invalid="!!localError"
           :aria-describedby="localError ? inputErrorId : undefined"
+          @blur="peekNow"
         />
         <p class="server-picker__hint">
           Pick the server where your account lives — like a phone company for the fediverse.
           Enter <strong>@you@server</strong> or just the server name (e.g.
           <strong>mastodon.social</strong>).
         </p>
-        <p v-if="peekUsers != null || peekOpen != null" class="server-picker__peek-summary">
-          <template v-if="peekUsers != null">{{ peekUsers.toLocaleString() }} monthly active</template>
-          <template v-if="peekOpen === true"> · open registration</template>
-          <template v-else-if="peekOpen === false"> · invite-only</template>
-        </p>
-
         <!-- Live peek -->
         <p class="sr-only" role="status">{{ peekAnnouncement }}</p>
         <div v-if="peekHost && (peekLoading || peekTitle || peekFailed)" class="server-picker__peek">
           <div v-if="peekLoading" class="server-picker__peek-loading">Checking {{ peekHost }}…</div>
-          <div v-else-if="peekFailed" class="server-picker__peek-error" role="alert">
+          <div v-else-if="peekFailed" class="server-picker__peek-error" role="status">
             Couldn’t reach {{ peekHost }}
           </div>
           <template v-else-if="peekTitle">
             <div class="server-picker__peek-title">{{ peekTitle }}</div>
             <div class="server-picker__peek-meta">
               <span v-if="peekUsers != null">{{ peekUsers.toLocaleString() }} monthly active</span>
-              <span v-if="peekOpen === true">Registrations open</span>
-              <span v-else-if="peekOpen === false">Registrations closed</span>
+              <span v-if="peekOpen === true">Sign-ups open</span>
+              <span v-else-if="peekOpen === false">Sign-ups closed</span>
+              <span v-if="peekOpen === true && peekApproval">Approval required</span>
               <span v-if="peekGated" class="server-picker__peek-note">
                 Public feed often needs sign-in on this server
               </span>

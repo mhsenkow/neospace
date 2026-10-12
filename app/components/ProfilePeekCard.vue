@@ -36,6 +36,9 @@ const safeBio = computed(() => {
   return emojify(sanitizeStatusHtml(note), props.account.emojis || [], { escape: false })
 })
 
+/** "1 follower" / "2 followers" — the count itself stays compact (1.2K) */
+const plural = (n: number | undefined, one: string, many = `${one}s`) => ((n ?? 0) === 1 ? one : many)
+
 const followers = computed(() => formatCompact(props.account.followersCount ?? 0))
 const following = computed(() => formatCompact(props.account.followingCount ?? 0))
 const posts = computed(() => formatCompact(props.account.statusesCount ?? 0))
@@ -46,7 +49,7 @@ const posts = computed(() => formatCompact(props.account.statusesCount ?? 0))
     <img
       v-if="account.avatar"
       :src="account.avatar"
-      :alt="account.displayName || account.username"
+      alt=""
       class="profile-card__avatar"
     />
     <div
@@ -68,11 +71,11 @@ const posts = computed(() => formatCompact(props.account.statusesCount ?? 0))
         v-html="safeBio"
       />
       <p class="profile-card__stats">
-        <span><strong>{{ followers }}</strong> followers</span>
+        <span><strong>{{ followers }}</strong> {{ plural(account.followersCount, 'follower') }}</span>
         <span aria-hidden="true">·</span>
         <span><strong>{{ following }}</strong> following</span>
         <span aria-hidden="true">·</span>
-        <span><strong>{{ posts }}</strong> posts</span>
+        <span><strong>{{ posts }}</strong> {{ plural(account.statusesCount, 'post') }}</span>
       </p>
       <button
         v-if="!hideOpen"

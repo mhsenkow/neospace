@@ -37,42 +37,90 @@ async function sha256Base64Url(input: string): Promise<string> {
   return base64Url(digest)
 }
 
-function readPendingAuth(): PendingAuthRecord | null {
-  if (typeof localStorage === 'undefined') return null
+/** Concurrent sign-ins kept at once (tabs / quick retries); oldest are dropped first */
+const PENDING_MAX = 8
+
+type PendingMap = Record<string, PendingAuthRecord>
+
+const validPending = (rec: unknown): rec is PendingAuthRecord =>
+  !!rec &&
+  typeof rec === 'object' &&
+  typeof (rec as PendingAuthRecord).state === 'string' &&
+  !!(rec as PendingAuthRecord).state &&
+  typeof (rec as PendingAuthRecord).verifier === 'string' &&
+  !!(rec as PendingAuthRecord).verifier &&
+  typeof (rec as PendingAuthRecord).createdAt === 'number'
+
+/** All unexpired pending sign-ins, keyed by `state`. Also reads the old single-slot shape. */
+function readPendingMap(): PendingMap {
+  if (typeof localStorage === 'undefined') return {}
   try {
     const raw = localStorage.getItem(PENDING_AUTH_KEY)
-    if (!raw) return null
-    const rec = JSON.parse(raw) as PendingAuthRecord
-    if (!rec?.state || !rec.verifier || Date.now() - rec.createdAt > PENDING_TTL_MS) {
-      localStorage.removeItem(PENDING_AUTH_KEY)
-      return null
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const candidates: unknown[] = validPending(parsed) ? [parsed] : Object.values(parsed as object)
+    const now = Date.now()
+    const map: PendingMap = {}
+    for (const rec of candidates) {
+      if (validPending(rec) && now - rec.createdAt <= PENDING_TTL_MS) map[rec.state] = rec
     }
-    return rec
+    // Persist the pruned / migrated shape so expired verifiers don't linger
+    if (Object.keys(map).length !== candidates.length || validPending(parsed)) writePendingMap(map)
+    return map
   } catch {
-    return null
+    return {}
   }
 }
 
-function writePendingAuth(rec: PendingAuthRecord) {
+function writePendingMap(map: PendingMap) {
   if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(PENDING_AUTH_KEY, JSON.stringify(rec))
+    const entries = Object.values(map).sort((a, b) => a.createdAt - b.createdAt)
+    const kept = entries.slice(Math.max(0, entries.length - PENDING_MAX))
+    if (!kept.length) localStorage.removeItem(PENDING_AUTH_KEY)
+    else localStorage.setItem(PENDING_AUTH_KEY, JSON.stringify(Object.fromEntries(kept.map((r) => [r.state, r]))))
   } catch {
     /* quota / private mode */
   }
 }
 
-export function clearPendingAuth() {
+function readPendingAuth(state: string | null): PendingAuthRecord | null {
+  if (!state) return null
+  return readPendingMap()[state] ?? null
+}
+
+/** Look at (without consuming) the pending sign-in for `state` — e.g. to build a retry link */
+export function peekPendingAuth(state: string | null): PendingAuthRecord | null {
+  return readPendingAuth(state)
+}
+
+function writePendingAuth(rec: PendingAuthRecord) {
+  const map = readPendingMap()
+  map[rec.state] = rec
+  writePendingMap(map)
+}
+
+/** Forget one sign-in attempt (`state`), or every attempt when called without one. */
+export function clearPendingAuth(state?: string | null) {
   if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.removeItem(AUTH_STATE_KEY)
-    sessionStorage.removeItem(AUTH_VERIFIER_KEY)
-  }
-  if (typeof localStorage !== 'undefined') {
-    try {
-      localStorage.removeItem(PENDING_AUTH_KEY)
-    } catch {
-      /* ignore */
+    const own = sessionStorage.getItem(AUTH_STATE_KEY)
+    if (!state || own === state) {
+      sessionStorage.removeItem(AUTH_STATE_KEY)
+      sessionStorage.removeItem(AUTH_VERIFIER_KEY)
     }
+  }
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (!state) {
+      localStorage.removeItem(PENDING_AUTH_KEY)
+      return
+    }
+    const map = readPendingMap()
+    delete map[state]
+    writePendingMap(map)
+  } catch {
+    /* ignore */
   }
 }
 
@@ -129,7 +177,7 @@ export function consumeOAuthChallenge(stateFromQuery: string | null): {
   pending?: PendingAuthRecord | null
   error?: string
 } {
-  const pending = readPendingAuth()
+  const pending = readPendingAuth(stateFromQuery)
   if (typeof sessionStorage === 'undefined' && !pending) {
     return { ok: false, codeVerifier: null, error: 'No session storage' }
   }
@@ -144,9 +192,8 @@ export function consumeOAuthChallenge(stateFromQuery: string | null): {
   if (!stateFromQuery) {
     return { ok: false, codeVerifier: null, error: 'Invalid OAuth state' }
   }
-  // The shared localStorage record belongs to whichever tab started sign-in
-  // last; this tab's own sessionStorage pair still counts — but then the
-  // record (instance, returnTo) is the other tab's and must not be used.
+  // Pending records are keyed by state, so concurrent tabs each find their own
+  // (instance, add mode, returnTo); the sessionStorage pair is only a fallback.
   if (pending && pending.state === stateFromQuery) {
     return { ok: true, codeVerifier: pending.verifier, pending }
   }

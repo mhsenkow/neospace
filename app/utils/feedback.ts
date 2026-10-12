@@ -85,9 +85,16 @@ export async function createGitHubIssue(
     turnstileToken?: string | null
     /** Opt-in only — diagnostic logs are never attached unless this is true */
     includeLogs?: boolean
+    /** The exact log text the user previewed — sent as-is so the report matches what they approved */
+    logSnapshot?: string
   },
 ): Promise<string> {
-  const bodyWithLogs = buildFeedbackBody(body, options?.includeLogs === true)
+  const includeLogs = options?.includeLogs === true
+  const bodyWithLogs = buildFeedbackBody(
+    body,
+    includeLogs,
+    includeLogs && options?.logSnapshot !== undefined ? options.logSnapshot : undefined,
+  )
 
   const res = await fetch('/api/feedback', {
     method: 'POST',

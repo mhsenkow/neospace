@@ -2,7 +2,7 @@
  * Shared compose media attachments — drag/drop, paste, upload, previews, alt text.
  */
 
-import { markRaw } from 'vue'
+import { computed, markRaw, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
@@ -27,6 +27,8 @@ export interface ComposeAttachment {
   file: File
   previewUrl: string
   remoteId: string | null
+  /** Account that uploaded it — media ids only exist on that account's server */
+  ownerId: string | null
   /** uploading → processing (server-side) → ready | error */
   phase: UploadPhase
   /** Real bytes-sent fraction 0..1; null when the browser can't tell (never faked) */
@@ -56,6 +58,10 @@ export function useComposeMedia() {
   const uploadAnnounce = ref('')
   /** Shown when a video exceeds the instance upload cap — paste a PeerTube link instead */
   const peerTubeHint = ref<string | null>(null)
+  /** Shown when attachments were dropped because the active account changed */
+  const accountSwitchNotice = ref<string | null>(null)
+  /** Account attachments are uploaded as (and later described / posted with) */
+  const currentOwnerId = () => instancesStore.activeAccount?.id ?? null
   let dragDepth = 0
   const altTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const uploadControllers = new Map<string, AbortController>()
@@ -66,6 +72,10 @@ export function useComposeMedia() {
 
   const dismissPeerTubeHint = () => {
     peerTubeHint.value = null
+  }
+
+  const dismissAccountSwitchNotice = () => {
+    accountSwitchNotice.value = null
   }
 
   const maxAttachments = computed(
@@ -94,13 +104,14 @@ export function useComposeMedia() {
 
   const isUploading = computed(() => attachments.value.some((a) => a.uploading))
   const hasMedia = computed(() => attachments.value.length > 0)
+  /** Only finished media owned by the posting account — never another account's ids */
+  const isPostable = (a: ComposeAttachment) =>
+    !!a.remoteId && a.phase === 'ready' && !a.uploading && !a.error && a.ownerId === currentOwnerId()
   const mediaIds = computed(() =>
-    attachments.value.map((a) => a.remoteId).filter((id): id is string => !!id),
+    attachments.value.filter(isPostable).map((a) => a.remoteId as string),
   )
   const allReady = computed(
-    () =>
-      attachments.value.length === 0 ||
-      attachments.value.every((a) => a.remoteId && a.phase === 'ready' && !a.uploading && !a.error),
+    () => attachments.value.length === 0 || attachments.value.every(isPostable),
   )
   const canAddMore = computed(() => attachments.value.length < maxAttachments.value)
 
@@ -170,6 +181,18 @@ export function useComposeMedia() {
     return draft
   }
 
+  const STILL_PROCESSING = 'Still processing'
+
+  const markStillProcessing = (localId: string, label: string) => {
+    patchAttachment(localId, {
+      phase: 'processing',
+      error: STILL_PROCESSING,
+      uploading: false,
+      progress: null,
+    })
+    announce(`${label} is still processing on the server`)
+  }
+
   const uploadOne = async (localId: string) => {
     const draft = patchAttachment(localId, {
       phase: 'uploading',
@@ -184,6 +207,7 @@ export function useComposeMedia() {
     const controller = new AbortController()
     uploadControllers.set(localId, controller)
     const label = draft.file.name || 'Attachment'
+    const ownerId = draft.ownerId
     const sentDescription = draft.description.trim()
     announce(`Uploading ${label}`)
     // A newer attempt (retry) owns the tile — ignore late callbacks from this one
@@ -193,6 +217,7 @@ export function useComposeMedia() {
         draft.file,
         sentDescription || undefined,
         {
+          accountId: ownerId ?? undefined,
           signal: controller.signal,
           timeoutMs: uploadTimeoutForBytes(draft.file.size),
           onProgress: (fraction) => {
@@ -209,6 +234,12 @@ export function useComposeMedia() {
       const current = attachments.value.find((a) => a.localId === localId)
       if (!current) return
       current.remoteId = remote.id
+      if (remote.processing) {
+        // Server still working: keep the id (alt text works, retry re-checks) but never "ready"
+        markStillProcessing(localId, label)
+        if (current.description.trim() !== sentDescription) setDescription(localId, current.description)
+        return
+      }
       patchAttachment(localId, { phase: 'ready', progress: 1, uploading: false })
       announce(`${label} ready`)
       // Alt typed while the upload ran had no media id to PUT to — send it now
@@ -233,7 +264,7 @@ export function useComposeMedia() {
         return
       }
       const msg = isUploadTimeout(e)
-        ? 'Upload timed out'
+        ? 'Upload timed out before it finished sending — retry'
         : e?.message || 'Upload failed'
       patchAttachment(localId, {
         phase: 'error',
@@ -263,6 +294,9 @@ export function useComposeMedia() {
     const rejected: RejectedFile[] = []
     const source = opts?.source ?? 'user'
     if (!files || files.length === 0) return { accepted: 0, rejected }
+    // The account these files will be uploaded as — captured before any await
+    const ownerId = currentOwnerId()
+    accountSwitchNotice.value = null
 
     const list = Array.from(files)
     const hasVideo = (f: File) => /^video\//i.test(f.type)
@@ -350,6 +384,10 @@ export function useComposeMedia() {
       // Downscaling awaits — the composer may have closed, or a parallel paste /
       // drop may have filled the remaining slots meanwhile.
       if (disposed) break
+      if (currentOwnerId() !== ownerId) {
+        rejected.push({ name: file.name, reason: 'Account changed while preparing — add it again' })
+        continue
+      }
       if (attachments.value.length + accepted.length >= limit) {
         rejected.push({ name: file.name, reason: `Attachment limit reached (${limit})` })
         continue
@@ -359,6 +397,7 @@ export function useComposeMedia() {
         file: markRaw(prepared),
         previewUrl: URL.createObjectURL(prepared),
         remoteId: null,
+        ownerId,
         phase: 'uploading',
         progress: null,
         uploading: true,
@@ -399,9 +438,51 @@ export function useComposeMedia() {
     return { accepted: accepted.length, rejected }
   }
 
+  /** Re-check media the server was still processing — the file is not uploaded twice */
+  const resumeProcessing = async (localId: string) => {
+    const draft = attachments.value.find((a) => a.localId === localId)
+    if (!draft?.remoteId) return
+    const remoteId = draft.remoteId
+    const label = draft.file.name || 'Attachment'
+    abortUpload(localId)
+    userCancelled.delete(localId)
+    const controller = new AbortController()
+    uploadControllers.set(localId, controller)
+    const isCurrent = () => uploadControllers.get(localId) === controller
+    patchAttachment(localId, { phase: 'processing', progress: null, uploading: true, error: null })
+    announce(`Checking ${label}`)
+    try {
+      const remote = await statusStore.resumeMediaProcessing(remoteId, {
+        signal: controller.signal,
+        accountId: draft.ownerId ?? undefined,
+      })
+      if (controller.signal.aborted || !isCurrent()) return
+      if (remote.processing) {
+        markStillProcessing(localId, label)
+        return
+      }
+      patchAttachment(localId, { phase: 'ready', progress: 1, uploading: false, error: null })
+      announce(`${label} ready`)
+    } catch (e: any) {
+      if (!isCurrent()) return
+      if (isUploadCancelled(e) || controller.signal.aborted) {
+        if (userCancelled.delete(localId)) markStillProcessing(localId, label)
+        return
+      }
+      markStillProcessing(localId, label)
+    } finally {
+      if (isCurrent()) {
+        uploadControllers.delete(localId)
+        patchAttachment(localId, { uploading: false })
+      }
+    }
+  }
+
   const retryUpload = async (localId: string) => {
     const draft = attachments.value.find((a) => a.localId === localId)
     if (!draft || draft.uploading) return
+    // Uploaded but unfinished on the server: ask again instead of sending the file twice
+    if (draft.remoteId && draft.phase === 'processing') return resumeProcessing(localId)
     await uploadOne(localId)
   }
 
@@ -420,7 +501,7 @@ export function useComposeMedia() {
         const current = attachments.value.find((a) => a.localId === localId)
         if (!current?.remoteId) return
         void statusStore
-          .updateMediaDescription(current.remoteId, current.description.trim())
+          .updateMediaDescription(current.remoteId, current.description.trim(), current.ownerId ?? undefined)
           .catch(async () => {
             try {
               const { useToastStore } = await import('~/stores/toast')
@@ -442,7 +523,11 @@ export function useComposeMedia() {
       const current = attachments.value.find((a) => a.localId === localId)
       if (!current?.remoteId) continue
       pending.push(
-        statusStore.updateMediaDescription(current.remoteId, current.description.trim()),
+        statusStore.updateMediaDescription(
+          current.remoteId,
+          current.description.trim(),
+          current.ownerId ?? undefined,
+        ),
       )
     }
     if (pending.length) await Promise.allSettled(pending)
@@ -495,6 +580,15 @@ export function useComposeMedia() {
     await addFiles(files)
   }
 
+  // Media ids belong to the uploading account's server. Switching accounts mid-compose
+  // detaches everything (and says so) instead of mixing A's media with B's status.
+  watch(currentOwnerId, (next, prev) => {
+    if (next === prev || !attachments.value.some((a) => a.ownerId !== next)) return
+    clearAttachments()
+    accountSwitchNotice.value =
+      'Attachments were removed because you switched accounts — uploads belong to the previous account’s server. Add them again to post with this account.'
+  })
+
   onUnmounted(() => {
     disposed = true
     for (const a of attachments.value) abortUpload(a.localId)
@@ -519,6 +613,8 @@ export function useComposeMedia() {
     mediaOptimizeSummary,
     peerTubeHint,
     dismissPeerTubeHint,
+    accountSwitchNotice,
+    dismissAccountSwitchNotice,
     addFiles,
     retryUpload,
     cancelUpload,

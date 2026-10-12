@@ -115,16 +115,31 @@ export type InsightsReport = {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
-const stripTags = (html: string) =>
-  html
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/p>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
+/** Numeric (&#39; / &#x27;) and the common named entities Mastodon emits */
+const decodeEntities = (s: string) =>
+  s
+    .replace(/&#(\d{1,7});/g, (m, d: string) => codePointOr(Number(d), m))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (m, h: string) => codePointOr(parseInt(h, 16), m))
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
+    .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
+    // Last, so "&amp;lt;" decodes once to "&lt;" and not on to "<"
+    .replace(/&amp;/g, '&')
+
+const codePointOr = (cp: number, fallback: string) => {
+  if (!Number.isInteger(cp) || cp <= 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return fallback
+  return String.fromCodePoint(cp)
+}
+
+const stripTags = (html: string) =>
+  decodeEntities(
+    html
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/p>/gi, ' ')
+      .replace(/<[^>]+>/g, ''),
+  )
     .replace(/\s+/g, ' ')
     .trim()
 

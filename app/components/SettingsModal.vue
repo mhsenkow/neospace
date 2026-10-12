@@ -227,12 +227,8 @@ watch(() => settingsStore.account, (account) => {
 }, { immediate: true })
 
 watch(
-  () => [
-    settingsStore.preferences,
-    settingsStore.localPreferences.defaultVisibility,
-    settingsStore.localPreferences.defaultSensitive,
-    settingsStore.localPreferences.postingDefaultsTouched,
-  ],
+  // The getters resolve this account's override (or server pref), so they also fire on switch
+  () => [settingsStore.preferences, settingsStore.defaultVisibility, settingsStore.defaultSensitive],
   () => {
     postingForm.visibility = settingsStore.defaultVisibility
     postingForm.sensitive = settingsStore.defaultSensitive
@@ -322,8 +318,8 @@ const confirmDeleteFilter = async (filterId: string, title: string) => {
   runModeration(() => settingsStore.deleteFilter(filterId))
 }
 
-const savePostingDefaults = () => {
-  settingsStore.updatePostingDefaults({
+const savePostingDefaults = async () => {
+  await settingsStore.updatePostingDefaults({
     visibility: postingForm.visibility,
     sensitive: postingForm.sensitive,
   })
@@ -526,6 +522,11 @@ const visibilityOptions = [
                    failed load hides it, so empty forms can't be saved over the account -->
               <template v-if="!settingsStore.error || settingsStore.account">
               <!-- Profile Settings -->
+              <section v-if="settingsStore.activeCategory === 'whats-new'" class="settings-section">
+                <SettingsSectionHeader :category="settingsStore.currentCategory" />
+                <SettingsWhatsNew />
+              </section>
+
               <section v-if="settingsStore.activeCategory === 'profile'" class="settings-section">
                 <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
@@ -1510,9 +1511,16 @@ const visibilityOptions = [
   background: var(--neo-success-soft);
   border: 1px solid var(--neo-success);
   border-radius: 8px;
-  color: var(--neo-success);
+  // Body text uses the full ink colour — success green on its own soft tint fails
+  // AA in most themes. Status stays visible via the border + the check glyph.
+  color: var(--neo-text-primary);
   font-size: 0.9375rem;
   font-weight: 500;
+
+  > span[aria-hidden='true'] {
+    color: var(--neo-success);
+    font-weight: 700;
+  }
 }
 
 .settings-error {
@@ -1525,9 +1533,14 @@ const visibilityOptions = [
   background: var(--neo-danger-soft);
   border: 1px solid var(--neo-danger);
   border-radius: 8px;
-  color: var(--neo-danger);
+  // Full ink colour: danger text on its own soft tint misses 4.5:1 in several themes
+  color: var(--neo-text-primary);
   font-size: 0.9375rem;
   overflow-wrap: anywhere;
+
+  > span[aria-hidden='true'] {
+    color: var(--neo-danger);
+  }
 
   &__retry {
     margin-left: auto;

@@ -1,9 +1,11 @@
 /**
  * Mastodon-style character counting for compose.
- * URLs count as 23; remote mentions count as @local; rest by grapheme.
+ * URLs count as 23 (or the server's reserved weight); remote mentions count as
+ * @local; rest by grapheme.
  */
 
-const URL_WEIGHT = 23
+/** Mastodon's default characters reserved per URL */
+export const DEFAULT_URL_WEIGHT = 23
 
 /** http(s) URLs, or @user / @user@domain mentions (URL alternative first). */
 const TOKEN_RE =
@@ -48,8 +50,13 @@ function mentionWeight(token: string): number {
   return graphemeLength(`@${local}`)
 }
 
-export function mastodonLength(text: string): number {
+/**
+ * @param opts.urlWeight - Characters each URL costs. Defaults to Mastodon's 23; pass
+ *   `null` for servers that count URLs in full (GoToSocial, Akkoma/Pleroma).
+ */
+export function mastodonLength(text: string, opts?: { urlWeight?: number | null }): number {
   if (!text) return 0
+  const urlWeight = opts?.urlWeight === undefined ? DEFAULT_URL_WEIGHT : opts.urlWeight
 
   let count = 0
   let last = 0
@@ -63,7 +70,7 @@ export function mastodonLength(text: string): number {
     if (token.startsWith('http')) {
       // Sentence punctuation after a link isn't part of it ("see https://x.co.")
       token = token.replace(/[.,:;!?]+$/, '')
-      count += URL_WEIGHT
+      count += urlWeight === null ? graphemeLength(token) : urlWeight
     } else {
       count += mentionWeight(token)
     }

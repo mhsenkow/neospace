@@ -20,6 +20,7 @@ import {
   buildPostQuery,
   detectIntent,
   hasPostOperators,
+  resolvableQuery,
   tagFromQuery,
   type PostFilters,
 } from '~/utils/searchQuery'
@@ -145,6 +146,8 @@ export function useFediverseSearch(opts: {
   const followedTags = ref<Set<string>>(new Set())
   const searchHasMore = ref(false)
   const loadMoreBusy = ref(false)
+  /** A load-more failed — show "Couldn't load more · Retry" instead of ending silently */
+  const loadMoreError = ref(false)
   /** The query the visible results answer (lags typing until they land) */
   const resultsFor = ref('')
   let offset = 0
@@ -182,10 +185,12 @@ export function useFediverseSearch(opts: {
     list.map((s) => ({ ...s, _instanceUrl: url }) as mastodon.v1.Status)
 
   const sentQuery = (q: string) =>
-    opts.tab.value === 'posts' ? buildPostQuery(q, opts.postFilters.value) : q
+    opts.tab.value === 'posts' ? buildPostQuery(q, opts.postFilters.value) : resolvableQuery(q)
 
+  // Keyed by account, not just server: `from:me` / "People I follow" differ between two
+  // linked accounts on the same instance.
   const cacheKey = (url: string, q: string) =>
-    [url, opts.isSignedIn.value ? 'u' : 'g', opts.tab.value, sentQuery(q), opts.peopleFollowingOnly.value ? 'f' : ''].join('|')
+    [url, instancesStore.activeAccountId ?? '', opts.isSignedIn.value ? 'u' : 'g', opts.tab.value, sentQuery(q), opts.peopleFollowingOnly.value ? 'f' : ''].join('|')
 
   const clearResults = () => {
     searchRace.abort()
@@ -202,6 +207,7 @@ export function useFediverseSearch(opts: {
     searchHasMore.value = false
     searchBusy.value = false
     loadMoreBusy.value = false
+    loadMoreError.value = false
     resultsFor.value = ''
     offset = 0
   }
@@ -340,9 +346,12 @@ export function useFediverseSearch(opts: {
     inflightKey = wireKey
 
     const ticket = searchRace.next()
-    if (append) loadMoreBusy.value = true
-    else {
+    if (append) {
+      loadMoreBusy.value = true
+      loadMoreError.value = false
+    } else {
       resultsGen++
+      loadMoreError.value = false
       searchBusy.value = true
       searchError.value = null
     }
@@ -404,7 +413,9 @@ export function useFediverseSearch(opts: {
         accounts.value = nextAccounts
         statuses.value = nextStatuses
         hashtags.value = nextTags
-        relationships.value = {}
+        // Relationships are per-account facts, not per-query: keep them so people
+        // still on screen (suggestions after Clear) don't flip back to "Follow".
+        // They're dropped on account switch (see watcher below).
       }
 
       const page = nextSearchPage(tab, pageOffset, {
@@ -471,7 +482,8 @@ export function useFediverseSearch(opts: {
         topHit.value = null
         resultsFor.value = trimmed
       } else {
-        searchHasMore.value = false
+        // Keep hasMore so the sentinel can offer Retry (it must not auto-fire again)
+        loadMoreError.value = true
       }
     } finally {
       if (ticket.isCurrent()) {
@@ -483,8 +495,17 @@ export function useFediverseSearch(opts: {
   }
 
   const loadMore = () => {
-    if (!searchHasMore.value || searchBusy.value || loadMoreBusy.value) return
-    void runSearch(opts.query.value, { append: true })
+    if (!searchHasMore.value || searchBusy.value || loadMoreBusy.value || loadMoreError.value) return
+    // Page the query the visible results answer — the box may already hold newer text
+    // (debounce pending), which would append that query's page 2 onto these results.
+    const answered = resultsFor.value
+    if (!answered || opts.query.value.trim() !== answered) return
+    void runSearch(answered, { append: true })
+  }
+
+  const retryLoadMore = () => {
+    loadMoreError.value = false
+    loadMore()
   }
 
   /** Follow toggles in flight — a double tap would otherwise send two */
@@ -543,6 +564,14 @@ export function useFediverseSearch(opts: {
     },
   )
 
+  // Relationships belong to the account that fetched them
+  watch(
+    () => instancesStore.activeAccountId,
+    () => {
+      relationships.value = {}
+    },
+  )
+
   onUnmounted(() => {
     searchRace.abort()
     resultsGen++
@@ -562,10 +591,12 @@ export function useFediverseSearch(opts: {
     followedTags,
     searchHasMore,
     loadMoreBusy,
+    loadMoreError,
     resultsFor,
     clearResults,
     runSearch,
     loadMore,
+    retryLoadMore,
     toggleFollowAccount,
     toggleFollowTag,
     ensureRelationships,

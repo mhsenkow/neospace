@@ -20,7 +20,10 @@ import type { RankerId } from '~/utils/rankers'
 import { useInstancesStore } from './instances'
 
 const STORAGE_KEY = 'neospace_algorithms_v1'
-const MAX_CUSTOM = 24
+export const MAX_CUSTOM = 24
+
+/** One cross-tab listener per page — set up on first hydrate */
+let storageListening = false
 
 interface AlgorithmsState {
   recipes: AlgorithmRecipe[]
@@ -91,6 +94,8 @@ export const useAlgorithmsStore = defineStore('algorithms', {
     customRecipes: (state): AlgorithmRecipe[] => state.recipes.filter((r) => !r.builtin),
     builtinList: (state): AlgorithmRecipe[] => state.recipes.filter((r) => r.builtin),
     allRecipes: (state): AlgorithmRecipe[] => state.recipes,
+    /** No room for another custom algorithm */
+    isFull: (state): boolean => state.recipes.filter((r) => !r.builtin).length >= MAX_CUSTOM,
   },
 
   actions: {
@@ -98,6 +103,14 @@ export const useAlgorithmsStore = defineStore('algorithms', {
       if (this.hydrated) return
       this.recipes = loadRecipes()
       this.hydrated = true
+      // Another tab saved (or cleared) recipes — take its list instead of overwriting it with ours on the next save
+      if (!storageListening && typeof window !== 'undefined') {
+        storageListening = true
+        window.addEventListener('storage', (e) => {
+          if (e.key !== null && e.key !== STORAGE_KEY) return
+          this.recipes = loadRecipes()
+        })
+      }
     },
 
     getRecipe(id: string | undefined | null): AlgorithmRecipe | null {
@@ -216,22 +229,25 @@ export const useAlgorithmsStore = defineStore('algorithms', {
       saveCustom(this.recipes)
     },
 
-    /** Import a shared payload; returns the saved recipe */
+    /** Import a shared payload; returns the saved recipe, or null when invalid or the list is full */
     importShare(raw: string): AlgorithmRecipe | null {
       const payload = decodeAlgorithmShare(raw)
       if (!payload) return null
       return this.importPayload(payload)
     },
 
-    importPayload(payload: AlgorithmSharePayload): AlgorithmRecipe {
+    /** Returns null when the payload is new but all {@link MAX_CUSTOM} slots are used — never evicts silently */
+    importPayload(payload: AlgorithmSharePayload): AlgorithmRecipe | null {
       this.hydrate()
       const recipe = sharePayloadToRecipe(payload)
-      // Dedupe by identical rules + name from same curator
+      // Dedupe by identical rules, ranker and name
       const twin = this.recipes.find(
         (r) =>
           !r.builtin &&
           r.name === recipe.name &&
           r.source === recipe.source &&
+          r.ranker === recipe.ranker &&
+          (r.description || '') === (recipe.description || '') &&
           !!r.mediaOnly === !!recipe.mediaOnly &&
           !!r.noReblogs === !!recipe.noReblogs &&
           !!r.noReplies === !!recipe.noReplies &&
@@ -241,11 +257,7 @@ export const useAlgorithmsStore = defineStore('algorithms', {
           JSON.stringify(r.excludeKeywords || []) === JSON.stringify(recipe.excludeKeywords || []),
       )
       if (twin) return twin
-      if (this.customRecipes.length >= MAX_CUSTOM) {
-        // Drop oldest custom to make room
-        const oldest = [...this.customRecipes].sort((a, b) => a.createdAt - b.createdAt)[0]
-        if (oldest) this.remove(oldest.id)
-      }
+      if (this.customRecipes.length >= MAX_CUSTOM) return null
       this.recipes.push(recipe)
       saveCustom(this.recipes)
       return recipe

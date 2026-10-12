@@ -17,4 +17,11 @@ describe('isNotebookOrigin', () => {
     expect(isNotebookOrigin('http://notebook.ibm.io')).toBe(false)
     expect(isNotebookOrigin('null')).toBe(false)
   })
+
+  it('trusts an exact allowlist, not every ibm.io sibling', () => {
+    expect(isNotebookOrigin('https://www.ibm.io')).toBe(true)
+    for (const sibling of ['loom', 'bruh', 'neospace', 'anything-hosted-later']) {
+      expect(isNotebookOrigin(`https://${sibling}.ibm.io`)).toBe(false)
+    }
+  })
 })

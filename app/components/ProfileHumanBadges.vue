@@ -5,7 +5,6 @@
 
 import type { mastodon } from 'masto'
 import { HUMAN_BADGE_DEFS } from '~/utils/humanBadges'
-import { accountLooksBot } from '~/utils/edwardSemantics'
 import { useSettingsStore } from '~/stores/settings'
 import NeoIcon from '~/components/NeoIcon.vue'
 
@@ -15,7 +14,8 @@ const props = defineProps<{
 }>()
 
 const settingsStore = useSettingsStore()
-const isBot = computed(() => accountLooksBot(props.account))
+// Only the account's own bot flag — a name heuristic must not publicly label someone a bot
+const isBot = computed(() => props.account.bot === true)
 
 const openHumansSettings = () => {
   settingsStore.open('humans')
@@ -37,8 +37,8 @@ const openHumansSettings = () => {
     </header>
 
     <p v-if="isBot" class="human-badges__bot" role="status">
-      This account is marked as a bot (or looks like one). Human badges are for
-      people — that’s the point.
+      This account is marked as a bot. Human badges are for people — that’s the
+      point.
     </p>
 
     <ul class="human-badges__grid">

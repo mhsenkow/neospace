@@ -1,17 +1,19 @@
 /**
  * After `nuxt generate`:
- * 1. Sync SPA fallbacks (404.html / 200.html = index.html)
+ * 1. Remove 404.html / 200.html. Cloudflare Pages treats a project with no top-level
+ *    404.html as a single-page app and answers unknown paths with index.html and HTTP 200;
+ *    a copied 404.html turned that off, so deep links (/status/123, /groups/cats)
+ *    returned the shell with HTTP 404 and unfurlers / uptime checks saw dead links.
  * 2. Add sha256 hashes for the remaining inline scripts (Nuxt's importmap and
  *    window.__NUXT__ config; boot scripts are external under /boot/) to the
  *    enforced CSP in .output/public/_headers.
  */
-import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 
 const out = resolve('.output/public')
 const index = resolve(out, 'index.html')
-const notFound = resolve(out, '404.html')
 const headersSrc = resolve('public/_headers')
 const headersOut = resolve(out, '_headers')
 
@@ -20,8 +22,12 @@ if (!existsSync(index)) {
   process.exit(1)
 }
 
-copyFileSync(index, notFound)
-console.log('spa-fallback: synced 404.html to index.html (Cloudflare Pages SPA fallback)')
+for (const name of ['404.html', '200.html']) {
+  if (existsSync(resolve(out, name))) {
+    rmSync(resolve(out, name))
+    console.log(`spa-fallback: removed ${name} (Cloudflare Pages SPA mode answers unknown paths 200 with index.html)`)
+  }
+}
 
 /** Every prerendered route page, so a per-page inline script can't be missed. */
 function htmlFiles(dir, found = []) {

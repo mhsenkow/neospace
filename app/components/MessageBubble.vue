@@ -4,11 +4,14 @@
  */
 
 import type { mastodon } from 'masto'
-import { sanitizeStatusHtml } from '~/utils/sanitizeHtml'
+import { sanitizeDisplayName, sanitizeStatusHtml } from '~/utils/sanitizeHtml'
+import { emojify, emojiUrlSet } from '~/utils/emojify'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import { stripParticipantMentions } from '~/utils/dmMentions'
 import { safeHttpUrl } from '~/utils/dmHelpers'
 import { useOverlayStore } from '~/stores/overlay'
 import { useStatusStore } from '~/stores/status'
+import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 
 const props = defineProps<{
@@ -16,6 +19,8 @@ const props = defineProps<{
   mine: boolean
   /** Show avatar + name above bubble (start of a run from this person) */
   showMeta?: boolean
+  /** Show the timestamp (hidden mid-run so consecutive lines aren't each stamped). Default true. */
+  showTime?: boolean
   /** Optimistic send state for own bubbles */
   delivery?: 'pending' | 'failed' | 'sent'
   /** Group-DM participant handles — only strip leading mention links for these */
@@ -32,6 +37,7 @@ const emit = defineEmits<{
 const overlay = useOverlayStore()
 const statusStore = useStatusStore()
 const toast = useToastStore()
+const instancesStore = useInstancesStore()
 const revealed = ref(false)
 const menuOpen = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
@@ -44,14 +50,43 @@ const isFailed = computed(() => props.delivery === 'failed')
 
 /** Strip only participant mention links at the start — keep "@home tonight" etc. */
 const bubbleHtml = computed(() =>
-  sanitizeStatusHtml(
-    stripParticipantMentions(
-      props.status.content || '',
-      props.participantAccts || [],
-      props.status.mentions || [],
+  // Custom emoji go in after sanitising (allowlisted urls only), like post cards
+  emojify(
+    sanitizeStatusHtml(
+      stripParticipantMentions(
+        props.status.content || '',
+        props.participantAccts || [],
+        props.status.mentions || [],
+      ),
     ),
+    props.status.emojis,
+    { escape: false },
   ),
 )
+
+const senderNameHtml = computed(() => {
+  const account = props.status.account
+  const emojis = account.emojis || []
+  return sanitizeDisplayName(
+    emojify(account.displayName || account.username, emojis),
+    emojiUrlSet(emojis),
+  )
+})
+
+const reduceMotion = usePrefersReducedMotion()
+
+/** A public / unlisted post inside a DM thread must not look like a private bubble */
+const visibilityChip = computed(() => {
+  switch (props.status.visibility) {
+    case 'public': return 'Public post'
+    case 'unlisted': return 'Unlisted post'
+    case 'private': return 'Followers only'
+    default: return ''
+  }
+})
+
+/** Optimistic / failed bubbles have no server id yet — only Copy makes sense */
+const hasServerId = computed(() => !props.delivery || props.delivery === 'sent')
 
 const hasText = computed(() =>
   bubbleHtml.value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().length > 0,
@@ -164,6 +199,9 @@ const copyText = async () => {
 
 const deleteOwn = async () => {
   menuOpen.value = false
+  // Delete as the account that was acting when the user opened the menu
+  const accountId = instancesStore.activeAccount?.id
+  if (!accountId) return
   const ok = await overlay.openConfirm({
     title: 'Delete this message?',
     body: 'It will be removed for everyone in the conversation.',
@@ -171,8 +209,12 @@ const deleteOwn = async () => {
     danger: true,
   })
   if (!ok) return
+  if (instancesStore.activeAccount?.id !== accountId) {
+    toast.show({ message: 'Your account changed — nothing was deleted.' })
+    return
+  }
   try {
-    await statusStore.deleteStatus(props.status.id)
+    await statusStore.deleteStatus(props.status.id, accountId)
     emit('deleted', props.status.id)
     toast.show({ message: 'Message deleted', duration: 2500 })
   } catch (e: any) {
@@ -232,7 +274,7 @@ onBeforeUnmount(() => {
         alt=""
         class="msg-bubble__avatar"
       />
-      <span class="msg-bubble__name">{{ status.account.displayName || status.account.username }}</span>
+      <span class="msg-bubble__name" v-html="senderNameHtml" />
     </div>
 
     <div class="msg-bubble__row">
@@ -256,6 +298,7 @@ onBeforeUnmount(() => {
           class="msg-bubble__content"
           tabindex="-1"
         >
+          <span v-if="visibilityChip" class="msg-bubble__visibility">{{ visibilityChip }}</span>
           <div
             v-if="hasText"
             class="msg-bubble__body"
@@ -264,8 +307,22 @@ onBeforeUnmount(() => {
 
           <div v-if="knownMedia.length || unknownMedia.length" class="msg-bubble__media">
             <template v-for="item in knownMedia" :key="item.id">
+              <!-- GIFV is a looping muted mp4: play it inline, don't hand it to the image lightbox -->
+              <video
+                v-if="item.type === 'gifv'"
+                :src="item.url || undefined"
+                :poster="item.previewUrl || undefined"
+                class="msg-bubble__img"
+                :autoplay="!reduceMotion"
+                loop
+                muted
+                playsinline
+                :controls="reduceMotion"
+                preload="metadata"
+                :aria-label="item.description?.trim() || 'Animated image'"
+              />
               <button
-                v-if="item.type === 'image' || item.type === 'gifv'"
+                v-else-if="item.type === 'image'"
                 type="button"
                 class="msg-bubble__media-btn"
                 :aria-label="mediaButtonLabel(item)"
@@ -311,7 +368,7 @@ onBeforeUnmount(() => {
         </div>
 
         <time
-          v-if="!isPending && !isFailed"
+          v-if="!isPending && !isFailed && showTime !== false"
           class="msg-bubble__time"
           :datetime="status.createdAt"
           :title="timeTitle"
@@ -336,8 +393,14 @@ onBeforeUnmount(() => {
         <NeoIcon name="more" :size="16" :stroke="2" />
         <template #items>
           <button type="button" role="menuitem" @click="copyText">Copy text</button>
-          <button v-if="mine" type="button" role="menuitem" @click="deleteOwn">Delete</button>
-          <button type="button" role="menuitem" @click="openAsPost">Open as post</button>
+          <button v-if="mine && hasServerId" type="button" role="menuitem" @click="deleteOwn">Delete</button>
+          <!-- For a direct message "/status/:id" is this same chat, so only offer it for public replies -->
+          <button
+            v-if="hasServerId && status.visibility !== 'direct'"
+            type="button"
+            role="menuitem"
+            @click="openAsPost"
+          >Open as post</button>
         </template>
       </NeoMenu>
     </div>
@@ -355,6 +418,17 @@ onBeforeUnmount(() => {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.msg-bubble__visibility {
+  align-self: flex-start;
+  margin-bottom: 0.25rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  opacity: 0.8;
 }
 
 .msg-bubble {

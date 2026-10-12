@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   isUploadCancelled,
   isUploadTimeout,
@@ -75,6 +75,159 @@ describe('postFormWithProgress (fetch fallback — no XHR in node)', () => {
   })
 })
 
+/** Minimal XMLHttpRequest double — drives the real XHR branch of postFormWithProgress */
+class FakeXHR {
+  static instances: FakeXHR[] = []
+  static failOn: 'open' | 'send' | null = null
+  upload: {
+    onprogress?: (e: { loaded: number; total: number; lengthComputable: boolean }) => void
+    onload?: () => void
+  } = {}
+  onload?: () => void
+  onerror?: () => void
+  onabort?: () => void
+  status = 0
+  responseText = ''
+  headers: Record<string, string> = {}
+  opened: [string, string] | null = null
+  aborted = false
+
+  constructor() {
+    FakeXHR.instances.push(this)
+  }
+  open(method: string, url: string) {
+    if (FakeXHR.failOn === 'open') throw new Error('open failed')
+    this.opened = [method, url]
+  }
+  setRequestHeader(key: string, value: string) {
+    this.headers[key] = value
+  }
+  send() {
+    if (FakeXHR.failOn === 'send') throw new Error('send failed')
+  }
+  abort() {
+    this.aborted = true
+    this.onabort?.()
+  }
+  respond(status: number, body: unknown) {
+    this.status = status
+    this.responseText = typeof body === 'string' ? body : JSON.stringify(body)
+    this.onload?.()
+  }
+}
+
+describe('postFormWithProgress (XHR branch)', () => {
+  const form = () => new FormData()
+  const last = () => FakeXHR.instances[FakeXHR.instances.length - 1]!
+
+  beforeEach(() => {
+    FakeXHR.instances = []
+    FakeXHR.failOn = null
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    // The fetch fallback must stay unused — a regression there can't mask an XHR break
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        throw new Error('fetch fallback used')
+      }),
+    )
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('posts with auth headers and resolves the parsed response', async () => {
+    const p = postFormWithProgress('https://x.example/api/v2/media', form(), {
+      headers: { Authorization: 'Bearer t' },
+    })
+    expect(last().opened).toEqual(['POST', 'https://x.example/api/v2/media'])
+    expect(last().headers).toEqual({ Authorization: 'Bearer t' })
+    last().respond(202, { id: '9' })
+    await expect(p).resolves.toEqual({ status: 202, body: { id: '9' } })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('reports real byte progress, null for unknown totals, and signals when sent', async () => {
+    const progress: (number | null)[] = []
+    let sent = 0
+    const p = postFormWithProgress('https://x.example', form(), {
+      onProgress: (f) => progress.push(f),
+      onSent: () => sent++,
+    })
+    const xhr = last()
+    xhr.upload.onprogress?.({ loaded: 25, total: 100, lengthComputable: true })
+    xhr.upload.onprogress?.({ loaded: 50, total: 0, lengthComputable: false })
+    xhr.upload.onprogress?.({ loaded: 100, total: 100, lengthComputable: true })
+    expect(sent).toBe(0)
+    xhr.upload.onload?.()
+    expect(sent).toBe(1)
+    xhr.respond(200, {})
+    await p
+    expect(progress).toEqual([0.25, null, 1])
+  })
+
+  it('treats a non-JSON body as empty and surfaces network errors', async () => {
+    const ok = postFormWithProgress('https://x.example', form())
+    last().respond(502, '<html>bad gateway</html>')
+    await expect(ok).resolves.toEqual({ status: 502, body: {}, malformed: true })
+
+    const down = postFormWithProgress('https://x.example', form())
+    last().onerror?.()
+    await expect(down).rejects.toThrow(/Network error/)
+  })
+
+  it('aborts the request when the caller aborts, as a cancellation', async () => {
+    const user = new AbortController()
+    const p = postFormWithProgress('https://x.example', form(), { signal: user.signal })
+    user.abort()
+    const err = await p.catch((e) => e)
+    expect(last().aborted).toBe(true)
+    expect(isUploadCancelled(err)).toBe(true)
+    expect(isUploadTimeout(err)).toBe(false)
+  })
+
+  it('rejects without opening a request when already aborted', async () => {
+    const c = new AbortController()
+    c.abort()
+    await expect(postFormWithProgress('https://x.example', form(), { signal: c.signal })).rejects.toBeInstanceOf(
+      UploadCancelledError,
+    )
+    expect(FakeXHR.instances).toHaveLength(0)
+  })
+
+  it('aborts on timeout and reports it as a timeout, not a cancellation', async () => {
+    vi.useFakeTimers()
+    const p = postFormWithProgress('https://x.example', form(), { timeoutMs: 1000 })
+    const settled = p.catch((e) => e)
+    vi.advanceTimersByTime(1000)
+    const err = await settled
+    expect(last().aborted).toBe(true)
+    expect(isUploadTimeout(err)).toBe(true)
+    expect(isUploadCancelled(err)).toBe(false)
+  })
+
+  it('stops the timer and abort listener once the upload finishes', async () => {
+    vi.useFakeTimers()
+    const user = new AbortController()
+    const remove = vi.spyOn(user.signal, 'removeEventListener')
+    const p = postFormWithProgress('https://x.example', form(), { signal: user.signal, timeoutMs: 1000 })
+    last().respond(200, {})
+    await p
+    expect(vi.getTimerCount()).toBe(0)
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
+  })
+
+  it.each(['open', 'send'] as const)('cleans up when %s throws synchronously', async (stage) => {
+    vi.useFakeTimers()
+    FakeXHR.failOn = stage
+    const user = new AbortController()
+    const remove = vi.spyOn(user.signal, 'removeEventListener')
+    await expect(
+      postFormWithProgress('https://x.example', form(), { signal: user.signal, timeoutMs: 1000 }),
+    ).rejects.toThrow(`${stage} failed`)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
+  })
+})
+
 describe('scheduled post helpers', () => {
   it('detects unsupported servers by HTTP status only', () => {
     expect(isScheduledUnsupported({ statusCode: 404 })).toBe(true)
@@ -95,6 +248,8 @@ describe('scheduled post helpers', () => {
     expect(toLocalInputValue('2026-10-12T12:06:00Z')).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
     expect(scheduledPreview({ text: '  a\n\nb  ' })).toBe('a b')
     expect(scheduledPreview({ text: '', spoilerText: '' })).toBe('(no text)')
-    expect(scheduledPreview({ text: 'x'.repeat(200), spoilerText: 'cw' }, 20)).toHaveLength(20)
+    expect(scheduledPreview({ text: 'x'.repeat(200) }, 20)).toHaveLength(20)
+    // A content warning hides the body — only the warning shows
+    expect(scheduledPreview({ text: 'secret', spoilerText: 'cw' })).toBe('CW: cw')
   })
 })

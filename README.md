@@ -144,7 +144,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run typecheck:app` | Nuxt app typecheck (clean; part of `check` / CI) |
 | `npm run lint` | Same as typecheck + typecheck:app (no separate ESLint yet) |
 | `npm test` | Vitest unit tests |
-| `npm run test:e2e` | Playwright journeys + axe (requires `npm run generate` first) |
+| `npm run test:e2e` | Playwright journeys + axe on desktop Chromium and mobile Chromium (requires `npm run generate` first; serves `.output/public` with `scripts/serve-e2e.mjs`; `E2E_WEBKIT=1` adds an iPhone WebKit project) |
 | `npm run check:full` | `check` + `generate` + e2e |
 | `npm run cf:preview` | Generate + Wrangler Pages dev |
 | `npm run cf:deploy` | Generate + deploy to Cloudflare Pages |
@@ -166,7 +166,7 @@ npm run cf:deploy
 - Output directory: `.output/public`
 - Node version: `22`
 
-SPA deep links use `404.html` fallback (`scripts/spa-fallback.mjs`). Security and cache headers live in `public/_headers`.
+SPA deep links rely on Cloudflare Pages' SPA mode: the build ships no top-level `404.html` (`scripts/spa-fallback.mjs` removes it), so unknown paths answer `index.html` with HTTP 200. Security and cache headers live in `public/_headers`.
 
 ### Leave-a-note (GitHub issues)
 
@@ -247,7 +247,7 @@ public/
 └── icons/                  # PWA manifest icons
 scripts/
 ├── build-prepaint.mjs      # Generates prepaint.js from appearance.ts
-└── spa-fallback.mjs        # Syncs 404.html for CF Pages SPA routing
+└── spa-fallback.mjs        # Removes 404.html/200.html so CF Pages SPA routing answers 200; adds CSP hashes
 shared/feedbackConstants.ts # Feedback API limits shared with client
 docs/                       # Architecture, status, audit — see docs/README.md
 ```

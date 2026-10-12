@@ -26,6 +26,8 @@ import { THEME_OPTIONS, UI_OPTIONS, resolveTheme } from '~/utils/appearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { BOARD_RIGHT_PORTALS, type BoardPortal } from '~/composables/useBoardPortal'
 import { participantLabel } from '~/utils/dmHelpers'
+import { richDisplayName } from '~/utils/displayName'
+import { notifLabel } from '~/utils/notifHelpers'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const themeStore = useThemeStore()
@@ -45,6 +47,7 @@ const motionBehavior = (behavior: ScrollBehavior): ScrollBehavior =>
   reducedMotion.value && behavior === 'smooth' ? 'auto' : behavior
 
 const addMenuOpen = ref(false)
+const boardFullLabel = `Board full (${MAX_COLUMNS}/${MAX_COLUMNS}) — remove a column to add another`
 const addAlgorithmsExpanded = ref(true)
 const addGroupsExpanded = ref(true)
 const addGroupQuery = ref('')
@@ -299,7 +302,8 @@ const addableGroups = computed(() => {
 
 const addGroupCustomTag = computed(() => {
   const q = addGroupQuery.value.trim().toLowerCase().replace(/^#/, '')
-  if (!q || !/^[a-z0-9_]+$/i.test(q)) return null
+  // Any script, like Mastodon: #café, #日本語, #ÜberTag
+  if (!q || !/^[\p{L}\p{N}_]+$/u.test(q)) return null
   if (addableGroups.value.some((g) => g.tag.toLowerCase() === q)) return null
   return q
 })
@@ -628,6 +632,11 @@ const onColumnFocus = (columnId: string) => {
   if (idx >= 0) {
     activeColumnIndex.value = idx
     syncTabIntoView(idx, 'smooth')
+    // While focused the other columns collapse and the strip's scrollLeft clamps
+    // to 0 — put the strip back on this column once the layout is restored
+    if (columnsStore.focusedColumnId == null) {
+      void nextTick(() => scrollToColumn(idx, 'auto'))
+    }
   }
 }
 
@@ -686,18 +695,7 @@ const portalInboxRows = computed(() => {
 const portalActivityRows = computed(() =>
   notificationsStore.notifications.slice(0, 4).map((n) => {
     const who = n.account?.displayName || n.account?.username || 'Someone'
-    const verb =
-      n.type === 'mention'
-        ? 'mentioned you'
-        : n.type === 'favourite'
-          ? 'liked your post'
-          : n.type === 'reblog'
-            ? 'boosted you'
-            : n.type === 'follow'
-              ? 'followed you'
-              : n.type === 'poll'
-                ? 'poll ended'
-                : 'interacted'
+    const verb = notifLabel(n.type)
     return {
       id: n.id,
       label: `${who} ${verb}`,
@@ -766,7 +764,9 @@ const openPortal = async (
   }
 }
 
-const openInboxRow = async (statusId: string | null) => {
+const openInboxRow = async (statusId: string | null, conversation?: { id: string; unread: boolean }) => {
+  // Opening a DM from here is reading it — match the Inbox column and clear the badge/dot
+  if (conversation?.unread) void conversationsStore.markRead(conversation.id)
   if (!statusId) {
     await openPortal('inbox')
     return
@@ -942,6 +942,23 @@ let carouselGesture: CarouselGesture | null = null
  * Trackpad: drive horizontal board scroll ourselves and claim the gesture
  * so Safari history swipe doesn't steal it. No snap-back on idle.
  */
+/** A horizontally scrollable element between `target` and the board that can still move toward `dx` */
+const nestedHorizontalScroller = (target: EventTarget | null, board: HTMLElement, dx: number): boolean => {
+  let node = target instanceof HTMLElement ? target : null
+  while (node && node !== board) {
+    if (node.scrollWidth > node.clientWidth + 1) {
+      const ox = getComputedStyle(node).overflowX
+      if (ox === 'auto' || ox === 'scroll') {
+        const atStart = node.scrollLeft <= 0
+        const atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 1
+        if ((dx < 0 && !atStart) || (dx > 0 && !atEnd)) return true
+      }
+    }
+    node = node.parentElement
+  }
+  return false
+}
+
 const onColumnsWheel = (e: WheelEvent) => {
   const el = columnsContainer.value
   if (!el || isMobileUi.value) return
@@ -962,6 +979,8 @@ const onColumnsWheel = (e: WheelEvent) => {
   }
 
   if (Math.abs(dx) < 0.5 || Math.abs(dx) <= Math.abs(dy) * 1.05) return
+  // Let nested horizontal scrollers (account strips, wide media / code) pan themselves
+  if (nestedHorizontalScroller(e.target, el, dx)) return
 
   if (e.cancelable) e.preventDefault()
   if (!wheelArmed) {
@@ -977,6 +996,28 @@ const onColumnsWheel = (e: WheelEvent) => {
     el.style.scrollSnapType = ''
     syncActiveColumnFromScroll()
   }, 120)
+}
+
+/** `[` / `]`: keyboard users jump between columns instead of tabbing through every card */
+const onBoardKeydown = (e: KeyboardEvent) => {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return
+  if (e.key !== '[' && e.key !== ']') return
+  if (isMobileUi.value) return
+  const t = e.target
+  if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+  const cols = getColumnEls()
+  if (cols.length < 2) return
+  let cur = cols.findIndex((c) => c.contains(document.activeElement))
+  if (cur < 0) cur = activeColumnIndex.value
+  const next = clamp(cur + (e.key === ']' ? 1 : -1), 0, cols.length - 1)
+  if (next === cur) return
+  e.preventDefault()
+  scrollToColumn(next)
+  const col = cols[next]
+  const target =
+    col?.querySelector<HTMLElement>('[role="feed"]') ??
+    col?.querySelector<HTMLElement>('button:not([disabled]), a[href], [tabindex="0"]')
+  target?.focus({ preventScroll: true })
 }
 
 const onCarouselTouchStart = (e: TouchEvent) => {
@@ -1212,6 +1253,8 @@ watch(
   (id, prev) => {
     if (id === prev) return
     columnsStore.initialize()
+    // initialize() can drop the focused column — Tabs density needs a selected tab
+    columnsStore.ensureTabsFocus()
     activeColumnIndex.value = 0
     nextTick(() => scrollToColumn(0, 'auto'))
   },
@@ -1352,6 +1395,11 @@ useHead({ title: 'Home | NeoSpace' })
         :panels="false"
         @update:model-value="(id) => (activeFeedTabId = id)"
       />
+      <div v-if="!columnsStore.canAddColumn" class="desk-feed-tabs__add" @click.stop>
+        <button type="button" class="add-column-full" aria-disabled="true" :aria-label="boardFullLabel" :title="boardFullLabel">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+        </button>
+      </div>
       <div v-if="columnsStore.canAddColumn" class="desk-feed-tabs__add" @click.stop>
         <NeoMenu
           v-model:open="addMenuOpen"
@@ -1368,7 +1416,7 @@ useHead({ title: 'Home | NeoSpace' })
             <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
             <div class="add-column-menu__divider" role="separator" />
             <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-              <span>Algorithms</span>
+              <span>Timelines</span>
               <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
@@ -1392,6 +1440,7 @@ useHead({ title: 'Home | NeoSpace' })
                 class="add-column-menu__item"
                 @click="addColumn('bookmarks')"
               >Saved</button>
+              <span v-if="algorithmsStore.allRecipes.length" class="add-column-menu__title">Algorithms</span>
               <button
                 v-for="recipe in algorithmsStore.allRecipes"
                 :key="recipe.id"
@@ -1478,6 +1527,11 @@ useHead({ title: 'Home | NeoSpace' })
 
         <!-- One Add Feed menu per layout: they share addMenuOpen, and a hidden desktop
              popup's outside-tap close would shut this sheet on pointerdown -->
+        <div v-if="!columnsStore.canAddColumn && isMobileUi" class="mobile-feed-chrome__add" @click.stop>
+          <button type="button" class="add-column-full" aria-disabled="true" :aria-label="boardFullLabel" :title="boardFullLabel">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          </button>
+        </div>
         <div v-if="columnsStore.canAddColumn && isMobileUi" class="mobile-feed-chrome__add" @click.stop>
           <NeoMenu
             v-model:open="addMenuOpen"
@@ -1496,7 +1550,7 @@ useHead({ title: 'Home | NeoSpace' })
               <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
               <div class="add-column-menu__divider" role="separator" />
               <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-                <span>Algorithms</span>
+                <span>Timelines</span>
                 <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
@@ -1520,6 +1574,7 @@ useHead({ title: 'Home | NeoSpace' })
                   class="add-column-menu__item"
                   @click="addColumn('bookmarks')"
                 >Saved</button>
+                <span v-if="algorithmsStore.allRecipes.length" class="add-column-menu__title">Algorithms</span>
                 <button
                   v-for="recipe in algorithmsStore.allRecipes"
                   :key="recipe.id"
@@ -1611,6 +1666,7 @@ useHead({ title: 'Home | NeoSpace' })
       id="feed-columns"
       class="columns-container"
       @scroll.passive="onColumnsScroll"
+      @keydown="onBoardKeydown"
     >
       <!-- Mobile edge: keep swiping left → Profile, then Settings -->
       <aside
@@ -1671,7 +1727,7 @@ useHead({ title: 'Home | NeoSpace' })
             class="feed-portal__avatar"
           />
           <div class="feed-portal__who">
-            <strong>{{ portalUser.displayName || portalUser.username }}</strong>
+            <strong v-html="richDisplayName(portalUser)" />
             <span>@{{ portalUser.acct }}</span>
           </div>
           <p class="feed-portal__stats">
@@ -1818,7 +1874,7 @@ useHead({ title: 'Home | NeoSpace' })
             type="button"
             class="feed-portal__list-row"
             :class="{ 'feed-portal__list-row--unread': row.unread }"
-            @click="openInboxRow(row.statusId)"
+            @click="openInboxRow(row.statusId, { id: row.id, unread: row.unread })"
           >
             <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" loading="lazy" decoding="async" />
             <span v-else class="feed-portal__list-avatar feed-portal__list-avatar--empty" />
@@ -1943,6 +1999,16 @@ useHead({ title: 'Home | NeoSpace' })
       </div>
     </nav>
 
+    <div
+      v-if="!columnsStore.canAddColumn && !isDeskTabs && !isMobileUi"
+      class="add-column-panel"
+      @click.stop
+    >
+      <button type="button" class="add-column-full" aria-disabled="true" :aria-label="boardFullLabel" :title="boardFullLabel">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+      </button>
+    </div>
+
     <!-- Desktop Add Column Panel -->
     <div
       v-if="columnsStore.canAddColumn && !isDeskTabs && !isMobileUi"
@@ -1970,7 +2036,7 @@ useHead({ title: 'Home | NeoSpace' })
           </button>
           <div class="add-column-menu__divider" role="separator" />
           <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-            <span>Algorithms</span>
+            <span>Timelines</span>
             <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
               <polyline points="6 9 12 15 18 9" />
             </svg>
@@ -2012,6 +2078,7 @@ useHead({ title: 'Home | NeoSpace' })
               <NeoIcon name="bookmark" :size="16" :stroke="1.5" />
               Saved
             </button>
+            <span v-if="algorithmsStore.allRecipes.length" class="add-column-menu__title">Algorithms</span>
             <button
               v-for="recipe in algorithmsStore.allRecipes"
               :key="`d-${recipe.id}`"
@@ -2415,7 +2482,9 @@ useHead({ title: 'Home | NeoSpace' })
   box-sizing: border-box;
   flex-direction: column;
   align-items: flex-start;
+  // `safe` keeps the title reachable at the top when a landscape phone overflows
   justify-content: center;
+  justify-content: safe center;
   gap: 0.75rem;
   padding: 2.5rem 1.25rem 5rem;
   overflow-x: hidden;
@@ -3044,6 +3113,26 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
+// Board at the column cap: keep the control (so the limit is discoverable) but inert
+.add-column-full {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--neo-text-muted);
+  opacity: 0.55;
+  cursor: not-allowed;
+
+  @media (hover: none), (pointer: coarse) {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 .add-column-neo {
   :deep(.neo-menu__trigger) {
     display: inline-flex;
@@ -3217,6 +3306,12 @@ useHead({ title: 'Home | NeoSpace' })
   }
 }
 
+
+.feed-portal__who strong :deep(img) {
+  height: 1.15em;
+  width: auto;
+  vertical-align: -0.2em;
+}
 </style>
 
 <!-- Teleported Add Feed panel lives on <body>; scoped :deep() cannot reach it. -->

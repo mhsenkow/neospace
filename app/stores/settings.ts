@@ -36,7 +36,9 @@ import {
 } from '~/utils/appearance'
 import { ensureFontsLoaded } from '~/utils/loadFonts'
 import { cursorPage } from '~/utils/linkHeader'
+import { normalizeDomainInput } from '~/utils/domainInput'
 import { listenSuiteLook, readSuiteLook, writeSuiteLook } from '~/utils/suiteLook'
+import { logWarn, logError } from '~/utils/log'
 
 // Settings categories for the sidebar
 export interface SettingsCategory {
@@ -47,41 +49,58 @@ export interface SettingsCategory {
   keywords?: string[]
 }
 
+/**
+ * Prefix match on the keyword or any word of it ("sign out" ← "out"). Substring and reverse
+ * matching made short keywords fire inside longer words (`ai` in "email", `ui` in "build").
+ */
+export function settingsKeywordMatches(keywords: string[] | undefined, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return false
+  return !!keywords?.some((k) => k.startsWith(q) || k.split(/\s+/).some((w) => w.startsWith(q)))
+}
+
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
+  {
+    id: 'whats-new',
+    label: "What's new",
+    icon: 'sparkle',
+    description: 'Short notes on recent NeoSpace updates',
+    keywords: ['changelog', 'updates', 'release', 'notes', 'tldr', 'version', 'shipped'],
+  },
   {
     id: 'profile',
     label: 'Profile',
     icon: 'user',
     description: 'Your public profile information',
-    keywords: ['name', 'bio', 'avatar', 'header', 'display', 'about', 'fields', 'website'],
+    keywords: ['name', 'bio', 'display', 'about', 'discoverable', 'discovery', 'directory'],
   },
   {
     id: 'privacy',
     label: 'Privacy & Safety',
     icon: 'lock',
     description: 'Control who can see your content',
-    keywords: ['mute', 'block', 'locked', 'discoverable', 'safety', 'hide', 'domain'],
+    keywords: ['mute', 'block', 'locked', 'private', 'approve', 'safety', 'hide', 'domain', 'domains'],
   },
   {
     id: 'notifications',
     label: 'Notifications',
     icon: 'bell',
     description: 'Manage your notification preferences',
-    keywords: ['alerts', 'mentions', 'push', 'email', 'activity'],
+    keywords: ['alerts', 'mentions', 'email', 'activity', 'server'],
   },
   {
     id: 'appearance',
     label: 'Appearance',
     icon: 'palette',
     description: 'Customize how NeoSpace looks',
-    keywords: ['theme', 'dark', 'light', 'font', 'dyslexic', 'density', 'radius', 'ui', 'contrast', 'motion', 'css'],
+    keywords: ['theme', 'dark', 'light', 'font', 'dyslexic', 'density', 'radius', 'ui', 'contrast', 'motion', 'css', 'size', 'corners', 'chrome', 'flip', 'lines'],
   },
   {
     id: 'posting',
     label: 'Posting Defaults',
     icon: 'pen',
     description: 'Default settings for new posts',
-    keywords: ['visibility', 'public', 'unlisted', 'followers', 'sensitive', 'cw', 'language', 'compose'],
+    keywords: ['visibility', 'public', 'unlisted', 'followers', 'sensitive', 'cw', 'compose', 'photo', 'photos', 'upload', 'quality', 'image', 'media'],
   },
   {
     id: 'filters',
@@ -162,11 +181,12 @@ interface SettingsState {
     flipTextAlign: 'left' | 'center' | 'right'
     /** Type scale for Flip-mode text (esp. text-only slides) */
     flipTextSize: 'reading' | 'large' | 'display'
-    /** null = follow server preference */
-    defaultVisibility: 'public' | 'unlisted' | 'private' | 'direct' | null
-    defaultSensitive: boolean | null
-    /** True only after the user saves Posting Defaults (avoids hard-coded public shadowing server prefs) */
-    postingDefaultsTouched: boolean
+    /**
+     * Posting defaults saved on this device, per account id — a server default belongs
+     * to one account, so one account's save must not shadow another's. Absent =
+     * follow that account's server preference.
+     */
+    postingOverrides: Record<string, PostingOverride>
     /** Collapse consecutive reblogs of the same post in Home ("A and N others reposted") */
     collapseReblogs: boolean
     /**
@@ -198,6 +218,27 @@ interface SettingsState {
 }
 
 const MODERATION_PAGE_SIZE = 40
+
+type PostingVisibility = 'public' | 'unlisted' | 'private' | 'direct'
+type PostingOverride = { visibility?: PostingVisibility; sensitive?: boolean }
+const POSTING_VISIBILITIES: readonly string[] = ['public', 'unlisted', 'private', 'direct']
+
+/** Keep only well-formed per-account posting overrides from stored JSON. */
+export function parsePostingOverrides(raw: unknown): Record<string, PostingOverride> {
+  const out: Record<string, PostingOverride> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (id === '__proto__' || !value || typeof value !== 'object') continue
+    const v = value as Record<string, unknown>
+    const entry: PostingOverride = {}
+    if (typeof v.visibility === 'string' && POSTING_VISIBILITIES.includes(v.visibility)) {
+      entry.visibility = v.visibility as PostingVisibility
+    }
+    if (typeof v.sensitive === 'boolean') entry.sensitive = v.sensitive
+    if (entry.visibility !== undefined || entry.sensitive !== undefined) out[id] = entry
+  }
+  return out
+}
 
 type AppearancePrefs = typeof DEFAULT_APPEARANCE
 
@@ -282,6 +323,22 @@ function readStoredLocalPrefs(): Record<string, any> | null {
   }
 }
 
+/**
+ * Merge a few fields into the stored blob instead of rewriting the whole object —
+ * a background tab's stale fontSize / density / … must not clobber another tab's changes.
+ */
+function mergeStoredLocalPrefs(partial: Record<string, unknown>) {
+  try {
+    const current = readStoredLocalPrefs() ?? {}
+    localStorage.setItem(
+      LOCAL_PREFS_KEY,
+      JSON.stringify({ v: LOCAL_PREFS_VERSION, ...current, ...partial }),
+    )
+  } catch (e) {
+    logError('Failed to save local preferences:', e)
+  }
+}
+
 /** Active account the loaded `account` / `preferences` / `filters` belong to. */
 let settingsOwnerId: string | null = null
 let settingsLoadSeq = 0
@@ -309,9 +366,7 @@ export const useSettingsStore = defineStore('settings', {
       customProfileCss: false,
       flipTextAlign: 'center',
       flipTextSize: 'large',
-      defaultVisibility: null,
-      defaultSensitive: null,
-      postingDefaultsTouched: false,
+      postingOverrides: {},
       collapseReblogs: true,
       mediaUploadQuality: 'balanced',
     },
@@ -344,7 +399,7 @@ export const useSettingsStore = defineStore('settings', {
         (cat) =>
           cat.label.toLowerCase().includes(query) ||
           cat.description?.toLowerCase().includes(query) ||
-          cat.keywords?.some((k) => k.includes(query) || query.includes(k)),
+          settingsKeywordMatches(cat.keywords, query),
       )
     },
     
@@ -359,8 +414,9 @@ export const useSettingsStore = defineStore('settings', {
      * Default post visibility — prefers local override, then Mastodon prefs
      */
     defaultVisibility: (state): 'public' | 'unlisted' | 'private' | 'direct' => {
+      const id = useInstancesStore().activeAccountId
       return (
-        state.localPreferences.defaultVisibility ??
+        (id ? state.localPreferences.postingOverrides[id]?.visibility : undefined) ??
         state.preferences?.['posting:default:visibility'] ??
         'public'
       )
@@ -370,12 +426,9 @@ export const useSettingsStore = defineStore('settings', {
      * Default sensitive media
      */
     defaultSensitive: (state): boolean => {
-      if (
-        state.localPreferences.postingDefaultsTouched &&
-        typeof state.localPreferences.defaultSensitive === 'boolean'
-      ) {
-        return state.localPreferences.defaultSensitive
-      }
+      const id = useInstancesStore().activeAccountId
+      const local = id ? state.localPreferences.postingOverrides[id]?.sensitive : undefined
+      if (typeof local === 'boolean') return local
       return state.preferences?.['posting:default:sensitive'] || false
     },
 
@@ -407,6 +460,8 @@ export const useSettingsStore = defineStore('settings', {
      */
     open(category?: string) {
       this.isOpen = true
+      // A banner from an earlier save (or a sidebar appearance cycle) is stale on re-open
+      this.saveSuccess = false
       this.openedToCategory = !!category
       if (category) {
         this.activeCategory = category
@@ -442,22 +497,14 @@ export const useSettingsStore = defineStore('settings', {
       try {
         const parsed = readStoredLocalPrefs()
         if (parsed) {
-          const vis = parsed.defaultVisibility
           const appearance = parseAppearance(parsed, !!parsed.compactMode)
           this.localPreferences = {
             ...this.localPreferences,
             ...appearance,
             compactMode: appearance.density === 'dense',
-            postingDefaultsTouched: !!parsed.postingDefaultsTouched,
-            defaultVisibility:
-              parsed.postingDefaultsTouched &&
-              ['public', 'unlisted', 'private', 'direct'].includes(vis)
-                ? vis
-                : null,
-            defaultSensitive:
-              parsed.postingDefaultsTouched && typeof parsed.defaultSensitive === 'boolean'
-                ? parsed.defaultSensitive
-                : null,
+            // Legacy global defaultVisibility / defaultSensitive can't be attributed to one
+            // account, so they're dropped — the server value (set by the same save) applies.
+            postingOverrides: parsePostingOverrides(parsed.postingOverrides),
             collapseReblogs: parsed.collapseReblogs !== false,
             mediaUploadQuality:
               parsed.mediaUploadQuality === 'efficient' ||
@@ -476,7 +523,7 @@ export const useSettingsStore = defineStore('settings', {
         this.applyLocalAppearance()
         this.syncCustomProfileCss()
       } catch (e) {
-        console.error('Failed to load local preferences:', e)
+        logError('Failed to load local preferences:', e)
       }
     },
 
@@ -506,7 +553,36 @@ export const useSettingsStore = defineStore('settings', {
 
     /** Follow sibling tools editing ibm.tools.shared (bruh / loom / words). */
     startSuiteLookSync(): () => void {
-      return listenSuiteLook((slice) => {
+      // Another tab changed NeoSpace's own appearance prefs: follow them (apply only —
+      // never write back, or the two tabs would ping-pong)
+      const onPrefsStorage = (e: StorageEvent) => {
+        if (e.key !== LOCAL_PREFS_KEY) return
+        const parsed = readStoredLocalPrefs()
+        if (!parsed) return
+        const appearance = parseAppearance(parsed, !!parsed.compactMode)
+        this.localPreferences = {
+          ...this.localPreferences,
+          ...appearance,
+          compactMode: appearance.density === 'dense',
+        }
+        const suite = readSuiteLook()
+        if (suite.theme) this.localPreferences.theme = suite.theme
+        if (suite.ui) this.localPreferences.ui = suite.ui
+        if (suite.font) this.localPreferences.font = suite.font
+        applyAppearance({
+          theme: this.localPreferences.theme,
+          ui: this.localPreferences.ui,
+          font: this.localPreferences.font,
+          fontSize: this.localPreferences.fontSize,
+          radius: this.localPreferences.radius,
+          density: this.localPreferences.density,
+          line: this.localPreferences.line,
+        })
+        ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
+        document.documentElement.classList.toggle('reduce-motion', this.localPreferences.reduceMotion)
+      }
+      if (typeof window !== 'undefined') window.addEventListener('storage', onPrefsStorage)
+      const offSuite = listenSuiteLook((slice) => {
         let changed = false
         if (slice.theme && slice.theme !== this.localPreferences.theme) {
           this.localPreferences.theme = slice.theme
@@ -532,8 +608,17 @@ export const useSettingsStore = defineStore('settings', {
           line: this.localPreferences.line,
         })
         ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
-        this.saveLocalPreferences()
+        // Only the look fields changed — don't rewrite the rest of the blob from this tab's state
+        mergeStoredLocalPrefs({
+          theme: this.localPreferences.theme,
+          ui: this.localPreferences.ui,
+          font: this.localPreferences.font,
+        })
       })
+      return () => {
+        offSuite()
+        if (typeof window !== 'undefined') window.removeEventListener('storage', onPrefsStorage)
+      }
     },
 
     /**
@@ -565,7 +650,7 @@ export const useSettingsStore = defineStore('settings', {
           JSON.stringify({ v: LOCAL_PREFS_VERSION, ...this.localPreferences }),
         )
       } catch (e) {
-        console.error('Failed to save local preferences:', e)
+        logError('Failed to save local preferences:', e)
       }
     },
     
@@ -611,7 +696,7 @@ export const useSettingsStore = defineStore('settings', {
         if (filterResult.status === 'fulfilled') {
           this.filters = filterResult.value
         } else {
-          console.error('Failed to load filters:', filterResult.reason)
+          logError('Failed to load filters:', filterResult.reason)
         }
         
         // Also load local preferences
@@ -620,7 +705,7 @@ export const useSettingsStore = defineStore('settings', {
       } catch (e: any) {
         if (seq !== settingsLoadSeq) return
         this.error = e?.message || 'Failed to load settings'
-        console.error('Settings load error:', e)
+        logError('Settings load error:', e)
       } finally {
         if (seq === settingsLoadSeq) this.isLoading = false
       }
@@ -695,7 +780,7 @@ export const useSettingsStore = defineStore('settings', {
         this.hasMoreMuted = !!page.nextMaxId && items.length > 0
       } catch (e) {
         if (!this.isModerationLoadCurrent(epoch, accountId)) return
-        console.error('Failed to load muted accounts:', e)
+        logError('Failed to load muted accounts:', e)
         this.error = e instanceof Error ? e.message : 'Failed to load muted accounts'
       } finally {
         if (epoch === moderationEpoch) this.isLoadingMuted = false
@@ -737,7 +822,7 @@ export const useSettingsStore = defineStore('settings', {
         this.hasMoreBlocked = !!page.nextMaxId && items.length > 0
       } catch (e) {
         if (!this.isModerationLoadCurrent(epoch, accountId)) return
-        console.error('Failed to load blocked accounts:', e)
+        logError('Failed to load blocked accounts:', e)
         this.error = e instanceof Error ? e.message : 'Failed to load blocked accounts'
       } finally {
         if (epoch === moderationEpoch) this.isLoadingBlocked = false
@@ -756,12 +841,12 @@ export const useSettingsStore = defineStore('settings', {
         if (!this.isModerationLoadCurrent(epoch, accountId)) return
         this.blockedDomains = domains
       } catch (e) {
-        console.error('Failed to load blocked domains:', e)
+        logError('Failed to load blocked domains:', e)
       }
     },
 
     async blockDomain(domain: string) {
-      const normalized = domain.trim().toLowerCase().replace(/^@/, '')
+      const normalized = normalizeDomainInput(domain)
       if (!normalized) throw new Error('Enter a domain like example.social')
       this.setModerationPending('block-domain', normalized, true)
       this.error = null
@@ -842,22 +927,22 @@ export const useSettingsStore = defineStore('settings', {
       sensitive?: boolean
       language?: string
     }) {
-      if (data.visibility) {
-        this.localPreferences.defaultVisibility = data.visibility
-        this.localPreferences.postingDefaultsTouched = true
-        if (this.preferences) {
-          this.preferences['posting:default:visibility'] = data.visibility
+      // The save belongs to the account that was active when the user pressed it
+      const ownerId = useInstancesStore().activeAccountId
+      this.error = null
+      if (ownerId && (data.visibility || data.sensitive !== undefined)) {
+        const entry: PostingOverride = { ...this.localPreferences.postingOverrides[ownerId] }
+        if (data.visibility) entry.visibility = data.visibility
+        if (data.sensitive !== undefined) entry.sensitive = data.sensitive
+        this.localPreferences.postingOverrides = {
+          ...this.localPreferences.postingOverrides,
+          [ownerId]: entry,
         }
       }
-      if (data.sensitive !== undefined) {
-        this.localPreferences.defaultSensitive = data.sensitive
-        this.localPreferences.postingDefaultsTouched = true
-        if (this.preferences) {
-          this.preferences['posting:default:sensitive'] = data.sensitive
-        }
-      }
-      if (data.language !== undefined && this.preferences) {
-        this.preferences['posting:default:language'] = data.language
+      if (this.preferences) {
+        if (data.visibility) this.preferences['posting:default:visibility'] = data.visibility
+        if (data.sensitive !== undefined) this.preferences['posting:default:sensitive'] = data.sensitive
+        if (data.language !== undefined) this.preferences['posting:default:language'] = data.language
       }
       this.saveLocalPreferences()
 
@@ -872,7 +957,12 @@ export const useSettingsStore = defineStore('settings', {
           const client = this.getClient()
           await client.v1.accounts.updateCredentials({ source })
         } catch (e) {
-          console.warn('Could not sync posting defaults to server:', e)
+          logWarn('Could not sync posting defaults to server:', e)
+          // Don't claim success: other clients and the web UI still use the old default
+          if (useInstancesStore().activeAccountId === ownerId) {
+            this.error = 'Saved on this device only — couldn’t update your server'
+          }
+          return
         }
       }
 
@@ -900,7 +990,9 @@ export const useSettingsStore = defineStore('settings', {
       if (typeof data.customProfileCss === 'boolean') {
         this.syncCustomProfileCss()
       }
-      this.saveSuccess = true
+      // Sidebar cycles (theme / corners / density…) run this with Settings closed —
+      // only an explicit save from the open modal gets the banner
+      if (this.isOpen) this.saveSuccess = true
     },
 
     cycleTheme() {

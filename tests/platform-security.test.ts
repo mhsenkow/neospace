@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRestAPIClient } from 'masto'
 import { assertSafePathSegment, guardMastoClient } from '../app/utils/mastoGuard'
 import { normalizeServer } from '../app/utils/instances'
-import { sanitizeProfileCss } from '../app/utils/sanitizeCss'
+import { SKIN_CONTAINMENT, sanitizeProfileCss } from '../app/utils/sanitizeCss'
 import { emojify } from '../app/utils/emojify'
 import { clearLogRing, formatLogRingForFeedback, logError, redactSecrets } from '../app/utils/log'
 import { isLoomOrigin } from '../app/utils/loomHandoff'
@@ -95,7 +95,7 @@ describe('sanitizeProfileCss adversarial', () => {
   it('keeps the old smoke expectations', () => {
     const out = sanitizeProfileCss('@font-face { src: url(https://e.x/f) } .z { color: red; }')
     expect(out).toContain('blocked font face')
-    expect(out).toBe(`/* blocked font face */${SCOPE} .z{ color: red; }`)
+    expect(out).toBe(`/* blocked font face */${SCOPE} .z{ color: red; }${SKIN_CONTAINMENT}`)
   })
 
   it.each([
@@ -125,12 +125,53 @@ describe('sanitizeProfileCss adversarial', () => {
 
   it('drops nested-rule bodies and statement at-rules entirely', () => {
     expect(sanitizeProfileCss('a { :is(&, body) { top: 0 } }')).toBe('')
-    expect(sanitizeProfileCss('@layer x; b { color: red }')).toBe(`${SCOPE} b{ color: red }`)
+    expect(sanitizeProfileCss('@layer x; b { color: red }')).toBe(`${SCOPE} b{ color: red }${SKIN_CONTAINMENT}`)
+  })
+
+  it('rewrites position after a blocked-marker (comment ends in "/")', () => {
+    for (const input of [
+      'a{javascript:position:fixed;inset:0;z-index:2147483647}',
+      'a{behavior:position:fixed}',
+      'a{x:1/**/position:fixed}',
+      'a{color:red;position/**/:fixed}',
+      'a{background:url(http://e/x)position:fixed}',
+    ]) {
+      const out = sanitizeProfileCss(input)
+      expect(out, input).not.toMatch(/position\s*:\s*fixed/i)
+      expect(out, input).toMatch(/position: absolute/)
+    }
+    // Properties that merely contain the word are left alone
+    expect(sanitizeProfileCss('a{background-position:center;--position:fixed}')).toContain(
+      'background-position:center;--position:fixed',
+    )
+  })
+
+  it('never styles #main-content from an empty or bare-scope selector', () => {
+    for (const input of [', x{color:red}', 'x,{color:red}', '.chaos-active #main-content{color:red}']) {
+      const out = sanitizeProfileCss(input).replace(SKIN_CONTAINMENT, '')
+      expect(out, input).not.toMatch(/#main-content\s*(,|\{)/)
+    }
+  })
+
+  it('contains absolutely positioned skin content and clamps z-index', () => {
+    const out = sanitizeProfileCss(
+      '.a{position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:99999} .b{z-index:var(--x)} .c{z-index:-5000 !important}',
+    )
+    expect(out.endsWith(SKIN_CONTAINMENT)).toBe(true)
+    expect(SKIN_CONTAINMENT).toMatch(/contain:paint/)
+    expect(SKIN_CONTAINMENT).toMatch(/isolation:isolate/)
+    expect(out).toContain('z-index: 100')
+    expect(out).toContain('z-index: auto')
+    expect(out).toContain('z-index: -100 !important')
+    expect(out).not.toMatch(/99999/)
+    expect(sanitizeProfileCss('')).toBe('')
   })
 
   it('keeps @media blocks (even after whitespace) and scopes their rules', () => {
     const out = sanitizeProfileCss('a{color:red}\n@media (max-width: 600px) { b { color: blue } }')
-    expect(out).toBe(`${SCOPE} a{color:red}@media (max-width: 600px){${SCOPE} b{ color: blue }}`)
+    expect(out).toBe(
+      `${SCOPE} a{color:red}@media (max-width: 600px){${SCOPE} b{ color: blue }}${SKIN_CONTAINMENT}`,
+    )
   })
 
   it('pins position:fixed (and var() indirection) to absolute', () => {
@@ -262,7 +303,8 @@ describe('OAuth state across tabs', () => {
     const resA = consumeOAuthChallenge(a.state)
     expect(resA.ok).toBe(true)
     expect(resA.codeVerifier).toBe(a.codeVerifier)
-    expect(resA.pending).toBeNull()
+    // Pending records are keyed by state, so tab A still gets its own instance / add mode / returnTo
+    expect(resA.pending?.instanceId).toBe('A')
 
     vi.stubGlobal('sessionStorage', tabB)
     const resB = consumeOAuthChallenge(b.state)
@@ -306,6 +348,39 @@ describe('feedback Pages Function', () => {
   }
   const env = { GITHUB_TOKEN: 'ghp_secret' }
 
+  it('allows same-origin callers on any dev/preview port, and still refuses strangers', async () => {
+    const sent = githubMock()
+    const body = JSON.stringify({ title: 'Hello', body: 'a note', kind: 'idea' })
+    const req = (url: string, origin: string) =>
+      new Request(url, {
+        method: 'POST',
+        body,
+        headers: {
+          Origin: origin,
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': `192.0.2.${++ipSeq}`,
+        },
+      })
+    // wrangler pages dev (:8788) and nuxt dev (:3011) — previously 403 FORBIDDEN_ORIGIN
+    for (const origin of ['http://localhost:8788', 'http://127.0.0.1:3011']) {
+      const res = await onRequestPost({ request: req(`${origin}/api/feedback`, origin), env } as never)
+      expect(res.status).toBe(200)
+    }
+    expect(sent).toHaveLength(2)
+    // A foreign page posting at the real endpoint is still refused
+    const evil = await onRequestPost({
+      request: req('https://neospace.ibm.io/api/feedback', 'https://evil.example'),
+      env,
+    } as never)
+    expect(evil.status).toBe(403)
+    // Same-origin to an unrelated host is not a way in for a different Origin header
+    const mismatch = await onRequestPost({
+      request: req('http://localhost:8788/api/feedback', 'http://localhost:9999'),
+      env,
+    } as never)
+    expect(mismatch.status).toBe(403)
+  })
+
   it('answers 400 (not a thrown 500) for null / non-object / wrongly typed JSON', async () => {
     githubMock()
     for (const body of ['null', '[]', '7', '{"title":{"x":1},"body":5,"kind":[]}']) {
@@ -338,14 +413,27 @@ describe('feedback Pages Function', () => {
     expect(JSON.stringify(json)).not.toContain('ghp_secret')
   })
 
-  it('keeps valid screenshots', async () => {
+  it('never inlines screenshots into the GitHub issue body', async () => {
     const sent = githubMock()
     await onRequestPost({
       request: post(JSON.stringify({ body: 'n', imageBase64: 'data:image/jpeg;base64,/9j/4AAQ==' })),
       env,
     })
-    expect(sent[0]!.body.body).toContain('![screenshot](data:image/jpeg;base64,/9j/4AAQ==)')
+    expect(sent[0]!.body.body).not.toContain('![screenshot]')
+    expect(sent[0]!.body.body).not.toContain('data:image/')
+    expect(sent[0]!.body.body).toMatch(/screenshot not attached/i)
+    // Helper still classifies mime for any future hosting path
     expect(screenshotDataUrl('iVBORw0KGgo=')).toBe('data:image/png;base64,iVBORw0KGgo=')
+  })
+
+  it('does not entity-escape Fediverse handles inside the text fence', async () => {
+    const sent = githubMock()
+    await onRequestPost({
+      request: post(JSON.stringify({ body: 'hi @alice@example.social see #12' })),
+      env,
+    })
+    expect(sent[0]!.body.body).toContain('@alice@example.social')
+    expect(sent[0]!.body.body).not.toContain('&#64;')
   })
 
   it('maps GitHub network failures to a JSON 502', async () => {
@@ -467,20 +555,23 @@ describe('feedback rate limit and Turnstile branches', () => {
 
   it('rejects a token siteverify refuses and accepts one it approves', async () => {
     const env = { GITHUB_TOKEN: 't', TURNSTILE_SECRET_KEY: 's' }
+    const addr = ip()
     mockFetch({ turnstile: false })
     const bad = await onRequestPost({
-      request: req({ body: 'x', turnstileToken: 'tok' }, ip()),
+      request: req({ body: 'x', turnstileToken: 'tok' }, addr),
       env,
     })
     expect(bad.status).toBe(403)
     expect(((await bad.json()) as { code: string }).code).toBe('TURNSTILE_FAILED')
 
+    // Failed Turnstile must not burn the successful-submit hourly bucket
     const urls = mockFetch({ turnstile: true })
-    const ok = await onRequestPost({
-      request: req({ body: 'x', turnstileToken: 'tok' }, ip()),
-      env,
-    })
-    expect(ok.status).toBe(200)
+    for (let i = 0; i < 5; i++) {
+      expect(
+        (await onRequestPost({ request: req({ body: 'x', turnstileToken: 'tok' }, addr), env }))
+          .status,
+      ).toBe(200)
+    }
     expect(urls.some((u) => u.includes('api.github.com'))).toBe(true)
   })
 

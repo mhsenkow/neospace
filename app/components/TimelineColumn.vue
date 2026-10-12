@@ -19,6 +19,7 @@ import {
   statusListKey,
 } from '~/utils/statusIdentity'
 import { recipeTip, statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
+import { RANKERS } from '~/utils/rankers'
 import { useRankedFeed } from '~/composables/useRankedFeed'
 import { useSettingsStore } from '~/stores/settings'
 import { compareId, idLess } from '~/utils/compareId'
@@ -27,32 +28,38 @@ import { httpStatusFrom, mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
 import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
 import { emitComposedStatus, onComposedStatus } from '~/composables/useComposedStatus'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
+import { dropDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 import { useDeskViewport, useMobileViewport } from '~/composables/useBreakpoint'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import { useColumnDnd } from '~/composables/useColumnDnd'
 import { cursorPage } from '~/utils/linkHeader'
+import {
+  catchUpForward,
+  mergeCursors,
+  nextGapSources,
+  type CatchUpSource,
+} from '~/utils/catchUp'
 
 /** Tag statuses with the instance they were loaded from so likes/boosts hit the right API. */
-const withBrowseOrigin = (
-  list: mastodon.v1.Status[],
-): (mastodon.v1.Status | ExtendedStatus)[] => {
+const browseOrigin = (): { id: string; url: string } => {
   const account =
     instancesStore.activeAccount ||
     instancesStore.instances.find((i) => i.accessToken) ||
     instancesStore.instances[0]
-  if (account) {
-    return list.map((s) => ({
-      ...s,
-      _instanceId: account.id,
-      _instanceUrl: account.url,
-    }))
-  }
+  if (account) return { id: account.id, url: account.url }
   const url = resolvePublicInstanceUrl()
-  const host = hostnameOf(url) || 'fallback'
+  return { id: `public:${hostnameOf(url) || 'fallback'}`, url }
+}
+
+const withBrowseOrigin = (
+  list: mastodon.v1.Status[],
+): (mastodon.v1.Status | ExtendedStatus)[] => {
+  const origin = browseOrigin()
   return list.map((s) => ({
     ...s,
-    _instanceId: `public:${host}`,
-    _instanceUrl: url,
+    _instanceId: origin.id,
+    _instanceUrl: origin.url,
   }))
 }
 
@@ -113,6 +120,9 @@ const loadAlgorithmPage = async (limit = 20, continueFrom?: string | null) => {
   }
   if (recipe.source === 'home' && !instancesStore.hasAuthenticatedInstance) {
     throw new Error('Sign in to run algorithms that use your home feed')
+  }
+  if (recipe.ranker && RANKERS[recipe.ranker]?.needsAuth && !instancesStore.hasAuthenticatedInstance) {
+    throw new Error(`Sign in to use the ${RANKERS[recipe.ranker].short}-style ranking`)
   }
 
   // X / Facebook / TikTok-style: ranked pages from a multi-source pool
@@ -292,8 +302,9 @@ let flipRo: ResizeObserver | null = null
 const pendingNew = shallowRef<(mastodon.v1.Status | ExtendedStatus)[]>([])
 const isNearTop = ref(true)
 const toastStore = useToastStore()
-/** Visible when catch-up hit its page cap — posts may be missing between polls */
-const timelineGap = ref(false)
+/** Sources whose catch-up hit the page cap — more arrivals are waiting (next poll continues from the cursor) */
+const gapSources = ref<string[]>([])
+const timelineGap = computed(() => gapSources.value.length > 0)
 /** Newest status id per instance for since_id polls (not the oldest-for-max_id feedCursors) */
 const sinceCursors = ref<Record<string, string>>({})
 
@@ -387,6 +398,7 @@ const isLoginRequiredError = computed(() => {
 })
 
 import type { NeoIconName } from '~/utils/neoIcons'
+import { logError } from '~/utils/log'
 
 type EmptyAction = { to: string; label: string; primary?: boolean }
 
@@ -559,12 +571,14 @@ const onComposePosted = (status: mastodon.v1.Status) => {
   emitComposedStatus(status)
 }
 
-/** Own-post delete / delete-and-redraft — drop the card from this column */
-const onStatusDeleted = (statusId: string) => {
-  const drop = (list: (mastodon.v1.Status | ExtendedStatus)[]) =>
-    list.filter((s) => s.id !== statusId && s.reblog?.id !== statusId)
-  statuses.value = drop(statuses.value)
-  pendingNew.value = drop(pendingNew.value)
+/**
+ * A post was deleted anywhere in the app — drop every copy from this column.
+ * Matched by canonical identity / same-origin id (never a bare id: another server's
+ * unrelated post can share it).
+ */
+const onStatusDeleted = (event: DeletedStatusEvent) => {
+  statuses.value = dropDeletedStatus(statuses.value, event)
+  pendingNew.value = dropDeletedStatus(pendingNew.value, event)
 }
 
 const onScroll = () => {
@@ -791,136 +805,137 @@ const displayRows = computed(() =>
 /** role="feed" articles: total is unknown (-1) while more pages can load */
 const feedSetSize = computed(() => (hasMore.value ? -1 : displayStatuses.value.length))
 
-/** Seed / advance per-instance newest cursors from held posts */
-const refreshSinceCursors = (list: (mastodon.v1.Status | ExtendedStatus)[]) => {
-  const merged = { ...sinceCursors.value, ...newestIdPerInstance(list as ExtendedStatus[]) }
+/**
+ * Newest held id per instance, merged over `current`. Pure — a poll works on
+ * this local copy and only commits it once pollForNew accepts the result.
+ */
+const seedSinceCursors = (
+  current: Record<string, string>,
+  list: (mastodon.v1.Status | ExtendedStatus)[],
+): Record<string, string> => {
+  const next = { ...newestIdPerInstance(list as ExtendedStatus[]) }
   // Single-server feeds may lack _instanceId — fall back to global top
   const top = list[0]
   if (top?.id) {
-    const ext = top as ExtendedStatus
-    const key = ext._instanceId || '_default'
-    if (!merged[key] || compareId(top.id, merged[key]) > 0) merged[key] = top.id
+    const key = (top as ExtendedStatus)._instanceId || '_default'
+    if (!next[key] || compareId(top.id, next[key]) > 0) next[key] = top.id
   }
-  sinceCursors.value = merged
+  return mergeCursors(current, next)
 }
 
 /**
- * Fetch one since_id page for the current feed. Returns [] when the feed
- * type doesn't support live polling.
+ * One forward (`min_id`) source per server for the current feed. Empty when the
+ * feed type doesn't support live polling. Each source pages independently so a
+ * busy server can hit the cap while a quiet one settles.
  */
-const fetchSincePage = async (
+const buildCatchUpSources = (
   cursors: Record<string, string>,
-  limit: number,
-): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+): CatchUpSource<mastodon.v1.Status | ExtendedStatus>[] => {
+  const cursorFor = (key: string) => cursors[key] || cursors._default || ''
+  const tagged = (list: mastodon.v1.Status[], inst: { id: string; url: string }) =>
+    list.map((s) => ({ ...s, _instanceId: inst.id, _instanceUrl: inst.url }))
+
   if (props.column.feedType === 'group' && props.column.groupTag) {
-    const sinceId = cursors._default || Object.values(cursors)[0]
-    if (!sinceId) return []
-    const client = publicClient()
-    const list = await client.v1.timelines.tag.$select(props.column.groupTag).list({
-      limit,
-      sinceId,
-    })
-    return withBrowseOrigin(list)
+    const tag = props.column.groupTag
+    const origin = browseOrigin()
+    const cursor = cursorFor(origin.id) || Object.values(cursors)[0] || ''
+    if (!cursor) return []
+    return [
+      {
+        key: origin.id,
+        cursor,
+        fetchPage: async (minId, limit) =>
+          tagged(await publicClient().v1.timelines.tag.$select(tag).list({ limit, minId }), origin),
+      },
+    ]
   }
 
   if (props.column.feedType === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return []
     const active = instancesStore.activeAccount
     if (!active?.accessToken) return []
-    const sinceId = cursors[active.id] || cursors._default
-    if (!sinceId) return []
-    return await instancesStore.fetchMergedHomeTimeline(
-      limit,
-      { [active.id]: sinceId },
-      { since: true },
-    )
+    const cursor = cursorFor(active.id)
+    if (!cursor) return []
+    return [
+      {
+        key: active.id,
+        cursor,
+        fetchPage: async (minId, limit) =>
+          tagged(await instancesStore.getClient(active.id).v1.timelines.home.list({ limit, minId }), active),
+      },
+    ]
   }
 
   if (props.column.feedType === 'local' || props.column.feedType === 'federated') {
+    const local = props.column.feedType === 'local'
     const targets = instancesStore.publicTimelineTargets()
-    if (targets.length === 1 && targets[0]?.accessToken) {
-      const inst = targets[0]
-      const sinceId = cursors[inst.id] || cursors._default
-      if (!sinceId) return []
-      const client = instancesStore.getClient(inst.id)
-      const list = await client.v1.timelines.public.list({
-        local: props.column.feedType === 'local',
-        limit,
-        sinceId,
-      })
-      return list.map((s) => ({
-        ...s,
-        _instanceId: inst.id,
-        _instanceUrl: inst.url,
-      }))
-    }
     if (instancesStore.instances.length > 0 && targets.length > 0) {
-      // Pass every target's cursor — not just targets[0]
-      const map: Record<string, string> = {}
-      for (const t of targets) {
-        const c = cursors[t.id] || cursors._default
-        if (c) map[t.id] = c
-      }
-      if (!Object.keys(map).length) return []
-      return await instancesStore.fetchMergedTimeline(
-        props.column.feedType as 'local' | 'federated',
-        limit,
-        map,
-        { since: true },
-      )
+      return targets.flatMap((inst) => {
+        const cursor = cursorFor(inst.id)
+        if (!cursor) return []
+        if (!inst.accessToken && isAuthGatedPublicHost(inst.url)) return []
+        return [
+          {
+            key: inst.id,
+            cursor,
+            fetchPage: async (minId: string, limit: number) =>
+              tagged(await instancesStore.getClient(inst.id).v1.timelines.public.list({ local, limit, minId }), inst),
+          },
+        ]
+      })
     }
-    const sinceId = cursors._default || Object.values(cursors)[0]
-    if (!sinceId) return []
-    const client = publicClient()
-    return withBrowseOrigin(
-      await client.v1.timelines.public.list({
-        local: props.column.feedType === 'local',
-        limit,
-        sinceId,
-      }),
-    )
+    const origin = browseOrigin()
+    const cursor = cursorFor(origin.id) || Object.values(cursors)[0] || ''
+    if (!cursor) return []
+    return [
+      {
+        key: origin.id,
+        cursor,
+        fetchPage: async (minId, limit) =>
+          tagged(await publicClient().v1.timelines.public.list({ local, limit, minId }), origin),
+      },
+    ]
   }
 
-  // Liked / Saved / algorithms: no since_id polling (lists aren’t live firehoses)
+  // Liked / Saved / algorithms: no polling (lists aren’t live firehoses)
   return []
 }
 
+interface CatchUpOutcome {
+  items: (mastodon.v1.Status | ExtendedStatus)[]
+  cursors: Record<string, string>
+  gapSources: string[]
+}
+
 /**
- * Fetch posts newer than held tops. Pages until a short page or CATCH_UP_MAX_PAGES.
- * Sets timelineGap when the cap is hit so the reader can recover.
+ * Fetch every post newer than the held tops, walking each server forward with
+ * min_id (up to CATCH_UP_MAX_PAGES per server). Mutates nothing: pollForNew
+ * commits `cursors` / `gapSources` only after the fetch generation still matches.
  */
-const fetchNewSince = async (): Promise<(mastodon.v1.Status | ExtendedStatus)[]> => {
+const fetchNewSince = async (): Promise<CatchUpOutcome> => {
   const held = [...pendingNew.value, ...statuses.value]
-  if (!held.length) return []
-  refreshSinceCursors(held)
+  const cursors = seedSinceCursors(sinceCursors.value, held)
+  if (!held.length) return { items: [], cursors, gapSources: gapSources.value }
 
-  const collected: (mastodon.v1.Status | ExtendedStatus)[] = []
-  let cursors = { ...sinceCursors.value }
-  let hitCap = false
+  const sources = buildCatchUpSources(cursors)
+  const result = await catchUpForward(sources, {
+    pageLimit: SINCE_PAGE_LIMIT,
+    maxPages: CATCH_UP_MAX_PAGES,
+  })
+  // Every server failed — surface it (polling swallows quietly) rather than "nothing new"
+  if (sources.length && result.failed.length === sources.length) throw result.firstError
 
-  for (let page = 0; page < CATCH_UP_MAX_PAGES; page++) {
-    const batch = await fetchSincePage(cursors, SINCE_PAGE_LIMIT)
-    if (!batch.length) break
-    collected.push(...batch)
-    const advanced = newestIdPerInstance(batch as ExtendedStatus[])
-    cursors = { ...cursors, ...advanced }
-    const top = batch[0] as ExtendedStatus | undefined
-    if (top?.id) {
-      const key = top._instanceId || '_default'
-      if (!cursors[key] || compareId(top.id, cursors[key]) > 0) cursors[key] = top.id
-    }
-    if (batch.length < SINCE_PAGE_LIMIT) break
-    if (page === CATCH_UP_MAX_PAGES - 1) hitCap = true
+  result.items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  return {
+    items: result.items,
+    cursors: mergeCursors(cursors, result.cursors),
+    gapSources: nextGapSources(gapSources.value, result),
   }
-
-  sinceCursors.value = cursors
-  timelineGap.value = hitCap
-  return collected
 }
 
 /** Full refresh to recover posts that may have been skipped past the catch-up cap */
 const recoverTimelineGap = () => {
-  timelineGap.value = false
+  gapSources.value = []
   statuses.value = []
   pendingNew.value = []
   sinceCursors.value = {}
@@ -951,10 +966,12 @@ const pollForNew = async () => {
   isPolling.value = true
   const gen = fetchGen
   try {
-    const fresh = await fetchNewSince()
-    // Feed / account switched mid-poll — these posts belong to the old feed
+    const outcome = await fetchNewSince()
+    // Feed / account switched mid-poll — these posts and cursors belong to the old feed
     if (gen !== fetchGen) return
-    mergeIncoming(fresh)
+    sinceCursors.value = outcome.cursors
+    gapSources.value = outcome.gapSources
+    mergeIncoming(outcome.items)
   } catch {
     // quiet — polling failures shouldn't interrupt reading
   } finally {
@@ -1073,7 +1090,7 @@ const fetchTimeline = async (refresh = false): Promise<boolean> => {
     algoSourceCursor.value = null
     savedCursor.value = null
     pendingNew.value = []
-    timelineGap.value = false
+    gapSources.value = []
     hasMore.value = true
     loadMoreError.value = null
   }
@@ -1236,7 +1253,7 @@ const loadMore = async () => {
     lastLoadAddedNothing.value = added === 0 && hasMore.value
   } catch (e: any) {
     if (gen !== fetchGen) return
-    console.error('Load more error:', e)
+    logError('Load more error:', e)
     const friendly = mapErrorToMessage(e)
     loadMoreError.value = friendly.detail || friendly.title || 'Couldn’t load more'
   } finally {
@@ -1287,7 +1304,7 @@ watch(
     statuses.value = []
     pendingNew.value = []
     sinceCursors.value = {}
-    timelineGap.value = false
+    gapSources.value = []
     error.value = null
     loadMoreError.value = null
     isNearTop.value = true
@@ -1337,11 +1354,13 @@ const feedRoot = ref<HTMLElement | null>(null)
 const { onKeydown: onFeedKeydown } = useFeedKeyboard(feedRoot)
 
 let stopComposedListen: (() => void) | null = null
+let stopDeletedListen: (() => void) | null = null
 
 onMounted(() => {
   // Register visibility/polling listeners before any await so unmount mid-fetch can't leak
   document.addEventListener('visibilitychange', onVisibilityChange)
   stopComposedListen = onComposedStatus(insertComposedStatus)
+  stopDeletedListen = onDeletedStatus(onStatusDeleted)
   startPolling()
 
   nextTick(() => {
@@ -1384,6 +1403,8 @@ onDeactivated(() => {
 onUnmounted(() => {
   stopComposedListen?.()
   stopComposedListen = null
+  stopDeletedListen?.()
+  stopDeletedListen = null
   if (listMotionTimer) clearTimeout(listMotionTimer)
   if (newPostsAnnounceTimer) clearTimeout(newPostsAnnounceTimer)
   if (observer) observer.disconnect()
@@ -1493,7 +1514,7 @@ onUnmounted(() => {
               class="feed-dropdown__section-toggle"
               @click.stop="algorithmsExpanded = !algorithmsExpanded"
             >
-              <span>Algorithms</span>
+              <span>Timelines</span>
               <svg :class="{ rotated: algorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
@@ -1553,6 +1574,7 @@ onUnmounted(() => {
                 <NeoIcon name="bookmark" :size="16" :stroke="1.5" />
                 Saved
               </button>
+              <span v-if="algorithmsStore.allRecipes.length" class="feed-dropdown__subhead">Algorithms</span>
               <button
                 v-for="recipe in algorithmsStore.allRecipes"
                 :key="recipe.id"
@@ -1852,7 +1874,7 @@ onUnmounted(() => {
 
       <!-- Busy-timeline gap: catch-up hit its page cap -->
       <div v-if="timelineGap" class="column-gap" role="status">
-        <p class="column-gap__text">Some newer posts may be missing — this feed was very busy.</p>
+        <p class="column-gap__text">More new posts are still arriving — this feed was very busy.</p>
         <button type="button" class="column-retry" @click="recoverTimelineGap">
           Reload feed
         </button>
@@ -1919,44 +1941,43 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Posts -->
-      <div
-        v-else
-        ref="feedRoot"
-        class="column-posts"
-        :class="{
-          'column-posts--flip': isFlip,
-          'column-posts--focus-wide': isDesktop && focused,
-        }"
-        role="feed"
-        tabindex="0"
-        :aria-busy="isLoadingMore || isLoading"
-        :aria-label="`${feedLabel} posts`"
-        @keydown="onFeedKeydown"
-      >
-        <template v-if="isFlip">
-          <RealPostCard
-            v-for="(row, idx) in displayRows"
-            :key="row.key"
-            :status="row.status"
-            variant="flip"
-            hide-inline-reply
-            :aria-posinset="idx + 1"
-            :aria-setsize="feedSetSize"
-            @deleted="onStatusDeleted"
-          />
-        </template>
-        <template v-else>
-          <RealPostCard
-            v-for="(row, idx) in displayRows"
-            :key="row.key"
-            :status="row.status"
-            :class="{ 'post-list-enter': enteringKeys.has(row.key) }"
-            :aria-posinset="idx + 1"
-            :aria-setsize="feedSetSize"
-            @deleted="onStatusDeleted"
-          />
-        </template>
+      <!-- Posts — role="feed" owns articles only; paging/status chrome follows as siblings -->
+      <template v-else>
+        <div
+          ref="feedRoot"
+          class="column-posts"
+          :class="{
+            'column-posts--flip': isFlip,
+            'column-posts--focus-wide': isDesktop && focused,
+          }"
+          role="feed"
+          tabindex="0"
+          :aria-busy="isLoadingMore || isLoading"
+          :aria-label="`${feedLabel} posts`"
+          @keydown="onFeedKeydown"
+        >
+          <template v-if="isFlip">
+            <RealPostCard
+              v-for="(row, idx) in displayRows"
+              :key="row.key"
+              :status="row.status"
+              variant="flip"
+              hide-inline-reply
+              :aria-posinset="idx + 1"
+              :aria-setsize="feedSetSize"
+            />
+          </template>
+          <template v-else>
+            <RealPostCard
+              v-for="(row, idx) in displayRows"
+              :key="row.key"
+              :status="row.status"
+              :class="{ 'post-list-enter': enteringKeys.has(row.key) }"
+              :aria-posinset="idx + 1"
+              :aria-setsize="feedSetSize"
+            />
+          </template>
+        </div>
 
         <!-- Infinite scroll trigger -->
         <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
@@ -1985,7 +2006,7 @@ onUnmounted(() => {
         <div v-if="!hasMore && statuses.length > 0 && !isFlip" class="column-end" role="status">
           <span aria-hidden="true">&#x2728;</span> All caught up
         </div>
-      </div>
+      </template>
     </div>
   </div>
 </template>
@@ -2372,6 +2393,16 @@ onUnmounted(() => {
     margin: 0.375rem 0.5rem;
   }
 
+  &__subhead {
+    display: block;
+    padding: 0.4rem 0.85rem 0.15rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+  }
+
   &__section-toggle {
     display: flex;
     align-items: center;
@@ -2661,9 +2692,9 @@ onUnmounted(() => {
   min-height: 1px;
   padding: 0.5rem 0;
 
+  // Sibling of the flip feed (not inside it), so size from the flip viewport
   &--flip {
-    flex: 0 0 40%;
-    min-height: 40%;
+    min-height: calc(var(--flip-port, 0px) * 0.4);
     scroll-snap-align: start;
     display: flex;
     align-items: center;

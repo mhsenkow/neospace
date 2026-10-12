@@ -7,6 +7,8 @@
 
 import type { NuxtError } from '#app'
 
+import { formatLogRingForFeedback } from '~/utils/log'
+
 const props = defineProps<{ error: NuxtError }>()
 
 const notFound = computed(() => props.error?.statusCode === 404)
@@ -17,6 +19,28 @@ useHead({
 
 const goHome = () => clearError({ redirect: '/' })
 const reload = () => window.location.reload()
+
+/** Short "Error 500 · message" line so a crash can be described in a report */
+const errorSummary = computed(() => {
+  const code = props.error?.statusCode || 500
+  const raw = String(props.error?.statusMessage || props.error?.message || '').replace(/\s+/g, ' ').trim()
+  return raw ? `Error ${code} · ${raw.slice(0, 160)}` : `Error ${code}`
+})
+
+const copied = ref<'idle' | 'ok' | 'failed'>('idle')
+/** Copy the summary + recent (already redacted) client logs — nothing is sent anywhere */
+const copyDetails = async () => {
+  const logs = formatLogRingForFeedback()
+  const text = [errorSummary.value, `Page: ${window.location.pathname}`, logs && `\nRecent client logs:\n${logs}`]
+    .filter(Boolean)
+    .join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = 'ok'
+  } catch {
+    copied.value = 'failed'
+  }
+}
 </script>
 
 <template>
@@ -33,14 +57,20 @@ const reload = () => window.location.reload()
     </div>
   </NuxtLayout>
   <main v-else id="main-content" class="neo-error neo-error--standalone" tabindex="-1">
-    <div class="neo-error__card" role="alert">
+    <div class="neo-error__card">
       <p class="neo-error__eyebrow">Error</p>
       <h1 class="neo-error__title">Something went wrong</h1>
-      <p class="neo-error__desc">NeoSpace hit an unexpected problem. Reloading usually fixes it.</p>
+      <p class="neo-error__desc" role="alert">NeoSpace hit an unexpected problem. Reloading usually fixes it.</p>
+      <p class="neo-error__detail">{{ errorSummary }}</p>
       <div class="neo-error__actions">
         <button type="button" class="neo-btn neo-btn--primary" @click="reload">Reload</button>
         <button type="button" class="neo-btn neo-btn--tertiary" @click="goHome">Back home</button>
+        <button type="button" class="neo-btn neo-btn--tertiary" @click="copyDetails">Copy details</button>
       </div>
+      <p class="neo-error__detail" role="status">
+        <template v-if="copied === 'ok'">Copied — paste it into a feedback note.</template>
+        <template v-else-if="copied === 'failed'">Couldn’t copy automatically.</template>
+      </p>
     </div>
   </main>
 </template>
@@ -64,7 +94,7 @@ const reload = () => window.location.reload()
   padding: 1.5rem 1.25rem;
   background: var(--neo-bg-secondary);
   border: 1px solid var(--neo-border-color);
-  border-radius: 16px;
+  border-radius: var(--neo-radius-lg, 16px);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -91,6 +121,17 @@ const reload = () => window.location.reload()
   font-size: 0.875rem;
   line-height: 1.45;
   color: var(--neo-text-secondary);
+}
+
+.neo-error__detail {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  overflow-wrap: anywhere;
+
+  &:empty {
+    display: none;
+  }
 }
 
 .neo-error__actions {

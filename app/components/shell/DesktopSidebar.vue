@@ -126,14 +126,13 @@ const algorithmsCanToggle = computed(() => sidebarAlgorithmItems.value.length > 
 const boardFeedActive = (feedType: ColumnFeedType, feedParam?: string) =>
   boardColumnIs(feedType, feedParam)
 
+// Inbox = DMs + Mentions only. The Activity heart owns plain /notifications, so
+// the two never both claim aria-current="page".
 const inboxActive = computed(
-  () =>
-    path.value === '/messages' ||
-    path.value === '/notifications' ||
-    boardColumnIs('messages') ||
-    boardColumnIs('notifications'),
+  () => path.value === '/messages' || isMentions.value || boardColumnIs('messages'),
 )
-const inboxBadge = computed(() => messagesBadge.value || notifBadge.value || '')
+// DM count only — the total notification count already badges Activity
+const inboxBadge = computed(() => messagesBadge.value || '')
 
 const toggleSidebarRail = () => {
   inboxMenuOpen.value = false
@@ -410,7 +409,9 @@ watch(
         :aria-expanded="algorithmsShowAll"
         @click="algorithmsShowAll = !algorithmsShowAll"
       >
-        {{ algorithmsShowAll ? 'Show less' : 'Show more' }}
+        <span class="sr-only">{{ algorithmsShowAll ? 'Show fewer algorithms' : 'Show more algorithms' }}</span>
+        <span class="sidebar__more-text" aria-hidden="true">{{ algorithmsShowAll ? 'Show less' : 'Show more' }}</span>
+        <span class="sidebar__more-glyph" aria-hidden="true">{{ algorithmsShowAll ? '−' : '⋯' }}</span>
       </button>
     </section>
 
@@ -474,7 +475,9 @@ watch(
         :aria-expanded="groupsShowAll"
         @click="groupsShowAll = !groupsShowAll"
       >
-        {{ groupsShowAll ? 'Show less' : 'Show more' }}
+        <span class="sr-only">{{ groupsShowAll ? 'Show fewer groups' : 'Show more groups' }}</span>
+        <span class="sidebar__more-text" aria-hidden="true">{{ groupsShowAll ? 'Show less' : 'Show more' }}</span>
+        <span class="sidebar__more-glyph" aria-hidden="true">{{ groupsShowAll ? '−' : '⋯' }}</span>
       </button>
     </section>
 
@@ -670,10 +673,20 @@ watch(
       border: 0 !important;
     }
 
-    // Controls, not just text: clipping left them as invisible Tab stops
-    .sidebar__section-action,
+    // Section actions ("New", "All", "Try") stay reachable as compact visible
+    // controls; "Show more/less" collapses to a "⋯" glyph (label is sr-only above)
+    .sidebar__section-action {
+      font-size: 0.625rem;
+      padding: 0.15rem 0.25rem;
+    }
+
     .sidebar__more {
-      display: none !important;
+      align-self: center;
+      margin: 0.1rem 0 0;
+    }
+
+    .sidebar__more-glyph {
+      display: inline;
     }
 
     .sidebar__top {
@@ -1147,6 +1160,15 @@ watch(
 
   &__row-glyph {
     flex-shrink: 0;
+  }
+
+  // Expanded sidebar shows the words; rail swaps in the glyph
+  &__more-glyph {
+    display: none;
+  }
+
+  .sidebar--rail &__more-text {
+    display: none;
   }
 
   &__more {

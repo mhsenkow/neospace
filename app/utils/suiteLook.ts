@@ -7,7 +7,6 @@
 import type { NeoFontId, NeoThemeId, NeoUiId } from '~/utils/appearance'
 import {
   FONT_OPTIONS,
-  THEME_OPTIONS,
   UI_OPTIONS,
   normalizeFont,
   normalizeTheme,
@@ -47,7 +46,6 @@ function writeBlob(partial: SharedBlob) {
   }
 }
 
-const THEME_IDS = THEME_OPTIONS.map((t) => t.id)
 const UI_IDS = UI_OPTIONS.map((u) => u.id)
 const FONT_IDS = FONT_OPTIONS.map((f) => f.id)
 
@@ -56,10 +54,10 @@ export function readSuiteLook(): SuiteLookSlice {
   const blob = readBlob()
   const out: SuiteLookSlice = {}
   if (typeof blob.theme === 'string') {
+    // Validate *before* normalising: normalizeTheme maps every unknown id to 'auto', so a
+    // sibling tool's theme we don't have would otherwise overwrite the user's choice with Auto
     const theme = normalizeTheme(blob.theme)
-    if (theme === 'auto' || THEME_IDS.includes(theme as (typeof THEME_IDS)[number])) {
-      out.theme = theme
-    }
+    if (blob.theme === 'auto' || theme !== 'auto') out.theme = theme
   }
   if (typeof blob.ui === 'string' && UI_IDS.includes(blob.ui as (typeof UI_IDS)[number])) {
     out.ui = normalizeUi(blob.ui)

@@ -17,8 +17,10 @@ import {
   clearClientSecret,
 } from '~/utils/oauthPkce'
 import { logError, logWarn } from '~/utils/log'
+import { extractProfileCss } from '~/utils/profileCss'
 import {
   DEFAULT_PUBLIC_INSTANCE,
+  friendlyServerError,
   hostnameOf,
   isAuthGatedPublicHost,
   resolvePublicInstanceUrl,
@@ -27,6 +29,8 @@ import { dedupeStatusesByIdentity } from '~/utils/statusIdentity'
 import {
   mapInstanceConfig,
   mapV2InstanceInfo,
+  pollLimitsFrom,
+  type PollLimits,
   type ConnectedInstanceInfo,
   type InstanceApiInfo,
 } from '~/utils/instanceInfo'
@@ -36,6 +40,7 @@ import {
   oauthFetch,
   parseOAuthResponse,
   readCachedOAuthApp,
+  requireAccessToken,
   writeCachedOAuthApp,
 } from '~/utils/oauthApp'
 import {
@@ -135,13 +140,7 @@ const getRedirectUri = () => {
 const generateId = () => Math.random().toString(36).substring(2, 15)
 
 function extractCustomCSS(user: mastodon.v1.Account | null): string {
-  if (!user?.fields) return ''
-  const cssField = user.fields.find((field) =>
-    ['css', 'custom_css', 'theme', 'style', 'chaos_css'].includes(
-      field.name.toLowerCase().replace(/[^a-z_]/g, ''),
-    ),
-  )
-  return cssField?.value || ''
+  return extractProfileCss(user?.fields)
 }
 
 export const useInstancesStore = defineStore('instances', {
@@ -240,6 +239,12 @@ export const useInstancesStore = defineStore('instances', {
       return 500
     },
 
+    /** Characters each URL costs toward the limit (null = counted in full). */
+    statusUrlWeight(): number | null {
+      const w = this.activeAccount?.instanceInfo?.urlWeight
+      return w === undefined ? 23 : w
+    },
+
     /** Media attachment limits from the active instance configuration. */
     composeMediaLimits(): {
       maxAttachments: number
@@ -278,6 +283,11 @@ export const useInstancesStore = defineStore('instances', {
     /** Hide scheduling only when the server positively lacks it. */
     canSchedulePosts(): boolean {
       return isFeatureAvailable(this.serverCapabilities.scheduledStatuses)
+    },
+
+    /** Poll option count / length / duration limits of the active posting server */
+    composePollLimits(): PollLimits {
+      return pollLimitsFrom(this.activeAccount?.instanceInfo?.polls)
     },
 
     canCreatePolls(): boolean {
@@ -694,7 +704,9 @@ export const useInstancesStore = defineStore('instances', {
 
       try {
         const host = instance.url.replace(/^https?:\/\//, '').toLowerCase()
-        const cached = readCachedOAuthApp(host)
+        // Reuse a registration only if it was made for this callback URI and scope set
+        const identity = { redirectUri: getRedirectUri(), scopes: SCOPES }
+        const cached = readCachedOAuthApp(host, identity)
 
         if (cached) {
           instance.clientId = cached.clientId
@@ -712,7 +724,7 @@ export const useInstancesStore = defineStore('instances', {
           instance.clientSecret = null
           if (app.clientId && app.clientSecret) {
             stashClientSecret(instanceId, app.clientSecret)
-            writeCachedOAuthApp(host, app.clientId, app.clientSecret)
+            writeCachedOAuthApp(host, app.clientId, app.clientSecret, identity)
           }
         }
 
@@ -747,7 +759,11 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    async completeAuth(code: string, stateFromQuery: string | null = null) {
+    async completeAuth(
+      code: string,
+      stateFromQuery: string | null = null,
+      opts?: { signal?: AbortSignal },
+    ) {
       const challenge = consumeOAuthChallenge(stateFromQuery)
       if (!challenge.ok) {
         throw new Error(challenge.error || 'Invalid OAuth state')
@@ -792,6 +808,7 @@ export const useInstancesStore = defineStore('instances', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tokenBody),
+          signal: opts?.signal,
         })
 
         if (!response.ok) {
@@ -805,12 +822,9 @@ export const useInstancesStore = defineStore('instances', {
           )
         }
 
-        const data = (await parseOAuthResponse(response)) as {
-          access_token?: string
-        }
-        // A 200 without a token (proxy/HTML error page) must not leave a
-        // half-signed-in slot — and must not revoke the token we still have
-        if (!data.access_token) throw new Error('Token exchange failed: no access token returned')
+        // A 200 that isn't a token object (proxy/HTML page, null, array, wrong types) must
+        // not leave a half-signed-in slot — and must not revoke the token we still have
+        const data = { access_token: requireAccessToken(await parseOAuthResponse(response)) }
         // Revoke any previous token on this slot before overwriting
         const previousToken = instance.accessToken
         if (previousToken && previousToken !== data.access_token && instance.clientId) {
@@ -855,8 +869,8 @@ export const useInstancesStore = defineStore('instances', {
         if (typeof window !== 'undefined') {
           sessionStorage.removeItem('neospace_auth_instance_id')
         }
-        // Matched via this tab's sessionStorage → the shared record is another tab's
-        if (challenge.pending) clearPendingAuth()
+        // Single-use: forget only this attempt — other tabs' pending sign-ins stay intact
+        if (challenge.pending) clearPendingAuth(challenge.pending.state)
 
         this.saveToStorage()
         return { instance, pending: challenge.pending ?? null }
@@ -1261,7 +1275,15 @@ export const useInstancesStore = defineStore('instances', {
       for (let i = 0; i < keys.length - PREVIEW_INFO_MAX; i++) delete map[keys[i]!]
     },
 
-    async fetchInstanceInfo(domain: string): Promise<InstanceApiInfo | null> {
+    /**
+     * Public server summary. `opts.cacheFailure: false` keeps a failed lookup out of the
+     * 2-minute failure cache — a host the user is still typing ("mastodon.s") shouldn't be
+     * remembered as dead once they finish it.
+     */
+    async fetchInstanceInfo(
+      domain: string,
+      opts?: { cacheFailure?: boolean },
+    ): Promise<InstanceApiInfo | null> {
       const key = domain.toLowerCase()
       if (this.previewInstanceInfo[key]) {
         return this.previewInstanceInfo[key]
@@ -1288,7 +1310,9 @@ export const useInstancesStore = defineStore('instances', {
         return apiInfo
       } catch (e) {
         logWarn(`Failed to fetch instance info for ${domain}:`, e)
-        rememberRemoteInstanceInfo(key, { at: Date.now(), ok: false, value: null })
+        if (opts?.cacheFailure !== false) {
+          rememberRemoteInstanceInfo(key, { at: Date.now(), ok: false, value: null })
+        }
         return null
       }
     },
@@ -1321,7 +1345,7 @@ export const useInstancesStore = defineStore('instances', {
         }
       } catch (e: any) {
         if (this.previewingInstance === ticket) {
-          this.previewError = e.message || 'Failed to load instance'
+          this.previewError = friendlyServerError(e)
         }
       } finally {
         if (this.previewingInstance === ticket) this.previewLoading = false

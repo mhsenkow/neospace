@@ -74,7 +74,7 @@ watch(isOpen, (open) => {
             v-model="overlay.report.comment"
             class="neo-input"
             rows="3"
-            maxlength="500"
+            maxlength="1000"
             placeholder="Describe what happened…"
           />
         </label>

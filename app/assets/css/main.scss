@@ -152,8 +152,7 @@ ul, ol {
   background-color: var(--neo-bg-card);
   border: var(--neo-chrome-border-width, 1px) var(--neo-border-style, solid) var(--neo-border-color);
   border-radius: var(--neo-card-radius, var(--neo-radius-md));
-  box-shadow: var(--neo-card-extra-shadow, none);
-  box-shadow: var(--neo-chrome-card-shadow, none);
+  box-shadow: var(--neo-chrome-card-shadow, 0 0 0 0 transparent), var(--neo-card-extra-shadow, 0 0 0 0 transparent);
   padding: var(--neo-spacing-6);
   transition: border-color var(--neo-transition-fast);
   max-width: 100%;
@@ -420,7 +419,9 @@ ul, ol {
   width: 100%;
   max-width: 100%;
   padding: var(--neo-spacing-3) var(--neo-spacing-4);
-  font-size: var(--neo-font-size-base);
+  // rem, not the base token: the root is already scaled by --neo-font-size-base,
+  // so the token here would scale inputs twice (XXL ≈ 27px)
+  font-size: 1rem;
   background-color: var(--neo-bg-secondary);
   color: var(--neo-text-primary);
   border: var(--neo-border-width) var(--neo-border-style) var(--neo-input-border, var(--neo-border-color));
@@ -811,6 +812,23 @@ select:focus-visible {
   html [aria-pressed='true'],
   html :is(a, button)[aria-current]:not([aria-current='false']) {
     border: 2px solid Highlight;
+  }
+}
+
+// Classic (non-overlay) scrollbars: reserve the gutter so locking scroll doesn't
+// shift the board sideways when a dialog opens/closes
+@media (min-width: 1024px) {
+  html {
+    scrollbar-gutter: stable;
+  }
+}
+
+// iOS overlay keyboard shrinks --neo-app-height: don't let the tab bar and the
+// bottom dock (waffle + install banner) ride up above the keyboard
+@media (max-width: 1023px) {
+  html[data-keyboard-open] .mobile-nav,
+  html[data-keyboard-open] .neo-bottom-dock {
+    display: none;
   }
 }
 

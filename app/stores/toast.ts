@@ -4,8 +4,12 @@
 
 import { defineStore } from 'pinia'
 
+export type ToastKind = 'info' | 'success' | 'error'
+
 export type ToastAction = {
   message: string
+  /** Severity — styles the toast and picks polite vs assertive announcement */
+  kind?: ToastKind
   actionLabel?: string
   onAction?: () => void
   duration?: number
@@ -13,6 +17,18 @@ export type ToastAction = {
 
 export type ToastItem = ToastAction & {
   id: number
+  kind: ToastKind
+}
+
+/** Most toasts on screen at once — the oldest makes room for the newest */
+export const MAX_TOASTS = 3
+
+const ERROR_RE = /^(couldn['’]?t|could not|can['’]?t|cannot|unable|failed|failure|error|something went wrong)\b|\bfailed\b/i
+
+/** Callers rarely pass `kind`; failure copy reliably starts "Couldn't …" / "Failed …" */
+export function inferToastKind(message: string, kind?: ToastKind): ToastKind {
+  if (kind) return kind
+  return ERROR_RE.test(message.trim()) ? 'error' : 'info'
 }
 
 let idSeq = 0
@@ -30,10 +46,29 @@ export const useToastStore = defineStore('toast', {
 
   actions: {
     show(opts: ToastAction) {
-      const id = ++idSeq
+      const kind = inferToastKind(opts.message, opts.kind)
       let duration = opts.duration ?? (opts.actionLabel ? ACTION_MIN_MS : 4000)
       if (opts.actionLabel && duration > 0) duration = Math.max(duration, ACTION_MIN_MS)
-      const item: ToastItem = { id, ...opts, duration }
+
+      // Merge identical messages (repeated offline / rate-limit failures) instead of stacking
+      const same = this.toasts.find(
+        (t) => t.message === opts.message && t.kind === kind && t.actionLabel === opts.actionLabel,
+      )
+      if (same) {
+        const t = timers.get(same.id)
+        if (t) {
+          if (t.handle !== null && typeof window !== 'undefined') window.clearTimeout(t.handle)
+          t.handle = null
+          t.remaining = duration
+          if (typeof window !== 'undefined' && duration > 0) this.resume(same.id)
+        }
+        same.onAction = opts.onAction
+        return same.id
+      }
+
+      const id = ++idSeq
+      const item: ToastItem = { id, ...opts, kind, duration }
+      while (this.toasts.length >= MAX_TOASTS) this.dismiss(this.toasts[0]!.id)
       this.toasts.push(item)
       if (duration > 0 && typeof window !== 'undefined') {
         timers.set(id, { handle: null, remaining: duration, startedAt: 0 })

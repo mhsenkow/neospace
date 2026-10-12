@@ -5,6 +5,7 @@
 
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
+import { logError } from '~/utils/log'
 
 export type ComposeVisibility = 'public' | 'unlisted' | 'private' | 'direct'
 
@@ -25,7 +26,7 @@ interface ComposeSheetState {
   initialText: string
   /** Prefilled content warning (delete & redraft) */
   initialSpoiler: string
-  /** Own draft slot (e.g. `redraft:<id>`) so a saved "new post" draft can't overwrite the prefill */
+  /** Own draft slot (`redraft:<id>`, or a saved draft's key) so a "new post" draft can't overwrite the prefill */
   draftSlot: string | null
   initialVisibility: ComposeVisibility | null
   placeholder: string | null
@@ -74,14 +75,16 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     }) {
       const nextReply = opts?.inReplyToId ?? null
       const nextQuote = opts?.quoteUrl ?? null
+      const nextSlot = opts?.draftSlot ?? null
       const contextChanged =
+        this.draftSlot !== nextSlot ||
         this.inReplyToId !== nextReply ||
         this.quoteUrl !== nextQuote ||
         !!opts?.pickRecipient !== this.pickRecipient
 
       this.initialText = opts?.initialText ?? ''
       this.initialSpoiler = opts?.spoilerText ?? ''
-      this.draftSlot = opts?.draftSlot ?? null
+      this.draftSlot = nextSlot
       this.initialVisibility = opts?.visibility ?? null
       this.placeholder = opts?.placeholder ?? null
       this.title = opts?.title ?? null
@@ -122,7 +125,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       // Always close — a throwing callback left the sheet open on a sent post,
       // inviting a second tap on Post (duplicate status).
       this.hide()
-      const fail = (e: unknown) => console.error('compose onPosted failed:', e)
+      const fail = (e: unknown) => logError('compose onPosted failed:', e)
       try {
         // Some callers pass async handlers (dmHelpers) — catch their rejections too
         const result: unknown = cb?.(status)

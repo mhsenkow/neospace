@@ -8,6 +8,7 @@ import { useOverlayStore } from '~/stores/overlay'
 import { useToastStore } from '~/stores/toast'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
+import { plainDisplayName } from '~/utils/displayName'
 
 const instancesStore = useInstancesStore()
 const overlayStore = useOverlayStore()
@@ -129,18 +130,19 @@ const makeMain = (instance: ConnectedInstance) => {
 const signOut = async (instance: ConnectedInstance) => {
   const ok = await overlayStore.openConfirm({
     title: 'Sign out?',
-    body: `Sign out of ${instance.name}? You can keep watching public posts.`,
+    body: `Sign out of ${handleOf(instance)}? You can keep watching public posts.`,
     confirmLabel: 'Sign out',
     danger: true,
   })
   if (!ok) return
   await instancesStore.logoutInstance(instance.id)
   void keepFocusInDialog()
-  toastStore.show({ message: `Signed out of ${instance.name}` })
+  toastStore.show({ message: `Signed out of ${handleOf(instance)}` })
 }
 
 const useForPosting = (instance: ConnectedInstance) => {
   instancesStore.setActiveAccount(instance.id)
+  toastStore.show({ message: `Posting as ${handleOf(instance)}`, duration: 2500 })
 }
 
 const addAccount = () => {
@@ -165,10 +167,10 @@ const isActive = (instance: ConnectedInstance) =>
         >
           <header class="accounts-header">
             <div>
-              <h2 id="accounts-title">Accounts &amp; Servers</h2>
+              <h2 id="accounts-title">Accounts &amp; servers</h2>
               <p class="accounts-lede">
-                NeoSpace keeps every server login under one session. Your main profile is the home identity;
-                other accounts are linked for posting and For You merges their home feeds.
+                Every account you add stays signed in on this device. Switch which one you post and read as at
+                any time — feeds follow the account you’re using.
               </p>
             </div>
             <button type="button" class="accounts-close" aria-label="Close" @click="closeAndReset">
@@ -182,7 +184,7 @@ const isActive = (instance: ConnectedInstance) =>
               <div class="accounts-section__head">
                 <h3>Signed in</h3>
                 <button type="button" class="accounts-link-btn" @click="addAccount">
-                  + Link server
+                  + Add account
                 </button>
               </div>
 
@@ -216,7 +218,7 @@ const isActive = (instance: ConnectedInstance) =>
                   <div class="account-row__info">
                     <div class="account-row__name-row">
                       <span class="account-row__name">
-                        {{ instance.user?.displayName || instance.user?.username }}
+                        {{ plainDisplayName(instance.user?.displayName, instance.user?.username) }}
                       </span>
                       <span
                         v-if="instance.id === instancesStore.primaryAccount?.id"
@@ -228,6 +230,9 @@ const isActive = (instance: ConnectedInstance) =>
                     <span class="account-row__server">{{ hostOf(instance) }}</span>
                     <p v-if="instance.sessionExpired || !instance.accessToken" class="account-row__error" role="status">
                       Session expired — sign in again
+                    </p>
+                    <p v-else-if="instance.error" class="account-row__error" role="status">
+                      {{ instance.error }}
                     </p>
                   </div>
                   <div class="account-row__actions">
@@ -362,7 +367,7 @@ const isActive = (instance: ConnectedInstance) =>
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: color-mix(in srgb, var(--neo-bg-primary, #000) 55%, transparent);
+  background: var(--neo-scrim);
   backdrop-filter: blur(4px);
 }
 

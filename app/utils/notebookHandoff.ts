@@ -5,9 +5,11 @@
  * Text only — never tokens, never files. AI stays in Throughline.
  */
 
+/** Exact allowlist — not `*.ibm.io`: loom, bruh and neospace itself live on sibling subdomains */
 export const NOTEBOOK_ORIGINS = new Set([
   'https://ibm.io',
   'https://www.ibm.io',
+  'https://notebook.ibm.io',
 ])
 
 export type NotebookShareMessage = {
@@ -33,8 +35,6 @@ export function isNotebookOrigin(origin: string): boolean {
     if (host.endsWith(SUITE_WORKERS_SUFFIX) && (host.includes('notebook') || host.includes('throughline'))) {
       return true
     }
-    // ibm.io/notebook/ is served from the ibm.io origin
-    if (host === 'ibm.io' || host.endsWith('.ibm.io')) return true
   } catch {
     /* ignore */
   }

@@ -28,7 +28,7 @@ const themeStore = useThemeStore()
 const overlayStore = useOverlayStore()
 const { open: openAccounts } = useAccountsManager()
 const { boardPortal } = useBoardPortal()
-const { currentThemeLabel, cycleTheme } = useShellAppearance()
+const { currentThemeLabel, cycleTheme, lookAnnounce } = useShellAppearance()
 const router = useRouter()
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
@@ -52,6 +52,12 @@ const closeMobileMenu = () => {
 }
 
 const { openBoardFeed, openFeedOrRoute, openGroup, boardColumnIs } = useBoardNav()
+const { path: routePath } = useActivityNav()
+const searchActive = computed(() => routePath.value === '/explore' || boardColumnIs('search'))
+const messagesActive = computed(() => routePath.value === '/messages' || boardColumnIs('messages'))
+const activityActive = computed(
+  () => routePath.value === '/notifications' || boardColumnIs('notifications'),
+)
 
 const openGroupFromMenu = (tag: string) => {
   closeMobileMenu()
@@ -179,7 +185,8 @@ useFocusTrap(mobileSidebarRef, open, {
         <button
           type="button"
           class="mobile-sidebar__link"
-          :class="{ 'chrome-hint': boardPortal === 'search' }"
+          :class="{ 'chrome-hint': boardPortal === 'search', 'router-link-active': searchActive }"
+          :aria-current="searchActive ? 'page' : undefined"
           @click="openDrawerFeedOrRoute('search', '/explore')"
         >Search</button>
         <NuxtLink
@@ -192,7 +199,8 @@ useFocusTrap(mobileSidebarRef, open, {
           v-if="instancesStore.hasAuthenticatedInstance"
           type="button"
           class="mobile-sidebar__link"
-          :class="{ 'chrome-hint': boardPortal === 'inbox' }"
+          :class="{ 'chrome-hint': boardPortal === 'inbox', 'router-link-active': messagesActive }"
+          :aria-current="messagesActive ? 'page' : undefined"
           @click="openDrawerFeedOrRoute('messages', '/messages')"
         >
           Messages
@@ -204,7 +212,8 @@ useFocusTrap(mobileSidebarRef, open, {
           v-if="instancesStore.hasAuthenticatedInstance"
           type="button"
           class="mobile-sidebar__link"
-          :class="{ 'chrome-hint': boardPortal === 'activity' }"
+          :class="{ 'chrome-hint': boardPortal === 'activity', 'router-link-active': activityActive }"
+          :aria-current="activityActive ? 'page' : undefined"
           @click="openDrawerFeedOrRoute('notifications', '/notifications')"
         >
           Activity
@@ -338,6 +347,7 @@ useFocusTrap(mobileSidebarRef, open, {
         <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
         <span>Theme · {{ currentThemeLabel }}</span>
       </button>
+      <p class="sr-only" aria-live="polite">{{ lookAnnounce }}</p>
       <button
         class="mobile-sidebar__action"
         :class="{ 'chrome-hint': boardPortal === 'settings' }"
@@ -456,8 +466,8 @@ useFocusTrap(mobileSidebarRef, open, {
   }
 
   &__close {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -579,6 +589,18 @@ useFocusTrap(mobileSidebarRef, open, {
     font-weight: 600;
     color: var(--neo-text-link);
     text-decoration: none;
+    // Touch target: "New" / "See all" were bare 0.75rem text (~16px tall)
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 0.5rem;
+    margin: -0.5rem -0.25rem -0.5rem 0;
+    background: transparent;
+    border: none;
+    font-family: inherit;
+    cursor: pointer;
 
     @media (hover: hover) {
       &:hover {

@@ -10,6 +10,7 @@ import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { categoryColor, categoryTint } from '~/composables/useShellAppearance'
+import { joinGroupFailure } from '~/utils/groupErrors'
 
 interface Props {
   group: Group
@@ -31,6 +32,14 @@ const router = useRouter()
 const isPending = computed(() => groupsStore.isTagPending(props.group.tag))
 
 /**
+ * Membership lives in the store. Search results are plain objects that never enter
+ * `groups` until a join, so reading `props.group.isMember` left a joined card on "Join".
+ */
+const isMember = computed(
+  () => groupsStore.getGroup(props.group.tag)?.isMember ?? props.group.isMember,
+)
+
+/**
  * Join ↔ Leave swap (and the pending `disabled`) destroys / blurs the focused
  * button — hand focus to whichever button is rendered once things settle.
  */
@@ -42,7 +51,7 @@ const noteActionFocus = () => {
   }
 }
 watch(
-  [() => props.group.isMember, isPending],
+  [isMember, isPending],
   () => {
     if (!refocusAction || isPending.value) return
     refocusAction = false
@@ -60,12 +69,12 @@ const handleJoin = async () => {
 
   try {
     await groupsStore.joinGroup(props.group.tag)
-  } catch {
+  } catch (e) {
+    const { message, retryable } = joinGroupFailure(e)
     toastStore.show({
-      message: 'Couldn’t join group',
-      actionLabel: 'Retry',
+      message,
+      ...(retryable ? { actionLabel: 'Retry', onAction: () => { void handleJoin() } } : {}),
       duration: 5000,
-      onAction: () => { void handleJoin() },
     })
   }
 }
@@ -108,11 +117,15 @@ const catTint = computed(() =>
     :class="{
       'group-card--compact': compact,
       'group-card--tile': tile,
-      'group-card--member': group.isMember,
+      'group-card--member': isMember,
     }"
   >
     <div class="group-card__icon" :style="{ backgroundColor: catTint }">
       <span class="group-card__emoji" aria-hidden="true">{{ group.icon }}</span>
+      <!-- On the icon, not the corner — the top-right belongs to the Join/Leave button -->
+      <span v-if="isMember && !tile" class="group-card__badge" aria-hidden="true">
+        <NeoIcon name="check" :size="10" :stroke="2.75" />
+      </span>
     </div>
 
     <div class="group-card__content">
@@ -138,7 +151,7 @@ const catTint = computed(() =>
 
     <div class="group-card__actions" @click.stop>
       <button
-        v-if="group.isMember"
+        v-if="isMember"
         ref="actionBtnRef"
         type="button"
         class="group-card__btn group-card__btn--leave"
@@ -167,10 +180,6 @@ const catTint = computed(() =>
         <span v-if="isPending" class="sr-only">Joining…</span>
         <span v-else>Join</span>
       </button>
-    </div>
-
-    <div v-if="group.isMember && !tile" class="group-card__badge">
-      <NeoIcon name="check" :size="12" :stroke="2.5" />
     </div>
   </article>
 </template>
@@ -247,6 +256,7 @@ const catTint = computed(() =>
   }
 
   &__icon {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -401,13 +411,14 @@ const catTint = computed(() =>
 
   &__badge {
     position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
+    right: -0.3rem;
+    bottom: -0.3rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.25rem;
-    height: 1.25rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    border: 2px solid var(--neo-bg-card);
     border-radius: 50%;
     background: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));

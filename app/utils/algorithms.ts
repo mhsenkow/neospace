@@ -61,7 +61,8 @@ export const ALGORITHM_SOURCES: { value: AlgorithmSource; label: string; needsAu
   { value: 'federated', label: 'Federated', needsAuth: false },
 ]
 
-const TAG_RE = /^[a-z0-9_]+$/i
+/** Same alphabet as group tags (any script: #café, #日本, #straße) */
+const TAG_RE = /^[\p{L}\p{M}\p{N}_\u00b7\u200c]+$/u
 
 /**
  * Lists arrive from share links and localStorage — untrusted. Keep only
@@ -101,17 +102,72 @@ export function normalizeKeywordList(raw: string | string[] | undefined): string
   return out
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  hellip: '…',
+  ndash: '–',
+  mdash: '—',
+  lsquo: '‘',
+  rsquo: '’',
+  ldquo: '“',
+  rdquo: '”',
+}
+
+/** Numeric (&#39; &#x27;) and common named entities — Mastodon encodes quotes and apostrophes */
+export function decodeEntities(text: string): string {
+  return text.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]+));/gi, (whole, dec, hex, name) => {
+    if (name) return NAMED_ENTITIES[name.toLowerCase()] ?? whole
+    const code = dec ? Number.parseInt(dec, 10) : Number.parseInt(hex, 16)
+    if (!Number.isFinite(code) || code < 1 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return whole
+    return String.fromCodePoint(code)
+  })
+}
+
 function stripHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/p>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+  // Tags first, then entities — a decoded `&lt;b&gt;` must stay literal text
+  return decodeEntities(
+    html
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/p>/gi, ' ')
+      .replace(/<[^>]+>/g, ''),
+  )
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const WORD_CHAR = '[\\p{L}\\p{N}_]'
+const matcherCache = new Map<string, RegExp>()
+
+/**
+ * Whole-word keyword match (Unicode-aware): "ai" doesn't hit "said"/"rain", "art"
+ * doesn't hit "start". A trailing `*` opts into prefix matching ("polit*").
+ */
+export function keywordMatches(text: string, keyword: string): boolean {
+  let kw = keyword.trim().toLowerCase()
+  if (!kw) return false
+  const prefix = kw.endsWith('*')
+  if (prefix) kw = kw.slice(0, -1).trimEnd()
+  if (!kw) return false
+  const key = `${prefix ? 1 : 0}:${kw}`
+  let re = matcherCache.get(key)
+  if (!re) {
+    // Only require a boundary on edges that are word characters ("c++" ends in punctuation)
+    const startsWord = new RegExp(`^${WORD_CHAR}`, 'u').test(kw)
+    const endsWord = new RegExp(`${WORD_CHAR}$`, 'u').test(kw)
+    re = new RegExp(
+      `${startsWord ? `(?<!${WORD_CHAR})` : ''}${escapeRegExp(kw)}${endsWord && !prefix ? `(?!${WORD_CHAR})` : ''}`,
+      'u',
+    )
+    if (matcherCache.size > 200) matcherCache.clear()
+    matcherCache.set(key, re)
+  }
+  return re.test(text)
 }
 
 function displayStatus(status: mastodon.v1.Status): mastodon.v1.Status {
@@ -144,11 +200,19 @@ export function statusMatchesRecipe(
   if (includeTags.length && !includeTags.some((t) => tags.includes(t))) return false
   if (excludeTags.length && excludeTags.some((t) => tags.includes(t))) return false
 
-  const text = stripHtml(body.content || '').toLowerCase()
-  const includeKeywords = (recipe.includeKeywords || []).map((k) => k.toLowerCase())
-  const excludeKeywords = (recipe.excludeKeywords || []).map((k) => k.toLowerCase())
-  if (includeKeywords.length && !includeKeywords.some((k) => text.includes(k))) return false
-  if (excludeKeywords.length && excludeKeywords.some((k) => text.includes(k))) return false
+  // Content warning, alt text and poll options are text the reader sees too
+  const text = [
+    stripHtml(body.content || ''),
+    body.spoilerText || '',
+    ...(body.mediaAttachments || []).map((m) => m.description || ''),
+    ...(body.poll?.options || []).map((o) => o.title || ''),
+  ]
+    .join(' ')
+    .toLowerCase()
+  const includeKeywords = recipe.includeKeywords || []
+  const excludeKeywords = recipe.excludeKeywords || []
+  if (includeKeywords.length && !includeKeywords.some((k) => keywordMatches(text, k))) return false
+  if (excludeKeywords.length && excludeKeywords.some((k) => keywordMatches(text, k))) return false
 
   return true
 }
@@ -259,7 +323,16 @@ export function recipeSummary(recipe: AlgorithmRecipe): string {
   if (recipe.noReblogs) bits.push('no boosts')
   if (recipe.noReplies) bits.push('no replies')
   if (recipe.includeTags?.length) bits.push(`#${recipe.includeTags.slice(0, 3).join(' #')}`)
-  if (recipe.includeKeywords?.length) bits.push(`“${recipe.includeKeywords[0]}”`)
+  if (recipe.includeKeywords?.length) {
+    const more = recipe.includeKeywords.length - 1
+    bits.push(`“${recipe.includeKeywords[0]}”${more > 0 ? ` +${more} more` : ''}`)
+  }
+  // What a recipe hides matters as much as what it shows — a shared link can quietly filter a topic
+  const hidden = [
+    ...(recipe.excludeTags || []).map((t) => `−#${t}`),
+    ...(recipe.excludeKeywords || []).map((k) => `−'${k}'`),
+  ]
+  if (hidden.length) bits.push(hidden.slice(0, 3).join(' ') + (hidden.length > 3 ? ` +${hidden.length - 3} more` : ''))
   return bits.join(' · ')
 }
 
@@ -427,13 +500,13 @@ export function parseAlgorithmSentence(raw: string): ParsedAlgorithmSentence {
   const noReplies = /\b(no replies?|without replies?|hide replies?|top[- ]level)\b/.test(lower)
 
   // Explicit hashtags
-  const allTags = [...text.matchAll(/#([a-z0-9_]{2,})/gi)].map((m) => m[1]!.toLowerCase())
+  const allTags = [...text.matchAll(/#([\p{L}\p{M}\p{N}_]{2,})/gu)].map((m) => m[1]!.toLowerCase())
   const includeTags: string[] = []
   const excludeTags: string[] = []
 
   // "no #politics" / "without #nsfw" / "except #x"
   const exclTagRe =
-    /(?:\bno|without|except|excluding|hide|skip|minus)\s+#([a-z0-9_]{2,})/gi
+    /(?:\bno|without|except|excluding|hide|skip|minus)\s+#([\p{L}\p{M}\p{N}_]{2,})/giu
   for (const m of text.matchAll(exclTagRe)) {
     excludeTags.push(m[1]!.toLowerCase())
   }
@@ -444,8 +517,9 @@ export function parseAlgorithmSentence(raw: string): ParsedAlgorithmSentence {
   // Quoted phrases
   const includeKeywords: string[] = []
   const excludeKeywords: string[] = []
-  for (const m of text.matchAll(/"([^"]{2,64})"|'([^']{2,64})'/g)) {
-    const phrase = (m[1] || m[2] || '').trim()
+  // A single quote only opens/closes a phrase at a word edge — "cat's pics and dog's pics" has none
+  for (const m of text.matchAll(/"([^"]{2,64})"|“([^”]{2,64})”|(?<![\p{L}\p{N}])'([^']{2,64})'(?![\p{L}\p{N}])/gu)) {
+    const phrase = (m[1] || m[2] || m[3] || '').trim()
     if (phrase) includeKeywords.push(phrase)
   }
 

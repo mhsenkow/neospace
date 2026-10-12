@@ -4,6 +4,7 @@
  * dropped when the query, token, or account changed) and token-scoped inserts.
  */
 
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { activeClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useInstancesStore } from '~/stores/instances'
@@ -34,7 +35,11 @@ export function useComposeAutocomplete(source: {
   const instancesStore = useInstancesStore()
   const token = ref<ComposeToken | null>(null)
   const items = ref<ComposeSuggestion[]>([])
+  /** The token (kind, start, query) the visible rows were fetched for */
+  let itemsToken: ComposeToken | null = null
   const searching = ref(false)
+  /** How the latest lookup for the current token ended — drives distinct announcements */
+  const outcome = ref<'pending' | 'results' | 'empty' | 'failed'>('pending')
   const index = ref(0)
   const race = createRaceGuard()
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -51,7 +56,9 @@ export function useComposeAutocomplete(source: {
 
   const open = computed(() => !!token.value)
   /** Only claim "expanded" while the listbox element actually exists */
-  const listShown = computed(() => open.value && (searching.value || items.value.length > 0))
+  const listShown = computed(
+    () => open.value && (searching.value || items.value.length > 0 || outcome.value === 'failed'),
+  )
 
   const clearTimer = () => {
     if (timer) clearTimeout(timer)
@@ -62,6 +69,8 @@ export function useComposeAutocomplete(source: {
     clearTimer()
     race.abort()
     token.value = null
+    outcome.value = 'pending'
+    itemsToken = null
     if (items.value.length) items.value = []
     searching.value = false
     index.value = 0
@@ -105,9 +114,12 @@ export function useComposeAutocomplete(source: {
     // Lone "@" — nothing to look up yet
     if (t.kind === 'mention' && !t.query) {
       items.value = []
+      itemsToken = null
+      outcome.value = 'pending'
       searching.value = false
       return
     }
+    outcome.value = 'pending'
     searching.value = true
     const stillValid = () =>
       ticket.isCurrent() &&
@@ -118,9 +130,17 @@ export function useComposeAutocomplete(source: {
         timer = null
         try {
           const found = await fetchFor(t)
-          if (stillValid()) items.value = found
+          if (stillValid()) {
+            itemsToken = t
+            items.value = found
+            outcome.value = found.length ? 'results' : 'empty'
+          }
         } catch {
-          if (stillValid()) items.value = []
+          if (stillValid()) {
+            itemsToken = null
+            items.value = []
+            outcome.value = 'failed'
+          }
         } finally {
           if (ticket.isCurrent()) searching.value = false
         }
@@ -136,12 +156,23 @@ export function useComposeAutocomplete(source: {
     if (!next) return close()
     const prev = token.value
     if (sameToken(prev, next)) return // caret moved inside the same token — no refetch
-    // Rows from another token/kind must never linger under a new one
-    if (!prev || prev.kind !== next.kind || prev.start !== next.start) items.value = []
+    // Rows fetched for another token, kind or query text must never linger under a new one
+    if (!prev || prev.kind !== next.kind || prev.start !== next.start || prev.query !== next.query) {
+      itemsToken = null
+      outcome.value = 'pending'
+      items.value = []
+    }
     index.value = 0
     token.value = next
     run(next)
   }
+
+  // Suggestions are account-scoped (mentions resolve on that account's server, emoji per
+  // instance): close at once and drop in-flight lookups so none of A's rows stay selectable as B
+  watch(
+    () => instancesStore.activeAccount?.id ?? null,
+    () => close(),
+  )
 
   // Fresh results can be shorter than the old list — keep the highlight on a real row
   watch(items, (list) => {
@@ -162,6 +193,8 @@ export function useComposeAutocomplete(source: {
     const current = findComposeToken(source.text(), source.caret(), enabledKinds.value)
     const t = token.value
     if (!current || !t || current.kind !== item.kind || current.start !== t.start) return null
+    // The row must belong to the query that's under the caret now, not an earlier one
+    if (!itemsToken || !sameToken(itemsToken, current)) return null
     const out = applyToken(source.text(), current, insertionFor(item))
     close()
     return out
@@ -169,7 +202,14 @@ export function useComposeAutocomplete(source: {
 
   /** Shared keyboard handling. Returns the chosen item, or `true`/`false` if handled. */
   const handleKeydown = (e: KeyboardEvent): { picked: ComposeSuggestion } | boolean => {
-    if (!open.value || !items.value.length) return false
+    if (!open.value) return false
+    // Escape dismisses the popup even while it's still searching (or empty) — and, being
+    // handled, never reaches the containing sheet's own Escape handling
+    if (e.key === 'Escape' && listShown.value) {
+      close()
+      return true
+    }
+    if (!items.value.length) return false
     if (e.key === 'ArrowDown') {
       move(1)
       return true
@@ -181,10 +221,6 @@ export function useComposeAutocomplete(source: {
     if (e.key === 'Enter' || e.key === 'Tab') {
       const picked = items.value[index.value]
       return picked ? { picked } : true
-    }
-    if (e.key === 'Escape') {
-      close()
-      return true
     }
     return false
   }
@@ -203,6 +239,7 @@ export function useComposeAutocomplete(source: {
     token,
     items,
     searching,
+    outcome,
     index,
     open,
     listShown,

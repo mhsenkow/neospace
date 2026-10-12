@@ -5,6 +5,9 @@
  */
 
 import { useThemeStore } from '~/stores/theme'
+import { useEdwardStore } from '~/stores/edward'
+import { useToastStore } from '~/stores/toast'
+import { bumpOsScheme } from '~/utils/osScheme'
 import { useSettingsStore } from '~/stores/settings'
 import { edwardActive } from '~/utils/edwardShell'
 import { useInstancesStore } from '~/stores/instances'
@@ -23,9 +26,15 @@ import MobileHeader from '~/components/shell/MobileHeader.vue'
 import MobileDrawer from '~/components/shell/MobileDrawer.vue'
 import MobileTabBar from '~/components/shell/MobileTabBar.vue'
 
-const LazyEdwardMode = defineAsyncComponent(
-  () => import('~/components/edward/EdwardMode.vue'),
-)
+const LazyEdwardMode = defineAsyncComponent({
+  loader: () => import('~/components/edward/EdwardMode.vue'),
+  // Chunk failed (offline / stale deploy): leave Edward instead of a phantom "on" state
+  onError(_err, _retry, fail) {
+    useEdwardStore().exit()
+    useToastStore().show({ message: 'Couldn’t load Edward — check your connection.', kind: 'error' })
+    fail()
+  },
+})
 
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
@@ -39,6 +48,9 @@ const route = useRoute()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 
 const mobileMenuOpen = ref(false)
+
+/** Browser reports no network — one shell notice instead of scattered failure toasts */
+const isOffline = ref(false)
 
 /** Overlays mount on first open only (keeps their chunks + setup off the boot path). */
 const composeSheet = useComposeSheetStore()
@@ -94,11 +106,14 @@ let shellLiveRefresh = false
 const startShellLiveRefresh = () => {
   if (shellLiveRefresh) return
   conversationsStore.startLiveRefresh()
+  // Activity badge: poll with backoff while the tab is visible
+  notificationsStore.startBadgePolling()
   shellLiveRefresh = true
 }
 const stopShellLiveRefresh = () => {
   if (!shellLiveRefresh) return
   conversationsStore.stopLiveRefresh()
+  notificationsStore.stopBadgePolling()
   shellLiveRefresh = false
 }
 
@@ -115,6 +130,8 @@ watchEffect(() => {
   // Body-teleported FAB / toasts can't inherit --neo-feed-tabs-h from the layout —
   // publish the board's pill dock on <html> (_structural.scss sizes it)
   document.documentElement.classList.toggle('neo-route-board', isBoardRoute.value)
+  // Toasts clear the pinned reply dock on threads (--neo-bottom-chrome-h is 0 there)
+  document.documentElement.classList.toggle('neo-route-thread', isThreadRoute.value)
 })
 
 onMounted(async () => {
@@ -125,12 +142,31 @@ onMounted(async () => {
   cleanups.push(settingsStore.startSuiteLookSync())
 
   // Register listeners + cleanups synchronously BEFORE any await
-  const mq = window.matchMedia('(prefers-color-scheme: dark)')
+  // Both queries feed resolveTheme('auto'): dark mode at sunset, Increase Contrast
   const onScheme = () => {
+    bumpOsScheme()
     if (settingsStore.localPreferences.theme === 'auto') applyTheme()
   }
-  mq.addEventListener?.('change', onScheme)
-  cleanups.push(() => mq.removeEventListener?.('change', onScheme))
+  for (const query of ['(prefers-color-scheme: dark)', '(prefers-contrast: more)']) {
+    const mq = window.matchMedia(query)
+    mq.addEventListener?.('change', onScheme)
+    cleanups.push(() => mq.removeEventListener?.('change', onScheme))
+  }
+
+  isOffline.value = navigator.onLine === false
+  const onOnline = () => {
+    isOffline.value = false
+    if (instancesStore.hasAuthenticatedInstance) void notificationsStore.refreshUnreadBadge()
+  }
+  const onOffline = () => {
+    isOffline.value = true
+  }
+  window.addEventListener('online', onOnline)
+  window.addEventListener('offline', onOffline)
+  cleanups.push(() => {
+    window.removeEventListener('online', onOnline)
+    window.removeEventListener('offline', onOffline)
+  })
 
   const onVisibility = () => {
     if (document.visibilityState === 'visible' && instancesStore.hasAuthenticatedInstance) {
@@ -143,7 +179,7 @@ onMounted(async () => {
   onUnmounted(() => {
     for (const fn of cleanups) fn()
     stopShellLiveRefresh()
-    document.documentElement.classList.remove('neo-route-board')
+    document.documentElement.classList.remove('neo-route-board', 'neo-route-thread')
   })
 
   loadSidebarRail()
@@ -168,6 +204,22 @@ onMounted(async () => {
   await bootLoomHandoff()
 })
 
+// Switching accounts: memberships and followed tags belong to the previous account
+watch(
+  () => instancesStore.activeAccountId,
+  (id, prev) => {
+    if (id === prev) return
+    if (prev) void groupsStore.resetForAccountSwitch()
+    else void groupsStore.initializeGroups()
+  },
+)
+
+// Filters load after groups init (or change later) — hide trending tags they cover
+watch(
+  () => settingsStore.filters,
+  () => groupsStore.refilterTrending(),
+)
+
 watch(
   () => instancesStore.userCustomCSS,
   (css) => {
@@ -180,11 +232,22 @@ watch(
   () => instancesStore.isAuthenticated,
   (ok) => {
     if (ok) {
-      if (!shellLiveRefresh) void conversationsStore.refreshUnreadBadge()
+      if (!shellLiveRefresh) {
+        void conversationsStore.refreshUnreadBadge()
+        void notificationsStore.refreshUnreadBadge()
+      }
       startShellLiveRefresh()
     } else {
       stopShellLiveRefresh()
     }
+  },
+)
+
+// A newly linked account's unread count belongs in the Activity badge right away
+watch(
+  () => instancesStore.authenticatedInstances.length,
+  (n, prev) => {
+    if (n > prev && instancesStore.hasAuthenticatedInstance) void notificationsStore.refreshUnreadBadge()
   },
 )
 
@@ -219,12 +282,15 @@ watch(
     <!-- Only the active breakpoint's navigation is rendered (each is large + reactive) -->
     <DesktopSidebar v-if="isDesk" />
 
-    <MobileHeader v-if="showMobileHeader" v-model:open="mobileMenuOpen" />
+    <MobileHeader v-if="!isDesk && showMobileHeader" v-model:open="mobileMenuOpen" />
 
     <MobileDrawer v-if="!isDesk" v-model:open="mobileMenuOpen" />
 
     <!-- Live region stays mounted so the notice is announced when it appears -->
     <div class="neo-auth-notice-region" role="status">
+      <div v-if="isOffline" class="neo-auth-notice neo-auth-notice--offline">
+        <p>You’re offline — showing cached posts. New activity will load when you reconnect.</p>
+      </div>
       <div v-if="instancesStore.authNotice" class="neo-auth-notice">
         <p>{{ instancesStore.authNotice }}</p>
         <button type="button" class="neo-auth-notice__dismiss" @click="instancesStore.dismissAuthNotice()">
@@ -237,14 +303,14 @@ watch(
       <slot />
     </main>
 
-    <MobileTabBar v-if="showMobileNav" />
+    <MobileTabBar v-if="!isDesk && showMobileNav" />
 
     <!-- Sticky v-if: fetch each sheet's chunk on first open, keep it for close transitions -->
     <LazyComposeSheet v-if="mounted.compose" />
     <LazyAlgorithmSheet v-if="mounted.algorithm" />
     <LazyInstanceManager v-if="mounted.accounts" />
     <AccountSwitcherSheet v-if="instancesStore.hasAuthenticatedInstance" />
-    <FeedbackNotes v-if="!isMobileSubview" />
+    <FeedbackNotes v-if="isDesk || !isMobileSubview" />
     <LazySettingsModal v-if="mounted.settings" />
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
     <!-- Hide while compose is open so the waffle never fights the soft keyboard / Post bar -->
@@ -271,6 +337,12 @@ watch(
   z-index: 90;
   flex-shrink: 0;
 
+  // Desktop: SubviewChrome is also sticky at top:0 — a sticky notice would
+  // cover the Back bar while scrolling. Let the notice scroll away instead.
+  @media (min-width: 1024px) {
+    position: static;
+  }
+
   // Desktop row shell: own the full first line beside the fixed sidebar — as a
   // plain flex item it sat under the sidebar and squeezed `main` sideways
   @media (min-width: 1024px) {
@@ -296,6 +368,11 @@ watch(
     margin: 0;
     flex: 1;
   }
+}
+
+.neo-auth-notice--offline {
+  background: var(--neo-bg-secondary, var(--neo-bg-primary));
+  border-bottom-color: var(--neo-border-color);
 }
 
 .neo-auth-notice__dismiss {

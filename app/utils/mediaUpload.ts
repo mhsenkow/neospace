@@ -37,6 +37,22 @@ export function uploadFraction(loaded: number, total: number, computable = true)
 export interface UploadHttpResult {
   status: number
   body: Record<string, unknown>
+  /** The response wasn't a JSON object (HTML error page, array, null, empty) */
+  malformed?: boolean
+}
+
+/** A 2xx upload response that isn't a media payload — a server/proxy fault, not a normal API error */
+export class UploadProtocolError extends Error {
+  constructor(message = 'The server sent an unexpected response. Try again.') {
+    super(message)
+    this.name = 'UploadProtocolError'
+  }
+}
+
+/** Media ids are opaque strings (usually numeric snowflakes) — reject objects, blanks and junk */
+export function parseMediaId(value: unknown): string | null {
+  const id = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value
+  return typeof id === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : null
 }
 
 export interface UploadHttpOptions {
@@ -49,13 +65,16 @@ export interface UploadHttpOptions {
   onSent?: () => void
 }
 
-function parseBody(text: string): Record<string, unknown> {
+function parseResponse(status: number, text: string): UploadHttpResult {
   try {
-    const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+    const parsed: unknown = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { status, body: parsed as Record<string, unknown> }
+    }
   } catch {
-    return {}
+    // fall through — not JSON
   }
+  return { status, body: {}, malformed: true }
 }
 
 /**
@@ -96,26 +115,32 @@ export function postFormWithProgress(
       }, timeoutMs)
     }
 
-    xhr.open('POST', url)
-    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
+    // open / header / send can throw synchronously — don't leave the timer or abort listener behind
+    try {
+      xhr.open('POST', url)
+      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
 
-    xhr.upload.onprogress = (e) => {
-      onProgress?.(uploadFraction(e.loaded, e.total, e.lengthComputable))
-    }
-    xhr.upload.onload = () => onSent?.()
-    xhr.onload = () => {
+      xhr.upload.onprogress = (e) => {
+        onProgress?.(uploadFraction(e.loaded, e.total, e.lengthComputable))
+      }
+      xhr.upload.onload = () => onSent?.()
+      xhr.onload = () => {
+        cleanup()
+        resolve(parseResponse(xhr.status, xhr.responseText))
+      }
+      xhr.onerror = () => {
+        cleanup()
+        reject(new Error('Network error — check your connection'))
+      }
+      xhr.onabort = () => {
+        cleanup()
+        reject(timedOut ? new UploadTimeoutError() : new UploadCancelledError())
+      }
+      xhr.send(form)
+    } catch (e) {
       cleanup()
-      resolve({ status: xhr.status, body: parseBody(xhr.responseText) })
+      reject(e)
     }
-    xhr.onerror = () => {
-      cleanup()
-      reject(new Error('Network error — check your connection'))
-    }
-    xhr.onabort = () => {
-      cleanup()
-      reject(timedOut ? new UploadTimeoutError() : new UploadCancelledError())
-    }
-    xhr.send(form)
   })
 }
 
@@ -144,7 +169,7 @@ async function fetchFallback(
       signal: controller.signal,
     })
     opts.onSent?.()
-    return { status: res.status, body: parseBody(await res.text()) }
+    return parseResponse(res.status, await res.text())
   } catch (e) {
     if ((e as { name?: string })?.name === 'AbortError') {
       throw timedOut ? new UploadTimeoutError() : new UploadCancelledError()

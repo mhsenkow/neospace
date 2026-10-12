@@ -13,6 +13,7 @@ import {
   type InsightsReport,
   type InsightsWindowDays,
 } from '~/utils/insights'
+import { logError } from '~/utils/log'
 
 const PAGE_LIMIT = 40
 const MAX_PAGES = 12 // up to ~480 statuses
@@ -212,7 +213,7 @@ export const useInsightsStore = defineStore('insights', {
         )
       } catch (e: any) {
         if (e?.name === 'AbortError' || gen !== fetchGen) return
-        console.error('Insights fetch failed:', e)
+        logError('Insights fetch failed:', e)
         this.error = e?.message || 'Could not load insights'
         this.report = null
       } finally {

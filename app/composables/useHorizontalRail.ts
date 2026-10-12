@@ -27,12 +27,15 @@ export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
   }
 
   let ro: ResizeObserver | null = null
+  let mo: MutationObserver | null = null
   let attached: HTMLElement | null = null
 
   const detach = () => {
     attached?.removeEventListener('scroll', update)
     ro?.disconnect()
     ro = null
+    mo?.disconnect()
+    mo = null
     attached = null
   }
 
@@ -47,6 +50,11 @@ export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
         el.addEventListener('scroll', update, { passive: true })
         ro = new ResizeObserver(update)
         ro.observe(el)
+        // Items added or removed change scrollWidth without resizing the rail itself
+        if (typeof MutationObserver !== 'undefined') {
+          mo = new MutationObserver(update)
+          mo.observe(el, { childList: true })
+        }
       }
       update()
     },

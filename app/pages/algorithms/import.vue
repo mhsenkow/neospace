@@ -7,11 +7,14 @@
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useColumnsStore } from '~/stores/columns'
 import { useToastStore } from '~/stores/toast'
+import { useInstancesStore } from '~/stores/instances'
+import { MAX_CUSTOM } from '~/stores/algorithms'
 import {
   decodeAlgorithmShare,
   recipeSummary,
   sharePayloadToRecipe,
 } from '~/utils/algorithms'
+import { RANKERS } from '~/utils/rankers'
 
 definePageMeta({
   layout: 'default',
@@ -24,6 +27,7 @@ const router = useRouter()
 const algorithms = useAlgorithmsStore()
 const columnsStore = useColumnsStore()
 const toast = useToastStore()
+const instancesStore = useInstancesStore()
 
 const raw = computed(() => {
   const q = route.query.r
@@ -32,6 +36,24 @@ const raw = computed(() => {
 
 const payload = computed(() => (raw.value ? decodeAlgorithmShare(raw.value) : null))
 const preview = computed(() => (payload.value ? sharePayloadToRecipe(payload.value, 'preview') : null))
+
+/** Share links are unauthenticated: strip bidi / control characters so a name can't visually spoof another */
+const cleanCurator = (v?: string) => (v || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
+const curatorAcct = computed(() => cleanCurator(preview.value?.authorAcct).replace(/^@/, ''))
+const curatorName = computed(() => cleanCurator(preview.value?.authorName))
+/** Link to the claimed profile, only for a well-formed user@host */
+const curatorHref = computed(() => {
+  const m = /^([\w.-]{1,64})@([a-z0-9.-]{1,253})$/i.exec(curatorAcct.value)
+  return m ? { path: '/profile', query: { user: curatorAcct.value } } : null
+})
+
+/** Guests can't use a recipe that reads the home timeline or an auth-only ranker */
+const needsSignIn = computed(() => {
+  const p = payload.value
+  if (!p || instancesStore.hasAuthenticatedInstance) return false
+  return p.s === 'home' || (!!p.r && !!RANKERS[p.r]?.needsAuth)
+})
+const loginHref = computed(() => `/login?returnTo=${encodeURIComponent(route.fullPath)}`)
 
 const importing = ref(false)
 const error = computed(() => {
@@ -47,11 +69,20 @@ async function addToBoard() {
     algorithms.hydrate()
     const recipe = algorithms.importShare(raw.value)
     if (!recipe) {
-      toast.show({ message: 'Couldn’t import this algorithm' })
+      toast.show({
+        message: algorithms.isFull
+          ? `You have ${MAX_CUSTOM} algorithms — delete one to import`
+          : 'Couldn’t import this algorithm',
+      })
       return
     }
-    columnsStore.ensureFocusedView('algorithm', recipe.id)
-    toast.show({ message: `Added “${recipe.name}”` })
+    // null = the board is full and nothing was added; don't claim otherwise
+    const columnId = columnsStore.ensureFocusedView('algorithm', recipe.id)
+    toast.show({
+      message: columnId
+        ? `Added “${recipe.name}”`
+        : `Saved “${recipe.name}” — your board is full (${columnsStore.maxColumns}/${columnsStore.maxColumns}). Remove a column to add it.`,
+    })
     await router.replace('/')
   } finally {
     importing.value = false
@@ -67,9 +98,16 @@ async function addToBoard() {
         <h1 class="algo-import__title">{{ preview.name }}</h1>
         <p v-if="preview.description" class="algo-import__desc">{{ preview.description }}</p>
         <p class="algo-import__meta">{{ recipeSummary(preview) }}</p>
-        <p v-if="preview.authorAcct" class="algo-import__curator">
-          Curated by <strong>@{{ preview.authorAcct }}</strong>
-          <template v-if="preview.authorName"> · {{ preview.authorName }}</template>
+        <p v-if="curatorAcct" class="algo-import__curator">
+          Says it’s from
+          <NuxtLink v-if="curatorHref" :to="curatorHref"><strong>@{{ curatorAcct }}</strong></NuxtLink>
+          <strong v-else>@{{ curatorAcct }}</strong>
+          <template v-if="curatorName"> · {{ curatorName }}</template>
+          <span class="algo-import__unverified"> (unverified — anyone can write this)</span>
+        </p>
+        <p v-if="needsSignIn" class="algo-import__note" role="status">
+          This algorithm needs you to sign in to work.
+          <NuxtLink :to="loginHref">Sign in to use this algorithm</NuxtLink>
         </p>
         <p class="algo-import__note">
           This adds a filtered view on <em>your</em> timelines — NeoSpace never posts or follows on the curator’s behalf.
@@ -144,6 +182,10 @@ async function addToBoard() {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--neo-text-primary);
+}
+
+.algo-import__unverified {
+  color: var(--neo-text-muted);
 }
 
 .algo-import__note {

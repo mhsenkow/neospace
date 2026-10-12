@@ -153,10 +153,12 @@ export function usePostActions(options: {
       lastFailure = failure
     }
 
-    // Last resort: verify the raw id exists locally (same-server edge cases).
+    // Last resort: the raw id exists locally AND is the same post (same-server edge
+    // cases). A foreign snowflake/ULID can collide with an unrelated local status, so
+    // without a matching ActivityPub uri we fail closed instead of acting on it.
     try {
-      await statusStore.fetchStatus(status.id)
-      return remember(primaryClient, status.id)
+      const fetched = await statusStore.fetchStatus(status.id)
+      if (status.uri && fetched?.uri === status.uri) return remember(primaryClient, status.id)
     } catch {
       /* foreign id */
     }
@@ -239,6 +241,17 @@ export function usePostActions(options: {
     if (!instancesStore.hasAuthenticatedInstance || isBoosting.value) return
     const s = options.displayStatus.value
     if (s.reblogged === wantBoost) return
+    // Followers-only / direct posts can't be reposted — say so instead of failing mid-flight
+    if (wantBoost && (s.visibility === 'private' || s.visibility === 'direct')) {
+      toastStore.show({
+        message:
+          s.visibility === 'direct'
+            ? 'Direct messages can’t be reposted'
+            : 'Followers-only posts can’t be reposted',
+        duration: 3200,
+      })
+      return
+    }
 
     isBoosting.value = true
     s.reblogged = wantBoost

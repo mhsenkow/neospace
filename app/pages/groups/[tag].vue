@@ -12,6 +12,7 @@ import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore } from '~/stores/columns'
 import { categoryColor } from '~/composables/useShellAppearance'
 import { logError } from '~/utils/log'
+import { joinGroupFailure } from '~/utils/groupErrors'
 import { getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { plainTextOf } from '~/utils/plainText'
@@ -155,7 +156,8 @@ const handleJoin = async () => {
     await groupsStore.joinGroup(tag.value)
   } catch (e) {
     logError('Failed to join:', e)
-    void showActionError('Couldn’t join group', () => { void handleJoin() })
+    const failure = joinGroupFailure(e)
+    void showActionError(failure.message, failure.retryable ? () => { void handleJoin() } : undefined)
   } finally {
     isJoining.value = false
     void refocusMembershipButton(hadFocus)
@@ -371,9 +373,9 @@ useHead({
       </div>
 
       <!-- Error State -->
-      <div v-else-if="groupsStore.error" class="timeline-error" role="alert">
+      <div v-else-if="groupsStore.timelineError" class="timeline-error" role="alert">
         <span aria-hidden="true">😕</span>
-        <p>{{ groupsStore.error }}</p>
+        <p>{{ groupsStore.timelineError }}</p>
         <button type="button" class="neo-btn neo-btn--ghost" @click="groupsStore.fetchGroupTimeline(tag, true)">
           Try again
         </button>

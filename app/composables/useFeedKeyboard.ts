@@ -11,6 +11,34 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
 }
 
+/**
+ * Index of the first card that intersects the [top, bottom] band, or the last
+ * card when everything is above it (-1 for an empty list).
+ */
+export function firstVisibleCardIndex(
+  rects: ReadonlyArray<{ top: number; bottom: number }>,
+  top: number,
+  bottom: number,
+): number {
+  if (!rects.length) return -1
+  const i = rects.findIndex((r) => r.bottom > top && r.top < bottom)
+  return i >= 0 ? i : rects.length - 1
+}
+
+/** Nearest scrolling ancestor's visible band, clipped to the window */
+function visibleBand(el: HTMLElement): { top: number; bottom: number } {
+  let band = { top: 0, bottom: window.innerHeight }
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    const oy = getComputedStyle(node).overflowY
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight) {
+      const r = node.getBoundingClientRect()
+      band = { top: Math.max(band.top, r.top), bottom: Math.min(band.bottom, r.bottom) }
+      break
+    }
+  }
+  return band
+}
+
 export function useFeedKeyboard(root: Ref<HTMLElement | null | undefined>) {
   const onKeydown = (e: KeyboardEvent) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
@@ -26,15 +54,29 @@ export function useFeedKeyboard(root: Ref<HTMLElement | null | undefined>) {
     const cards = Array.from(el.querySelectorAll<HTMLElement>('.status-card'))
     if (!cards.length) return
 
+    // Caps Lock reports uppercase letters; shortcuts shouldn't silently stop working
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+    if (e.shiftKey && key.length === 1) return
+
     let idx = cards.findIndex((c) => c === active || c.contains(active as Node))
 
-    if (e.key === 'j' || e.key === 'k') {
+    if (key === 'j' || key === 'k') {
       e.preventDefault()
-      if (idx < 0) idx = e.key === 'j' ? -1 : 0
-      const next =
-        e.key === 'j'
-          ? Math.min(idx + 1, cards.length - 1)
-          : Math.max(idx <= 0 ? 0 : idx - 1, 0)
+      let next: number
+      if (idx < 0) {
+        // Nothing focused yet: start at the first card actually on screen, not card 0
+        const band = visibleBand(el)
+        next = firstVisibleCardIndex(
+          cards.map((c) => c.getBoundingClientRect()),
+          band.top,
+          band.bottom,
+        )
+      } else {
+        next =
+          key === 'j'
+            ? Math.min(idx + 1, cards.length - 1)
+            : Math.max(idx <= 0 ? 0 : idx - 1, 0)
+      }
       const card = cards[next]
       if (!card) return
       card.focus({ preventScroll: true })
@@ -42,7 +84,7 @@ export function useFeedKeyboard(root: Ref<HTMLElement | null | undefined>) {
       return
     }
 
-    if (e.key === 'Enter' || e.key === 'o') {
+    if (e.key === 'Enter' || key === 'o') {
       if (idx < 0) return
       const card = cards[idx]
       // Enter only from the card itself — Enter on Like / Reply / links / CW

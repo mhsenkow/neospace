@@ -80,6 +80,7 @@ function updatePanelPos(remeasure = true) {
   if (w && left + w > window.innerWidth - margin) {
     left = Math.max(margin, window.innerWidth - w - margin)
   }
+  if (left < margin) left = margin
   // Flip above the trigger when there's no room below (and there is above)
   if (h && top + h > window.innerHeight - margin && rect.top - h - 4 >= margin) {
     top = rect.top - h - 4
@@ -89,16 +90,28 @@ function updatePanelPos(remeasure = true) {
     left: `${Math.round(left)}px`,
     top: `${Math.round(top)}px`,
     minWidth: base.minWidth,
+    // Taller than the viewport (short landscape screens): scroll instead of clipping
+    maxHeight: `calc(100vh - ${margin * 2}px)`,
+    overflowY: 'auto',
     // Popover tier: teleported panels may open from inside modals (followers list)
     zIndex: 'var(--neo-z-popover, 1060)',
   }
   if ((!w || !h) && remeasure) void nextTick(() => open.value && updatePanelPos(false))
 }
 
+/** Which item to focus when the menu opens (ArrowUp on the trigger wants the last) */
+let pendingFocus: 'first' | 'last' = 'first'
+
 async function onOpen() {
+  const intent = pendingFocus
+  pendingFocus = 'first'
   if (usePortal.value && !props.sheet) updatePanelPos()
   await nextTick()
   const list = items()
+  if (intent === 'last' && list.length) {
+    list[list.length - 1]?.focus({ preventScroll: true })
+    return
+  }
   // Prefer filter input when present (Add Feed groups), else first item
   const filter = menuRef.value?.querySelector<HTMLElement>('input[type="search"], input:not([type="hidden"])')
   ;(filter || list[0])?.focus({ preventScroll: true })
@@ -127,11 +140,13 @@ function onTriggerKeydown(e: KeyboardEvent) {
     open.value = true
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
-    open.value = true
-    nextTick(() => {
+    if (open.value) {
       const list = items()
       list[list.length - 1]?.focus()
-    })
+    } else {
+      pendingFocus = 'last'
+      open.value = true
+    }
   }
 }
 
@@ -153,10 +168,7 @@ function focusPastTrigger(step: 1 | -1) {
 }
 
 function onMenuKeydown(e: KeyboardEvent) {
-  const list = items()
-  if (!list.length) return
-  const i = list.indexOf(document.activeElement as HTMLElement)
-
+  // Escape and Tab must work even while the menu is empty or still loading
   if (e.key === 'Escape') {
     e.preventDefault()
     e.stopPropagation()
@@ -172,6 +184,9 @@ function onMenuKeydown(e: KeyboardEvent) {
     focusPastTrigger(e.shiftKey ? -1 : 1)
     return
   }
+  const list = items()
+  if (!list.length) return
+  const i = list.indexOf(document.activeElement as HTMLElement)
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     const next = list[(i + 1) % list.length]
@@ -298,7 +313,7 @@ defineExpose({ open, close, toggle })
       :aria-label="label"
       :aria-expanded="open"
       :aria-controls="menuId"
-      :aria-haspopup="sheet ? 'dialog' : 'menu'"
+      aria-haspopup="menu"
       @click="toggle"
       @keydown="onTriggerKeydown"
     >
@@ -345,7 +360,9 @@ defineExpose({ open, close, toggle })
         @focusout="onMenuFocusOut"
         @click="onPanelClick"
       >
-        <slot name="items" />
+        <!-- Panel stays mounted (aria-controls stays valid); items render only while
+             open so a feed of ⋯ menus doesn't hold thousands of hidden buttons -->
+        <slot v-if="open" name="items" />
       </div>
     </Teleport>
   </div>
@@ -435,7 +452,7 @@ defineExpose({ open, close, toggle })
   margin: 0;
   padding: 0.35rem 0.65rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
   border: none;
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--neo-radius-lg, 16px) var(--neo-radius-lg, 16px) 0 0;
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
   overflow-x: hidden;
   overflow-y: auto;

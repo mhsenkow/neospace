@@ -12,11 +12,15 @@ import { activeClient, activeCredentials } from '~/composables/useMasto'
 import { accountsMatch, hostOf } from '~/utils/federation'
 import { stripHtml } from '~/utils/stripHtml'
 import { profileFieldLimit } from '~/utils/profileSources'
+import { extractProfileCss } from '~/utils/profileCss'
+import { httpStatusFrom } from '~/utils/friendlyError'
 import {
   ACCOUNT_STATUS_PAGE_SIZE,
   accountStatusHasMore,
   dedupeStatusPage,
 } from '~/composables/useAccountPager'
+import { dropDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
+import { logError } from '~/utils/log'
 
 /**
  * Per-operation request sequences. A slow response for an older profile (A→B
@@ -26,7 +30,21 @@ let profileSeq = 0
 let statusesSeq = 0
 let pinnedSeq = 0
 
-type StatusListOpts = { excludeReplies?: boolean; onlyMedia?: boolean }
+/**
+ * Stamp the serving host on fetched posts. Own-post management proves a status id
+ * belongs to the acting server from this tag; untagged posts get no delete / pin.
+ */
+function tagServingOrigin<T extends mastodon.v1.Status>(list: T[]): T[] {
+  let origin = ''
+  try {
+    origin = activeCredentials().url
+  } catch {
+    return list
+  }
+  return list.map((s) => ({ ...s, _instanceUrl: origin }))
+}
+
+type StatusListOpts = { excludeReplies?: boolean; onlyMedia?: boolean; excludeReblogs?: boolean }
 
 interface ProfileState {
   // Viewed profile (can be self or other user)
@@ -54,6 +72,8 @@ interface ProfileState {
   }
   // Errors
   error: string | null
+  /** HTTP status behind `error` when there was one (404 → "Account not found", no Retry) */
+  errorStatus: number | null
   /** Inline save failures — keep the form mounted */
   saveError: string | null
   // Pagination
@@ -81,6 +101,7 @@ export const useProfileStore = defineStore('profile', {
       discoverable: true,
     },
     error: null,
+    errorStatus: null,
     saveError: null,
     maxStatusId: null,
     hasMoreStatuses: true,
@@ -116,13 +137,7 @@ export const useProfileStore = defineStore('profile', {
     },
 
     profileCustomCSS(): string {
-      if (!this.viewedProfile?.fields) return ''
-      const cssField = this.viewedProfile.fields.find(field =>
-        ['css', 'custom_css', 'theme', 'style', 'chaos_css'].includes(
-          field.name.toLowerCase().replace(/[^a-z_]/g, '')
-        )
-      )
-      return cssField?.value || ''
+      return extractProfileCss(this.viewedProfile?.fields)
     },
   },
 
@@ -141,6 +156,7 @@ export const useProfileStore = defineStore('profile', {
       const seq = ++profileSeq
       this.isLoading = true
       this.error = null
+      this.errorStatus = null
 
       try {
         const client = this.getClient()
@@ -153,14 +169,15 @@ export const useProfileStore = defineStore('profile', {
         this.setViewedProfile(account)
 
         await Promise.all([
-          this.fetchStatuses(true, { excludeReplies: true }),
+          this.fetchStatuses(true, { excludeReplies: true, excludeReblogs: true }),
           this.fetchPinnedStatuses(),
         ])
 
       } catch (e: any) {
         if (seq !== profileSeq) return
         this.error = e.message || 'Failed to fetch profile'
-        console.error('Profile fetch error:', e)
+        this.errorStatus = httpStatusFrom(e)
+        logError('Profile fetch error:', e)
       } finally {
         if (seq === profileSeq) this.isLoading = false
       }
@@ -173,6 +190,7 @@ export const useProfileStore = defineStore('profile', {
       const seq = ++profileSeq
       this.isLoading = true
       this.error = null
+      this.errorStatus = null
 
       try {
         const client = this.getClient()
@@ -203,16 +221,18 @@ export const useProfileStore = defineStore('profile', {
         if (account) {
           this.setViewedProfile(account)
           await Promise.all([
-            this.fetchStatuses(true, { excludeReplies: true }),
+            this.fetchStatuses(true, { excludeReplies: true, excludeReblogs: true }),
             this.fetchPinnedStatuses(),
           ])
         } else {
           this.error = 'User not found'
+          this.errorStatus = 404
         }
       } catch (e: any) {
         if (seq !== profileSeq) return
         this.error = e.message || 'Failed to find user'
-        console.error('Profile lookup error:', e)
+        this.errorStatus = httpStatusFrom(e)
+        logError('Profile lookup error:', e)
       } finally {
         if (seq === profileSeq) this.isLoading = false
       }
@@ -241,13 +261,13 @@ export const useProfileStore = defineStore('profile', {
           limit: ACCOUNT_STATUS_PAGE_SIZE,
           maxId: this.maxStatusId || undefined,
           excludeReplies: opts?.excludeReplies ?? false,
-          excludeReblogs: false,
+          excludeReblogs: opts?.excludeReblogs ?? false,
           onlyMedia: opts?.onlyMedia ?? false,
         })
         // Newer fetch (tab switch / other profile) owns the list now
         if (seq !== statusesSeq || this.viewedProfile?.id !== profileId) return
 
-        this.statuses = dedupeStatusPage(this.statuses, statuses, refresh)
+        this.statuses = dedupeStatusPage(this.statuses, tagServingOrigin(statuses), refresh)
 
         if (statuses.length > 0) {
           this.maxStatusId = statuses[statuses.length - 1]?.id ?? null
@@ -257,7 +277,7 @@ export const useProfileStore = defineStore('profile', {
 
       } catch (e: any) {
         if (seq !== statusesSeq) return
-        console.error('Failed to fetch statuses:', e)
+        logError('Failed to fetch statuses:', e)
       } finally {
         if (seq === statusesSeq) this.isLoadingStatuses = false
       }
@@ -278,10 +298,16 @@ export const useProfileStore = defineStore('profile', {
           pinned: true,
         })
         if (seq !== pinnedSeq || this.viewedProfile?.id !== profileId) return
-        this.pinnedStatuses = pinned
+        this.pinnedStatuses = tagServingOrigin(pinned)
       } catch (e: any) {
-        console.error('Failed to fetch pinned statuses:', e)
+        logError('Failed to fetch pinned statuses:', e)
       }
+    },
+
+    /** A post was deleted elsewhere in the app — drop it from the lists without a refetch. */
+    removeDeletedStatus(event: DeletedStatusEvent) {
+      this.statuses = dropDeletedStatus(this.statuses, event)
+      this.pinnedStatuses = dropDeletedStatus(this.pinnedStatuses, event)
     },
 
     /** Swap the viewed profile; an open editor never carries over to someone else. */
@@ -391,7 +417,7 @@ export const useProfileStore = defineStore('profile', {
 
       } catch (e: any) {
         this.saveError = e.message || 'Failed to update profile'
-        console.error('Profile update error:', e)
+        logError('Profile update error:', e)
         throw e
       } finally {
         this.isUpdating = false
@@ -420,7 +446,7 @@ export const useProfileStore = defineStore('profile', {
 
         return relationship
       } catch (e: any) {
-        console.error('Follow error:', e)
+        logError('Follow error:', e)
         throw e
       }
     },
@@ -446,9 +472,37 @@ export const useProfileStore = defineStore('profile', {
 
         return relationship
       } catch (e: any) {
-        console.error('Unfollow error:', e)
+        logError('Unfollow error:', e)
         throw e
       }
+    },
+
+    /**
+     * Mute / block (or undo) the viewed profile. Resolves with the Relationship the
+     * server returns so the page paints the real state; the caller ignores it if the
+     * user navigated to another profile meanwhile (compare `viewedProfile.id`).
+     */
+    async setRelationship(
+      kind: 'mute' | 'unmute' | 'block' | 'unblock',
+    ): Promise<mastodon.v1.Relationship | null> {
+      if (!this.viewedProfile || this.isOwnProfile) return null
+      const target = this.getClient().v1.accounts.$select(this.viewedProfile.id)
+      return await target[kind]()
+    },
+
+    /** Report the viewed profile (no specific post) */
+    async reportViewedAccount(opts: {
+      comment?: string
+      category: 'spam' | 'violation' | 'other'
+      forward: boolean
+    }) {
+      if (!this.viewedProfile || this.isOwnProfile) return
+      await this.getClient().v1.reports.create({
+        accountId: this.viewedProfile.id,
+        comment: opts.comment || '',
+        category: opts.category,
+        forward: opts.forward,
+      } as never)
     },
 
     /**
@@ -464,7 +518,7 @@ export const useProfileStore = defineStore('profile', {
         })
         return relationships[0] || null
       } catch (e: any) {
-        console.error('Relationship fetch error:', e)
+        logError('Relationship fetch error:', e)
         return null
       }
     },
@@ -505,6 +559,7 @@ export const useProfileStore = defineStore('profile', {
       this.maxStatusId = null
       this.hasMoreStatuses = true
       this.error = null
+      this.errorStatus = null
       this.saveError = null
       this.initEditForm()
     },

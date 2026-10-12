@@ -13,19 +13,22 @@ import { cursorPage } from '~/utils/linkHeader'
 import { formatDateOnly } from '~/utils/insights'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
+import { logError } from '~/utils/log'
 
 const instancesStore = useInstancesStore()
 const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
 
 const reportActionError = (e: unknown, fallback: string) => {
-  console.error(fallback, e)
+  logError(fallback, e)
   const friendly = mapErrorToMessage(e)
   toastStore.show({ message: friendly.detail || friendly.title || fallback, duration: 4200 })
 }
 
 const props = defineProps<{
   accountId?: string
+  /** The profile whose lists these are — lets us explain partial lists for remote accounts */
+  account?: mastodon.v1.Account | null
   initialTab?: 'followers' | 'following'
 }>()
 
@@ -33,6 +36,8 @@ const isOpen = ref(false)
 const activeTab = ref<'followers' | 'following'>('following')
 const relationships = ref<Record<string, mastodon.v1.Relationship>>({})
 const loadingActions = ref<Record<string, boolean>>({})
+/** Ids whose relationship lookup finished (or failed) — until then actions stay neutral */
+const relationshipsSettled = ref<Record<string, boolean>>({})
 const modalRef = ref<HTMLElement | null>(null)
 
 const tabDefs = [
@@ -47,6 +52,22 @@ const isOwnFollowersList = computed(() => {
 
 const getClient = () => activeClient()
 
+const isSelf = (accountId: string) => !!accountId && accountId === instancesStore.currentUser?.id
+
+/** Remote profile: this server only knows the followers/following its own users have seen */
+const remoteHost = computed(() => {
+  const acct = props.account?.acct
+  if (!acct?.includes('@')) return null
+  return acct.split('@')[1]?.toLowerCase() || null
+})
+const homeHost = computed(() => {
+  try {
+    return new URL(instancesStore.activeAccount?.url || '').hostname
+  } catch {
+    return 'your server'
+  }
+})
+
 const enrichPage = async (fetchedAccounts: mastodon.v1.Account[]) => {
   if (!fetchedAccounts.length) return
   const client = getClient()
@@ -58,6 +79,9 @@ const enrichPage = async (fetchedAccounts: mastodon.v1.Account[]) => {
     })
   } catch {
     /* relationships are optional */
+  } finally {
+    // Settle either way: a failed lookup must not leave Follow disabled forever
+    for (const a of fetchedAccounts) relationshipsSettled.value[a.id] = true
   }
   // Skip N+1 lastStatus fetches — use account.lastStatusAt in the row UI
 }
@@ -88,13 +112,15 @@ const hasMore = pager.hasMore
 const loadError = computed(() => {
   const err = pager.error.value
   if (!err) return null
-  return err instanceof Error ? err.message : String(err)
+  const friendly = mapErrorToMessage(err)
+  return friendly.detail || friendly.title || 'Couldn’t load this list'
 })
 
 const close = () => {
   isOpen.value = false
   pager.reset()
   relationships.value = {}
+  relationshipsSettled.value = {}
 }
 
 useFocusTrap(modalRef, isOpen, {
@@ -114,6 +140,7 @@ const open = (tab?: 'followers' | 'following') => {
 const loadAccounts = async () => {
   if (!instancesStore.isAuthenticated) return
   relationships.value = {}
+  relationshipsSettled.value = {}
   pager.reset()
   await pager.loadInitial()
 }
@@ -127,13 +154,25 @@ const formatLastActive = (iso?: string | null) =>
   formatDateOnly(iso, { month: 'short', day: 'numeric', year: 'numeric' })
 
 const handleFollow = async (accountId: string) => {
+  if (isSelf(accountId) || loadingActions.value[accountId]) return
+  const rel = relationships.value[accountId]
+  // Unfollowing is easy to hit by accident in a long list — confirm, like the profile page
+  if (rel?.following) {
+    const ok = await overlayStore.openConfirm({
+      title: 'Unfollow this account?',
+      body: 'Their posts will no longer appear in your Following feed.',
+      confirmLabel: 'Unfollow',
+      danger: true,
+    })
+    if (!ok) return
+  }
   loadingActions.value[accountId] = true
   try {
     const client = getClient()
-    const rel = relationships.value[accountId]
 
     // "Requested" is a pending follow — tapping it again withdraws the request
-    if (rel?.following || rel?.requested) {
+    const current = relationships.value[accountId]
+    if (current?.following || current?.requested) {
       const updated = await client.v1.accounts.$select(accountId).unfollow()
       relationships.value[accountId] = updated
     } else {
@@ -279,6 +318,15 @@ defineExpose({ open, close })
             </div>
 
             <div v-else class="account-list">
+              <p v-if="remoteHost" class="remote-note">
+                Only {{ activeTab }} known to {{ homeHost }} are shown.
+                <a
+                  v-if="account?.url"
+                  :href="account.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Open on {{ remoteHost }}</a>
+              </p>
               <div
                 v-for="account in accounts"
                 :key="account.id"
@@ -310,20 +358,24 @@ defineExpose({ open, close })
                     >Follows you</span>
                   </div>
 
-                  <div class="account-actions">
+                  <div v-if="!isSelf(account.id)" class="account-actions">
                     <button
                       type="button"
                       class="action-btn"
                       :class="{
+                        'action-btn--pending': !relationshipsSettled[account.id],
                         'action-btn--following': relationships[account.id]?.following,
                         'action-btn--requested': relationships[account.id]?.requested,
                         'action-btn--loading': loadingActions[account.id]
                       }"
-                      :disabled="loadingActions[account.id]"
+                      :disabled="loadingActions[account.id] || !relationshipsSettled[account.id]"
+                      :aria-busy="!relationshipsSettled[account.id]"
                       @click="handleFollow(account.id)"
                     >
                       {{
-                        relationships[account.id]?.following
+                        !relationshipsSettled[account.id]
+                          ? '…'
+                          : relationships[account.id]?.following
                           ? 'Following'
                           : relationships[account.id]?.requested
                             ? 'Requested'
@@ -570,7 +622,8 @@ defineExpose({ open, close })
   cursor: pointer;
 
   &--following,
-  &--requested {
+  &--requested,
+  &--pending {
     background: transparent;
     color: var(--neo-text-primary);
   }
@@ -630,6 +683,18 @@ defineExpose({ open, close })
   font-size: 0.875rem;
   color: var(--neo-text-secondary);
   line-height: 1.4;
+}
+
+.remote-note {
+  margin: 0 0 0.5rem;
+  padding: 0 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+
+  a {
+    color: var(--neo-accent);
+    text-decoration: underline;
+  }
 }
 
 .recent-post-meta,

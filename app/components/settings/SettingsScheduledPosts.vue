@@ -12,11 +12,14 @@ import { useOverlayStore } from '~/stores/overlay'
 import { useToastStore } from '~/stores/toast'
 import { createRaceGuard } from '~/composables/useRace'
 import {
+  checkLocalSchedule,
   isScheduledUnsupported,
+  localTimeZoneLabel,
+  scheduledHiddenBody,
   scheduledPreview,
+  scheduleCheckMessage,
   SCHEDULE_MIN_LEAD_MS,
   toLocalInputValue,
-  validRescheduleIso,
 } from '~/utils/scheduledPosts'
 
 const instancesStore = useInstancesStore()
@@ -29,12 +32,24 @@ const loading = ref(false)
 const loadError = ref<string | null>(null)
 /** Server answered 404/405/501 — treat the feature as absent and hide the section */
 const unsupported = ref(false)
-const busyId = ref<string | null>(null)
+/** Per-item pending state — two concurrent actions never re-enable each other's controls */
+const busy = ref<Record<string, 'saving' | 'cancelling'>>({})
 const editingId = ref<string | null>(null)
 const editValue = ref('')
 const editError = ref<string | null>(null)
 const minLocal = ref('')
+/** Items whose content-warned body the user chose to reveal */
+const revealed = ref<Set<string>>(new Set())
 const race = createRaceGuard()
+const timeZone = computed(() => localTimeZoneLabel())
+
+/**
+ * Lifecycle token: bumped on reset/unmount, so a late reschedule/cancel result can't touch
+ * a detached or reinitialized queue even if the same account is active again.
+ */
+let generation = 0
+/** Count of finished mutations — a load that started before one is stale and re-run */
+let mutations = 0
 
 const visible = computed(
   () => instancesStore.isAuthenticated && instancesStore.canSchedulePosts && !unsupported.value,
@@ -50,15 +65,28 @@ const formatWhen = (iso: string) => {
   }
 }
 
+const setBusy = (id: string, state: 'saving' | 'cancelling' | null) => {
+  const next = { ...busy.value }
+  if (state) next[id] = state
+  else delete next[id]
+  busy.value = next
+}
+
 const load = async () => {
   const accountId = instancesStore.activeAccountId
   if (!accountId || !instancesStore.canSchedulePosts) return
   const ticket = race.next()
+  const startedAt = mutations
   loading.value = true
   loadError.value = null
   try {
     const list = await statusStore.listScheduledStatuses(accountId)
     if (!ticket.isCurrent() || accountId !== instancesStore.activeAccountId) return
+    // A reschedule/cancel finished while this was in flight: the list may resurrect or revert it
+    if (mutations !== startedAt) {
+      void load()
+      return
+    }
     items.value = list
   } catch (e) {
     if (!ticket.isCurrent() || accountId !== instancesStore.activeAccountId) return
@@ -74,24 +102,33 @@ const load = async () => {
 }
 
 const reset = () => {
+  generation += 1
   race.abort()
   items.value = []
   loadError.value = null
   unsupported.value = false
-  busyId.value = null
+  busy.value = {}
   editingId.value = null
   editError.value = null
+  revealed.value = new Set()
   loading.value = false
 }
 
-// Switching accounts must never show (or act on) the previous account's queue
+// Switching accounts must never show (or act on) the previous account's queue.
+// Capability support arriving late (instance probe) also triggers the first load.
 watch(
-  () => instancesStore.activeAccountId,
-  () => {
-    reset()
-    void load()
+  () => [instancesStore.activeAccountId, instancesStore.canSchedulePosts] as const,
+  ([id, canSchedule], prev) => {
+    if (!prev || id !== prev[0]) reset()
+    if (canSchedule) void load()
   },
   { immediate: true },
+)
+
+// A post was just scheduled from the composer — show it without a manual refresh
+watch(
+  () => statusStore.scheduledRevision,
+  () => void load(),
 )
 
 const startEdit = (item: mastodon.v1.ScheduledStatus) => {
@@ -106,61 +143,78 @@ const cancelEdit = () => {
   editError.value = null
 }
 
+const toggleReveal = (id: string) => {
+  const next = new Set(revealed.value)
+  if (!next.delete(id)) next.add(id)
+  revealed.value = next
+}
+
 const saveEdit = async (item: mastodon.v1.ScheduledStatus) => {
-  const iso = validRescheduleIso(editValue.value)
-  if (!iso) {
-    editError.value = 'Pick a time at least 5 minutes from now'
+  const check = checkLocalSchedule(editValue.value)
+  if (!check.ok) {
+    editError.value = scheduleCheckMessage(check.reason)
     return
   }
   const accountId = instancesStore.activeAccountId
-  if (!accountId) return
-  busyId.value = item.id
+  if (!accountId || busy.value[item.id]) return
+  const gen = generation
+  setBusy(item.id, 'saving')
   editError.value = null
   try {
-    const updated = await statusStore.updateScheduledStatus(item.id, iso, accountId)
-    if (accountId !== instancesStore.activeAccountId) return
+    const updated = await statusStore.updateScheduledStatus(item.id, check.iso, accountId)
+    mutations += 1
+    if (gen !== generation || accountId !== instancesStore.activeAccountId) return
     items.value = items
       .value.map((x) => (x.id === item.id ? updated : x))
       .sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt))
     editingId.value = null
-    toastStore.show({ message: `Rescheduled for ${formatWhen(updated.scheduledAt)}`, duration: 3000 })
+    toastStore.show({
+      message: `Rescheduled for ${formatWhen(updated.scheduledAt)} (${timeZone.value})`,
+      duration: 3000,
+    })
   } catch (e) {
-    if (accountId !== instancesStore.activeAccountId) return
+    if (gen !== generation || accountId !== instancesStore.activeAccountId) return
     editError.value = e instanceof Error ? e.message : 'Couldn’t reschedule'
   } finally {
-    if (busyId.value === item.id) busyId.value = null
+    if (gen === generation) setBusy(item.id, null)
   }
 }
 
 const cancelPost = async (item: mastodon.v1.ScheduledStatus) => {
   const accountId = instancesStore.activeAccountId
-  if (!accountId) return
+  if (!accountId || busy.value[item.id]) return
+  const gen = generation
   const ok = await overlayStore.openConfirm({
     title: 'Cancel this scheduled post?',
     body: `It will not be published. ${scheduledPreview(item.params, 80)}`,
     confirmLabel: 'Cancel post',
     danger: true,
   })
-  // The account may have switched while the dialog was open
-  if (!ok || accountId !== instancesStore.activeAccountId) return
-  busyId.value = item.id
+  // The account may have switched (or the panel closed) while the dialog was open
+  if (!ok || gen !== generation || accountId !== instancesStore.activeAccountId) return
+  setBusy(item.id, 'cancelling')
   try {
     await statusStore.cancelScheduledStatus(item.id, accountId)
-    if (accountId !== instancesStore.activeAccountId) return
+    mutations += 1
+    if (gen !== generation || accountId !== instancesStore.activeAccountId) return
     items.value = items.value.filter((x) => x.id !== item.id)
     if (editingId.value === item.id) cancelEdit()
     toastStore.show({ message: 'Scheduled post cancelled', duration: 2500 })
   } catch (e) {
+    if (gen !== generation) return
     toastStore.show({
       message: e instanceof Error ? e.message : 'Couldn’t cancel that post',
       duration: 3500,
     })
   } finally {
-    if (busyId.value === item.id) busyId.value = null
+    if (gen === generation) setBusy(item.id, null)
   }
 }
 
-onBeforeUnmount(() => race.abort())
+onBeforeUnmount(() => {
+  generation += 1
+  race.abort()
+})
 </script>
 
 <template>
@@ -192,6 +246,19 @@ onBeforeUnmount(() => race.abort())
             </time>
           </div>
           <p class="settings-scheduled__text">{{ scheduledPreview(item.params) }}</p>
+          <template v-if="scheduledHiddenBody(item.params)">
+            <p v-if="revealed.has(item.id)" class="settings-scheduled__text">
+              {{ scheduledHiddenBody(item.params) }}
+            </p>
+            <button
+              type="button"
+              class="settings-btn settings-btn--small settings-btn--ghost"
+              :aria-expanded="revealed.has(item.id)"
+              @click="toggleReveal(item.id)"
+            >
+              {{ revealed.has(item.id) ? 'Hide text' : 'Show text' }}
+            </button>
+          </template>
           <p v-if="item.mediaAttachments?.length" class="settings-field-hint">
             {{ item.mediaAttachments.length }} attachment{{ item.mediaAttachments.length === 1 ? '' : 's' }}
           </p>
@@ -205,25 +272,27 @@ onBeforeUnmount(() => race.abort())
               class="settings-input"
               :min="minLocal"
               :aria-invalid="!!editError"
+              :aria-describedby="`sched-tz-${item.id}`"
             />
             <button
               type="button"
               class="settings-btn settings-btn--small settings-btn--primary"
-              :disabled="busyId === item.id"
+              :disabled="!!busy[item.id]"
               @click="saveEdit(item)"
             >
-              {{ busyId === item.id ? 'Saving…' : 'Save time' }}
+              {{ busy[item.id] === 'saving' ? 'Saving…' : 'Save time' }}
             </button>
             <button type="button" class="settings-btn settings-btn--small settings-btn--ghost" @click="cancelEdit">
               Keep current
             </button>
+            <p :id="`sched-tz-${item.id}`" class="settings-field-hint">Time zone: {{ timeZone }}</p>
             <p v-if="editError" class="settings-field-error" role="alert">{{ editError }}</p>
           </div>
           <div v-else class="settings-scheduled__actions">
             <button
               type="button"
               class="settings-btn settings-btn--small settings-btn--ghost"
-              :disabled="busyId === item.id"
+              :disabled="!!busy[item.id]"
               @click="startEdit(item)"
             >
               Reschedule
@@ -231,10 +300,10 @@ onBeforeUnmount(() => race.abort())
             <button
               type="button"
               class="settings-btn settings-btn--small settings-btn--danger"
-              :disabled="busyId === item.id"
+              :disabled="!!busy[item.id]"
               @click="cancelPost(item)"
             >
-              {{ busyId === item.id ? 'Cancelling…' : 'Cancel post' }}
+              {{ busy[item.id] === 'cancelling' ? 'Cancelling…' : 'Cancel post' }}
             </button>
           </div>
         </li>

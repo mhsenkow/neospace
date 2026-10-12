@@ -10,6 +10,16 @@ const hasGallery = computed(() => overlay.lightbox.items.length > 1)
 const caption = computed(
   () => overlay.lightbox.items[overlay.lightbox.index]?.caption?.trim() || '',
 )
+const preview = computed(() => overlay.lightbox.items[overlay.lightbox.index]?.preview || '')
+/** Full-size load state — never leave a bare black screen on slow or failed loads */
+const loadState = ref<'loading' | 'loaded' | 'error'>('loading')
+watch(
+  () => [overlay.lightbox.open, overlay.lightbox.src] as const,
+  () => {
+    loadState.value = 'loading'
+  },
+  { immediate: true },
+)
 const positionLabel = computed(() => {
   if (!hasGallery.value) return ''
   return `${overlay.lightbox.index + 1} of ${overlay.lightbox.items.length}`
@@ -51,7 +61,8 @@ const isZoomed = () =>
 
 const onPointerDown = (e: PointerEvent) => {
   if (e.pointerType === 'mouse' || isZoomed() || drag.value) return
-  if ((e.target as HTMLElement | null)?.closest('button')) return
+  // Buttons, and the scrollable alt text (its drags scroll, not swipe)
+  if ((e.target as HTMLElement | null)?.closest('button, .neo-lightbox__alt')) return
   drag.value = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 }
 }
 
@@ -135,11 +146,38 @@ const imgStyle = computed(() => {
         ‹
       </button>
       <figure class="neo-lightbox__figure" :style="imgStyle">
+        <!-- Cached thumbnail + spinner until the full-size image arrives -->
+        <div v-if="loadState === 'loading'" class="neo-lightbox__loading" role="status">
+          <img
+            v-if="preview"
+            class="neo-lightbox__img neo-lightbox__img--preview"
+            :src="preview"
+            alt=""
+            draggable="false"
+          />
+          <span class="neo-lightbox__spinner" aria-hidden="true" />
+          <span class="neo-sr-only">Loading image</span>
+        </div>
+        <div v-if="loadState === 'error'" class="neo-lightbox__error" role="alert">
+          <p>Couldn’t load this image.</p>
+          <a
+            :href="overlay.lightbox.src"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="neo-btn neo-btn--ghost"
+          >
+            Open original
+          </a>
+        </div>
         <img
+          v-show="loadState === 'loaded'"
+          :key="overlay.lightbox.src"
           class="neo-lightbox__img"
           :src="overlay.lightbox.src"
           :alt="overlay.lightbox.alt"
           draggable="false"
+          @load="loadState = 'loaded'"
+          @error="loadState = 'error'"
         />
         <!-- Alt text is for everyone, not just screen readers -->
         <figcaption v-if="caption" class="neo-lightbox__alt">
@@ -243,6 +281,60 @@ const imgStyle = computed(() => {
   line-height: 1.45;
   text-align: center;
   white-space: pre-line;
+  // The root's `pinch-zoom` would block one-finger scrolling of long alt text
+  touch-action: pan-y;
+}
+
+.neo-lightbox__loading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 8rem;
+  min-height: 8rem;
+}
+
+.neo-lightbox__img--preview {
+  filter: blur(2px);
+  opacity: 0.7;
+}
+
+.neo-lightbox__spinner {
+  position: absolute;
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: neo-lightbox-spin 0.8s linear infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation-duration: 2.4s;
+  }
+}
+
+@keyframes neo-lightbox-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.neo-lightbox__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  color: rgba(255, 255, 255, 0.88);
+  text-align: center;
+
+  p {
+    margin: 0;
+  }
+
+  a {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.35);
+  }
 }
 
 .neo-lightbox__counter {

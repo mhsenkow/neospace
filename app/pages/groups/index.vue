@@ -23,7 +23,12 @@ const dismissKeyboardOnTouch = (e: KeyboardEvent) => {
   ;(e.target as HTMLInputElement | null)?.blur()
 }
 // Debounced + race-guarded; pending timer cleared on unmount
-const { results: searchResults, isSearching } = useGroupSearch(searchQuery, { delayMs: 300 })
+const {
+  results: searchResults,
+  isSearching,
+  searchError,
+  retry: retrySearch,
+} = useGroupSearch(searchQuery, { delayMs: 300 })
 
 onMounted(async () => {
   await groupsStore.initializeGroups()
@@ -36,11 +41,10 @@ const trendingGroups = computed(() =>
   groupsStore.trendingGroups.filter((g) => !g.isMember).slice(0, 10),
 )
 
+/** The host the trends were actually fetched from (guests get a public fallback server, not "your server") */
 const trendingServerLabel = computed(() => {
-  const url =
-    instancesStore.activeAccount?.url ||
-    instancesStore.instances[0]?.url ||
-    ''
+  if (groupsStore.trendingHost) return groupsStore.trendingHost
+  const url = instancesStore.activeAccount?.url || instancesStore.instances[0]?.url || ''
   if (!url) return 'your server'
   try {
     return new URL(url).hostname
@@ -59,6 +63,7 @@ const hasSearch = computed(() => searchQuery.value.trim().length > 0)
 const searchStatus = computed(() => {
   if (!hasSearch.value) return ''
   if (isSearching.value) return 'Searching groups…'
+  if (searchError.value) return searchError.value
   const n = searchResults.value.length
   if (!n) return `No groups match “${searchQuery.value.trim()}”`
   return `${n} ${n === 1 ? 'group' : 'groups'} found`
@@ -68,6 +73,10 @@ const suggestedRailRef = ref<HTMLElement | null>(null)
 const trendingRailRef = ref<HTMLElement | null>(null)
 const suggestedRail = useHorizontalRail(suggestedRailRef)
 const trendingRail = useHorizontalRail(trendingRailRef)
+const joinedRailRef = ref<HTMLElement | null>(null)
+const joinedRail = useHorizontalRail(joinedRailRef)
+
+const retryGroups = () => void groupsStore.initializeGroups(true)
 
 useHead({
   title: 'Groups | NeoSpace',
@@ -82,6 +91,9 @@ useHead({
     <header class="groups-hero">
       <div class="hero-content">
         <h1>Groups</h1>
+        <p class="groups-lede">
+          Groups are hashtags. Join one to see its posts in Home. Post with #tag to take part.
+        </p>
       </div>
     </header>
 
@@ -129,6 +141,14 @@ useHead({
         </div>
       </section>
 
+      <section v-else-if="hasSearch && !isSearching && searchError" class="groups-section">
+        <div class="empty-state" role="alert">
+          <span class="empty-emoji" aria-hidden="true">📡</span>
+          <p class="empty-state__text">{{ searchError }}</p>
+          <button type="button" class="neo-btn neo-btn--ghost" @click="retrySearch">Retry</button>
+        </div>
+      </section>
+
       <section v-else-if="hasSearch && !isSearching && searchResults.length === 0" class="groups-section">
         <div class="empty-state">
           <span class="empty-emoji" aria-hidden="true">🔍</span>
@@ -148,6 +168,15 @@ useHead({
       </section>
 
       <template v-if="!hasSearch">
+        <div
+          v-if="instancesStore.isAuthenticated && groupsStore.followedTagsError"
+          class="groups-error"
+          role="alert"
+        >
+          <span>Couldn’t load your groups.</span>
+          <button type="button" class="neo-btn neo-btn--ghost" @click="retryGroups">Retry</button>
+        </div>
+
         <!-- Your groups — quick jump (Threads hub style) -->
         <section
           v-if="instancesStore.isAuthenticated && joinedGroups.length > 0"
@@ -157,29 +186,49 @@ useHead({
             <h2 class="section-title">Your groups</h2>
             <span class="section-count">{{ joinedGroups.length }}</span>
           </div>
-          <div class="groups-jump" role="list">
-            <div
-              v-for="group in joinedGroups"
-              :key="group.tag"
-              class="jump-chip-item"
-              role="listitem"
+          <div class="groups-rail-wrap">
+            <button
+              v-if="joinedRail.canScrollBack.value"
+              type="button"
+              class="groups-rail-nav groups-rail-nav--prev"
+              aria-label="Scroll your groups left"
+              @click="joinedRail.scrollBy(-240)"
             >
-              <button
-                type="button"
-                class="jump-chip"
-                :title="`Open ${group.name}`"
-                @click="viewGroup(group.tag)"
+              <NeoIcon name="chevron-left" :size="18" :stroke="2" />
+            </button>
+            <div ref="joinedRailRef" class="groups-jump" role="list">
+              <div
+                v-for="group in joinedGroups"
+                :key="group.tag"
+                class="jump-chip-item"
+                role="listitem"
               >
-                <span
-                  class="jump-chip__icon"
-                  :style="{ backgroundColor: categoryTint(group.category) }"
-                  aria-hidden="true"
+                <button
+                  type="button"
+                  class="jump-chip"
+                  :title="`Open ${group.name}`"
+                  @click="viewGroup(group.tag)"
                 >
-                  {{ group.icon }}
-                </span>
-                <span class="jump-chip__name">{{ group.name }}</span>
-              </button>
+                  <span
+                    class="jump-chip__icon"
+                    :style="{ backgroundColor: categoryTint(group.category) }"
+                    aria-hidden="true"
+                  >
+                    {{ group.icon }}
+                  </span>
+                  <span class="jump-chip__name">{{ group.name }}</span>
+                </button>
+              </div>
             </div>
+            <button
+              v-if="joinedRail.canScrollForward.value"
+              type="button"
+              class="groups-rail-nav groups-rail-nav--next"
+              aria-label="Scroll your groups right"
+              @click="joinedRail.scrollBy(240)"
+            >
+              <NeoIcon name="chevron-right" :size="18" :stroke="2" />
+            </button>
           </div>
         </section>
 
@@ -281,7 +330,8 @@ useHead({
             </button>
           </nav>
 
-          <div v-if="groupsStore.isLoading" class="loading-state" aria-busy="true">
+          <!-- Featured groups are seeded up front: only block the grid when there is nothing to show -->
+          <div v-if="groupsStore.isLoading && filteredGroups.length === 0" class="loading-state" aria-busy="true">
             <FunLoader fill label="Loading groups" />
           </div>
 
@@ -290,8 +340,12 @@ useHead({
             <p>No groups found in this category.</p>
           </div>
 
+          <p v-if="groupsStore.isLoading && filteredGroups.length > 0" class="groups-refreshing" role="status">
+            Updating groups…
+          </p>
+
           <TransitionGroup
-            v-else
+            v-if="filteredGroups.length > 0"
             name="card"
             tag="div"
             class="groups-grid"
@@ -342,6 +396,31 @@ useHead({
   margin: 0;
   letter-spacing: -0.03em;
   line-height: 1.15;
+}
+
+.groups-lede {
+  margin: 0.35rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--neo-text-secondary);
+}
+
+.groups-error,
+.groups-refreshing {
+  margin: 0 0 1rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+}
+
+.groups-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 12px;
 }
 
 .groups-main {

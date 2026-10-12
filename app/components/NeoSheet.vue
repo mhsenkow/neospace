@@ -132,6 +132,13 @@ const rootStyle = computed(() => ({
     height: auto;
   }
 
+  // Touch tablets (iPad Pro landscape is 1366px): keep the bottom sheet a
+  // readable column instead of stretching it edge to edge
+  @media (min-width: 768px) {
+    max-width: 640px;
+    align-self: center;
+  }
+
   @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     max-width: 560px;
     max-height: min(80vh, 720px);

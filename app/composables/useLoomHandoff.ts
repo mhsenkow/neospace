@@ -75,33 +75,23 @@ export function useLoomHandoff() {
   let notebookShareAccepted = false
   let bruhUpgradeTimer: number | null = null
 
-  const ackLoom = (origin: string) => {
+  /**
+   * ACK to the window that sent the message (not just `window.opener`) so a share
+   * from another window/frame, or after the opener navigated, still stops retrying.
+   * Falls back to the opener for senders that don't expose `source`.
+   */
+  const ack = (e: MessageEvent, type: 'neospace-loom-ack' | 'neospace-bruh-ack' | 'neospace-notebook-ack') => {
     try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({ type: 'neospace-loom-ack', v: 1 }, origin)
-      }
+      const source = e.source as Window | null
+      const target =
+        source && typeof source.postMessage === 'function' && !source.closed
+          ? source
+          : window.opener && !window.opener.closed
+            ? window.opener
+            : null
+      target?.postMessage({ type, v: 1 }, e.origin)
     } catch {
-      /* opener may be gone */
-    }
-  }
-
-  const ackBruh = (origin: string) => {
-    try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({ type: 'neospace-bruh-ack', v: 1 }, origin)
-      }
-    } catch {
-      /* opener may be gone */
-    }
-  }
-
-  const ackNotebook = (origin: string) => {
-    try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({ type: 'neospace-notebook-ack', v: 1 }, origin)
-      }
-    } catch {
-      /* opener may be gone */
+      /* sender may be gone */
     }
   }
 
@@ -156,7 +146,7 @@ export function useLoomHandoff() {
   /** bruh → compose: text-only (page excerpt + share link). Always ack; upgrade draft if fuller text arrives. */
   const onBruhMessage = (e: MessageEvent) => {
     if (!isBruhOrigin(e.origin) || !isBruhShare(e.data)) return
-    ackBruh(e.origin)
+    ack(e, 'neospace-bruh-ack')
     const text = bruhShareText(e.data)
     if (!text) return
     const already = bruhShareAccepted
@@ -177,7 +167,7 @@ export function useLoomHandoff() {
   /** Throughline → compose: text-only cell / note. */
   const onNotebookMessage = (e: MessageEvent) => {
     if (!isNotebookOrigin(e.origin) || !isNotebookShare(e.data)) return
-    ackNotebook(e.origin)
+    ack(e, 'neospace-notebook-ack')
     const text = notebookShareText(e.data)
     if (!text) return
     const already = notebookShareAccepted
@@ -187,20 +177,12 @@ export function useLoomHandoff() {
     })()
   }
 
-  const onLoomMessage = (e: MessageEvent) => {
-    if (isBruhOrigin(e.origin)) {
-      onBruhMessage(e)
-      return
-    }
-    if (isNotebookOrigin(e.origin)) {
-      onNotebookMessage(e)
-      return
-    }
+  const onLoomShare = (e: MessageEvent) => {
     if (!isLoomOrigin(e.origin)) return
     if (e.data?.type !== 'loom-neospace-share' || e.data?.v !== 1) return
     const buffer = bufferFromMessage(e.data.image?.buffer)
     // Always ACK so Loom stops retrying — even for duplicate deliveries
-    ackLoom(e.origin)
+    ack(e, 'neospace-loom-ack')
     // Already opened from query / earlier message — still ingest image upgrades,
     // but never remount the sheet (that wipes a draft already taken into the box).
     if (loomShareAccepted && !buffer) return
@@ -227,6 +209,18 @@ export function useLoomHandoff() {
         await openHandoffCompose()
       }
     })()
+  }
+
+  /**
+   * One listener for the suite. Dispatch on the message type first, then apply that
+   * source's origin rule — checking origins in a fixed order sent `loom.ibm.io` to the
+   * notebook handler (which rejected the type) and local Loom to the bruh handler.
+   */
+  const onLoomMessage = (e: MessageEvent) => {
+    const type = (e.data as { type?: unknown } | null)?.type
+    if (type === 'bruh-neospace-share') onBruhMessage(e)
+    else if (type === 'notebook-neospace-share') onNotebookMessage(e)
+    else if (type === 'loom-neospace-share') onLoomShare(e)
   }
 
   /** Register listeners synchronously — call before any await in onMounted. */

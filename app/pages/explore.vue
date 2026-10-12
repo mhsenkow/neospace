@@ -93,10 +93,12 @@ const {
   followedTags,
   searchHasMore,
   loadMoreBusy,
+  loadMoreError,
   resultsFor,
   clearResults: clearFediverseResults,
   runSearch: runFediverseSearch,
   loadMore: loadMoreSearch,
+  retryLoadMore,
   toggleFollowAccount,
   toggleFollowTag,
   ensureRelationships,
@@ -1078,7 +1080,11 @@ onUnmounted(() => {
           aria-live="polite"
           :aria-busy="loadMoreBusy"
         >
-          {{ loadMoreBusy ? 'Loading more…' : 'Scroll for more' }}
+          <template v-if="loadMoreError">
+            Couldn’t load more ·
+            <button type="button" class="explore-text-link" @click="retryLoadMore">Retry</button>
+          </template>
+          <template v-else>{{ loadMoreBusy ? 'Loading more…' : 'Scroll for more' }}</template>
         </div>
       </template>
 
