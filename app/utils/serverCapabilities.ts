@@ -43,7 +43,18 @@ export interface ServerMetadata {
   } | null
 }
 
-export const UNKNOWN_CAPABILITIES: ServerCapabilities = Object.freeze({
+const freezeSettingsPaths = (paths: Partial<Record<SettingsTopic, string>>) =>
+  Object.freeze({ ...paths })
+
+/** Deep-frozen snapshot — callers must not mutate shared capability objects */
+export function freezeCapabilities(caps: ServerCapabilities): ServerCapabilities {
+  return Object.freeze({
+    ...caps,
+    settingsPaths: freezeSettingsPaths(caps.settingsPaths),
+  })
+}
+
+export const UNKNOWN_CAPABILITIES: ServerCapabilities = freezeCapabilities({
   software: 'unknown',
   version: null,
   scheduledStatuses: 'unknown',
@@ -51,8 +62,19 @@ export const UNKNOWN_CAPABILITIES: ServerCapabilities = Object.freeze({
   customEmojis: 'unknown',
   hashtagSearch: 'unknown',
   translation: 'unknown',
-  settingsPaths: Object.freeze({}),
-}) as ServerCapabilities
+  settingsPaths: {},
+})
+
+/** Persisted capability rows older than this are refreshed on the next session verify */
+export const CAPABILITIES_FRESH_MS = 7 * 24 * 60 * 60 * 1000
+
+export function isCapabilitiesStale(
+  probedAt: number | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (typeof probedAt !== 'number' || !Number.isFinite(probedAt)) return true
+  return now - probedAt > CAPABILITIES_FRESH_MS
+}
 
 type Matrix = Omit<ServerCapabilities, 'software' | 'version'>
 
@@ -159,7 +181,7 @@ export function detectServerCapabilities(meta: ServerMetadata | null | undefined
   if (typeof maxPollOptions === 'number') caps.polls = maxPollOptions > 0 ? 'yes' : 'no'
   const translation = meta.configuration?.translation?.enabled
   if (typeof translation === 'boolean') caps.translation = flag(translation)
-  return caps
+  return freezeCapabilities(caps)
 }
 
 /** Only hide a control when the server positively lacks the feature */

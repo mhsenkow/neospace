@@ -164,7 +164,13 @@ export function statusToInsightRow(status: InsightStatusLike): InsightPostRow {
   const tags = (status.tags || [])
     .map((t) => (t?.name || '').replace(/^#/, '').trim())
     .filter(Boolean)
-  const preview = stripTags(status.content || '').slice(0, 140)
+  const body = stripTags(status.content || '')
+  let preview = body.slice(0, 140)
+  if (status.spoilerText?.trim()) preview = status.spoilerText.trim().slice(0, 140)
+  else if (!preview.trim()) {
+    if ((status.mediaAttachments?.length || 0) > 0) preview = 'Photo / video post'
+    else if (status.poll) preview = 'Poll'
+  }
 
   return {
     id: status.id,

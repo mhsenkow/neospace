@@ -16,6 +16,7 @@ import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { useSuiteGroups } from '~/composables/useSuiteGroups'
 import { SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
 import type { NeoIconName } from '~/utils/neoIcons'
+import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -97,11 +98,11 @@ const drawerAlgorithmItems = computed(() => {
     feedParam?: string
   }[] = [
     { key: 'local', label: `Local (${localHostLabel.value})`, icon: 'globe', feedType: 'local' },
-    { key: 'federated', label: 'Federated', icon: 'servers', feedType: 'federated' },
+    { key: 'federated', label: 'Federated', icon: 'reblog', feedType: 'federated' },
   ]
   if (instancesStore.hasAuthenticatedInstance) {
     items.push(
-      { key: 'favourites', label: 'Liked', icon: 'heart', feedType: 'favourites' },
+      { key: 'favourites', label: 'Liked', icon: 'sparkle', feedType: 'favourites' },
       { key: 'bookmarks', label: 'Saved', icon: 'bookmark', feedType: 'bookmarks' },
     )
   }
@@ -169,15 +170,50 @@ const handleLogout = async () => {
   router.push('/login')
 }
 
+
+const mobileSidebarRef = ref<HTMLElement | null>(null)
+const reduceMotion = usePrefersReducedMotion()
+const drawerDragX = ref(0)
+let drawerSwipePointer: number | null = null
+let drawerSwipeStartX = 0
+const DRAWER_SWIPE_CLOSE_PX = 88
+
+const onDrawerPointerDown = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  drawerSwipePointer = e.pointerId
+  drawerSwipeStartX = e.clientX
+  drawerDragX.value = 0
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+const onDrawerPointerMove = (e: PointerEvent) => {
+  if (drawerSwipePointer !== e.pointerId) return
+  const dx = e.clientX - drawerSwipeStartX
+  drawerDragX.value = Math.max(0, dx)
+}
+
+const finishDrawerSwipe = (e: PointerEvent) => {
+  if (drawerSwipePointer !== e.pointerId) return
+  if (drawerDragX.value >= DRAWER_SWIPE_CLOSE_PX) closeMobileMenu()
+  drawerDragX.value = 0
+  drawerSwipePointer = null
+  try {
+    ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+  } catch {
+    /* ignore */
+  }
+}
+
 watch(open, async (isOpen) => {
-  // neo-dialog-open is owned by useFocusTrap — don't toggle it here
-  if (!isOpen) return
+  if (!isOpen) {
+    drawerDragX.value = 0
+    return
+  }
   if (groupsStore.groups.length === 0) {
     await groupsStore.initializeGroups()
   }
 })
 
-const mobileSidebarRef = ref<HTMLElement | null>(null)
 useFocusTrap(mobileSidebarRef, open, {
   onEscape: closeMobileMenu,
   initialFocus: '.mobile-sidebar__close',
@@ -195,9 +231,19 @@ useFocusTrap(mobileSidebarRef, open, {
     id="mobile-sidebar"
     ref="mobileSidebarRef"
     class="mobile-sidebar"
+    :class="{ 'mobile-sidebar--dragging': drawerDragX > 0 }"
+    :style="
+      drawerDragX && !reduceMotion
+        ? { transform: `translateX(${drawerDragX}px)` }
+        : undefined
+    "
     role="dialog"
     aria-modal="true"
     aria-label="Menu"
+    @pointerdown="onDrawerPointerDown"
+    @pointermove="onDrawerPointerMove"
+    @pointerup="finishDrawerSwipe"
+    @pointercancel="finishDrawerSwipe"
   >
     <div class="mobile-sidebar__header">
       <!-- Plain link: the logo isn't a nav item, so it never claims aria-current -->
@@ -944,58 +990,8 @@ useFocusTrap(mobileSidebarRef, open, {
   }
 }
 
-.nav-badge {
-  position: absolute;
-  top: 4px;
-  right: 2px;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--neo-font-family-ui);
-  font-size: max(0.6875rem, 11px);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--neo-text-on-accent, var(--neo-text-inverse));
-  background: var(--neo-accent);
-  border-radius: var(--neo-radius-sm, 2px);
-  pointer-events: none;
-
-  &--inline {
-    position: static;
-    margin-left: 0.4rem;
-    min-width: 1.15rem;
-    height: 1.15rem;
-    font-size: max(0.6875rem, 11px);
-  }
-}
-
-/* Edge-portal cue: pulse the matching chrome control */
-.chrome-hint {
-  color: var(--neo-accent) !important;
-  background: var(--neo-accent-soft) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
-  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-}
-
-:deep(.acct-switch.chrome-hint .acct-switch__trigger) {
-  color: var(--neo-accent);
-  background: var(--neo-accent-soft);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
-  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-  border-radius: var(--neo-radius-sm, 4px);
-}
-
-@keyframes chrome-hint-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 35%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--neo-accent) 22%, transparent);
-  }
+.mobile-sidebar--dragging {
+  transition: none;
 }
 
 .fade-enter-active,

@@ -34,6 +34,7 @@ import {
 } from '~/utils/edwardPace'
 import { dialectForHost } from '~/utils/edwardServers'
 import { edQuip } from '~/utils/edwardVoice'
+import { formatCount } from '~/utils/searchQuery'
 import type { EdwardReason } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
 import type { NeoIconName } from '~/utils/neoIcons'
@@ -131,6 +132,13 @@ const selected = computed(() => edward.selectedStatus)
 const count = computed(() => edward.ballCount)
 const loading = computed(() => edward.loading)
 const error = computed(() => edward.error)
+const canvasRef = ref<InstanceType<typeof EdwardCanvas> | null>(null)
+const restart3d = () => {
+  void canvasRef.value?.restart3d?.()
+}
+const showRestart3d = computed(
+  () => !!error.value && /3d view|paused the 3d/i.test(error.value),
+)
 const recessed = computed(() => edward.recessed)
 const sourceCount = computed(() => edward.sourceCount)
 const focusMode = computed(() => edward.focusMode)
@@ -276,6 +284,8 @@ const nextQuip = () => {
     total: edward.exploreSummary.total,
     backpack: edward.backpack,
     fromHome: visibleNow.filter((b) => b.source === 'home').length,
+    loading: edward.loading,
+    error: edward.error,
     visible: visibleNow,
     watching: watchCurrent.value?.name ?? null,
   })
@@ -823,7 +833,13 @@ onUnmounted(() => {
       aria-label="Edward mode session"
     >
       <ClientOnly>
-        <EdwardCanvas @pick="onPick" @unsupported="onWebglUnsupported" />
+        <EdwardCanvas
+          ref="canvasRef"
+          :stage-header-h="headerH"
+          :stage-explore-h="exploreH"
+          @pick="onPick"
+          @unsupported="onWebglUnsupported"
+        />
       </ClientOnly>
 
       <div class="edward-mode__scan" aria-hidden="true" />
@@ -1035,9 +1051,9 @@ onUnmounted(() => {
             </li>
           </ul>
           <span class="edward-mode__deck-meta">
-            <span v-if="deckHero.counts?.fav">♥ {{ deckHero.counts.fav }}</span>
-            <span v-if="deckHero.counts?.boost">↻ {{ deckHero.counts.boost }}</span>
-            <span v-if="deckHero.counts?.reply">↩ {{ deckHero.counts.reply }}</span>
+            <span v-if="deckHero.counts?.fav">♥ {{ formatCount(deckHero.counts.fav) }}</span>
+            <span v-if="deckHero.counts?.boost">↻ {{ formatCount(deckHero.counts.boost) }}</span>
+            <span v-if="deckHero.counts?.reply">↩ {{ formatCount(deckHero.counts.reply) }}</span>
             <span v-if="deckHero.tag" class="edward-mode__deck-tag">#{{ deckHero.tag }}</span>
             <span class="edward-mode__deck-why">{{ deckHero.why }}</span>
           </span>
@@ -1276,6 +1292,14 @@ onUnmounted(() => {
 
       <p v-if="error" class="edward-mode__error" role="alert">
         {{ error }}
+        <button
+          v-if="showRestart3d"
+          type="button"
+          class="edward-mode__error-restart"
+          @click="restart3d"
+        >
+          Restart 3D
+        </button>
       </p>
 
       <div
@@ -2008,8 +2032,30 @@ onUnmounted(() => {
   color: #ffe566;
   background: #1a1420;
   border: 2px solid #ff7eb3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  align-items: center;
   border-radius: 3px;
   box-shadow: 4px 4px 0 #ff7eb3;
+}
+
+.edward-mode__error-restart {
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1a1420;
+  background: #59d1e0;
+  border: none;
+  border-radius: 4px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.05);
+  }
 }
 
 .edward-mode__explore {

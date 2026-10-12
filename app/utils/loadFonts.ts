@@ -5,79 +5,70 @@
 
 import type { NeoFontId, NeoUiId } from './appearance'
 
-/** Dynamic imports — only the active chrome + face are fetched */
-const FONT_LOADERS: Record<string, () => Promise<unknown>> = {
-  'Source Sans 3': () =>
-    Promise.all([
-      import('@fontsource/source-sans-3/400.css'),
-      import('@fontsource/source-sans-3/500.css'),
-    ]),
-  'Source Serif 4': () =>
-    Promise.all([
-      import('@fontsource/source-serif-4/400.css'),
-      import('@fontsource/source-serif-4/500.css'),
-    ]),
-  'Source Code Pro': () =>
-    Promise.all([
-      import('@fontsource/source-code-pro/400.css'),
-      import('@fontsource/source-code-pro/500.css'),
-    ]),
-  'Josefin Sans': () =>
-    Promise.all([
-      import('@fontsource/josefin-sans/400.css'),
-      import('@fontsource/josefin-sans/500.css'),
-    ]),
-  'Josefin Slab': () =>
-    Promise.all([
-      import('@fontsource/josefin-slab/400.css'),
-      import('@fontsource/josefin-slab/500.css'),
-    ]),
-  'Cormorant Garamond': () =>
-    Promise.all([
-      import('@fontsource/cormorant-garamond/400.css'),
-      import('@fontsource/cormorant-garamond/500.css'),
-    ]),
-  'Space Mono': () =>
-    Promise.all([
-      import('@fontsource/space-mono/400.css'),
-      import('@fontsource/space-mono/700.css'),
-    ]),
-  'IBM Plex Sans': () =>
-    Promise.all([
-      import('@fontsource/ibm-plex-sans/400.css'),
-      import('@fontsource/ibm-plex-sans/500.css'),
-    ]),
-  'IBM Plex Serif': () =>
-    Promise.all([
-      import('@fontsource/ibm-plex-serif/400.css'),
-      import('@fontsource/ibm-plex-serif/500.css'),
-    ]),
-  'IBM Plex Mono': () =>
-    Promise.all([
-      import('@fontsource/ibm-plex-mono/400.css'),
-      import('@fontsource/ibm-plex-mono/500.css'),
-    ]),
-  Oswald: () =>
-    Promise.all([
-      import('@fontsource/oswald/400.css'),
-      import('@fontsource/oswald/500.css'),
-    ]),
-  'Roboto Slab': () =>
-    Promise.all([
-      import('@fontsource/roboto-slab/400.css'),
-      import('@fontsource/roboto-slab/500.css'),
-    ]),
-  'Share Tech Mono': () => import('@fontsource/share-tech-mono/400.css'),
-  'Libre Franklin': () =>
-    Promise.all([
-      import('@fontsource/libre-franklin/400.css'),
-      import('@fontsource/libre-franklin/500.css'),
-    ]),
-  Newsreader: () =>
-    Promise.all([
-      import('@fontsource/newsreader/400.css'),
-      import('@fontsource/newsreader/500.css'),
-    ]),
+type FaceWeights = { regular: () => Promise<unknown>; bold: () => Promise<unknown> }
+
+/** Dynamic imports — regular + intentional bold (600/700), not synthesized faux-bold */
+const FONT_LOADERS: Record<string, FaceWeights> = {
+  'Source Sans 3': {
+    regular: () => import('@fontsource/source-sans-3/400.css'),
+    bold: () => import('@fontsource/source-sans-3/600.css'),
+  },
+  'Source Serif 4': {
+    regular: () => import('@fontsource/source-serif-4/400.css'),
+    bold: () => import('@fontsource/source-serif-4/600.css'),
+  },
+  'Source Code Pro': {
+    regular: () => import('@fontsource/source-code-pro/400.css'),
+    bold: () => import('@fontsource/source-code-pro/600.css'),
+  },
+  'Josefin Sans': {
+    regular: () => import('@fontsource/josefin-sans/400.css'),
+    bold: () => import('@fontsource/josefin-sans/600.css'),
+  },
+  'Josefin Slab': {
+    regular: () => import('@fontsource/josefin-slab/400.css'),
+    bold: () => import('@fontsource/josefin-slab/600.css'),
+  },
+  'Cormorant Garamond': {
+    regular: () => import('@fontsource/cormorant-garamond/400.css'),
+    bold: () => import('@fontsource/cormorant-garamond/600.css'),
+  },
+  'Space Mono': {
+    regular: () => import('@fontsource/space-mono/400.css'),
+    bold: () => import('@fontsource/space-mono/700.css'),
+  },
+  'IBM Plex Sans': {
+    regular: () => import('@fontsource/ibm-plex-sans/400.css'),
+    bold: () => import('@fontsource/ibm-plex-sans/600.css'),
+  },
+  'IBM Plex Serif': {
+    regular: () => import('@fontsource/ibm-plex-serif/400.css'),
+    bold: () => import('@fontsource/ibm-plex-serif/600.css'),
+  },
+  'IBM Plex Mono': {
+    regular: () => import('@fontsource/ibm-plex-mono/400.css'),
+    bold: () => import('@fontsource/ibm-plex-mono/600.css'),
+  },
+  Oswald: {
+    regular: () => import('@fontsource/oswald/400.css'),
+    bold: () => import('@fontsource/oswald/600.css'),
+  },
+  'Roboto Slab': {
+    regular: () => import('@fontsource/roboto-slab/400.css'),
+    bold: () => import('@fontsource/roboto-slab/600.css'),
+  },
+  'Share Tech Mono': {
+    regular: () => import('@fontsource/share-tech-mono/400.css'),
+    bold: () => import('@fontsource/share-tech-mono/400.css'),
+  },
+  'Libre Franklin': {
+    regular: () => import('@fontsource/libre-franklin/400.css'),
+    bold: () => import('@fontsource/libre-franklin/600.css'),
+  },
+  Newsreader: {
+    regular: () => import('@fontsource/newsreader/400.css'),
+    bold: () => import('@fontsource/newsreader/600.css'),
+  },
 }
 
 /** Which remote families each chrome uses for body + UI */
@@ -124,23 +115,80 @@ const UI_FAMILIES: Record<NeoUiId, Partial<Record<NeoFontId | 'ui', string[]>>> 
 }
 
 const loaded = new Set<string>()
+const failed = new Set<string>()
+let retryHooked = false
+const MAX_FONT_RETRIES = 2
+
+function loadFamily(name: string, weights: FaceWeights): Promise<void> {
+  return Promise.all([weights.regular(), weights.bold()]).then(() => undefined)
+}
+
+function scheduleFamilyLoad(name: string, defer: boolean) {
+  if (loaded.has(name) || typeof document === 'undefined') return
+  const weights = FONT_LOADERS[name]
+  if (!weights) return
+
+  const run = () => {
+    if (loaded.has(name)) return
+    loaded.add(name)
+    void loadFamily(name, weights)
+      .then(() => {
+        failed.delete(name)
+      })
+      .catch(() => {
+        loaded.delete(name)
+        failed.add(name)
+        ensureFontRetryHook()
+      })
+  }
+
+  if (defer && typeof requestIdleCallback === 'function') requestIdleCallback(run)
+  else if (defer) queueMicrotask(run)
+  else run()
+}
+
+/** Retry failed faces after connectivity returns — no theme toggle required */
+function ensureFontRetryHook() {
+  if (retryHooked || typeof window === 'undefined') return
+  retryHooked = true
+  let retries = 0
+  const tryAgain = () => {
+    if (!failed.size || retries >= MAX_FONT_RETRIES) return
+    retries += 1
+    const pending = [...failed]
+    failed.clear()
+    for (const name of pending) {
+      if (loaded.has(name)) continue
+      const weights = FONT_LOADERS[name]
+      if (!weights) continue
+      loaded.add(name)
+      void loadFamily(name, weights)
+        .then(() => failed.delete(name))
+        .catch(() => {
+          loaded.delete(name)
+          failed.add(name)
+        })
+    }
+  }
+  window.addEventListener('online', tryAgain)
+  window.addEventListener('focus', tryAgain)
+}
+
+/** Active UI family first; content family loads when different (idle when possible) */
+export function resolveFontFamilies(ui: NeoUiId, font: NeoFontId): { critical: string[]; deferred: string[] } {
+  const map = UI_FAMILIES[ui] || {}
+  const uiNames = map.ui || []
+  const bodyNames = map[font] || []
+  const critical = [...new Set(uiNames.length ? uiNames : bodyNames)]
+  const deferred = bodyNames.filter((n) => !critical.includes(n))
+  return { critical, deferred }
+}
 
 export function ensureFontsLoaded(ui: NeoUiId, font: NeoFontId) {
   if (typeof document === 'undefined') return
-
-  const map = UI_FAMILIES[ui] || {}
-  // Mono is only fetched when the active face is mono (lazy), via map[font]
-  const names = new Set<string>([...(map.ui || []), ...(map[font] || [])])
-
-  for (const name of names) {
-    if (loaded.has(name)) continue
-    const loader = FONT_LOADERS[name]
-    if (!loader) continue
-    loaded.add(name)
-    void loader().catch(() => {
-      loaded.delete(name)
-    })
-  }
+  const { critical, deferred } = resolveFontFamilies(ui, font)
+  for (const name of critical) scheduleFamilyLoad(name, false)
+  for (const name of deferred) scheduleFamilyLoad(name, true)
 }
 
 /** Families covered by local loaders (for tests / CSP verification) */

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clearCachedOAuthApp,
+  OAUTH_APP_CACHE_TTL_MS,
   oauthFetch,
   parseOAuthResponse,
   readCachedOAuthApp,
@@ -46,6 +47,17 @@ describe('OAuth app cache identity', () => {
     expect(readCachedOAuthApp('m.example', id)).toBeNull()
     writeCachedOAuthApp('m.example', 'fresh', 'fresh', id)
     expect(readCachedOAuthApp('m.example', id)?.clientId).toBe('fresh')
+  })
+
+  it('drops registrations past the TTL when reading the cache', () => {
+    const staleAt = Date.now() - OAUTH_APP_CACHE_TTL_MS - 1000
+    localStorage.setItem(
+      'neospace_oauth_apps',
+      JSON.stringify({
+        'm.example': { clientId: 'old', clientSecret: 'old', savedAt: staleAt, ...id },
+      }),
+    )
+    expect(readCachedOAuthApp('m.example', id)).toBeNull()
   })
 
   it('survives a corrupt cache blob and prunes beyond its bound', () => {

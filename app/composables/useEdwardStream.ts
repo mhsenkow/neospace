@@ -10,7 +10,7 @@ import { useGroupsStore } from '~/stores/groups'
 import { onDeletedStatus } from '~/composables/useDeletedStatus'
 import { matchesDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 import { statusIdentity, dedupeStatusesByIdentity } from '~/utils/statusIdentity'
-import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
+import { hostnameOf, isAuthGatedPublicHost, notePublicTimelineAuthFailure, resolvePublicInstanceUrl } from '~/utils/instances'
 import { publicClient } from '~/composables/useMasto'
 import {
   emptyAffinityContext,
@@ -350,6 +350,7 @@ export function useEdwardStream() {
           })
           return [...fed.map(map), ...local.map(map)]
         } catch (e: unknown) {
+          notePublicTimelineAuthFailure(instance.url, e, { authenticated: !!instance.accessToken })
           if (httpStatusFrom(e) === 429) rateLimited = true
           const message = e instanceof Error ? e.message : 'Failed'
           errors.push(`${instance.name}: ${message}`)

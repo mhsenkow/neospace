@@ -163,10 +163,37 @@ function blockEnd(css: string, open: number): number {
   return css.length
 }
 
+/** Split a selector prelude on top-level commas (respects `:is(a, b)`). */
+function splitSelectorList(prelude: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let quote: '"' | "'" | null = null
+  let start = 0
+  for (let i = 0; i < prelude.length; i++) {
+    const c = prelude[i]!
+    if (quote) {
+      if (c === quote) quote = null
+      continue
+    }
+    if (c === '"' || c === "'") {
+      quote = c
+      continue
+    }
+    if (c === '(') depth++
+    else if (c === ')') depth = Math.max(0, depth - 1)
+    else if (c === ',' && depth === 0) {
+      parts.push(prelude.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(prelude.slice(start))
+  return parts
+}
+
 /** Scope each selector in a prelude; null when nothing safe remains. */
 function scopeSelectors(prelude: string, scope: string): string | null {
   const parts: string[] = []
-  for (const raw of prelude.split(',')) {
+  for (const raw of splitSelectorList(prelude)) {
     let s = raw.trim()
     if (s.startsWith(scope)) s = s.slice(scope.length).trim()
     // An empty part (`, x{}`) or the bare scope would style #main-content itself

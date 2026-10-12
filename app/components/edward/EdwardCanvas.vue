@@ -30,6 +30,17 @@ import {
   edwardIsCompact,
   speedMeta,
 } from '~/utils/edwardPace'
+import { formatCount } from '~/utils/searchQuery'
+
+const props = withDefaults(
+  defineProps<{
+    /** Measured `.edward-mode__header` height (px) — open stage top inset */
+    stageHeaderH?: number
+    /** Measured `.edward-mode__explore` height (px) — open stage bottom inset */
+    stageExploreH?: number
+  }>(),
+  { stageHeaderH: 0, stageExploreH: 0 },
+)
 
 const emit = defineEmits<{
   pick: [identity: string]
@@ -231,6 +242,10 @@ let scene: InstanceType<ThreeMod['Scene']> | null = null
 let camera: InstanceType<ThreeMod['PerspectiveCamera']> | null = null
 let ballGroup: InstanceType<ThreeMod['Group']> | null = null
 let filamentLines: InstanceType<ThreeMod['LineSegments']> | null = null
+const FILAMENT_MAX_VERTS = 180 * 2
+let filamentPositions: Float32Array | null = null
+let filamentPosAttr: InstanceType<ThreeMod['Float32BufferAttribute']> | null = null
+let pickMeshes: InstanceType<ThreeMod['Object3D']>[] = []
 let stars: InstanceType<ThreeMod['Points']> | null = null
 let sphereGeo: InstanceType<ThreeMod['SphereGeometry']> | null = null
 let faceGeo: InstanceType<ThreeMod['CircleGeometry']> | null = null
@@ -408,8 +423,8 @@ const paintPips = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor) => {
   const c = d.counts
   if (!c || c.fav + c.boost <= 0) return
   const parts: string[] = []
-  if (c.fav) parts.push(`♥${compact(c.fav)}`)
-  if (c.boost) parts.push(`↻${compact(c.boost)}`)
+  if (c.fav) parts.push(`♥${formatCount(c.fav)}`)
+  if (c.boost) parts.push(`↻${formatCount(c.boost)}`)
   const text = parts.join(' ')
   ctx.save()
   ctx.font = `700 26px ${RIM_FONT}`
@@ -443,8 +458,6 @@ const paintSourceBadge = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor
   ctx.fillText(EDWARD_SOURCE_GLYPH[d.source], 94, 96)
   ctx.restore()
 }
-
-const compact = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
 
 const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTexture']> => {
   const canvas = document.createElement('canvas')
@@ -838,6 +851,7 @@ const syncBallsFromStore = () => {
   if (resort) packByExploreRank(descriptors)
 
   balls = [...identityToBall.values()]
+  pickMeshes = balls.flatMap((b) => [b.shell, b.face])
   rebuildFilaments()
 }
 
@@ -995,9 +1009,20 @@ const updateBubbleOptics = (t: number) => {
 }
 
 const rebuildFilaments = () => {
-  if (!THREE || !filamentLines) return
+  const positions = filamentPositions
+  if (!THREE || !filamentLines || !positions || !filamentPosAttr) return
   const t = (performance.now() - clockStart) / 1000
-  const positions: number[] = []
+  let vi = 0
+  const maxFloats = positions.length
+  const pushPair = (ax: number, ay: number, az: number, bx: number, by: number, bz: number) => {
+    if (vi + 6 > maxFloats) return
+    positions[vi++] = ax
+    positions[vi++] = ay
+    positions[vi++] = az
+    positions[vi++] = bx
+    positions[vi++] = by
+    positions[vi++] = bz
+  }
   const byAuthor = new Map<string, BallRuntime[]>()
   const byStatusId = new Map<string, BallRuntime>()
 
@@ -1014,22 +1039,18 @@ const rebuildFilaments = () => {
     if (!parent) continue
     const A = ballWorldPos(b, t)
     const B = ballWorldPos(parent, t)
-    positions.push(A.x, A.y, A.z, B.x, B.y, B.z)
+    pushPair(A.x, A.y, A.z, B.x, B.y, B.z)
   }
 
   for (const list of byAuthor.values()) {
     if (list.length < 2) continue
     const A = ballWorldPos(list[0]!, t)
     const B = ballWorldPos(list[1]!, t)
-    positions.push(A.x, A.y, A.z, B.x, B.y, B.z)
+    pushPair(A.x, A.y, A.z, B.x, B.y, B.z)
   }
 
-  const sliced = positions.slice(0, 180 * 6)
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(sliced, 3))
-  const old = filamentLines.geometry
-  filamentLines.geometry = geo
-  old.dispose()
+  filamentPosAttr.needsUpdate = true
+  filamentLines.geometry.setDrawRange(0, vi / 3)
 }
 
 /** Scratch vector — projection runs for every ball, every frame */
@@ -1099,10 +1120,18 @@ const measureLens = () => {
   const W = host.width
   const H = host.height
   updateLaneSpread(W, H)
-  const header = document.querySelector('.edward-mode__header')
-  const explore = document.querySelector('.edward-mode__explore')
-  let top = (header ? header.getBoundingClientRect().bottom - host.top : 0) + 12
-  let bottom = (explore ? explore.getBoundingClientRect().top - host.top : H) - 12
+  let top = 12
+  let bottom = H - 12
+  if (props.stageHeaderH > 0) top = props.stageHeaderH + 12
+  else {
+    const header = document.querySelector('.edward-mode__header')
+    top = (header ? header.getBoundingClientRect().bottom - host.top : 0) + 12
+  }
+  if (props.stageExploreH > 0) bottom = H - props.stageExploreH - 12
+  else {
+    const explore = document.querySelector('.edward-mode__explore')
+    bottom = (explore ? explore.getBoundingClientRect().top - host.top : H) - 12
+  }
   stageTop = top
   stageBottom = bottom
   if (mode === 'off') {
@@ -1428,8 +1457,7 @@ let _ndcV: InstanceType<ThreeMod['Vector2']> | null = null
 const hitTest = (): BallRuntime | null => {
   if (!raycaster || !camera || !ballGroup || !THREE) return null
   raycaster.setFromCamera((_ndcV ||= new THREE.Vector2()).set(pointerNdc.x, pointerNdc.y), camera)
-  const meshes = balls.flatMap((b) => [b.shell, b.face])
-  const hits = raycaster.intersectObjects(meshes, false)
+  const hits = raycaster.intersectObjects(pickMeshes, false)
   if (!hits.length) return null
   const id = hits[0]!.object.userData.identity as string
   return identityToBall.get(id) || null
@@ -1658,7 +1686,6 @@ const onResize = () => {
 }
 
 let lastFrameT = 0
-let filamentTick = 0
 /** Simulation clock — advances at the chosen speed (still = frozen) */
 let simT = 0
 
@@ -1695,7 +1722,7 @@ const frame = () => {
   simT += simDt
   updateBalls(t, dt, simT, simDt)
 
-  if (++filamentTick % 30 === 0) rebuildFilaments()
+  rebuildFilaments()
 
   if (hoverIdentity) {
     const b = identityToBall.get(hoverIdentity)
@@ -1862,6 +1889,9 @@ const disposeScene = () => {
   sparkGeo = null
   torusGeo = null
   filamentLines = null
+  filamentPositions = null
+  filamentPosAttr = null
+  pickMeshes = []
   stars = null
   ballGroup = null
   renderer?.dispose()
@@ -2014,8 +2044,12 @@ const init = async () => {
   )
   scene.add(stars)
 
+  filamentPositions = new Float32Array(FILAMENT_MAX_VERTS * 3)
+  filamentPosAttr = new THREE.Float32BufferAttribute(filamentPositions, 3)
+  filamentPosAttr.setUsage(THREE.DynamicDrawUsage)
   const filGeo = new THREE.BufferGeometry()
-  filGeo.setAttribute('position', new THREE.Float32BufferAttribute([], 3))
+  filGeo.setAttribute('position', filamentPosAttr)
+  filGeo.setDrawRange(0, 0)
   filamentLines = new THREE.LineSegments(
     filGeo,
     new THREE.LineBasicMaterial({
@@ -2067,15 +2101,19 @@ watch(
 )
 
 watch(
-  () => edward.affinity,
-  () => syncBallsFromStore(),
-  { deep: false },
+  () => [props.stageHeaderH, props.stageExploreH] as const,
+  () => measureLens(),
 )
 
-watch(
-  () => [edward.exploreQuery, edward.exploreSort] as const,
-  () => syncBallsFromStore(),
-)
+const restart3d = async () => {
+  if (!hostEl.value) return
+  disposeScene()
+  disposed = false
+  contextLost = false
+  await init()
+}
+
+defineExpose({ restart3d })
 
 onMounted(() => {
   disposed = false
@@ -2121,7 +2159,7 @@ onUnmounted(() => {
     >
       <div class="edward-canvas__hover-top">
         <span class="edward-canvas__hover-glyph" aria-hidden="true">{{ hoverCard.glyph }}</span>
-        <span class="edward-canvas__hover-kind">{{ hoverCard.why }} · {{ hoverCard.mood }}</span>
+        <span class="edward-canvas__hover-kind">{{ hoverCard.why }}</span>
         <span class="edward-canvas__hover-age">{{ hoverCard.age }}</span>
       </div>
       <div class="edward-canvas__hover-body">
@@ -2142,13 +2180,13 @@ onUnmounted(() => {
         </li>
       </ul>
       <div class="edward-canvas__hover-meta">
-        <span v-if="hoverCard.counts?.fav">♥ {{ hoverCard.counts.fav }}</span>
-        <span v-if="hoverCard.counts?.boost">↻ {{ hoverCard.counts.boost }}</span>
-        <span v-if="hoverCard.counts?.reply">↩ {{ hoverCard.counts.reply }}</span>
+        <span v-if="hoverCard.counts?.fav">♥ {{ formatCount(hoverCard.counts.fav) }}</span>
+        <span v-if="hoverCard.counts?.boost">↻ {{ formatCount(hoverCard.counts.boost) }}</span>
+        <span v-if="hoverCard.counts?.reply">↩ {{ formatCount(hoverCard.counts.reply) }}</span>
         <span v-if="hoverCard.tag" class="edward-canvas__hover-tag">#{{ hoverCard.tag }}</span>
         <span v-if="hoverCard.affinity > 0.35" class="edward-canvas__hover-you">related to you</span>
       </div>
-      <span class="edward-canvas__hover-go">click to open · heart · reply · follow</span>
+      <span class="edward-canvas__hover-go">click to open</span>
     </div>
   </div>
 </template>

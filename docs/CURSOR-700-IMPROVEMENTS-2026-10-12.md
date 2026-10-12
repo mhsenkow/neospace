@@ -335,10 +335,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** A two-person, three-selection poll shows accurate percentages and unambiguous totals.
   - Evidence: Multiple-choice polls now summarize “N people” (`votersCount`) instead of reusing the selection total as votes.
 
-- [ ] **NS-047 · P3 · I — Expose hidden-total polls in compose.**
+- [x] **NS-047 · P3 · I — Expose hidden-total polls in compose.**
   - **Target:** [app/components/RealComposeBox.vue:300](/Users/powerox/neospace/app/components/RealComposeBox.vue:300).
   - **Change:** Add the hideTotals option already supported by normalizePoll, with server-aware availability and explanatory copy.
   - **Done when:** The created poll payload can intentionally hide totals until closing.
+  - **Done:** Mastodon servers get a “Hide vote counts until the poll closes” toggle (with brief copy); `hideTotals` flows through to `normalizePoll` / the create payload.
 
 - [x] **NS-048 · P2 · C — Avoid numeric meters for unknown poll counts.**
   - **Target:** [app/components/PostPoll.vue:46](/Users/powerox/neospace/app/components/PostPoll.vue:46).
@@ -346,10 +347,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** Assistive technology does not announce fabricated numeric results for hidden counts.
   - Evidence: When the server hides counts, options no longer render as `role=meter` with a fake 0%; they say “Results hidden until the poll closes” and expose own-vote text to screen readers.
 
-- [ ] **NS-049 · P3 · I — Render custom emoji in poll options.**
+- [x] **NS-049 · P3 · I — Render custom emoji in poll options.**
   - **Target:** [app/components/PostPoll.vue:97](/Users/powerox/neospace/app/components/PostPoll.vue:97).
   - **Change:** Use the existing safe emoji renderer with the poll's emoji allowlist in both choices and results.
   - **Done when:** Custom-emoji labels display consistently and remain safely named to screen readers.
+  - **Done:** `PostPoll` accepts status `emojis` and renders option labels via `emojify` (choices + results); `<img alt=":shortcode:">` keeps screen-reader names.
 
 - [x] **NS-050 · P2 · I — Refresh poll state after a duplicate vote response.**
   - **Target:** [app/components/RealPostCard.vue:823](/Users/powerox/neospace/app/components/RealPostCard.vue:823).
@@ -401,10 +403,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** DST transition inputs are either preserved as intended or rejected with a useful correction.
   - Evidence: `checkLocalSchedule` round-trips local date parts to reject nonexistent (DST gap / Feb 31) times with a correction message, used by both the queue and the composer; tested.
 
-- [ ] **NS-058 · P3 · I — Preview scheduled attachments and visibility.**
+- [x] **NS-058 · P3 · I — Preview scheduled attachments and visibility.**
   - **Target:** [app/components/settings/SettingsScheduledPosts.vue:16](/Users/powerox/neospace/app/components/settings/SettingsScheduledPosts.vue:16).
   - **Change:** Show media presence, visibility, and reply/poll context so similarly worded scheduled posts can be distinguished.
   - **Done when:** Users can identify the correct queued post before cancelling or rescheduling it.
+  - **Done:** Queue rows show a context line (visibility, attachment count, reply, poll options) via `scheduledPostMeta` / `scheduledMetaSummary`; tested in `tests/mediaUpload.test.ts`.
 
 - [x] **NS-059 · P2 · C — Respect scheduled-post content warnings in previews.**
   - **Target:** [app/utils/scheduledPosts.ts:32](/Users/powerox/neospace/app/utils/scheduledPosts.ts:32).
@@ -450,10 +453,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** Escape dismisses a loading or empty autocomplete popup predictably.
   - Evidence: `handleKeydown` dismisses a visible popup on Escape even while searching or after a failed lookup (cancels timer + race) and the composer stops propagation, so the sheet's own Escape doesn't fire; an invisible popup doesn't swallow Escape.
 
-- [ ] **NS-066 · P3 · I — Support valid non-ASCII mention names.**
+- [x] **NS-066 · P3 · I — Support valid non-ASCII mention names.**
   - **Target:** [app/utils/composeTokens.ts:30](/Users/powerox/neospace/app/utils/composeTokens.ts:30).
   - **Change:** Define token rules from supported server handle shapes and add Unicode cases where allowed.
   - **Done when:** Typing a supported non-ASCII username offers completions without breaking URL/email detection.
+  - **Done:** Mention tokens allow `\p{L}\p{M}\p{N}` in the local handle (same open-boundary rules); `@café` / `@Вася` covered in `tests/composeTokens.test.ts`.
 
 - [x] **NS-067 · P2 · C — Support combining marks in hashtag tokens.**
   - **Target:** [app/utils/composeTokens.ts:31](/Users/powerox/neospace/app/utils/composeTokens.ts:31).
@@ -481,10 +485,11 @@ For each item, completion means the specified behavior works, relevant account/r
 
 ## New pass: capabilities, metadata, and OAuth helpers
 
-- [ ] **NS-071 · P3 · I — Keep unknown capabilities immutable.**
+- [x] **NS-071 · P3 · I — Keep unknown capabilities immutable.**
   - **Target:** [app/utils/serverCapabilities.ts:46](/Users/powerox/neospace/app/utils/serverCapabilities.ts:46).
   - **Change:** Return isolated capability values or a deeply immutable type instead of a mutable interface assertion for the shared unknown object.
   - **Done when:** A caller cannot alter another account's unknown feature state.
+  - **Done:** `freezeCapabilities` deep-freezes detect results and `UNKNOWN_CAPABILITIES`; the instances getter re-freezes persisted rows. Tested in `tests/serverCapabilities.test.ts`.
 
 - [x] **NS-072 · P2 · C — Avoid identifying every bare semver as Mastodon.**
   - **Target:** [app/utils/serverCapabilities.ts:134](/Users/powerox/neospace/app/utils/serverCapabilities.ts:134).
@@ -504,10 +509,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** A partial metadata refresh cannot unexpectedly reset known limits to generic fallbacks.
   - Evidence: `mapInstanceConfig` falls back to the previous value for every limit (characters, media, profile fields, poll limits) when a refresh omits it.
 
-- [ ] **NS-075 · P3 · I — Give persisted capabilities a freshness policy.**
+- [x] **NS-075 · P3 · I — Give persisted capabilities a freshness policy.**
   - **Target:** [app/utils/serverCapabilities.ts:23](/Users/powerox/neospace/app/utils/serverCapabilities.ts:23).
   - **Change:** Record probe time/version and refresh or invalidate stale capabilities after a server upgrade or endpoint evidence.
   - **Done when:** An outdated unsupported flag does not permanently hide a newly available feature.
+  - **Done:** `capabilitiesProbedAt` is stamped on every probe; `isCapabilitiesStale` (7-day window) triggers `/api/v2/instance` refresh on startup verify (full verify always re-probes).
 
 - [x] **NS-076 · P2 · I — Include OAuth registration inputs in cache identity.**
   - **Target:** [app/utils/oauthApp.ts:5](/Users/powerox/neospace/app/utils/oauthApp.ts:5).
@@ -533,10 +539,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** An invalid client can recover without an infinite login loop or reusing the rejected registration.
   - Evidence: `tests/oauthApp.test.ts` covers rejected-client recovery (clear once → single re-registration, rejected registration never reused), legacy/mismatched identity, corrupt blobs and pruning.
 
-- [ ] **NS-080 · P3 · C — Bound the persisted OAuth application cache.**
+- [x] **NS-080 · P3 · C — Bound the persisted OAuth application cache.**
   - **Target:** [app/utils/oauthApp.ts:26](/Users/powerox/neospace/app/utils/oauthApp.ts:26).
   - **Change:** Add TTL/LRU pruning and schema validation rather than allowing unlimited host entries.
   - **Done when:** Repeated probes cannot grow the application-cache blob without bound.
+  - **Done:** `readMap` validates entry shape, drops entries older than `OAUTH_APP_CACHE_TTL_MS` (90d), and keeps the existing LRU cap of 32 hosts; tested in `tests/oauthApp.test.ts`.
 
 ## New pass: appearance, accessibility, and extracted panels
 
@@ -546,15 +553,17 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** A recorded artifact budget demonstrates the reduction while supported scripts still render correctly.
   - **Done:** Measured, then cut the install-time download: fonts are no longer precached (`nuxt.config.ts` `globPatterns` drops `woff2`; a `CacheFirst` runtime cache `neo-fonts` stores only the faces/subsets actually used, still offline-capable afterwards). Precache went from 292 entries / 4,425 KiB to 158 entries / ~2,670 KiB (−40%); all @fontsource subsets are kept, so every supported script still renders (browsers fetch by `unicode-range`). Budget recorded and enforced by `scripts/precache-budget.mjs` (`npm run budget`, run in CI after `generate`; `tests/precache-budget.test.ts`). The e2e font journeys (NS-084) still load the right families.
 
-- [ ] **NS-082 · P3 · C — Provide real bold weights for active font families.**
+- [x] **NS-082 · P3 · C — Provide real bold weights for active font families.**
   - **Target:** [app/utils/loadFonts.ts:10](/Users/powerox/neospace/app/utils/loadFonts.ts:10).
   - **Change:** Load the bold weight used by the UI where available, or intentionally reduce bold styling instead of relying silently on synthesized 700 from 400/500.
   - **Done when:** Representative headings and badges use an intentional weight across each supported family.
+  - **Done:** Each @fontsource family loads 400 + 600 (700 for Space Mono) instead of faux-bold from 500-only faces.
 
-- [ ] **NS-083 · P3 · I — Retry a failed active font without toggling appearance.**
+- [x] **NS-083 · P3 · I — Retry a failed active font without toggling appearance.**
   - **Target:** [app/utils/loadFonts.ts:140](/Users/powerox/neospace/app/utils/loadFonts.ts:140).
   - **Change:** Provide a bounded retry on online/focus recovery for the active family after load failure.
   - **Done when:** The chosen font can recover after a connection failure without changing the selected theme or font.
+  - **Done:** Failed loads are tracked and retried (max 2) on `online` / `focus` without changing appearance prefs.
 
 - [x] **NS-084 · P2 · I — Verify font privacy through actual network requests.**
   - **Target:** [tests/loadFonts.test.ts:4](/Users/powerox/neospace/tests/loadFonts.test.ts:4).
@@ -585,16 +594,17 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Done when:** All tabs can be reached by touch and keyboard at 375px and with enlarged text.
   - Evidence: Profile tablist scrolls horizontally (`overflow-x:auto`, tabs `flex:1 0 auto`, `min-height`, no wrap) and `NeoTabs` scrolls the selected tab into view. Not re-measured in a browser at 375px.
 
-- [ ] **NS-089 · P3 · I — Consolidate duplicated poll styling.**
+- [x] **NS-089 · P3 · I — Consolidate duplicated poll styling.**
   - **Target:** [app/components/RealPostCard.vue:1672](/Users/powerox/neospace/app/components/RealPostCard.vue:1672).
   - **Change:** Remove stale parent poll rules after checking scoped interactions and make PostPoll own its standard layout variants.
   - **Done when:** Poll appearance is controlled in one clear place without changing CW or Flick behavior.
+  - **Done:** Flip layout margins/order live on `PostPoll` (`layout` prop); duplicate `.status-poll` rules removed from `RealPostCard.vue`.
 
-- [ ] **NS-090 · P2 · I — Finish extracting settings panels incrementally.**
+- [x] **NS-090 · P2 · I — Finish extracting settings panels incrementally.**
   - **Target:** [app/components/SettingsModal.vue:1](/Users/powerox/neospace/app/components/SettingsModal.vue:1).
   - **Change:** Extract remaining privacy, notification, posting, filters, profile, and account sections behind typed interfaces; appearance extraction alone leaves a large orchestration component.
   - **Done when:** The host owns navigation/lifecycle while each panel owns its form and local errors.
-  - Partial (left unchecked): Extracted `SettingsPostingPanel.vue` and `SettingsNotificationsPanel.vue` (posting owns form + dirty via `v-model:dirty`; notifications is instance-link only). Profile, privacy, filters, and account sections remain inline in `SettingsModal.vue`. Tests: `tests/settings-posting.test.ts`.
+  - **Done:** Host keeps nav/lifecycle/dirty-guard; panels own forms — `SettingsProfilePanel`, `SettingsPrivacyPanel`, `SettingsFiltersPanel`, `SettingsAccountPanel`, plus posting/notifications/appearance. Profile/privacy emit `v-model:dirty`.
 
 ## New pass: release engineering and trustworthy diagnostics
 
@@ -621,10 +631,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Change:** Run the prepaint generator through dev/build hooks or detect stale output before those commands.
   - **Done when:** Changing the appearance catalog cannot leave development or build using stale boot options.
   - **Done:** `package.json` `predev`/`prebuild` run `scripts/build-prepaint.mjs`, which now also writes the theme-color map; `public/boot/prepaint.js` regenerated.
-- [ ] **NS-095 · P3 · C — Avoid rebuilding the same app in each CI job.**
+- [x] **NS-095 · P3 · C — Avoid rebuilding the same app in each CI job.**
   - **Target:** [.github/workflows/ci.yml:36](/Users/powerox/neospace/.github/workflows/ci.yml:36).
   - **Change:** Upload generated output from the check job and reuse that exact artifact for browser verification.
   - **Done when:** Browser tests inspect the same built output that passed the build gate.
+  - **Done:** The `e2e` job downloads `site-${{ github.sha }}` from `check` instead of running `npm run generate` again.
 
 - [x] **NS-096 · P2 · C — Pin CI actions and bound job duration.**
   - **Target:** [.github/workflows/ci.yml:20](/Users/powerox/neospace/.github/workflows/ci.yml:20).
@@ -636,10 +647,11 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Change:** Add a dedicated TypeScript project covering Playwright config, fixtures, helpers, and specs instead of relying only on runtime transpilation.
   - **Done when:** A fixture or assertion type error fails a named typecheck gate.
   - **Done:** Added `e2e/tsconfig.json` and `npm run typecheck:e2e` (included in `lint` and `check`, which CI runs); verified it flags a deliberate type error.
-- [ ] **NS-098 · P3 · C — Make mocked status creation deterministic.**
+- [x] **NS-098 · P3 · C — Make mocked status creation deterministic.**
   - **Target:** [e2e/helpers/mockApi.ts:39](/Users/powerox/neospace/e2e/helpers/mockApi.ts:39).
   - **Change:** Use a deterministic id sequence and assert submitted content/visibility rather than returning the same canned text for every mutation.
   - **Done when:** Identical runs produce stable fixtures and incorrect request payloads cannot pass unnoticed.
+  - **Done:** POST `/api/v1/statuses` uses a fixed `9001+` id sequence, echoes submitted `status`/`visibility` in the response, and 422s empty text so bad payloads can’t pass silently.
 
 - [x] **NS-099 · P2 · C — Submit the exact diagnostic logs the user previewed.**
   - **Target:** [app/components/FeedbackNotes.vue:221](/Users/powerox/neospace/app/components/FeedbackNotes.vue:221).
@@ -914,11 +926,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1158](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1158); explicit source files unchanged at review time.
   - Evidence: Done in the P3 UX/A11Y/polish pass; see `tests/p3-batch.test.ts` for the util-level cases (UI changes verified by typecheck + unit tests, not in a live browser).
 
-- [ ] **NS-138 · P3 · CODE · A · M — Learn it at runtime: on a 422 or 401 from timelines/public, remember the host (persisted with a TTL).**
+- [x] **NS-138 · P3 · CODE · A · M — Learn it at runtime: on a 422 or 401 from timelines/public, remember the host (persisted with a TTL).**
   - **Target:** [app/utils/instances.ts:12](/Users/powerox/neospace/app/utils/instances.ts:12). **Area:** C. Server compatibility & input normalisation (utils/instances.ts, ServerPicker.vue).
   - **Change:** Learn it at runtime: on a 422 or 401 from `timelines/public`, remember the host (persisted with a TTL).
   - **Prior observation to check:** `app/utils/instances.ts:12` — `AUTH_GATED_PUBLIC_HOSTS` is a hand-kept list of 3 hosts. Since Mastodon 4.2 any server can gate public timelines.
   - **Provenance:** [October 9 candidate, line 1160](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1160); explicit source files unchanged at review time.
+  - **Done:** `notePublicTimelineAuthFailure` / `rememberAuthGatedPublicHost` (90-day TTL in localStorage) merge with the static set; wired from `instances` store + `useEdwardStream`. Tests: `tests/p3-edward-shell-batch.test.ts`.
 
 - [x] **NS-139 · P3 · UX · A · S — inputmode="email".**
   - **Target:** [app/components/ServerPicker.vue:190](/Users/powerox/neospace/app/components/ServerPicker.vue:190). **Area:** C. Server compatibility & input normalisation (utils/instances.ts, ServerPicker.vue).
@@ -1421,11 +1434,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 719](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:719); explicit source files unchanged at review time.
   - Evidence: Done in the P3 UX/A11Y/polish pass; see `tests/p3-batch.test.ts` for the util-level cases (UI changes verified by typecheck + unit tests, not in a live browser).
 
-- [ ] **NS-213 · P3 · DESIGN · A · S — Give each its own glyph.**
+- [x] **NS-213 · P3 · DESIGN · A · S — Give each its own glyph.**
   - **Target:** [app/components/shell/DesktopSidebar.vue:101](/Users/powerox/neospace/app/components/shell/DesktopSidebar.vue:101). **Area:** DesktopSidebar (`app/components/shell/DesktopSidebar.vue`).
   - **Change:** Give each its own glyph.
   - **Prior observation to check:** `DesktopSidebar.vue:101,230,97,600,331,590`: icons mean different things in the same sidebar. The heart is both Activity and the "Liked" feed, `servers` is both Federated and "Accounts & servers", and `message` is both "Leave a note" and "Direct messages".
   - **Provenance:** [October 9 candidate, line 720](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:720); explicit source files unchanged at review time.
+  - **Done:** Activity → `bell`, Liked → `sparkle`, Federated → `reblog`, feedback → `pen` (DMs still `message` / Inbox `send`). Drawer algorithm rows match.
 
 - [x] **NS-214 · P3 · UX · A · S — Rename Look's control to "Spacing" and use "Show/Hide".**
   - **Target:** [app/components/shell/DesktopSidebar.vue:472](/Users/powerox/neospace/app/components/shell/DesktopSidebar.vue:472). **Area:** DesktopSidebar (`app/components/shell/DesktopSidebar.vue`).
@@ -1532,17 +1546,19 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 739](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:739); explicit source files unchanged at review time.
   - Evidence: Done in the P3 UX/A11Y/polish pass; see `tests/p3-batch.test.ts` for the util-level cases (UI changes verified by typecheck + unit tests, not in a live browser).
 
-- [ ] **NS-229 · P3 · UX · A · M — Track horizontal drag on the panel and close past a threshold (respecting reduced motion).**
+- [x] **NS-229 · P3 · UX · A · M — Track horizontal drag on the panel and close past a threshold (respecting reduced motion).**
   - **Target:** [app/components/shell/MobileDrawer.vue:149](/Users/powerox/neospace/app/components/shell/MobileDrawer.vue:149). **Area:** MobileDrawer (`app/components/shell/MobileDrawer.vue`).
   - **Change:** Track horizontal drag on the panel and close past a threshold (respecting reduced motion).
   - **Prior observation to check:** `MobileDrawer.vue:149-162`: the 280px drawer has no swipe-to-close (or edge-swipe-to-open) gesture; only tapping the overlay or the X closes it.
   - **Provenance:** [October 9 candidate, line 740](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:740); explicit source files unchanged at review time.
+  - **Done:** Swipe-right on `#mobile-sidebar` closes past 88px; drag transform skipped when reduced motion is on.
 
-- [ ] **NS-230 · P3 · CODE · A · S — Move them to one shared partial and delete the dead rules.**
+- [x] **NS-230 · P3 · CODE · A · S — Move them to one shared partial and delete the dead rules.**
   - **Target:** [app/components/shell/MobileDrawer.vue:840](/Users/powerox/neospace/app/components/shell/MobileDrawer.vue:840). **Area:** MobileDrawer (`app/components/shell/MobileDrawer.vue`).
   - **Change:** Move them to one shared partial and delete the dead rules.
   - **Prior observation to check:** `MobileDrawer.vue:840-892`, `MobileTabBar.vue:247-300,303-355`, `DesktopSidebar.vue:1340-1366`: `.nav-badge` is copied three times and `.chrome-hint` with its `@keyframes` twice. The drawer's `:deep(.acct-switch.chrome-hint …)` (lines 876-882) targets nothing, since the drawer has no AccountSwitcher. The tab bar's `&--avatar` and `__avatar*` rules are dead.
   - **Provenance:** [October 9 candidate, line 741](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:741); explicit source files unchanged at review time.
+  - **Done:** `app/assets/css/_shell-chrome.scss` imported from `main.scss`; duplicates removed from drawer/tab bar/sidebar (drawer acct-switch deep rule dropped).
 
 - [x] **NS-231 · P3 · DESIGN · A · S — Guard the hover rules (as MobileDrawer.vue:465 already does).**
   - **Target:** [app/components/shell/MobileHeader.vue:110](/Users/powerox/neospace/app/components/shell/MobileHeader.vue:110). **Area:** MobileHeader (`app/components/shell/MobileHeader.vue`).
@@ -1565,11 +1581,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 751](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:751); explicit source files unchanged at review time.
   - **Done:** `MobileTabBar.vue` tab items get an `:active` background.
 
-- [ ] **NS-234 · P3 · UX · A · M — Decide on labels, or on distinct icons.**
+- [x] **NS-234 · P3 · UX · A · M — Decide on labels, or on distinct icons.**
   - **Target:** [app/components/shell/MobileTabBar.vue:76](/Users/powerox/neospace/app/components/shell/MobileTabBar.vue:76). **Area:** MobileTabBar (`app/components/shell/MobileTabBar.vue`).
   - **Change:** Decide on labels, or on distinct icons.
   - **Prior observation to check:** `MobileTabBar.vue:76-184`: the tabs are icons only, with no visible labels. The heart means "Activity" here but "Liked" in the drawer and sidebar algorithm lists.
   - **Provenance:** [October 9 candidate, line 752](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:752); explicit source files unchanged at review time.
+  - **Done:** Chose distinct icons: Activity → `bell`, Messages → `send` (Liked stays `sparkle` in drawer/sidebar).
 
 - [x] **NS-235 · P3 · A11Y · A · S — Make them match (menu).**
   - **Target:** [app/components/NeoMenu.vue:301](/Users/powerox/neospace/app/components/NeoMenu.vue:301). **Area:** NeoMenu (`app/components/NeoMenu.vue`).
@@ -2132,11 +2149,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 293](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:293); explicit source files unchanged at review time.
   - Evidence: Done in the P3 UX/A11Y/polish pass; see `tests/p3-batch.test.ts` for the util-level cases (UI changes verified by typecheck + unit tests, not in a live browser).
 
-- [ ] **NS-316 · P3 · UX · A · M — Collapse within a sliding window (say 20 rows), keeping the first occurrence's position.**
+- [x] **NS-316 · P3 · UX · A · M — Collapse within a sliding window (say 20 rows), keeping the first occurrence's position.**
   - **Target:** [app/utils/statusIdentity.ts:108](/Users/powerox/neospace/app/utils/statusIdentity.ts:108). **Area:** F. Column chrome, DnD, composables & utils.
   - **Change:** Collapse within a sliding window (say 20 rows), keeping the first occurrence's position.
   - **Prior observation to check:** `app/utils/statusIdentity.ts:108` — Reblogs collapse only when they are *consecutive*. The same post boosted by three followees a few posts apart still repeats in Home, which is the complaint the earlier "A and 2 others reposted" item was meant to fix.
   - **Provenance:** [October 9 candidate, line 294](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:294); explicit source files unchanged at review time.
+  - **Done:** `collapseDuplicateReblogs` merges within the last 20 rendered rows at the first slot. Tests: `tests/p3-edward-shell-batch.test.ts`, existing smoke case kept.
 
 ## Remaining candidates: Edward (lean-back 3D discovery mode)
 
@@ -2258,83 +2276,96 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `tests/edward.test.ts:48` — The test "matches followed accounts by local part as before" encodes the cross-server false positive (bare `alice` matches `alice@far.example`). There are also no tests for `useEdwardStream` (re-seed backoff, backpack shed/release order, ghost purge), for the recessed restore after the compose sheet closes, or for `mergeNewer` keeping the selected post.
   - **Provenance:** [October 9 candidate, line 564](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:564); explicit source files unchanged at review time.
   - **Done:** Flipped the cross-server assertion earlier; now added `tests/edwardStream.test.ts` (fake timers): backpack seeds/releases at stream pace and clears on stop, ghosted author purged from the queue and never dripped, deleted post purged, re-seed backoff after a rate limit (calm 12 s → 24 s), `mergeNewer` keeps the selected post, and the recess restore. The recess restore was extracted to `composables/useEdwardRecess.ts` so it is testable; `stop()` now also zeroes the store's backpack count (a bug the test found).
-- [ ] **NS-335 · P3 · PERF · A · M — Keep one preallocated Float32BufferAttribute (180×6), rewrite the pairs each frame, and set needsUpdate.**
+- [x] **NS-335 · P3 · PERF · A · M — Keep one preallocated Float32BufferAttribute (180×6), rewrite the pairs each frame, and set needsUpdate.**
   - **Target:** [app/components/edward/EdwardCanvas.vue:851](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:851). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Keep one preallocated `Float32BufferAttribute` (180×6), rewrite the pairs each frame, and set `needsUpdate`.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:851-887` — `rebuildFilaments` allocates a new `BufferGeometry` (GPU buffer create plus dispose) every 30 frames and on every sync. Between rebuilds the lines stay frozen at old positions while the balls move, so filaments visibly detach.
   - **Provenance:** [October 9 candidate, line 487](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:487); explicit source files unchanged at review time.
+  - **Done:** One dynamic `Float32BufferAttribute` + `setDrawRange`; filaments updated every frame (not every 30 ticks).
 
-- [ ] **NS-336 · P3 · UX · A · L — Add a "Restart 3D" action that disposes and re-inits the scene, or use WEBGL_lose_context.restoreContext().**
+- [x] **NS-336 · P3 · UX · A · L — Add a "Restart 3D" action that disposes and re-inits the scene, or use WEBGL_lose_context.restoreContext().**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1582](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1582). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Add a "Restart 3D" action that disposes and re-inits the scene, or use `WEBGL_lose_context.restoreContext()`.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1582-1583` — The context-lost copy says it "resumes when the device allows", but there's no retry and it stays up indefinitely if Chrome refuses to restore.
   - **Provenance:** [October 9 candidate, line 491](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:491); explicit source files unchanged at review time.
+  - **Done:** `defineExpose({ restart3d })` on canvas; `EdwardMode` shows **Restart 3D** on context-lost / 3D errors.
 
-- [ ] **NS-337 · P3 · PERF · A · L — Keep only the visibleBalls watcher.**
+- [x] **NS-337 · P3 · PERF · A · L — Keep only the visibleBalls watcher.**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1846](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1846). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Keep only the `visibleBalls` watcher.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1846-1861` — Three watchers call `syncBallsFromStore`. A filter change fires both the `visibleBalls` watcher and the `[exploreQuery, exploreSort]` watcher, and an affinity change fires both `affinity` and `visibleBalls`. Each sync rebuilds filaments.
   - **Provenance:** [October 9 candidate, line 494](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:494); explicit source files unchanged at review time.
+  - **Done:** Removed redundant `affinity` and `exploreQuery`/`exploreSort` watchers.
 
-- [ ] **NS-338 · P3 · PERF · A · L — Keep a cached pick-mesh array, rebuilt in syncBallsFromStore.**
+- [x] **NS-338 · P3 · PERF · A · L — Keep a cached pick-mesh array, rebuilt in syncBallsFromStore.**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1278](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1278). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Keep a cached pick-mesh array, rebuilt in `syncBallsFromStore`.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1278` — `hitTest` allocates `balls.flatMap(...)` (about 150 elements) on every `pointermove`.
   - **Provenance:** [October 9 candidate, line 495](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:495); explicit source files unchanged at review time.
+  - **Done:** `pickMeshes` cache rebuilt in `syncBallsFromStore`, used by `hitTest`.
 
-- [ ] **NS-339 · P3 · CODE · A · L — Pass the header and console rects (or their heights, already measured as headerH/exploreH) as props.**
+- [x] **NS-339 · P3 · CODE · A · L — Pass the header and console rects (or their heights, already measured as headerH/exploreH) as props.**
   - **Target:** [app/components/edward/EdwardCanvas.vue:956](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:956). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Pass the header and console rects (or their heights, already measured as `headerH`/`exploreH`) as props.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:956-957` — `measureLens` reaches into the parent with global `document.querySelector('.edward-mode__header' / '__explore')`, coupling the canvas to the parent's class names.
   - **Provenance:** [October 9 candidate, line 496](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:496); explicit source files unchanged at review time.
+  - **Done:** `stageHeaderH` / `stageExploreH` props from `EdwardMode` (querySelector kept as fallback until RO measures).
 
-- [ ] **NS-340 · P3 · UX · A · L — Change it to "click to open".**
+- [x] **NS-340 · P3 · UX · A · L — Change it to "click to open".**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1950](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1950). **Area:** Canvas overlays — hover card & captions.
   - **Change:** Change it to "click to open".
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1950` — The hover footer promises "click to open · heart · reply · follow", but the hover card can't do any of those and clicking only opens the peek.
   - **Provenance:** [October 9 candidate, line 499](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:499); explicit source files unchanged at review time.
+  - **Done:** Hover footer copy is **click to open** only.
 
-- [ ] **NS-341 · P3 · UX · A · L — Show why only, or map moods to user-facing labels.**
+- [x] **NS-341 · P3 · UX · A · L — Show why only, or map moods to user-facing labels.**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1923](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1923). **Area:** Canvas overlays — hover card & captions.
   - **Change:** Show `why` only, or map moods to user-facing labels.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1923` — The hover header prints the internal mood id (`{{ hoverCard.mood }}` such as `yapping`, `linky`, `eggplant`, `booby`) uppercased next to the `why` label, which often repeats it ("REPLY · YAPPING").
   - **Provenance:** [October 9 candidate, line 500](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:500); explicit source files unchanged at review time.
+  - **Done:** Hover kind line shows `why` only (glyph still in the corner).
 
-- [ ] **NS-342 · P3 · DESIGN · A · L — Use one Intl.NumberFormat(undefined, { notation: 'compact' }) helper everywhere.**
+- [x] **NS-342 · P3 · DESIGN · A · L — Use one Intl.NumberFormat(undefined, { notation: 'compact' }) helper everywhere.**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1944](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1944). **Area:** Canvas overlays — hover card & captions.
   - **Change:** Use one `Intl.NumberFormat(undefined, { notation: 'compact' })` helper everywhere.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1944-1946` — Hover counts print raw (`♥ 12345`) while the coin texture uses `compact()` (`:351`). The deck (`EdwardMode.vue:1027-1029`) and peek (`EdwardPostModal.vue:399,411,421`) also print raw numbers.
   - **Provenance:** [October 9 candidate, line 501](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:501); explicit source files unchanged at review time.
+  - **Done:** Shared `formatCount` from `searchQuery.ts` on hover, deck, peek, and coin pips.
 
-- [ ] **NS-343 · P3 · UX · A · L — Anchor www as \bw{3,}\b (JP-style laughter, without a following dot), and skip ? inside URLs (strip URLs…**
+- [x] **NS-343 · P3 · UX · A · L — Anchor www as \bw{3,}\b (JP-style laughter, without a following dot), and skip ? inside URLs (strip URLs…**
   - **Target:** [app/utils/edwardFaces.ts:87](/Users/powerox/neospace/app/utils/edwardFaces.ts:87). **Area:** Semantics, affinity, faces & explore (utils).
   - **Change:** Anchor `www` as `\bw{3,}\b` (JP-style laughter, without a following dot), and skip `?` inside URLs (strip URLs before cue matching).
   - **Prior observation to check:** `app/utils/edwardFaces.ts:87` — `LAUGH_RE` contains an unanchored `www+`, so any post whose text includes a "www." link becomes a laughing "giggle" face. `ASK_RE` (`:110`) matches any `?`, including URL query strings, so link posts read as "asking something".
   - **Provenance:** [October 9 candidate, line 550](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:550); explicit source files unchanged at review time.
+  - **Done:** `textForMoodCues` strips URLs; `LAUGH_RE` uses `\bw{3,}\b`. Tests: `tests/p3-edward-shell-batch.test.ts`.
 
-- [ ] **NS-344 · P3 · UX · A · L — Rename near to something like "big & close", or merge the two modes.**
+- [x] **NS-344 · P3 · UX · A · L — Rename near to something like "big & close", or merge the two modes.**
   - **Target:** [app/utils/edwardExplore.ts:129](/Users/powerox/neospace/app/utils/edwardExplore.ts:129). **Area:** Semantics, affinity, faces & explore (utils).
   - **Change:** Rename `near` to something like "big & close", or merge the two modes.
   - **Prior observation to check:** `app/utils/edwardExplore.ts:129-136` — The sort labels "near · you" and "related" sound the same, and the hints ("related and big, pulled close" vs "closest to who and what you follow") don't separate them.
   - **Provenance:** [October 9 candidate, line 555](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:555); explicit source files unchanged at review time.
+  - **Done:** Sort label **big & close** with a distinct hint from **related**.
 
-- [ ] **NS-345 · P3 · UX · A · L — For the far channel, require ball.language (treat unknown as excluded).**
+- [x] **NS-345 · P3 · UX · A · L — For the far channel, require ball.language (treat unknown as excluded).**
   - **Target:** [app/utils/edwardExplore.ts:396](/Users/powerox/neospace/app/utils/edwardExplore.ts:396). **Area:** Semantics, affinity, faces & explore (utils).
   - **Change:** For the `far` channel, require `ball.language` (treat unknown as excluded).
   - **Prior observation to check:** `app/utils/edwardExplore.ts:396` — `-lang:xx` only excludes posts that declare a language, so the "far away" channel (`:194`) is full of untagged posts in your own language.
   - **Provenance:** [October 9 candidate, line 556](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:556); explicit source files unchanged at review time.
+  - **Done:** Any `-lang:` filter excludes missing `ball.language` too. Tests: `tests/p3-edward-shell-batch.test.ts`.
 
-- [ ] **NS-346 · P3 · DESIGN · A · L — Give rage its own glyph (e.g**
+- [x] **NS-346 · P3 · DESIGN · A · L — Give rage its own glyph (e.g**
   - **Target:** [app/utils/edwardFaces.ts:963](/Users/powerox/neospace/app/utils/edwardFaces.ts:963). **Area:** Semantics, affinity, faces & explore (utils).
   - **Change:** Give rage its own glyph (e.g. `ಠ益ಠ`).
   - **Prior observation to check:** `app/utils/edwardFaces.ts:963` — `manic` (viral) and `rage` (`:966`) share the glyph `✧ヮ✧`, so the legend, deck and peek can't tell "viral" from "heat".
   - **Provenance:** [October 9 candidate, line 559](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:559); explicit source files unchanged at review time.
+  - **Done:** `MOOD_GLYPH.rage` → `ಠ益ಠ`.
 
-- [ ] **NS-347 · P3 · UX · A · L — Pass loading/error/total and return matching lines ("ed can't reach the net… retrying (´・ω・)").**
+- [x] **NS-347 · P3 · UX · A · L — Pass loading/error/total and return matching lines ("ed can't reach the net… retrying (´・ω・)").**
   - **Target:** [app/utils/edwardVoice.ts:40](/Users/powerox/neospace/app/utils/edwardVoice.ts:40). **Area:** Semantics, affinity, faces & explore (utils).
   - **Change:** Pass `loading`/`error`/`total` and return matching lines ("ed can't reach the net… retrying (´・ω・`)").
   - **Prior observation to check:** `app/utils/edwardVoice.ts:40-69` — `edQuip` has no lines for loading, error or empty-unfiltered states. While the banner says the server is rate-limiting or the 3D view died, Ed still types "hack hack hack ✌".
   - **Provenance:** [October 9 candidate, line 561](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:561); explicit source files unchanged at review time.
+  - **Done:** `EdQuipContext` takes `loading`/`error`; `EdwardMode` passes store state. Tests: `tests/p3-edward-shell-batch.test.ts`.
 
 ## Remaining candidates: Groups (hashtag groups) & ranked-feed algorithms
 
@@ -2854,19 +2885,22 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1324](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1324); explicit source files unchanged at review time.
   - Evidence: Running `inCount` in X interleave (no O(n²) filter).
 
-- [ ] **NS-421 · P3 · CODE · A · S — Decode entities (a shared helper, also used by utils/algorithms.ts) before tokenizing.**
+- [x] **NS-421 · P3 · CODE · A · S — Decode entities (a shared helper, also used by utils/algorithms.ts) before tokenizing.**
+  - **Done:** `app/utils/decodeEntities.ts` shared by rankers (`stripHtml`/`contentWords`) and algorithms.
   - **Target:** [app/utils/rankers.ts:118](/Users/powerox/neospace/app/utils/rankers.ts:118). **Area:** app/utils/rankers.ts.
   - **Change:** Decode entities (a shared helper, also used by `utils/algorithms.ts`) before tokenizing.
   - **Prior observation to check:** `app/utils/rankers.ts:118-124` — `stripHtml` turns every entity into a space, so Mastodon's `don&#39;t` becomes "don t" and `&amp;` becomes a gap. That pollutes `likedWords`/interest matching and the engagement-bait regex ("like if you&#39;re…").
   - **Provenance:** [October 9 candidate, line 1325](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1325); explicit source files unchanged at review time.
 
-- [ ] **NS-422 · P3 · UX · A · S — Use Intl.Segmenter(undefined, { granularity: 'word' }) when available.**
+- [x] **NS-422 · P3 · UX · A · S — Use Intl.Segmenter(undefined, { granularity: 'word' }) when available.**
+  - **Done:** `contentWords` uses `Intl.Segmenter` word segments with regex fallback.
   - **Target:** [app/utils/rankers.ts:128](/Users/powerox/neospace/app/utils/rankers.ts:128). **Area:** app/utils/rankers.ts.
   - **Change:** Use `Intl.Segmenter(undefined, { granularity: 'word' })` when available.
   - **Prior observation to check:** `app/utils/rankers.ts:128` — `contentWords` assumes space-separated words: CJK/Thai posts become one giant "word" (or a few), so TikTok-style interest matching never fires for those languages.
   - **Provenance:** [October 9 candidate, line 1326](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1326); explicit source files unchanged at review time.
 
-- [ ] **NS-423 · P3 · UX · A · S — Seed it from settingsStore preferences (posting:default:language) and accept a set of languages.**
+- [x] **NS-423 · P3 · UX · A · S — Seed it from settingsStore preferences (posting:default:language) and accept a set of languages.**
+  - **Done:** `viewerLangs` set in `useRankedFeed` from posting default + navigator; `languageMatches` for TikTok ranker.
   - **Target:** [app/utils/rankers.ts:484](/Users/powerox/neospace/app/utils/rankers.ts:484). **Area:** app/utils/rankers.ts.
   - **Change:** Seed it from `settingsStore` preferences (`posting:default:language`) and accept a set of languages.
   - **Prior observation to check:** `app/utils/rankers.ts:484-487` — `viewerLang` comes from `navigator.language` only, ignoring the account's posting language and chosen UI language, so a bilingual user is penalised (×0.8) for their own language.
@@ -2879,55 +2913,64 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1328](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1328); explicit source files unchanged at review time.
   - Evidence: Facebook description notes English-only bait regex.
 
-- [ ] **NS-425 · P3 · PERF · A · S — Cache features per identity, and evict served entries older than a few pages.**
+- [x] **NS-425 · P3 · PERF · A · S — Cache features per identity, and evict served entries older than a few pages.**
+  - **Done:** `_featureCache` on rank context; pool rows evicted after `PAGE * 5` served identities.
   - **Target:** [app/composables/useRankedFeed.ts:59](/Users/powerox/neospace/app/composables/useRankedFeed.ts:59). **Area:** app/composables/useRankedFeed.ts.
   - **Change:** Cache features per identity, and evict served entries older than a few pages.
   - **Prior observation to check:** `app/composables/useRankedFeed.ts:59,186-196` — `pool` grows without bound for the session, and every refill re-runs `features()` (HTML strip, regex, tokenizing) on every unserved post.
   - **Provenance:** [October 9 candidate, line 1340](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1340); explicit source files unchanged at review time.
 
-- [ ] **NS-426 · P3 · PERF · A · S — Rank and serve after the first refill, and run the second in the background.**
+- [x] **NS-426 · P3 · PERF · A · S — Rank and serve after the first refill, and run the second in the background.**
+  - **Done:** Fresh load awaits one refill; second refill is fire-and-forget when the queue already has a page.
   - **Target:** [app/composables/useRankedFeed.ts:221](/Users/powerox/neospace/app/composables/useRankedFeed.ts:221). **Area:** app/composables/useRankedFeed.ts.
   - **Change:** Rank and serve after the first refill, and run the second in the background.
   - **Prior observation to check:** `app/composables/useRankedFeed.ts:221` — A fresh load runs two full refills (up to 5 sources × 2), plus up to 12 context requests (5+5 follow pages, favourites, bookmarks): ~22 requests before the first post. On slow networks the column spins for seconds.
   - **Provenance:** [October 9 candidate, line 1341](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1341); explicit source files unchanged at review time.
 
-- [ ] **NS-427 · P3 · UX · A · S — Expose the limits as constants and show "12 max" helper text and a warning in AlgorithmSheet.**
+- [x] **NS-427 · P3 · UX · A · S — Expose the limits as constants and show "12 max" helper text and a warning in AlgorithmSheet.**
+  - **Done:** `ALGORITHM_LIST_MAX` / `ALGORITHM_KEYWORD_MAX_LEN`; editor hints and over-limit warnings.
   - **Target:** [app/utils/algorithms.ts:85](/Users/powerox/neospace/app/utils/algorithms.ts:85). **Area:** app/utils/algorithms.ts.
   - **Change:** Expose the limits as constants and show "12 max" helper text and a warning in AlgorithmSheet.
   - **Prior observation to check:** `app/utils/algorithms.ts:85,96,99` — Tag and keyword lists are silently truncated to 12 entries and keywords over 64 chars are silently dropped. Nothing in the editor says so.
   - **Provenance:** [October 9 candidate, line 1350](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1350); explicit source files unchanged at review time.
 
-- [ ] **NS-428 · P3 · UX · A · S — Return a typed error ('version') and show "This link was made with a newer NeoSpace — refresh to update".**
+- [x] **NS-428 · P3 · UX · A · S — Return a typed error ('version') and show "This link was made with a newer NeoSpace — refresh to update".**
+  - **Done:** `tryDecodeAlgorithmShare` + import page copy for `reason: 'version'`.
   - **Target:** [app/utils/algorithms.ts:210](/Users/powerox/neospace/app/utils/algorithms.ts:210). **Area:** app/utils/algorithms.ts.
   - **Change:** Return a typed error (`'version'`) and show "This link was made with a newer NeoSpace — refresh to update".
   - **Prior observation to check:** `app/utils/algorithms.ts:210` — A payload with `v !== 1` (e.g., a link from a newer NeoSpace) gets the same generic "invalid or corrupted" error, and there's no migration hook.
   - **Provenance:** [October 9 candidate, line 1351](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1351); explicit source files unchanged at review time.
 
-- [ ] **NS-429 · P3 · UX · A · S — Require phrasing like "on local", "local timeline" or "this server".**
+- [x] **NS-429 · P3 · UX · A · S — Require phrasing like "on local", "local timeline" or "this server".**
+  - **Done:** `parseAlgorithmSentence` local source requires explicit timeline phrasing.
   - **Target:** [app/utils/algorithms.ts:411](/Users/powerox/neospace/app/utils/algorithms.ts:411). **Area:** app/utils/algorithms.ts.
   - **Change:** Require phrasing like "on local", "local timeline" or "this server".
   - **Prior observation to check:** `app/utils/algorithms.ts:411` — Source detection treats any "local" as the Local timeline, so "local news without replies" becomes a Local-timeline recipe with keyword "news".
   - **Provenance:** [October 9 candidate, line 1352](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1352); explicit source files unchanged at review time.
 
-- [ ] **NS-430 · P3 · UX · A · S — Return a boolean from saveCustom and toast "Saved for this session only — storage is full".**
+- [x] **NS-430 · P3 · UX · A · S — Return a boolean from saveCustom and toast "Saved for this session only — storage is full".**
+  - **Done:** `upsert` returns `{ recipe, persisted }`; AlgorithmSheet toasts when `persisted` is false.
   - **Target:** [app/stores/algorithms.ts:75](/Users/powerox/neospace/app/stores/algorithms.ts:75). **Area:** app/stores/algorithms.ts.
   - **Change:** Return a boolean from `saveCustom` and toast "Saved for this session only — storage is full".
   - **Prior observation to check:** `app/stores/algorithms.ts:75-79` — Quota/private-mode save failures are swallowed, so the toast says "Saved", the recipe works until reload, then vanishes.
   - **Provenance:** [October 9 candidate, line 1359](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1359); explicit source files unchanged at review time.
 
-- [ ] **NS-431 · P3 · CODE · A · S — Coerce booleans with === true, and skip custom ids starting with builtin-.**
+- [x] **NS-431 · P3 · CODE · A · S — Coerce booleans with === true, and skip custom ids starting with builtin-.**
+  - **Done:** Untrusted recipe hydration coerces flags and ignores `builtin-*` custom ids.
   - **Target:** [app/stores/algorithms.ts:51](/Users/powerox/neospace/app/stores/algorithms.ts:51). **Area:** app/stores/algorithms.ts.
   - **Change:** Coerce booleans with `=== true`, and skip custom ids starting with `builtin-`.
   - **Prior observation to check:** `app/stores/algorithms.ts:51-64` — Untrusted localStorage `mediaOnly`/`noReblogs`/`noReplies` are spread as-is (`"false"` is truthy), and a custom entry whose id equals a builtin id (`builtin-x`) replaces the builtin and can then be deleted.
   - **Provenance:** [October 9 candidate, line 1360](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1360); explicit source files unchanged at review time.
 
-- [ ] **NS-432 · P3 · UX · A · S — Branch the note on preview.ranker.**
+- [x] **NS-432 · P3 · UX · A · S — Branch the note on preview.ranker.**
+  - **Done:** Import page explains ranked vs filtered timelines separately.
   - **Target:** [app/pages/algorithms/import.vue:74](/Users/powerox/neospace/app/pages/algorithms/import.vue:74). **Area:** app/pages/algorithms/import.vue.
   - **Change:** Branch the note on `preview.ranker`.
   - **Prior observation to check:** `app/pages/algorithms/import.vue:74-76` — "This adds a filtered view on *your* timelines" is wrong for ranked recipes, which pull trending, federated and followed-tag posts from beyond your timelines.
   - **Provenance:** [October 9 candidate, line 1366](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1366); explicit source files unchanged at review time.
 
-- [ ] **NS-433 · P3 · UX · A · S — Toast "Already in your feeds — opened it" when the twin path was taken (return a flag from importPayload).**
+- [x] **NS-433 · P3 · UX · A · S — Toast "Already in your feeds — opened it" when the twin path was taken (return a flag from importPayload).**
+  - **Done:** `importPayload` returns `{ recipe, alreadyHad }`; import page toasts accordingly.
   - **Target:** [app/pages/algorithms/import.vue:48](/Users/powerox/neospace/app/pages/algorithms/import.vue:48). **Area:** app/pages/algorithms/import.vue.
   - **Change:** Toast "Already in your feeds — opened it" when the twin path was taken (return a flag from `importPayload`).
   - **Prior observation to check:** `app/pages/algorithms/import.vue:48-54` — Re-importing a link you already have (`twin`) still toasts "Added …", as if it were a new feed.
@@ -3056,7 +3099,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1494](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1494); explicit source files unchanged at review time.
   - **Done:** `createGitHubIssue` tests added with stubbed fetch/location.
 
-- [ ] **NS-451 · P3 · CODE · A · S — Build it from new URL(request.url).host.**
+- [x] **NS-451 · P3 · CODE · A · S — Build it from new URL(request.url).host.**
+  - **Done:** Feedback issue meta `source:` uses request host.
   - **Target:** [functions/api/feedback.ts:327](/Users/powerox/neospace/functions/api/feedback.ts:327). **Area:** Feedback API: functions/api/feedback.ts, functions/utils/rateLimit.ts, shared/feedbackConstants.ts.
   - **Change:** Build it from `new URL(request.url).host`.
   - **Prior observation to check:** `functions/api/feedback.ts:327` — The meta block hardcodes `source: neospace.ibm.io leave-a-note`, even for pages.dev previews and localhost, so triage can't tell preview reports from prod ones.
@@ -3069,7 +3113,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1405](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1405); explicit source files unchanged at review time.
   - Evidence: N/A: already in `feedback.ts` `json()`; test accepts charset.
 
-- [ ] **NS-453 · P3 · CODE · A · S — Use @cloudflare/workers-types and remove the override.**
+- [x] **NS-453 · P3 · CODE · A · S — Use @cloudflare/workers-types and remove the override.**
+  - **Done:** `@cloudflare/workers-types` devDependency; `PagesFunction` import; dropped `noImplicitAny: false`.
   - **Target:** [functions/api/feedback.ts:24](/Users/powerox/neospace/functions/api/feedback.ts:24). **Area:** Feedback API: functions/api/feedback.ts, functions/utils/rateLimit.ts, shared/feedbackConstants.ts.
   - **Change:** Use `@cloudflare/workers-types` and remove the override.
   - **Prior observation to check:** `functions/api/feedback.ts:24-27` + `functions/tsconfig.json:10` — Hand-rolled `PagesFunction` type (no `waitUntil` or `params`), and `noImplicitAny: false` weakens `strict`.
@@ -3694,7 +3739,8 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/utils/profileSources.ts:120` — The javascript/data/vbscript check is a dead duplicate of `:85`.
   - **Provenance:** [October 9 candidate, line 881](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:881); explicit source files unchanged at review time.
 
-- [ ] **NS-542 · P3 · CODE · A · S — Split only at top-level commas (track paren depth).**
+- [x] **NS-542 · P3 · CODE · A · S — Split only at top-level commas (track paren depth).**
+  - **Done:** `splitSelectorList` respects parentheses/quotes before scoping.
   - **Target:** [app/utils/sanitizeCss.ts:143](/Users/powerox/neospace/app/utils/sanitizeCss.ts:143). **Area:** app/utils/sanitizeCss.ts — profile skin sanitizer.
   - **Change:** Split only at top-level commas (track paren depth).
   - **Prior observation to check:** `app/utils/sanitizeCss.ts:143` — Splitting selectors on raw commas breaks `:is(a, b)` and `:where(…)` into `.scope :is(a, .scope b)`, silently changing what legitimate skins match.

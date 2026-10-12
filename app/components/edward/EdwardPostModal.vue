@@ -18,6 +18,7 @@ import { emojify, emojiUrlSet } from '~/utils/emojify'
 import { faceSpecFor, MOOD_GLYPH } from '~/utils/edwardFaces'
 import { accountLooksBot, lookupAcctFor, statusKind } from '~/utils/edwardSemantics'
 import NeoIcon from '~/components/NeoIcon.vue'
+import { formatCount } from '~/utils/searchQuery'
 
 const props = defineProps<{
   status: ExtendedStatus
@@ -389,7 +390,7 @@ watch(
           @click="handleFavourite()"
         >
           <NeoIcon name="heart" :size="15" :stroke="1.85" :filled="!!body.favourited" />
-          <em>{{ body.favouritesCount ?? 0 }}</em>
+          <em>{{ formatCount(body.favouritesCount) }}</em>
         </button>
         <button
           type="button"
@@ -401,7 +402,7 @@ watch(
           @click="toggleBoost(!body.reblogged)"
         >
           <NeoIcon name="reblog" :size="15" :stroke="1.85" />
-          <em>{{ body.reblogsCount ?? 0 }}</em>
+          <em>{{ formatCount(body.reblogsCount) }}</em>
         </button>
         <button
           type="button"
@@ -411,7 +412,7 @@ watch(
           @click="handleReply()"
         >
           <NeoIcon name="message" :size="15" :stroke="1.85" />
-          <em>{{ body.repliesCount ?? 0 }}</em>
+          <em>{{ formatCount(body.repliesCount) }}</em>
         </button>
         <button
           type="button"

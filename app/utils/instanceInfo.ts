@@ -32,6 +32,8 @@ export interface ConnectedInstanceInfo {
   }
   /** Software + feature flags, detected once when the instance is probed */
   capabilities?: ServerCapabilities
+  /** When capabilities/limits were last mapped from /api/v2/instance */
+  capabilitiesProbedAt?: number
 }
 
 /** Public (watch / explore) summary of a server. */
@@ -180,5 +182,6 @@ export function mapInstanceConfig(
         }
       : prev?.polls,
     capabilities,
+    capabilitiesProbedAt: Date.now(),
   }
 }

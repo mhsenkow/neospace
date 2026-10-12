@@ -97,3 +97,48 @@ export function scheduledHiddenBody(params: { text?: string | null; spoilerText?
   const text = (params.text || '').replace(/\s+/g, ' ').trim()
   return spoiler && text ? text : null
 }
+
+const VISIBILITY_LABEL: Record<string, string> = {
+  public: 'Public',
+  unlisted: 'Unlisted',
+  private: 'Followers only',
+  direct: 'Direct',
+  limited: 'Limited',
+}
+
+export type ScheduledPostMeta = {
+  visibility: string | null
+  attachments: number
+  inReply: boolean
+  pollOptions: number
+}
+
+/** Short labels so similarly worded queue rows are distinguishable */
+export function scheduledPostMeta(params: {
+  visibility?: string | null
+  mediaIds?: string[] | null
+  mediaAttachments?: unknown[] | null
+  inReplyToId?: string | null
+  poll?: { options?: string[] | null } | null
+}): ScheduledPostMeta {
+  const vis = (params.visibility || '').trim()
+  const attachments =
+    params.mediaAttachments?.length ??
+    (Array.isArray(params.mediaIds) ? params.mediaIds.length : 0)
+  const pollOptions = params.poll?.options?.filter((o) => (o || '').trim()).length ?? 0
+  return {
+    visibility: VISIBILITY_LABEL[vis] || (vis ? vis : null),
+    attachments,
+    inReply: !!(params.inReplyToId && String(params.inReplyToId).trim()),
+    pollOptions,
+  }
+}
+
+export function scheduledMetaSummary(meta: ScheduledPostMeta): string {
+  const parts: string[] = []
+  if (meta.visibility) parts.push(meta.visibility)
+  if (meta.attachments) parts.push(`${meta.attachments} attachment${meta.attachments === 1 ? '' : 's'}`)
+  if (meta.inReply) parts.push('Reply')
+  if (meta.pollOptions >= 2) parts.push(`Poll · ${meta.pollOptions} options`)
+  return parts.join(' · ')
+}

@@ -5,6 +5,7 @@
  * performs the vote — this component only collects the choice.
  */
 import type { mastodon } from 'masto'
+import { emojify, type EmojiInput } from '~/utils/emojify'
 
 const props = defineProps<{
   poll: mastodon.v1.Poll
@@ -12,7 +13,13 @@ const props = defineProps<{
   canVote: boolean
   /** A vote request is in flight */
   voting?: boolean
+  /** Custom emoji allowlist for option labels (`:shortcode:`) */
+  emojis?: EmojiInput[] | null
+  /** Flip-card layout tweaks owned here instead of the post card */
+  layout?: 'default' | 'flip' | 'flip-media'
 }>()
+
+const optionHtml = (title: string) => emojify(title, props.emojis, { escape: true })
 
 const emit = defineEmits<{
   vote: [choices: number[]]
@@ -117,7 +124,14 @@ const closesLabel = computed(() => {
 </script>
 
 <template>
-  <div class="status-poll" @click.stop>
+  <div
+    class="status-poll"
+    :class="{
+      'status-poll--flip': layout === 'flip',
+      'status-poll--flip-media': layout === 'flip-media',
+    }"
+    @click.stop
+  >
     <form v-if="showVoting" class="status-poll-form" @submit.prevent="submit">
       <fieldset class="status-poll-fieldset" :disabled="voting">
         <legend class="sr-only">
@@ -136,7 +150,7 @@ const closesLabel = computed(() => {
             :checked="selected.includes(optionIdx)"
             @change="toggle(optionIdx)"
           />
-          <span class="status-poll-title">{{ option.title }}</span>
+          <span class="status-poll-title" v-html="optionHtml(option.title)" />
         </label>
       </fieldset>
       <div class="status-poll-actions">
@@ -170,7 +184,7 @@ const closesLabel = computed(() => {
         "
       >
         <span class="status-poll-title">
-          {{ option.title }}
+          <span v-html="optionHtml(option.title)" />
           <span v-if="isOwnVote(optionIdx)" class="status-poll-own" aria-hidden="true">✓</span>
           <span v-if="countsHidden && isOwnVote(optionIdx)" class="sr-only">(your vote)</span>
         </span>
@@ -296,5 +310,30 @@ const closesLabel = computed(() => {
   margin: 0;
   font-size: 0.75rem;
   color: var(--neo-text-muted);
+}
+
+.status-poll-title :deep(.emoji) {
+  height: 1.1em;
+  width: 1.1em;
+  vertical-align: -0.15em;
+  object-fit: contain;
+}
+
+/* Flip card layout — parent flex column sets order on the poll root */
+.status-poll--flip {
+  order: 3;
+  margin: 1rem 0 0;
+  width: 100%;
+  max-width: var(--flip-max, none);
+  text-align: left;
+}
+
+.status-poll--flip-media {
+  order: 3;
+  max-width: 40rem;
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: 1.25rem 4.5rem;
+  box-sizing: border-box;
 }
 </style>

@@ -138,7 +138,12 @@ export async function mockMastodonApi(
   const unhandled: string[] = []
   const servers = [...(opts.servers ?? [primaryServer])]
   let oauth: OAuthExpectation | null = null
+  /** Deterministic created-post ids — stable across runs, monotonic per mock session */
   let postedSeq = 0
+  const nextPostedId = () => {
+    postedSeq += 1
+    return String(9000 + postedSeq)
+  }
 
   const serverFor = (origin: string) => servers.find((s) => s.origin === origin)
 
@@ -270,14 +275,21 @@ export async function mockMastodonApi(
           if (!needsAuth()) return
           const entry = record()
           const body = (entry.body ?? {}) as { status?: string; visibility?: string }
-          const text = String(body.status ?? '')
+          const text = typeof body.status === 'string' ? body.status : ''
+          if (!text.trim()) {
+            return json(route, { error: 'Validation failed: Text is required' }, 422)
+          }
           const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-          const id = String(9000 + ++postedSeq)
+          const id = nextPostedId()
+          const visibility =
+            typeof body.visibility === 'string' && body.visibility.trim()
+              ? body.visibility
+              : 'public'
           return json(
             route,
             makeStatus(id, {
-              content: `<p>${escaped}</p>`,
-              visibility: body.visibility ?? 'public',
+              content: `<p>${escaped || ' '}</p>`,
+              visibility,
               account: server.account,
               uri: `${server.origin}/users/${server.account.username}/statuses/${id}`,
               url: `${server.origin}/@${server.account.username}/${id}`,

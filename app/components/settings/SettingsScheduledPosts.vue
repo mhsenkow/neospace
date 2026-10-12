@@ -16,6 +16,8 @@ import {
   isScheduledUnsupported,
   localTimeZoneLabel,
   scheduledHiddenBody,
+  scheduledPostMeta,
+  scheduledMetaSummary,
   scheduledPreview,
   scheduleCheckMessage,
   SCHEDULE_MIN_LEAD_MS,
@@ -54,6 +56,8 @@ let mutations = 0
 const visible = computed(
   () => instancesStore.isAuthenticated && instancesStore.canSchedulePosts && !unsupported.value,
 )
+
+const metaFor = (item: mastodon.v1.ScheduledStatus) => scheduledPostMeta(item.params)
 
 const formatWhen = (iso: string) => {
   try {
@@ -245,6 +249,9 @@ onBeforeUnmount(() => {
               {{ formatWhen(item.scheduledAt) }}
             </time>
           </div>
+          <p v-if="scheduledMetaSummary(metaFor(item))" class="settings-field-hint settings-scheduled__context">
+            {{ scheduledMetaSummary(metaFor(item)) }}
+          </p>
           <p class="settings-scheduled__text">{{ scheduledPreview(item.params) }}</p>
           <template v-if="scheduledHiddenBody(item.params)">
             <p v-if="revealed.has(item.id)" class="settings-scheduled__text">
@@ -259,10 +266,6 @@ onBeforeUnmount(() => {
               {{ revealed.has(item.id) ? 'Hide text' : 'Show text' }}
             </button>
           </template>
-          <p v-if="item.mediaAttachments?.length" class="settings-field-hint">
-            {{ item.mediaAttachments.length }} attachment{{ item.mediaAttachments.length === 1 ? '' : 's' }}
-          </p>
-
           <div v-if="editingId === item.id" class="settings-scheduled__edit">
             <label class="sr-only" :for="`sched-${item.id}`">New time</label>
             <input

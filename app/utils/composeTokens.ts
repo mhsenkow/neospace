@@ -31,8 +31,11 @@ export const ALL_TOKEN_KINDS: readonly ComposeTokenKind[] = ['mention', 'hashtag
 
 /** A trigger only counts at the start of text or after whitespace / opening punctuation */
 const OPEN = `[\\s([{“"'‘]`
+/** Local handle + optional `@domain` — Unicode letters/marks/digits where servers allow them */
+const MENTION_BODY = `[\\p{L}\\p{M}\\p{N}_.@/-]*`
+
 const PATTERNS: Record<ComposeTokenKind, { re: RegExp; trigger: string }> = {
-  mention: { re: new RegExp(`(?:^|${OPEN})@([a-zA-Z0-9_.@/-]*)$`), trigger: '@' },
+  mention: { re: new RegExp(`(?:^|${OPEN})@(${MENTION_BODY})$`, 'u'), trigger: '@' },
   // Same character set as the group-tag validator: letters, combining marks, digits, _ · ZWNJ
   hashtag: { re: new RegExp(`(?:^|${OPEN})#([\\p{L}\\p{M}\\p{N}_\\u00b7\\u200c]+)$`, 'u'), trigger: '#' },
   // ≥2 chars so ":)" / "10:30" / URLs (preceded by a word char) never open the list
@@ -41,7 +44,7 @@ const PATTERNS: Record<ComposeTokenKind, { re: RegExp; trigger: string }> = {
 
 /** Characters that continue a token after the caret (mirrors each pattern's body) */
 const CONTINUE: Record<ComposeTokenKind, RegExp> = {
-  mention: /^[a-zA-Z0-9_.@/-]+/,
+  mention: /^[\p{L}\p{M}\p{N}_.@/-]+/u,
   hashtag: /^[\p{L}\p{M}\p{N}_\u00b7\u200c]+/u,
   emoji: /^[a-zA-Z0-9_+-]+/,
 }

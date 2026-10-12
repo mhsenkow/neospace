@@ -11,9 +11,13 @@ import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { useOverlayStore } from '~/stores/overlay'
 import {
+  ALGORITHM_KEYWORD_MAX_LEN,
+  ALGORITHM_LIST_MAX,
   ALGORITHM_SENTENCE_EXAMPLES,
   ALGORITHM_SOURCES,
   buildShareUrl,
+  normalizeKeywordList,
+  normalizeTagList,
   parseAlgorithmSentence,
   recipeSummary,
   type AlgorithmSource,
@@ -98,6 +102,11 @@ const parsed = computed(() => {
   if (!sentence.value.trim()) return null
   return parseAlgorithmSentence(sentence.value)
 })
+
+const tagListCount = computed(() => normalizeTagList(includeTags.value).length)
+const keywordListCount = computed(() => normalizeKeywordList(includeKeywords.value).length)
+const tagListOver = computed(() => tagListCount.value > ALGORITHM_LIST_MAX)
+const keywordListOver = computed(() => keywordListCount.value > ALGORITHM_LIST_MAX)
 
 const liveSummary = computed(() =>
   recipeSummary({
@@ -216,7 +225,7 @@ async function save(andOpen: boolean) {
   }
   saving.value = true
   try {
-    const recipe = algorithms.upsert({
+    const saved = algorithms.upsert({
       id: editing.value?.builtin ? undefined : editing.value?.id,
       name: n,
       description: description.value || sentence.value.trim() || undefined,
@@ -230,10 +239,11 @@ async function save(andOpen: boolean) {
       excludeKeywords: excludeKeywords.value,
       ranker: ranker.value || undefined,
     })
-    if (!recipe) {
+    if (!saved) {
       toast.show({ message: 'Couldn’t save — too many custom algorithms?' })
       return
     }
+    const { recipe, persisted } = saved
     if (andOpen) {
       let colId = columnsStore.ensureFocusedView('algorithm', recipe.id)
       if (!colId && columnsStore.columns.length >= columnsStore.maxColumns) {
@@ -254,7 +264,11 @@ async function save(andOpen: boolean) {
         await router.push('/')
       }
     }
-    toast.show({ message: andOpen ? `Opened ${recipe.name}` : `Saved ${recipe.name}` })
+    if (!persisted) {
+      toast.show({ message: 'Saved for this session only — storage is full' })
+    } else {
+      toast.show({ message: andOpen ? `Opened ${recipe.name}` : `Saved ${recipe.name}` })
+    }
     algorithms.closeEditor()
   } finally {
     saving.value = false
@@ -267,7 +281,7 @@ async function copyShareLink() {
     toast.show({ message: 'Describe or name the algorithm before sharing' })
     return
   }
-  const recipe = algorithms.upsert({
+  const saved = algorithms.upsert({
     id: editing.value?.builtin ? undefined : editing.value?.id,
     name: name.value.trim() || editing.value?.name || 'Untitled',
     description: description.value || sentence.value.trim() || undefined,
@@ -281,11 +295,11 @@ async function copyShareLink() {
     excludeKeywords: excludeKeywords.value,
     ranker: ranker.value || undefined,
   })
-  if (!recipe) {
+  if (!saved) {
     toast.show({ message: 'Couldn’t prepare share link' })
     return
   }
-  const stamped = algorithms.stampAuthor(recipe)
+  const stamped = algorithms.stampAuthor(saved.recipe)
   const url = buildShareUrl(window.location.origin, stamped)
   shareUrl.value = url
   try {
@@ -549,7 +563,7 @@ async function removeRecipe() {
 
             <div class="algo-sheet__grid">
               <label class="algo-sheet__field">
-                <span>Must include tags</span>
+                <span>Must include tags <span class="algo-sheet__hint">({{ ALGORITHM_LIST_MAX }} max)</span></span>
                 <input
                   v-model="includeTags"
                   type="text"
@@ -557,9 +571,10 @@ async function removeRecipe() {
                   @focus="onFocusField"
                   @input="onRulesManualEdit"
                 >
+                <p v-if="tagListOver" class="algo-sheet__warn" role="status">Only the first {{ ALGORITHM_LIST_MAX }} tags are kept.</p>
               </label>
               <label class="algo-sheet__field">
-                <span>Exclude tags</span>
+                <span>Exclude tags <span class="algo-sheet__hint">({{ ALGORITHM_LIST_MAX }} max)</span></span>
                 <input
                   v-model="excludeTags"
                   type="text"
@@ -569,7 +584,7 @@ async function removeRecipe() {
                 >
               </label>
               <label class="algo-sheet__field">
-                <span>Must include keywords</span>
+                <span>Must include keywords <span class="algo-sheet__hint">({{ ALGORITHM_LIST_MAX }} max, {{ ALGORITHM_KEYWORD_MAX_LEN }} chars each)</span></span>
                 <input
                   v-model="includeKeywords"
                   type="text"
@@ -577,6 +592,7 @@ async function removeRecipe() {
                   @focus="onFocusField"
                   @input="onRulesManualEdit"
                 >
+                <p v-if="keywordListOver" class="algo-sheet__warn" role="status">Only the first {{ ALGORITHM_LIST_MAX }} keywords are kept.</p>
               </label>
               <label class="algo-sheet__field">
                 <span>Exclude keywords</span>
@@ -787,6 +803,18 @@ async function removeRecipe() {
       border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
     }
   }
+}
+
+.algo-sheet__hint {
+  font-weight: 500;
+  color: var(--neo-text-muted);
+}
+
+.algo-sheet__warn {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--neo-warning, #b45309);
 }
 
 .algo-sheet__sentence {

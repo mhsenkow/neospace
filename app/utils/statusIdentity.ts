@@ -90,44 +90,51 @@ function sameItems(a: readonly unknown[], b: readonly unknown[]) {
   return true
 }
 
-/** Collapse consecutive reblogs of the same original into one row ("A and N others reposted"). */
+const REBLOG_COLLAPSE_WINDOW = 20
+
+function mergeReblogIntoRow<T extends CollapsedReblogStatus>(
+  anchor: T,
+  rebloggers: NonNullable<T['_collapsedRebloggers']>,
+): T {
+  if (rebloggers.length <= 1) return anchor
+  const cached = collapsedWrapperCache.get(anchor)
+  if (cached && cached.reblog === anchor.reblog && sameItems(cached.rebloggers, rebloggers)) {
+    return cached.wrapper as T
+  }
+  const wrapper = { ...anchor, _collapsedRebloggers: rebloggers }
+  collapsedWrapperCache.set(anchor, { reblog: anchor.reblog, rebloggers, wrapper })
+  return wrapper as T
+}
+
+/** Collapse reblogs of the same original within a sliding window ("A and N others reposted"). */
 export function collapseDuplicateReblogs<T extends CollapsedReblogStatus>(statuses: T[]): T[] {
   const out: T[] = []
-  let i = 0
-  while (i < statuses.length) {
+  for (let i = 0; i < statuses.length; i++) {
     const current = statuses[i]!
     if (!current.reblog) {
       out.push(current)
-      i++
       continue
     }
     const originalKey = statusIdentity(current.reblog)
-    const rebloggers: NonNullable<T['_collapsedRebloggers']> = []
-    if (current.account) rebloggers.push(current.account)
-    let j = i + 1
-    while (j < statuses.length) {
-      const next = statuses[j]!
-      if (!next.reblog || statusIdentity(next.reblog) !== originalKey) break
-      if (next.account) rebloggers.push(next.account)
-      j++
-    }
-    if (rebloggers.length <= 1) {
-      out.push(current)
-    } else {
-      const cached = collapsedWrapperCache.get(current)
-      if (
-        cached &&
-        cached.reblog === current.reblog &&
-        sameItems(cached.rebloggers, rebloggers)
-      ) {
-        out.push(cached.wrapper as T)
-      } else {
-        const wrapper = { ...current, _collapsedRebloggers: rebloggers }
-        collapsedWrapperCache.set(current, { reblog: current.reblog, rebloggers, wrapper })
-        out.push(wrapper)
+    let mergeIdx = -1
+    for (let k = Math.max(0, out.length - REBLOG_COLLAPSE_WINDOW); k < out.length; k++) {
+      const row = out[k]!
+      if (row.reblog && statusIdentity(row.reblog) === originalKey) {
+        mergeIdx = k
+        break
       }
     }
-    i = j
+    if (mergeIdx >= 0) {
+      const anchor = out[mergeIdx]!
+      const rebloggers: NonNullable<T['_collapsedRebloggers']> = [
+        ...(anchor._collapsedRebloggers ||
+          (anchor.account ? [anchor.account] : [])),
+      ]
+      if (current.account) rebloggers.push(current.account)
+      out[mergeIdx] = mergeReblogIntoRow(anchor, rebloggers)
+      continue
+    }
+    out.push(current)
   }
   return out
 }

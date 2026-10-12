@@ -118,6 +118,20 @@ describe('parseAlgorithmSentence', () => {
   it('reads non-ASCII hashtags', () => {
     expect(parseAlgorithmSentence('#café no #politics').includeTags).toContain('café')
   })
+
+  it('does not treat bare “local” as the local timeline source', () => {
+    expect(parseAlgorithmSentence('local news without replies').source).toBe('home')
+    expect(parseAlgorithmSentence('cat photos on local timeline').source).toBe('local')
+  })
+})
+
+describe('tryDecodeAlgorithmShare', () => {
+  it('flags newer payload versions', async () => {
+    const { tryDecodeAlgorithmShare } = await import('../app/utils/algorithms')
+    const json = JSON.stringify({ v: 2, n: 'Future', s: 'home' })
+    const raw = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+    expect(tryDecodeAlgorithmShare(raw)).toEqual({ ok: false, reason: 'version' })
+  })
 })
 
 describe('recipeSummary', () => {
@@ -151,16 +165,18 @@ describe('importPayload', () => {
 
   it('returns the existing recipe for a true twin', () => {
     const store = useAlgorithmsStore()
-    const a = store.importPayload(payload())!
-    expect(store.importPayload(payload())!.id).toBe(a.id)
+    const a = store.importPayload(payload())!.recipe
+    const again = store.importPayload(payload())!
+    expect(again.recipe.id).toBe(a.id)
+    expect(again.alreadyHad).toBe(true)
     expect(store.customRecipes).toHaveLength(1)
   })
 
   it('does not treat a different ranker or description as a twin', () => {
     const store = useAlgorithmsStore()
-    const x = store.importPayload(payload({ r: 'x' }))!
-    const tiktok = store.importPayload(payload({ r: 'tiktok' }))!
-    const described = store.importPayload(payload({ r: 'tiktok', d: 'other words' }))!
+    const x = store.importPayload(payload({ r: 'x' }))!.recipe
+    const tiktok = store.importPayload(payload({ r: 'tiktok' }))!.recipe
+    const described = store.importPayload(payload({ r: 'tiktok', d: 'other words' }))!.recipe
     expect(tiktok.id).not.toBe(x.id)
     expect(tiktok.ranker).toBe('tiktok')
     expect(described.id).not.toBe(tiktok.id)

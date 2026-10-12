@@ -7,7 +7,14 @@ import {
   UploadTimeoutError,
   uploadFraction,
 } from '../app/utils/mediaUpload'
-import { isScheduledUnsupported, toLocalInputValue, validRescheduleIso, scheduledPreview } from '../app/utils/scheduledPosts'
+import {
+  isScheduledUnsupported,
+  scheduledMetaSummary,
+  scheduledPostMeta,
+  scheduledPreview,
+  toLocalInputValue,
+  validRescheduleIso,
+} from '../app/utils/scheduledPosts'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -251,5 +258,17 @@ describe('scheduled post helpers', () => {
     expect(scheduledPreview({ text: 'x'.repeat(200) }, 20)).toHaveLength(20)
     // A content warning hides the body — only the warning shows
     expect(scheduledPreview({ text: 'secret', spoilerText: 'cw' })).toBe('CW: cw')
+  })
+
+  it('summarizes scheduled-post context for the queue', () => {
+    const meta = scheduledPostMeta({
+      visibility: 'unlisted',
+      mediaIds: ['1', '2'],
+      inReplyToId: '9',
+      poll: { options: ['a', 'b', ''] },
+    })
+    expect(scheduledMetaSummary(meta)).toBe(
+      'Unlisted · 2 attachments · Reply · Poll · 2 options',
+    )
   })
 })

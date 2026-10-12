@@ -26,6 +26,8 @@
  *    posts get exploration slots.
  */
 
+import { decodeEntities } from '~/utils/decodeEntities'
+
 export type RankerId = 'x' | 'facebook' | 'tiktok'
 
 export type CandidateSource = 'home' | 'trend' | 'tag' | 'local' | 'federated'
@@ -66,7 +68,12 @@ export type RankContext = {
   /** Words from posts you've liked / bookmarked (TikTok's interest graph stand-in) */
   likedWords: Map<string, number>
   followedTags: Set<string>
+  /** Primary viewer language (first of {@link viewerLangs}) — legacy single-lang checks */
   viewerLang: string | null
+  /** Languages the viewer reads or posts in — TikTok-style lang match accepts any */
+  viewerLangs: Set<string>
+  /** Session cache for {@link features} — keyed by status id */
+  _featureCache?: Map<string, Features>
   /**
    * The viewer's instance host. Mastodon returns same-server accts without a
    * host (`bob`), so accts are qualified with this before comparing — otherwise
@@ -134,21 +141,59 @@ const STOP = new Set(
 )
 
 const stripHtml = (html: string) =>
-  html
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/p>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&[a-z#0-9]+;/gi, ' ')
+  decodeEntities(
+    html
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/p>/gi, ' ')
+      .replace(/<[^>]+>/g, ''),
+  )
+    .replace(/\s+/g, ' ')
     .trim()
+
+let wordSegmenter: Intl.Segmenter | null = null
 
 export function contentWords(text: string, max = 40): string[] {
   const out: string[] = []
-  for (const w of text.toLowerCase().match(/[\p{L}][\p{L}\p{N}'_-]{2,}/gu) || []) {
-    if (STOP.has(w) || w.startsWith('http')) continue
+  const lower = decodeEntities(text).toLowerCase()
+  const pushWord = (w: string) => {
+    if (w.length < 3 || STOP.has(w) || w.startsWith('http')) return
     out.push(w)
+  }
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    wordSegmenter ??= new Intl.Segmenter(undefined, { granularity: 'word' })
+    for (const part of wordSegmenter.segment(lower)) {
+      if (!part.isWordLike) continue
+      pushWord(part.segment)
+      if (out.length >= max) break
+    }
+    return out
+  }
+  for (const w of lower.match(/[\p{L}][\p{L}\p{N}'_-]{2,}/gu) || []) {
+    pushWord(w)
     if (out.length >= max) break
   }
   return out
+}
+
+export function viewerLanguagesFrom(opts?: {
+  postingLanguage?: string | null
+  navigatorLanguage?: string | null
+}): Set<string> {
+  const langs = new Set<string>()
+  const add = (v?: string | null) => {
+    const base = (v || '').split('-')[0]?.toLowerCase()
+    if (base) langs.add(base)
+  }
+  add(opts?.postingLanguage)
+  add(opts?.navigatorLanguage)
+  return langs
+}
+
+export function languageMatches(postLang: string | null, ctx: RankContext): boolean {
+  if (!postLang) return true
+  const langs = ctx.viewerLangs?.size ? ctx.viewerLangs : ctx.viewerLang ? new Set([ctx.viewerLang]) : new Set<string>()
+  if (!langs.size) return true
+  return langs.has(postLang)
 }
 
 const norm = (acct?: string | null) => (acct || '').replace(/^@/, '').toLowerCase()
@@ -202,7 +247,7 @@ const p = (n: number, reach: number) => 1 - Math.exp(-n / reach)
 /** A NaN in a sort comparator scrambles the order — scores are always finite */
 const finite = (n: number) => (Number.isFinite(n) ? n : 0)
 
-export function features(s: RankStatus, ctx: RankContext): Features {
+function computeFeatures(s: RankStatus, ctx: RankContext): Features {
   const body = s.reblog || s
   const text = stripHtml(body.content || '')
   const media = body.mediaAttachments || []
@@ -238,6 +283,19 @@ export function features(s: RankStatus, ctx: RankContext): Features {
     // ~√followers people actually see a post; a floor keeps tiny accounts sane
     reach: 8 + Math.sqrt(followers) * 2.5,
   }
+}
+
+export function features(s: RankStatus, ctx: RankContext): Features {
+  const cache = ctx._featureCache
+  const key = s.id
+  if (cache && key) {
+    const hit = cache.get(key)
+    if (hit) return hit
+    const f = computeFeatures(s, ctx)
+    cache.set(key, f)
+    return f
+  }
+  return computeFeatures(s, ctx)
 }
 
 const isFollowed = (acct: string, ctx: RankContext) => ctx.following.has(acct)
@@ -456,7 +514,7 @@ function rankTikTok<S extends RankStatus>(statuses: S[], ctx: RankContext, rand:
       ePlaytime * TIKTOK_VALUES.playtime +
       pPlay * TIKTOK_VALUES.play
     const interest = interestScore(f, ctx)
-    const langMatch = !f.language || !ctx.viewerLang || f.language === ctx.viewerLang ? 1 : 0.8
+    const langMatch = languageMatches(f.language, ctx) ? 1 : 0.8
     let score = base * (1 + interest * 1.6) * langMatch * Math.pow(0.5, f.ageH / 48)
     if (f.cw) score *= 0.7
     const why: string[] = []
@@ -519,6 +577,10 @@ export function tasteFrom(statuses: RankStatus[], host?: string | null) {
 }
 
 export function emptyRankContext(now = Date.now()): RankContext {
+  const viewerLangs = viewerLanguagesFrom({
+    navigatorLanguage: typeof navigator !== 'undefined' ? navigator.language : null,
+  })
+  const viewerLang = viewerLangs.size ? [...viewerLangs][0]! : null
   return {
     selfAcct: null,
     following: new Set(),
@@ -528,10 +590,8 @@ export function emptyRankContext(now = Date.now()): RankContext {
     likedWords: new Map(),
     followedTags: new Set(),
     host: null,
-    viewerLang:
-      typeof navigator !== 'undefined' && navigator.language
-        ? navigator.language.split('-')[0]!.toLowerCase()
-        : null,
+    viewerLang,
+    viewerLangs,
     now,
   }
 }

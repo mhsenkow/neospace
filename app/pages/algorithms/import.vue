@@ -10,9 +10,9 @@ import { useToastStore } from '~/stores/toast'
 import { useInstancesStore } from '~/stores/instances'
 import { MAX_CUSTOM } from '~/stores/algorithms'
 import {
-  decodeAlgorithmShare,
   recipeSummary,
   sharePayloadToRecipe,
+  tryDecodeAlgorithmShare,
 } from '~/utils/algorithms'
 import { RANKERS } from '~/utils/rankers'
 
@@ -34,7 +34,8 @@ const raw = computed(() => {
   return typeof q === 'string' ? q : Array.isArray(q) ? q[0] || '' : ''
 })
 
-const payload = computed(() => (raw.value ? decodeAlgorithmShare(raw.value) : null))
+const decoded = computed(() => (raw.value ? tryDecodeAlgorithmShare(raw.value) : null))
+const payload = computed(() => (decoded.value?.ok ? decoded.value.payload : null))
 const preview = computed(() => (payload.value ? sharePayloadToRecipe(payload.value, 'preview') : null))
 
 /** Share links are unauthenticated: strip bidi / control characters so a name can't visually spoof another */
@@ -58,7 +59,12 @@ const loginHref = computed(() => `/login?returnTo=${encodeURIComponent(route.ful
 const importing = ref(false)
 const error = computed(() => {
   if (!raw.value) return 'This link is missing an algorithm payload.'
-  if (!payload.value) return 'This share link is invalid or corrupted.'
+  const d = decoded.value
+  if (!d) return 'This share link is invalid or corrupted.'
+  if (!d.ok && d.reason === 'version') {
+    return 'This link was made with a newer NeoSpace — refresh to update.'
+  }
+  if (!d.ok) return 'This share link is invalid or corrupted.'
   return null
 })
 
@@ -67,8 +73,8 @@ async function addToBoard() {
   importing.value = true
   try {
     algorithms.hydrate()
-    const recipe = algorithms.importShare(raw.value)
-    if (!recipe) {
+    const result = algorithms.importShare(raw.value)
+    if (!result) {
       toast.show({
         message: algorithms.isFull
           ? `You have ${MAX_CUSTOM} algorithms — delete one to import`
@@ -76,13 +82,18 @@ async function addToBoard() {
       })
       return
     }
+    const { recipe, alreadyHad } = result
     // null = the board is full and nothing was added; don't claim otherwise
     const columnId = columnsStore.ensureFocusedView('algorithm', recipe.id)
-    toast.show({
-      message: columnId
-        ? `Added “${recipe.name}”`
-        : `Saved “${recipe.name}” — your board is full (${columnsStore.maxColumns}/${columnsStore.maxColumns}). Remove a column to add it.`,
-    })
+    if (alreadyHad) {
+      toast.show({ message: 'Already in your feeds — opened it' })
+    } else {
+      toast.show({
+        message: columnId
+          ? `Added “${recipe.name}”`
+          : `Saved “${recipe.name}” — your board is full (${columnsStore.maxColumns}/${columnsStore.maxColumns}). Remove a column to add it.`,
+      })
+    }
     await router.replace('/')
   } finally {
     importing.value = false
@@ -110,7 +121,12 @@ async function addToBoard() {
           <NuxtLink :to="loginHref">Sign in to use this algorithm</NuxtLink>
         </p>
         <p class="algo-import__note">
-          This adds a filtered view on <em>your</em> timelines — NeoSpace never posts or follows on the curator’s behalf.
+          <template v-if="preview.ranker">
+            This ranks posts from trending, federated, and tag sources — not just your home timeline. NeoSpace never posts or follows on the curator’s behalf.
+          </template>
+          <template v-else>
+            This adds a filtered view on <em>your</em> timelines — NeoSpace never posts or follows on the curator’s behalf.
+          </template>
         </p>
         <div class="algo-import__actions">
           <button

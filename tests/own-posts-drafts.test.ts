@@ -198,6 +198,9 @@ describe('normalizePoll', () => {
       expiresIn: 3600,
       multiple: true,
     })
+    expect(
+      normalizePoll({ options: ['a', 'b'], expiresIn: 3600, hideTotals: true }),
+    ).toEqual({ options: ['a', 'b'], expiresIn: 3600, hideTotals: true })
   })
 
   it('enforces 2–4 distinct options and a valid duration', () => {

@@ -206,6 +206,12 @@ describe('sanitizeProfileCss adversarial', () => {
     const once = sanitizeProfileCss('a{color:red} b, c > d {margin:0}')
     expect(sanitizeProfileCss(once)).toBe(once)
   })
+
+  it('does not split :is() selectors on inner commas', () => {
+    const out = sanitizeProfileCss(':is(a, b) { color: red }')
+    expect(out).toContain(':is(a, b)')
+    expect(out).not.toMatch(new RegExp(`${SCOPE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} a, ${SCOPE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} b`))
+  })
 })
 
 describe('emojify', () => {

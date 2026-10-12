@@ -16,6 +16,8 @@ export type EdQuipContext = {
   total: number
   backpack: number
   fromHome: number
+  loading?: boolean
+  error?: string | null
   /** What's on stage after filters */
   visible: readonly EdwardBallDescriptor[]
   /** Name on deck (tour / lens) */
@@ -39,6 +41,29 @@ export function hotTag(balls: readonly EdwardBallDescriptor[]): { tag: string; n
 
 export function edQuip(ctx: EdQuipContext, rand: () => number = Math.random): string {
   const v = ctx.visible
+  if (ctx.error) {
+    return pick(
+      [
+        "ed can't reach the net… retrying (´・ω・`)",
+        'the wires are tangled~ ed is trying again ♪',
+        'hack hack… no signal yet (´・ω・`)',
+      ],
+      rand,
+    )
+  }
+  if (ctx.loading && ctx.total === 0) {
+    return pick(
+      [
+        'ed is hacking the mainframe… please wait ✌',
+        'fetch fetch fetch~ the net is big (・∀・)',
+        'warming up the bubbles… almost almost ♪',
+      ],
+      rand,
+    )
+  }
+  if (!ctx.filtered && !ctx.loading && ctx.total === 0) {
+    return pick(['quiet quiet~ ed hears nothing yet (´・ω・`)', 'the stream is empty… ed keeps listening ♪'], rand)
+  }
   if (ctx.filtered && ctx.matched === 0) {
     return pick(['nothing here... ed looked everywhere (´・ω・`)', 'empty empty~ try fewer filters?? ♪'], rand)
   }

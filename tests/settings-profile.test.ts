@@ -58,6 +58,23 @@ describe('CSV export injection', () => {
     expect(escapeCsv('a,b')).toBe('"a,b"')
   })
 
+  it('uses spoiler text and media fallbacks in post previews', () => {
+    const cw = statusToInsightRow({
+      id: '2',
+      createdAt: '2026-10-01T12:00:00.000Z',
+      content: '<p>secret body</p>',
+      spoilerText: 'Sensitive topic',
+    })
+    expect(cw.preview).toBe('Sensitive topic')
+    const media = statusToInsightRow({
+      id: '3',
+      createdAt: '2026-10-01T12:00:00.000Z',
+      content: '',
+      mediaAttachments: [{ type: 'image' }],
+    })
+    expect(media.preview).toBe('Photo / video post')
+  })
+
   it('neutralises a post preview that starts with a formula', () => {
     const row = statusToInsightRow({
       id: '1',

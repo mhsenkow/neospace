@@ -76,7 +76,7 @@ const openActivity = () => {
     @click="openMessages"
   >
     <NeoIcon
-      name="message"
+      name="send"
       :size="22"
       :stroke="messagesActive || boardPortal === 'inbox' ? 2 : 1.5"
       :filled="messagesActive"
@@ -92,7 +92,7 @@ const openActivity = () => {
     }"
     aria-label="Messages — sign in"
   >
-    <NeoIcon name="message" :size="22" :stroke="boardPortal === 'inbox' ? 2 : 1.5" />
+    <NeoIcon name="send" :size="22" :stroke="boardPortal === 'inbox' ? 2 : 1.5" />
   </NuxtLink>
 
   <button
@@ -119,10 +119,9 @@ const openActivity = () => {
     @click="openActivity"
   >
     <NeoIcon
-      name="heart"
+      name="bell"
       :size="22"
       :stroke="activityActive || boardPortal === 'activity' ? 2 : 1.5"
-      :filled="activityActive"
     />
     <span v-if="notifBadge" class="nav-badge" aria-hidden="true">{{ notifBadge }}</span>
   </button>
@@ -282,57 +281,4 @@ const openActivity = () => {
   }
 }
 
-.nav-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--neo-font-family-ui);
-  font-size: max(0.6875rem, 11px);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--neo-text-on-accent, var(--neo-text-inverse));
-  background: var(--neo-accent);
-  border-radius: var(--neo-radius-sm, 2px);
-  pointer-events: none;
-
-  &--inline {
-    position: static;
-    margin-left: 0.4rem;
-    min-width: 1.15rem;
-    height: 1.15rem;
-    font-size: max(0.6875rem, 11px);
-  }
-}
-
-/* Edge-portal cue: pulse the matching chrome control */
-.chrome-hint {
-  color: var(--neo-accent) !important;
-  background: var(--neo-accent-soft) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
-  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-}
-
-:deep(.acct-switch.chrome-hint .acct-switch__trigger) {
-  color: var(--neo-accent);
-  background: var(--neo-accent-soft);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 45%, transparent);
-  animation: chrome-hint-pulse 1.6s ease-in-out infinite;
-  border-radius: var(--neo-radius-sm, 4px);
-}
-
-@keyframes chrome-hint-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 35%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--neo-accent) 22%, transparent);
-  }
-}
 </style>

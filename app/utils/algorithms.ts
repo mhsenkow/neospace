@@ -4,7 +4,14 @@
  */
 
 import type { mastodon } from 'masto'
+import { decodeEntities } from '~/utils/decodeEntities'
 import { RANKERS, type RankerId } from '~/utils/rankers'
+
+export { decodeEntities } from '~/utils/decodeEntities'
+
+/** Max tags or keywords stored per recipe (share payload and editor). */
+export const ALGORITHM_LIST_MAX = 12
+export const ALGORITHM_KEYWORD_MAX_LEN = 64
 
 export type AlgorithmSource = 'home' | 'local' | 'federated'
 
@@ -83,7 +90,7 @@ export function normalizeTagList(raw: string | string[] | undefined): string[] {
     if (!tag || !TAG_RE.test(tag) || seen.has(tag)) continue
     seen.add(tag)
     out.push(tag)
-    if (out.length >= 12) break
+    if (out.length >= ALGORITHM_LIST_MAX) break
   }
   return out
 }
@@ -94,38 +101,12 @@ export function normalizeKeywordList(raw: string | string[] | undefined): string
   const seen = new Set<string>()
   for (const k of parts) {
     const key = k.trim().toLowerCase()
-    if (!key || key.length > 64 || seen.has(key)) continue
+    if (!key || key.length > ALGORITHM_KEYWORD_MAX_LEN || seen.has(key)) continue
     seen.add(key)
     out.push(k.trim())
-    if (out.length >= 12) break
+    if (out.length >= ALGORITHM_LIST_MAX) break
   }
   return out
-}
-
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-  hellip: '…',
-  ndash: '–',
-  mdash: '—',
-  lsquo: '‘',
-  rsquo: '’',
-  ldquo: '“',
-  rdquo: '”',
-}
-
-/** Numeric (&#39; &#x27;) and common named entities — Mastodon encodes quotes and apostrophes */
-export function decodeEntities(text: string): string {
-  return text.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]+));/gi, (whole, dec, hex, name) => {
-    if (name) return NAMED_ENTITIES[name.toLowerCase()] ?? whole
-    const code = dec ? Number.parseInt(dec, 10) : Number.parseInt(hex, 16)
-    if (!Number.isFinite(code) || code < 1 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return whole
-    return String.fromCodePoint(code)
-  })
 }
 
 function stripHtml(html: string): string {
@@ -264,24 +245,34 @@ export function encodeAlgorithmShare(recipe: AlgorithmRecipe): string {
   return bytesToBase64Url(bytes)
 }
 
-export function decodeAlgorithmShare(raw: string): AlgorithmSharePayload | null {
+export type DecodeAlgorithmShareResult =
+  | { ok: true; payload: AlgorithmSharePayload }
+  | { ok: false; reason: 'invalid' | 'version' }
+
+export function tryDecodeAlgorithmShare(raw: string): DecodeAlgorithmShareResult {
   try {
     const trimmed = raw.trim()
-    if (!trimmed || trimmed.length > 4000) return null
+    if (!trimmed || trimmed.length > 4000) return { ok: false, reason: 'invalid' }
     const bytes = base64UrlToBytes(trimmed)
     const json = new TextDecoder().decode(bytes)
-    const parsed = JSON.parse(json) as AlgorithmSharePayload
-    if (parsed?.v !== 1 || typeof parsed.n !== 'string' || !parsed.n.trim()) return null
-    if (parsed.s !== 'home' && parsed.s !== 'local' && parsed.s !== 'federated') return null
+    const parsed = JSON.parse(json) as AlgorithmSharePayload & { v?: number }
+    if (typeof parsed?.v === 'number' && parsed.v > 1) return { ok: false, reason: 'version' }
+    if (parsed?.v !== 1 || typeof parsed.n !== 'string' || !parsed.n.trim()) return { ok: false, reason: 'invalid' }
+    if (parsed.s !== 'home' && parsed.s !== 'local' && parsed.s !== 'federated') return { ok: false, reason: 'invalid' }
     // Optional text fields get `.trim()`ed on import — drop anything that isn't a string
     for (const key of ['d', 'a', 'an'] as const) {
       if (parsed[key] !== undefined && typeof parsed[key] !== 'string') delete parsed[key]
     }
     if (parsed.r !== undefined && !isRankerId(parsed.r)) delete parsed.r
-    return parsed
+    return { ok: true, payload: parsed }
   } catch {
-    return null
+    return { ok: false, reason: 'invalid' }
   }
+}
+
+export function decodeAlgorithmShare(raw: string): AlgorithmSharePayload | null {
+  const r = tryDecodeAlgorithmShare(raw)
+  return r.ok ? r.payload : null
 }
 
 export function sharePayloadToRecipe(payload: AlgorithmSharePayload, id?: string): AlgorithmRecipe {
@@ -488,7 +479,7 @@ export function parseAlgorithmSentence(raw: string): ParsedAlgorithmSentence {
 
   let source: AlgorithmSource = 'home'
   if (/\b(federated|fediverse|public timeline|firehose)\b/.test(lower)) source = 'federated'
-  else if (/\b(local|this server|my server|instance)\b/.test(lower)) source = 'local'
+  else if (/\b(on local|local timeline|this server|my server)\b/.test(lower)) source = 'local'
   else if (/\b(for you|home|following)\b/.test(lower)) source = 'home'
 
   const mediaOnly =

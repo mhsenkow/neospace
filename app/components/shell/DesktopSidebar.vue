@@ -87,17 +87,17 @@ const sidebarAlgorithmItems = computed(() => {
     key: string
     label: string
     tip?: string | null
-    icon: 'globe' | 'servers' | 'heart' | 'bookmark' | 'filter'
+    icon: 'globe' | 'reblog' | 'sparkle' | 'bookmark' | 'filter'
     feedType: ColumnFeedType
     feedParam?: string
     auth?: boolean
   }[] = [
     { key: 'local', label: `Local`, icon: 'globe', feedType: 'local' },
-    { key: 'federated', label: 'Federated', icon: 'servers', feedType: 'federated' },
+    { key: 'federated', label: 'Federated', icon: 'reblog', feedType: 'federated' },
   ]
   if (instancesStore.hasAuthenticatedInstance) {
     items.push(
-      { key: 'favourites', label: 'Liked', icon: 'heart', feedType: 'favourites', auth: true },
+      { key: 'favourites', label: 'Liked', icon: 'sparkle', feedType: 'favourites', auth: true },
       { key: 'bookmarks', label: 'Saved', icon: 'bookmark', feedType: 'bookmarks', auth: true },
     )
   }
@@ -217,10 +217,9 @@ watch(
         @click="openActivity"
       >
         <NeoIcon
-          name="heart"
+          name="bell"
           :size="20"
           :stroke="isActivity || boardColumnIs('notifications') ? 2 : 1.75"
-          :filled="isActivity || boardColumnIs('notifications')"
         />
         <span v-if="notifBadge" class="nav-badge nav-badge--corner" aria-hidden="true">{{ notifBadge }}</span>
       </button>
@@ -582,7 +581,7 @@ watch(
       aria-label="Leave a note"
       @click="openFeedback"
     >
-      <NeoIcon name="message" :size="20" :stroke="1.5" />
+      <NeoIcon name="pen" :size="20" :stroke="1.5" />
     </button>
 
     <button
@@ -1311,34 +1310,6 @@ watch(
     }
   }
 
-}
-
-.nav-badge {
-  position: absolute;
-  top: 4px;
-  right: 2px;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--neo-font-family-ui);
-  font-size: max(0.6875rem, 11px);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--neo-text-on-accent, var(--neo-text-inverse));
-  background: var(--neo-accent);
-  border-radius: var(--neo-radius-sm, 2px);
-  pointer-events: none;
-
-  &--inline {
-    position: static;
-    margin-left: 0.4rem;
-    min-width: 1.15rem;
-    height: 1.15rem;
-    font-size: max(0.6875rem, 11px);
-  }
 }
 
 .sidebar {

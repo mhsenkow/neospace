@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { isPermanentSourceFailure, rankWhyLabel, sourceBackoffMs } from '../app/utils/rankedSources'
 import {
+  contentWords,
   emptyRankContext,
+  features,
   interestScore,
+  languageMatches,
   qualifyAcct,
   rankFeed,
   tasteFrom,
+  viewerLanguagesFrom,
   X_WEIGHTS,
   FB_MSI,
   FB_CLOSENESS,
@@ -288,5 +292,21 @@ describe('ranked source policy', () => {
   it('never renders a dangling separator when a ranker gives no reasons', () => {
     expect(rankWhyLabel('TikTok', [])).toBe('TikTok · Something new')
     expect(rankWhyLabel('TikTok', ['', ' video '])).toBe('TikTok · video')
+  })
+})
+
+describe('contentWords and language', () => {
+  it('decodes entities before tokenizing', () => {
+    expect(contentWords("don&#39;t boost")).toContain("don't")
+    const f = features(post({ content: "<p>like if you&#39;re here</p>" }), ctx())
+    expect(f.text).toContain("you're")
+  })
+
+  it('accepts any viewer language in the set', () => {
+    const c = ctx()
+    c.viewerLangs = viewerLanguagesFrom({ postingLanguage: 'ja', navigatorLanguage: 'en' })
+    c.viewerLang = 'en'
+    expect(languageMatches('ja', c)).toBe(true)
+    expect(languageMatches('fr', c)).toBe(false)
   })
 })

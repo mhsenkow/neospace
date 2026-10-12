@@ -22,6 +22,9 @@ import { useInstancesStore } from './instances'
 const STORAGE_KEY = 'neospace_algorithms_v1'
 export const MAX_CUSTOM = 24
 
+export type AlgorithmImportResult = { recipe: AlgorithmRecipe; alreadyHad: boolean }
+export type AlgorithmUpsertResult = { recipe: AlgorithmRecipe; persisted: boolean }
+
 /** One cross-tab listener per page — set up on first hydrate */
 let storageListening = false
 
@@ -50,12 +53,16 @@ function loadRecipes(): AlgorithmRecipe[] {
     for (const c of custom.slice(0, MAX_CUSTOM)) {
       // Untrusted JSON — strings where the UI calls string methods, a real source
       if (typeof c.id !== 'string' || !c.id || typeof c.name !== 'string' || !c.name) continue
+      if (c.id.startsWith('builtin-')) continue
       if (c.source !== 'home' && c.source !== 'local' && c.source !== 'federated') continue
       byId.set(c.id, {
         ...c,
         description: typeof c.description === 'string' ? c.description : undefined,
         authorAcct: typeof c.authorAcct === 'string' ? c.authorAcct : undefined,
         authorName: typeof c.authorName === 'string' ? c.authorName : undefined,
+        mediaOnly: c.mediaOnly === true,
+        noReblogs: c.noReblogs === true,
+        noReplies: c.noReplies === true,
         createdAt: typeof c.createdAt === 'number' ? c.createdAt : 0,
         updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : 0,
         includeTags: normalizeTagList(c.includeTags),
@@ -72,13 +79,15 @@ function loadRecipes(): AlgorithmRecipe[] {
   }
 }
 
-function saveCustom(recipes: AlgorithmRecipe[]) {
-  if (typeof window === 'undefined') return
+function saveCustom(recipes: AlgorithmRecipe[]): boolean {
+  if (typeof window === 'undefined') return true
   const custom = recipes.filter((r) => !r.builtin).slice(0, MAX_CUSTOM)
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 1, recipes: custom }))
+    return true
   } catch {
     // Quota / private mode — keep the in-memory recipe rather than failing the save
+    return false
   }
 }
 
@@ -145,10 +154,15 @@ export const useAlgorithmsStore = defineStore('algorithms', {
       ranker?: RankerId
       authorAcct?: string
       authorName?: string
-    }): AlgorithmRecipe | null {
+    }): AlgorithmUpsertResult | null {
       this.hydrate()
       const name = input.name.trim().slice(0, 48)
       if (!name) return null
+
+      let persisted = true
+      const commit = () => {
+        persisted = saveCustom(this.recipes)
+      }
 
       const now = Date.now()
       const existing = input.id ? this.recipes.find((r) => r.id === input.id) : null
@@ -174,8 +188,8 @@ export const useAlgorithmsStore = defineStore('algorithms', {
         }
         if (this.customRecipes.length >= MAX_CUSTOM) return null
         this.recipes.push(forked)
-        saveCustom(this.recipes)
-        return forked
+        commit()
+        return { recipe: forked, persisted }
       }
 
       if (existing) {
@@ -193,8 +207,8 @@ export const useAlgorithmsStore = defineStore('algorithms', {
         if (input.authorAcct !== undefined) existing.authorAcct = input.authorAcct
         if (input.authorName !== undefined) existing.authorName = input.authorName
         existing.updatedAt = now
-        saveCustom(this.recipes)
-        return existing
+        commit()
+        return { recipe: existing, persisted }
       }
 
       if (this.customRecipes.length >= MAX_CUSTOM) return null
@@ -217,8 +231,8 @@ export const useAlgorithmsStore = defineStore('algorithms', {
         updatedAt: now,
       }
       this.recipes.push(recipe)
-      saveCustom(this.recipes)
-      return recipe
+      commit()
+      return { recipe, persisted }
     },
 
     remove(id: string) {
@@ -230,14 +244,14 @@ export const useAlgorithmsStore = defineStore('algorithms', {
     },
 
     /** Import a shared payload; returns the saved recipe, or null when invalid or the list is full */
-    importShare(raw: string): AlgorithmRecipe | null {
+    importShare(raw: string): AlgorithmImportResult | null {
       const payload = decodeAlgorithmShare(raw)
       if (!payload) return null
       return this.importPayload(payload)
     },
 
     /** Returns null when the payload is new but all {@link MAX_CUSTOM} slots are used — never evicts silently */
-    importPayload(payload: AlgorithmSharePayload): AlgorithmRecipe | null {
+    importPayload(payload: AlgorithmSharePayload): AlgorithmImportResult | null {
       this.hydrate()
       const recipe = sharePayloadToRecipe(payload)
       // Dedupe by identical rules, ranker and name
@@ -256,11 +270,11 @@ export const useAlgorithmsStore = defineStore('algorithms', {
           JSON.stringify(r.includeKeywords || []) === JSON.stringify(recipe.includeKeywords || []) &&
           JSON.stringify(r.excludeKeywords || []) === JSON.stringify(recipe.excludeKeywords || []),
       )
-      if (twin) return twin
+      if (twin) return { recipe: twin, alreadyHad: true }
       if (this.customRecipes.length >= MAX_CUSTOM) return null
       this.recipes.push(recipe)
       saveCustom(this.recipes)
-      return recipe
+      return { recipe, alreadyHad: false }
     },
 
     encodeShare(id: string): string | null {

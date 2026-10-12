@@ -354,6 +354,10 @@ const showPoll = ref(false)
 const pollOptions = ref<string[]>(['', ''])
 const pollDuration = ref<number>(24 * 60 * 60)
 const pollMultiple = ref(false)
+const pollHideTotals = ref(false)
+const canHidePollTotals = computed(
+  () => instancesStore.serverCapabilities.software === 'mastodon',
+)
 const pollInputRefs = ref<HTMLInputElement[]>([])
 
 const filledPollOptions = computed(() =>
@@ -407,6 +411,7 @@ const resetPoll = () => {
     ? 24 * 60 * 60
     : (POLL_DURATIONS.value[POLL_DURATIONS.value.length - 1]?.seconds ?? 24 * 60 * 60)
   pollMultiple.value = false
+  pollHideTotals.value = false
 }
 
 const addPollOption = () => {
@@ -798,6 +803,7 @@ const handlePost = async () => {
               options: filledPollOptions.value,
               expiresIn: pollDuration.value,
               multiple: pollMultiple.value || undefined,
+              hideTotals: pollHideTotals.value || undefined,
             },
           }
         : {}),
@@ -1294,6 +1300,13 @@ defineExpose({
           <input v-model="pollMultiple" type="checkbox" />
           <span>Allow multiple choices</span>
         </label>
+        <label v-if="canHidePollTotals" class="compose-poll__field compose-poll__field--wrap">
+          <input v-model="pollHideTotals" type="checkbox" />
+          <span>Hide vote counts until the poll closes</span>
+        </label>
+        <p v-if="canHidePollTotals && pollHideTotals" class="compose-poll__hint">
+          Totals stay hidden on Mastodon until voting ends; other clients may show them differently.
+        </p>
       </div>
       <p v-if="pollError" class="compose-poll__error" role="alert">{{ pollError }}</p>
     </fieldset>
@@ -1968,6 +1981,17 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.compose-poll__field--wrap {
+  flex: 1 1 100%;
+}
+
+.compose-poll__hint {
+  margin: 0;
+  flex: 1 1 100%;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
 }
 
 .compose-poll__select {

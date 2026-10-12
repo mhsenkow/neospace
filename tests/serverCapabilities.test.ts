@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   detectServerCapabilities,
   detectServerSoftware,
+  isCapabilitiesStale,
   isFeatureAvailable,
   serverSettingsUrl,
   UNKNOWN_CAPABILITIES,
@@ -127,10 +128,21 @@ describe('server capabilities matrix', () => {
     expect(detectServerSoftware('4.2.0', null)).toBe('unknown') // ambiguous bare semver (NS-072)
   })
 
-  it('does not share mutable state between detections', () => {
+  it('returns frozen snapshots that cannot mutate shared defaults', () => {
     const a = detectServerCapabilities(rows[0]!.meta)
-    a.settingsPaths.export = '/mutated'
-    expect(detectServerCapabilities(rows[0]!.meta).settingsPaths.export).toBe('/settings/export')
+    expect(Object.isFrozen(a)).toBe(true)
+    expect(Object.isFrozen(a.settingsPaths)).toBe(true)
+    expect(Object.isFrozen(UNKNOWN_CAPABILITIES)).toBe(true)
+    expect(() => {
+      ;(a.settingsPaths as { export?: string }).export = '/mutated'
+    }).toThrow()
+  })
+
+  it('treats missing or aged probe timestamps as stale', () => {
+    const now = 1_700_000_000_000
+    expect(isCapabilitiesStale(undefined, now)).toBe(true)
+    expect(isCapabilitiesStale(now - 8 * 86400_000, now)).toBe(true)
+    expect(isCapabilitiesStale(now - 86400_000, now)).toBe(false)
   })
 })
 
@@ -149,6 +161,7 @@ describe('mapInstanceConfig', () => {
     expect(first.maxCharacters).toBe(1000)
     expect(first.mediaDescriptionLimit).toBe(1500)
     expect(first.capabilities?.software).toBe('mastodon')
+    expect(typeof first.capabilitiesProbedAt).toBe('number')
 
     const refreshed = mapInstanceConfig({ title: '', version: '4.3.0' }, first)
     expect(refreshed.title).toBe('Example')

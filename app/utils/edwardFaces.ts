@@ -83,8 +83,13 @@ const FILL: Record<EdwardFaceMood, { fill: string; rim: string; tag: string; why
   cool: { fill: '#b8e0ff', rim: '#2a7ab8', tag: 'B)', why: 'cool' },
 }
 
+/** Strip URL-ish spans so query `?` and `www.` don't skew mood cues. */
+function textForMoodCues(raw: string): string {
+  return raw.replace(/https?:\/\/\S+|www\.\S+/gi, ' ')
+}
+
 const LAUGH_RE =
-  /\b(lol|lmao|rofl|haha|hehe|lololol|lulz|kek)\b|😂|🤣|😆|😹|www+|www{2,}/i
+  /\b(lol|lmao|rofl|haha|hehe|lololol|lulz|kek)\b|😂|🤣|😆|😹|\bw{3,}\b/i
 const LOVE_RE =
   /\b(love|luv|heart|adore|miss you|ily)\b|<3|♥|❤|💕|💖|💗|💘|🥰|😍|😘/i
 const SAD_RE =
@@ -129,17 +134,19 @@ function capsRatio(text: string): number {
 
 function spicyMood(text: string): EdwardFaceMood | null {
   if (!text) return null
+  const cueText = textForMoodCues(text)
   // Pick the strongest / first matching spicy family
-  if (EGGPLANT_RE.test(text)) return 'eggplant'
-  if (PEACH_RE.test(text)) return 'peach'
-  if (BOOBY_RE.test(text)) return 'booby'
-  if (KITTY_RE.test(text)) return 'kitty'
+  if (EGGPLANT_RE.test(cueText)) return 'eggplant'
+  if (PEACH_RE.test(cueText)) return 'peach'
+  if (BOOBY_RE.test(cueText)) return 'booby'
+  if (KITTY_RE.test(cueText)) return 'kitty'
   return null
 }
 
 /** Priority-ordered semantic classifier — structure first, then text cues. */
 export function faceMoodFor(s: EdwardFaceSignals): EdwardFaceMood {
   const text = (s.text || '').trim()
+  const cueText = textForMoodCues(text)
 
   // Spicy emoji/text wins over generic CW veil — still cartoon, just dirtier
   const spicy = spicyMood(text)
@@ -151,19 +158,19 @@ export function faceMoodFor(s: EdwardFaceSignals): EdwardFaceMood {
   if (s.engagement >= 50) return 'manic'
 
   if (text) {
-    if (LAUGH_RE.test(text)) return 'giggle'
-    if (LOVE_RE.test(text)) return 'swoon'
-    if (RAGE_RE.test(text) || capsRatio(text) > 0.72) return 'rage'
-    if (ANGER_RE.test(text) || capsRatio(text) > 0.55) return 'anger'
-    if (FEAR_RE.test(text)) return 'fear'
-    if (PARTY_RE.test(text)) return 'party'
-    if (SMUG_RE.test(text)) return 'smug'
-    if (SLEEPY_RE.test(text)) return 'sleepy'
-    if (SICK_RE.test(text)) return 'sick'
-    if (CONFUSED_RE.test(text)) return 'confused'
-    if (COOL_RE.test(text)) return 'cool'
-    if (SAD_RE.test(text)) return 'sad'
-    if (ASK_RE.test(text)) return 'ask'
+    if (LAUGH_RE.test(cueText)) return 'giggle'
+    if (LOVE_RE.test(cueText)) return 'swoon'
+    if (RAGE_RE.test(cueText) || capsRatio(text) > 0.72) return 'rage'
+    if (ANGER_RE.test(cueText) || capsRatio(text) > 0.55) return 'anger'
+    if (FEAR_RE.test(cueText)) return 'fear'
+    if (PARTY_RE.test(cueText)) return 'party'
+    if (SMUG_RE.test(cueText)) return 'smug'
+    if (SLEEPY_RE.test(cueText)) return 'sleepy'
+    if (SICK_RE.test(cueText)) return 'sick'
+    if (CONFUSED_RE.test(cueText)) return 'confused'
+    if (COOL_RE.test(cueText)) return 'cool'
+    if (SAD_RE.test(cueText)) return 'sad'
+    if (ASK_RE.test(cueText)) return 'ask'
   }
 
   if (s.badges.includes('media')) return 'sparkle'
@@ -171,7 +178,7 @@ export function faceMoodFor(s: EdwardFaceSignals): EdwardFaceMood {
   if (s.hasCard && !s.badges.includes('media')) return 'linky'
   if (s.kind === 'boost') return 'starry'
   if (s.kind === 'reply' || (s.mentionCount || 0) >= 2) return 'yapping'
-  if (ASK_RE.test(text)) return 'ask'
+  if (ASK_RE.test(cueText)) return 'ask'
   return 'curious'
 }
 
@@ -965,7 +972,7 @@ export const EDWARD_MOOD_GLYPHS: Record<EdwardFaceMood, string> = {
   manic: '✧ヮ✧',
   giggle: '＾▽＾',
   swoon: '♡‿♡',
-  rage: '✧ヮ✧',
+  rage: 'ಠ益ಠ',
   sad: '╥_╥',
   ask: '·?·',
   linky: '⛓',

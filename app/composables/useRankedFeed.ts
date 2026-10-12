@@ -12,6 +12,7 @@
 import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
+import { useSettingsStore } from '~/stores/settings'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { statusIdentity } from '~/utils/statusIdentity'
 import { httpStatusFrom } from '~/utils/friendlyError'
@@ -24,6 +25,7 @@ import {
   rankFeed,
   qualifyAcct,
   tasteFrom,
+  viewerLanguagesFrom,
   type CandidateSource,
   type RankContext,
   type RankerId,
@@ -34,6 +36,8 @@ export type RankedStatus = ExtendedStatus & { _rankWhy?: string; _rankSource?: C
 const PAGE = 20
 /** Fetch more candidates when fewer than this many ranked posts are left */
 const REFILL_BELOW = 30
+/** Drop served pool rows (and feature cache) beyond this many identities */
+const POOL_SERVE_CAP = PAGE * 5
 const CONTEXT_TTL_MS = 15 * 60_000
 const FOLLOW_MAX = 400
 /** A context built from a failed fetch is retried soon instead of living the full TTL */
@@ -41,6 +45,11 @@ const PARTIAL_CONTEXT_TTL_MS = 20_000
 
 /** Taste context is per account and slow-changing — shared across columns */
 const contextCache = new Map<string, { at: number; ttl: number; ctx: RankContext }>()
+
+const persistRankContext = (ctx: RankContext): RankContext => {
+  const { _featureCache: _fc, ...stored } = ctx
+  return stored
+}
 
 /**
  * Follow lists paginate by follow-row id from the Link header — an account id
@@ -62,6 +71,7 @@ async function pageAll<T>(fetchPage: (maxId?: string) => Promise<CursorPage<T>>,
 export function useRankedFeed() {
   const instances = useInstancesStore()
   const groups = useGroupsStore()
+  const settings = useSettingsStore()
 
   let ranker: RankerId | null = null
   let ctx: RankContext = emptyRankContext()
@@ -75,6 +85,7 @@ export function useRankedFeed() {
   /** Per followed tag: where its next page starts (null = exhausted) */
   let tagCursors = new Map<string, string | null>()
   let dry = false
+  let servedOrder: string[] = []
   /** Bumped on every reset — in-flight fetches from an older session drop their results */
   let session = 0
   /** Consecutive failures and next-allowed attempt per source (backoff) */
@@ -105,7 +116,14 @@ export function useRankedFeed() {
     const user = instances.currentUser
     const key = acct?.id && user?.id ? `${acct.id}:${user.id}` : 'guest'
     const hit = contextCache.get(key)
-    if (hit && Date.now() - hit.at < hit.ttl) return { ...hit.ctx, now: Date.now() }
+    if (hit && Date.now() - hit.at < hit.ttl) {
+      const langs = hit.ctx.viewerLangs?.size
+        ? new Set(hit.ctx.viewerLangs)
+        : hit.ctx.viewerLang
+          ? new Set([hit.ctx.viewerLang])
+          : new Set<string>()
+      return { ...hit.ctx, now: Date.now(), viewerLangs: langs, viewerLang: langs.size ? [...langs][0]! : hit.ctx.viewerLang }
+    }
 
     // At app start the groups init is still in flight; reading before it lands pins an empty tag set
     try {
@@ -114,11 +132,17 @@ export function useRankedFeed() {
       /* groups are an optional signal */
     }
     const next = emptyRankContext()
+    next.viewerLangs = viewerLanguagesFrom({
+      postingLanguage: settings.defaultLanguage,
+      navigatorLanguage: typeof navigator !== 'undefined' ? navigator.language : null,
+    })
+    next.viewerLang = next.viewerLangs.size ? [...next.viewerLangs][0]! : null
+    next._featureCache = new Map()
     next.followedTags = liveFollowedTags()
     next.host = hostOf(acct?.url)
     if (!acct?.accessToken || !user?.id) {
       // Signed in but the user isn't loaded yet: don't pin a guest-shaped context
-      if (!acct?.accessToken) contextCache.set(key, { at: Date.now(), ttl: CONTEXT_TTL_MS, ctx: next })
+      if (!acct?.accessToken) contextCache.set(key, { at: Date.now(), ttl: CONTEXT_TTL_MS, ctx: persistRankContext(next) })
       return next
     }
     next.selfAcct = qualifyAcct(user.acct || user.username || '', next.host)
@@ -161,7 +185,11 @@ export function useRankedFeed() {
     next.likedAuthors = taste.likedAuthors
     next.likedTags = taste.likedTags
     next.likedWords = taste.likedWords
-    contextCache.set(key, { at: Date.now(), ttl: partial ? PARTIAL_CONTEXT_TTL_MS : CONTEXT_TTL_MS, ctx: next })
+    contextCache.set(key, {
+      at: Date.now(),
+      ttl: partial ? PARTIAL_CONTEXT_TTL_MS : CONTEXT_TTL_MS,
+      ctx: persistRankContext(next),
+    })
     return next
   }
 
@@ -284,6 +312,7 @@ export function useRankedFeed() {
     ranker = id
     pool = new Map()
     served.clear()
+    servedOrder = []
     queue = []
     cursors = {}
     tagCursors = new Map()
@@ -291,7 +320,7 @@ export function useRankedFeed() {
     tagTurn = 0
     dry = false
     const next = await loadContext()
-    if (token === session) ctx = next
+    if (token === session) ctx = { ...next, _featureCache: new Map() }
     return token
   }
 
@@ -307,13 +336,25 @@ export function useRankedFeed() {
     const token = fresh || ranker !== id ? await reset(id) : session
     const superseded = { statuses: [] as RankedStatus[], exhausted: false }
     if (token !== session) return superseded
-    // Two rounds on a fresh start: a deeper pool ranks better
     if (fresh) await refill(token)
     if (token !== session) return superseded
-    if (queue.length < REFILL_BELOW && !dry) await refill(token)
+    if (queue.length < REFILL_BELOW && !dry) {
+      if (fresh && queue.length >= PAGE) void refill(token)
+      else await refill(token)
+    }
     if (token !== session) return superseded
     const page = queue.splice(0, PAGE)
-    for (const s of page) served.add(statusIdentity(s)!)
+    for (const s of page) {
+      const key = statusIdentity(s)!
+      served.add(key)
+      servedOrder.push(key)
+    }
+    while (servedOrder.length > POOL_SERVE_CAP) {
+      const old = servedOrder.shift()!
+      const row = pool.get(old)
+      if (row?.id) ctx._featureCache?.delete(row.id)
+      pool.delete(old)
+    }
     return { statuses: page, exhausted: dry && !queue.length }
   }
 

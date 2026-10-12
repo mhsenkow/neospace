@@ -6,7 +6,7 @@
  * Guest mode must default to an instance that still allows public reads.
  */
 
-import { isClientError, isTimeoutError, isUnexpectedResponseError } from '~/utils/friendlyError'
+import { httpStatusFrom, isClientError, isTimeoutError, isUnexpectedResponseError } from '~/utils/friendlyError'
 
 export const DEFAULT_PUBLIC_INSTANCE = 'https://fosstodon.org'
 
@@ -16,6 +16,70 @@ export const AUTH_GATED_PUBLIC_HOSTS = new Set([
   'mstdn.social',
   'tech.lgbt',
 ])
+
+/** How long a runtime-learned gate is remembered (Mastodon hosts can change policy). */
+export const AUTH_GATED_LEARNED_TTL_MS = 90 * 24 * 60 * 60 * 1000
+
+const AUTH_GATED_LEARNED_KEY = 'neo:auth-gated-public-hosts'
+
+type LearnedGateEntry = { host: string; expiresAt: number }
+
+function readLearnedAuthGatedHosts(): Map<string, number> {
+  const out = new Map<string, number>()
+  if (typeof localStorage === 'undefined') return out
+  try {
+    const raw = localStorage.getItem(AUTH_GATED_LEARNED_KEY)
+    if (!raw) return out
+    const parsed = JSON.parse(raw) as LearnedGateEntry[]
+    if (!Array.isArray(parsed)) return out
+    const now = Date.now()
+    let dirty = false
+    for (const row of parsed) {
+      const host = row?.host?.toLowerCase?.()
+      const expiresAt = row?.expiresAt
+      if (!host || typeof expiresAt !== 'number') {
+        dirty = true
+        continue
+      }
+      if (expiresAt <= now) {
+        dirty = true
+        continue
+      }
+      out.set(host, expiresAt)
+    }
+    if (dirty) persistLearnedAuthGatedHosts(out)
+  } catch {
+    /* ignore corrupt storage */
+  }
+  return out
+}
+
+function persistLearnedAuthGatedHosts(map: Map<string, number>) {
+  if (typeof localStorage === 'undefined') return
+  const payload: LearnedGateEntry[] = [...map.entries()].map(([host, expiresAt]) => ({ host, expiresAt }))
+  localStorage.setItem(AUTH_GATED_LEARNED_KEY, JSON.stringify(payload))
+}
+
+/** Remember that this host returned 401/422 for unauthenticated public timelines. */
+export function rememberAuthGatedPublicHost(urlOrHost: string): void {
+  const host = urlOrHost.includes('://') ? hostnameOf(urlOrHost) : urlOrHost.toLowerCase().split('/')[0] || ''
+  if (!host) return
+  const learned = readLearnedAuthGatedHosts()
+  learned.set(host, Date.now() + AUTH_GATED_LEARNED_TTL_MS)
+  persistLearnedAuthGatedHosts(learned)
+}
+
+/** Call when timelines/public fails for a guest/watch row — learns the host at runtime. */
+export function notePublicTimelineAuthFailure(
+  urlOrHost: string,
+  err: unknown,
+  opts?: { authenticated?: boolean },
+): void {
+  if (opts?.authenticated) return
+  const status = httpStatusFrom(err)
+  if (status !== 401 && status !== 422) return
+  rememberAuthGatedPublicHost(urlOrHost)
+}
 
 export function hostnameOf(url: string): string {
   try {
@@ -32,8 +96,17 @@ export function hostnameMatches(url: string, domain: string): boolean {
 }
 
 export function isAuthGatedPublicHost(urlOrHost: string): boolean {
-  const host = urlOrHost.includes('://') ? hostnameOf(urlOrHost) : urlOrHost.toLowerCase()
-  return AUTH_GATED_PUBLIC_HOSTS.has(host)
+  const host = urlOrHost.includes('://') ? hostnameOf(urlOrHost) : urlOrHost.toLowerCase().split('/')[0] || ''
+  if (AUTH_GATED_PUBLIC_HOSTS.has(host)) return true
+  const learned = readLearnedAuthGatedHosts()
+  const expiresAt = learned.get(host)
+  if (!expiresAt) return false
+  if (expiresAt <= Date.now()) {
+    learned.delete(host)
+    persistLearnedAuthGatedHosts(learned)
+    return false
+  }
+  return true
 }
 
 export function resolvePublicInstanceUrl(

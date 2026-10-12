@@ -20,10 +20,7 @@ interface Env {
   TURNSTILE_SECRET_KEY?: string
 }
 
-type PagesFunction<E = unknown> = (context: {
-  request: Request
-  env: E
-}) => Response | Promise<Response>
+import type { PagesFunction } from '@cloudflare/workers-types'
 
 const UA = 'NeoSpace-Feedback/1.0'
 const GITHUB_FETCH_TIMEOUT_MS = 30_000
@@ -336,7 +333,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     `kind: ${kind}`,
     pageLabel ? `area: ${pageLabel}` : null,
     pathname ? `path: ${pathname}` : null,
-    'source: neospace.ibm.io leave-a-note',
+    `source: ${new URL(request.url).host} leave-a-note`,
     '```',
   ]
     .filter(Boolean)

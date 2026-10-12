@@ -14,16 +14,31 @@ type StoredApp = CachedApp & Partial<OAuthAppIdentity> & { savedAt?: number }
 
 /** Persisted blob stays bounded: least-recently-saved hosts are pruned past this */
 const OAUTH_APP_CACHE_MAX = 32
+/** Registrations older than this are dropped — servers may rotate app credentials */
+export const OAUTH_APP_CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
 const hostKey = (host: string) => host.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '')
 
-function readMap(): Record<string, StoredApp> {
+function isStoredApp(v: unknown): v is StoredApp {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const o = v as StoredApp
+  return typeof o.clientId === 'string' && !!o.clientId && typeof o.clientSecret === 'string' && !!o.clientSecret
+}
+
+function readMap(now = Date.now()): Record<string, StoredApp> {
   try {
     const raw = localStorage.getItem(OAUTH_APP_CACHE_KEY)
     if (!raw) return {}
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return parsed as Record<string, StoredApp>
+    const out: Record<string, StoredApp> = {}
+    for (const [key, entry] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!isStoredApp(entry)) continue
+      const savedAt = entry.savedAt
+      if (typeof savedAt === 'number' && now - savedAt > OAUTH_APP_CACHE_TTL_MS) continue
+      out[key] = entry
+    }
+    return out
   } catch {
     return {}
   }

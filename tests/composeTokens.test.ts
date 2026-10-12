@@ -18,6 +18,8 @@ describe('findComposeToken', () => {
     ['(#café', { kind: 'hashtag', start: 1, query: 'café' }],
     ['so :blob', { kind: 'emoji', start: 3, query: 'blob' }],
     ['"@x', { kind: 'mention', start: 1, query: 'x' }],
+    ['@café', { kind: 'mention', start: 0, query: 'café' }],
+    ['hi @Вася', { kind: 'mention', start: 3, query: 'Вася' }],
   ] as const)('%s', (text, want) => {
     expect(at(text)).toMatchObject(want)
   })

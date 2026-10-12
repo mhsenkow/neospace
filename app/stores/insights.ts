@@ -210,12 +210,15 @@ export const useInsightsStore = defineStore('insights', {
 
         for (let page = 0; page < MAX_PAGES; page++) {
           if (signal.aborted || gen !== fetchGen) return
-          const batch = await client.v1.accounts.$select(account.id).statuses.list({
-            limit: PAGE_LIMIT,
-            maxId,
-            excludeReplies: false,
-            excludeReblogs: false,
-          } as any)
+          const batch = await client.v1.accounts.$select(account.id).statuses.list(
+            {
+              limit: PAGE_LIMIT,
+              maxId,
+              excludeReplies: false,
+              excludeReblogs: false,
+            },
+            { requestInit: { signal } },
+          )
           if (signal.aborted || gen !== fetchGen) return
 
           if (batch.length) collected.push(...batch)

@@ -32,6 +32,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Fonts are self-hosted; Settings → What’s new has this TLDR',
       'Hardened leave-a-note; stronger CI (browser + a11y + real lint); groups/shell/Edward polish',
       'PWA updates no longer hijack mid-session; shared feed menus; quieter Edward when recessed',
+      'Settings panels split out; Edward uses less GPU idle time; compose polls and shell polish',
     ],
   },
   {

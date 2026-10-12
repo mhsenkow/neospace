@@ -128,7 +128,7 @@ const SORT_ALIASES: Record<string, EdwardSortMode> = {
 
 export const EDWARD_SORT_LABELS: Record<EdwardSortMode, string> = {
   stream: 'stream',
-  near: 'near · you',
+  near: 'big & close',
   new: 'newest',
   loud: 'loudest',
   you: 'related',
@@ -146,7 +146,7 @@ export const EDWARD_SORT_HINTS: Record<EdwardSortMode, string> = {
   you: 'closest to who and what you follow',
   new: 'freshest first',
   loud: 'most engagement first',
-  near: 'related and big, pulled close',
+  near: 'high affinity, drawn large and close',
 }
 
 export const EDWARD_EXPLORE_CHIPS: {
@@ -393,7 +393,7 @@ export function ballMatchesExplore(
   if (q.maxEngagement !== null && ball.engagement > q.maxEngagement) return false
   if (q.sources.size && !q.sources.has(ball.source ?? 'firehose')) return false
   if (q.languages.size && !(ball.language && q.languages.has(ball.language))) return false
-  if (q.excludeLanguages.size && ball.language && q.excludeLanguages.has(ball.language)) return false
+  if (q.excludeLanguages.size && (!ball.language || q.excludeLanguages.has(ball.language))) return false
   if (q.excludeMoods.size && q.excludeMoods.has(ball.mood)) return false
   if (q.threads && !ball.isThread) return false
   if (q.long && !(ball.readMinutes > 0)) return false

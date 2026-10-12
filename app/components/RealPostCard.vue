@@ -255,6 +255,10 @@ const flipMedia = computed(() => {
   const media = displayStatus.value.mediaAttachments || []
   return media.find((m) => m.type === 'image' || m.type === 'gifv' || m.type === 'video') || null
 })
+const pollLayout = computed((): 'default' | 'flip' | 'flip-media' => {
+  if (!isFlip.value) return 'default'
+  return flipMedia.value ? 'flip-media' : 'flip'
+})
 const flipAlign = computed(() => settingsStore.localPreferences.flipTextAlign || 'center')
 const flipSize = computed(() => settingsStore.localPreferences.flipTextSize || 'large')
 
@@ -1426,6 +1430,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           <PostPoll
             v-if="displayStatus.poll && cwOpen"
             :poll="displayStatus.poll"
+            :emojis="statusEmojis"
+            :layout="pollLayout"
             :can-vote="canInteract"
             :voting="isVoting"
             @vote="handleVote"
@@ -1524,6 +1530,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           <PostPoll
             v-if="displayStatus.poll"
             :poll="displayStatus.poll"
+            :emojis="statusEmojis"
+            :layout="pollLayout"
             :can-vote="canInteract"
             :voting="isVoting"
             @vote="handleVote"
@@ -1861,14 +1869,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
         align-self: var(--flip-items);
       }
 
-      .status-poll {
-        order: 3;
-        margin: 1rem 0 0;
-        width: 100%;
-        max-width: var(--flip-max);
-        text-align: left;
-      }
-
       .status-actions {
         bottom: 4.5rem;
       }
@@ -1944,11 +1944,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           justify-content: flex-end;
         }
       }
-    }
-
-    .status-poll {
-      order: 3;
-      margin: 0 4.25rem 0.5rem 1rem;
     }
 
     .status-actions {
@@ -2711,8 +2706,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     &.status-card--flip-media {
       :deep(.status-header),
       .status-content-wrap,
-      .status-cw,
-      .status-poll {
+      .status-cw {
         max-width: 40rem;
         width: 100%;
         margin-inline: auto;
@@ -2725,11 +2719,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
       .status-content-wrap,
       .status-cw {
-        padding-inline: 1.25rem 4.5rem;
-      }
-
-      .status-poll {
-        margin-inline: auto;
         padding-inline: 1.25rem 4.5rem;
       }
     }

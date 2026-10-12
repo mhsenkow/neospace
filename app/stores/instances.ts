@@ -24,6 +24,7 @@ import {
   friendlyServerError,
   hostnameOf,
   isAuthGatedPublicHost,
+  notePublicTimelineAuthFailure,
   resolvePublicInstanceUrl,
 } from '~/utils/instances'
 import { dedupeStatusesByIdentity } from '~/utils/statusIdentity'
@@ -50,6 +51,8 @@ import {
   writeCachedOAuthApp,
 } from '~/utils/oauthApp'
 import {
+  freezeCapabilities,
+  isCapabilitiesStale,
   isFeatureAvailable,
   serverSettingsUrl,
   UNKNOWN_CAPABILITIES,
@@ -304,7 +307,8 @@ export const useInstancesStore = defineStore('instances', {
 
     /** Software + feature flags for the active posting account (unknown until probed). */
     serverCapabilities(): ServerCapabilities {
-      return this.activeAccount?.instanceInfo?.capabilities ?? UNKNOWN_CAPABILITIES
+      const caps = this.activeAccount?.instanceInfo?.capabilities
+      return caps ? freezeCapabilities(caps) : UNKNOWN_CAPABILITIES
     },
 
     /** Hide scheduling only when the server positively lacks it. */
@@ -1041,13 +1045,14 @@ export const useInstancesStore = defineStore('instances', {
               recent.token === instance.accessToken &&
               Date.now() - recent.at < RECENT_VERIFY_MS
             ) {
-              void this.refreshInstanceInfo(instance.id, client)
+              if (isCapabilitiesStale(instance.instanceInfo?.capabilitiesProbedAt)) {
+                void this.refreshInstanceInfo(instance.id, client)
+              }
               return
             }
             instance.user = await client.v1.accounts.verifyCredentials()
             instance.error = null
-            // Refresh compose limit when possible (older saved instances may lack it).
-            // Fire-and-forget — startup shouldn't wait on /api/v2/instance.
+            // Full verify always re-probes instance metadata (limits + capabilities).
             void this.refreshInstanceInfo(instance.id, client)
           } catch (e: any) {
             const status = e?.status ?? e?.statusCode
@@ -1246,6 +1251,7 @@ export const useInstancesStore = defineStore('instances', {
             _instanceUrl: instance.url,
           }))
         } catch (e: any) {
+          notePublicTimelineAuthFailure(instance.url, e, { authenticated: !!instance.accessToken })
           const message = e?.message || 'Failed to fetch'
           logWarn(`Failed to fetch from ${instance.url}:`, e)
           errors.push(`${instance.name}: ${message}`)
