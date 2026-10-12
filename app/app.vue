@@ -45,13 +45,11 @@ const restoreMainScroll = (top: number) => {
     cancelled = true
   }
   const opts = { once: true, passive: true, capture: true } as const
-  window.addEventListener('wheel', cancel, opts)
-  window.addEventListener('touchstart', cancel, opts)
-  window.addEventListener('keydown', cancel, opts)
+  // pointerdown covers scrollbar drags and trackpad/mouse on iPads, which fire no wheel/touch
+  const cancelEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+  for (const type of cancelEvents) window.addEventListener(type, cancel, opts)
   const cleanup = () => {
-    window.removeEventListener('wheel', cancel, opts)
-    window.removeEventListener('touchstart', cancel, opts)
-    window.removeEventListener('keydown', cancel, opts)
+    for (const type of cancelEvents) window.removeEventListener(type, cancel, opts)
   }
   const tick = () => {
     const main = getMainScroller()

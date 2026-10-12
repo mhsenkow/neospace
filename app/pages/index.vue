@@ -21,13 +21,14 @@ import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useSettingsStore } from '~/stores/settings'
 import { useConversationsStore } from '~/stores/conversations'
-import { useNotificationsStore } from '~/stores/notifications'
+import { useNotificationsStore, type ExtendedNotification } from '~/stores/notifications'
 import { THEME_OPTIONS, UI_OPTIONS, resolveTheme } from '~/utils/appearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { BOARD_RIGHT_PORTALS, type BoardPortal } from '~/composables/useBoardPortal'
 import { participantLabel } from '~/utils/dmHelpers'
 import { richDisplayName } from '~/utils/displayName'
-import { notifLabel } from '~/utils/notifHelpers'
+import { notifLabel, notificationRoute } from '~/utils/notifHelpers'
+import { formatCount, formatCountLabel } from '~/utils/searchQuery'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 
 const themeStore = useThemeStore()
@@ -47,7 +48,7 @@ const motionBehavior = (behavior: ScrollBehavior): ScrollBehavior =>
   reducedMotion.value && behavior === 'smooth' ? 'auto' : behavior
 
 const addMenuOpen = ref(false)
-const boardFullLabel = `Board full (${MAX_COLUMNS}/${MAX_COLUMNS}) — remove a column to add another`
+const boardFullLabel = `Board full (${MAX_COLUMNS}/${MAX_COLUMNS}) — remove a feed to add another`
 const addAlgorithmsExpanded = ref(true)
 const addGroupsExpanded = ref(true)
 const addGroupQuery = ref('')
@@ -700,9 +701,17 @@ const portalActivityRows = computed(() =>
       id: n.id,
       label: `${who} ${verb}`,
       avatar: n.account?.avatar || '',
+      notif: n,
+      unread: notificationsStore.isUnread(n),
     }
   }),
 )
+
+const openPortalActivityRow = (notif: ExtendedNotification) => {
+  const route = notificationRoute(notif)
+  if (route) void router.push(route)
+  else void openPortal('activity')
+}
 
 const syncBoardPortalFromSlide = (index: number) => {
   if (!isMobileUi.value) {
@@ -824,9 +833,17 @@ const activeViewMode = computed(
   () => columnsStore.columns[activeColumnIndex.value]?.viewMode || 'flow',
 )
 
+/** Flick only means something for post lists — panels (Notifications, Messages, Search, Profile) ignore it */
+const activeColumnIsTimeline = computed(() => {
+  const col = columnsStore.columns[activeColumnIndex.value]
+  return !col || isTimelineFeed(col.feedType)
+})
+
+const { openGroup } = useBoardNav()
+
 const toggleActiveViewMode = () => {
   const col = columnsStore.columns[activeColumnIndex.value]
-  if (!col) return
+  if (!col || !isTimelineFeed(col.feedType)) return
   columnsStore.toggleColumnViewMode(col.id)
 }
 
@@ -959,6 +976,28 @@ const nestedHorizontalScroller = (target: EventTarget | null, board: HTMLElement
   return false
 }
 
+/** Is `target` inside any element that scrolls horizontally (below the board)? */
+const insideHorizontalScroller = (target: EventTarget | null, board: HTMLElement): boolean => {
+  let node = target instanceof HTMLElement ? target : null
+  while (node && node !== board) {
+    if (node.scrollWidth > node.clientWidth + 1) {
+      const ox = getComputedStyle(node).overflowX
+      if (ox === 'auto' || ox === 'scroll') return true
+    }
+    node = node.parentElement
+  }
+  return false
+}
+
+/** After an x-locked swipe, the lift-off must not "click" the link / button it began on */
+let swallowClickUntil = 0
+const onCarouselClickCapture = (e: MouseEvent) => {
+  if (performance.now() > swallowClickUntil) return
+  swallowClickUntil = 0
+  e.preventDefault()
+  e.stopPropagation()
+}
+
 const onColumnsWheel = (e: WheelEvent) => {
   const el = columnsContainer.value
   if (!el || isMobileUi.value) return
@@ -1027,14 +1066,18 @@ const onCarouselTouchStart = (e: TouchEvent) => {
   if (!el) return
   const t = e.touches[0]!
   const target = e.target as HTMLElement | null
-  // Don't steal taps from column chrome / compose / menus (iPad move/close/focus)
+  // Don't steal taps from column chrome / compose / menus (iPad move/close/focus).
+  // Links and buttons inside posts DO start a swipe — names, reblog labels and the action bar
+  // cover most of a card, and a tap on them still works (the click is swallowed only after an x-locked swipe).
   if (
     target?.closest(
-      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .mobile-feed-tabs, .mobile-feed-chrome, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill, .feed-portal__search, .feed-portal__list',
+      'input, textarea, select, [contenteditable="true"], [role="menu"], [role="listbox"], [role="slider"], video, audio, .mobile-feed-tabs, .mobile-feed-chrome, .column-header, .feed-dropdown, .add-column-panel, .compose, .compose-pill, .feed-portal__search, .feed-portal__list',
     )
   ) {
     return
   }
+  // Wide media / code / account strips pan themselves
+  if (insideHorizontalScroller(target, el)) return
   const now = performance.now()
   carouselGesture = {
     id: t.identifier,
@@ -1126,6 +1169,7 @@ const finishCarouselGesture = (e: TouchEvent) => {
   carouselGesture = null
   nativeTookOver = false
   if (!el || !wasX) return
+  swallowClickUntil = performance.now() + 400
 
   el.style.touchAction = ''
   el.classList.remove('columns-container--swiping')
@@ -1175,6 +1219,7 @@ const bindCarouselGestures = () => {
   el.addEventListener('touchmove', onCarouselTouchMove, { passive: false, capture: true })
   el.addEventListener('touchend', finishCarouselGesture, { passive: true, capture: true })
   el.addEventListener('touchcancel', finishCarouselGesture, { passive: true, capture: true })
+  el.addEventListener('click', onCarouselClickCapture, true)
   el.addEventListener('wheel', onColumnsWheel, { passive: false, capture: true })
   el.addEventListener('scrollend', onCarouselScrollEnd)
   // Mobile: JS parks — never leave mandatory snap armed (it bounced against settle)
@@ -1197,6 +1242,7 @@ const unbindCarouselGestures = () => {
   el.removeEventListener('touchmove', onCarouselTouchMove, true)
   el.removeEventListener('touchend', finishCarouselGesture, true)
   el.removeEventListener('touchcancel', finishCarouselGesture, true)
+  el.removeEventListener('click', onCarouselClickCapture, true)
   el.removeEventListener('wheel', onColumnsWheel, true)
   el.removeEventListener('scrollend', onCarouselScrollEnd)
   carouselResizeRo?.disconnect()
@@ -1413,49 +1459,15 @@ useHead({ title: 'Home | NeoSpace' })
           </svg>
           <template #items>
             <span class="add-column-menu__title">Add feed</span>
-            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
-            <div class="add-column-menu__divider" role="separator" />
-            <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-              <span>Timelines</span>
-              <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            <template v-if="addAlgorithmsExpanded">
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-                Local ({{ localHostLabel }})
-              </button>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('favourites')"
-              >Liked</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('bookmarks')"
-              >Saved</button>
-              <span v-if="algorithmsStore.allRecipes.length" class="add-column-menu__title">Algorithms</span>
-              <button
-                v-for="recipe in algorithmsStore.allRecipes"
-                :key="recipe.id"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('algorithm', recipe.id)"
-              >{{ recipe.name }}</button>
-              <button
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="algorithmsStore.openEditor(); addMenuOpen = false"
-              >Create algorithm…</button>
-            </template>
+            <FeedMenuItems
+              variant="add"
+              :timelines-expanded="addAlgorithmsExpanded"
+              :local-host-label="localHostLabel"
+              compact-add
+              @toggle-timelines="addAlgorithmsExpanded = !addAlgorithmsExpanded"
+              @pick="addColumn"
+              @create-algorithm="algorithmsStore.openEditor(); addMenuOpen = false"
+            />
           </template>
         </NeoMenu>
       </div>
@@ -1469,8 +1481,8 @@ useHead({ title: 'Home | NeoSpace' })
         :class="{ 'mobile-feed-chrome__mode--flip': activeViewMode === 'flip' }"
         aria-label="Flick view — one post at a time"
         :aria-pressed="activeViewMode === 'flip'"
-        :title="activeViewMode === 'flip' ? 'Flick — one post at a time' : 'Feed — scroll a list'"
-        :disabled="!!boardPortal"
+        title="Flick view — one post at a time"
+        :disabled="!!boardPortal || !activeColumnIsTimeline"
         @click="toggleActiveViewMode"
       >
         <span class="mode-glyph" aria-hidden="true">
@@ -1546,67 +1558,16 @@ useHead({ title: 'Home | NeoSpace' })
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             <template #items>
-              <span class="add-column-menu__title">Add Feed</span>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">For You</button>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-                <span>Timelines</span>
-                <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="addAlgorithmsExpanded">
-                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-                  Local ({{ localHostLabel }})
-                </button>
-                <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">Federated</button>
-                <button
-                  v-if="instancesStore.hasAuthenticatedInstance"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('favourites')"
-                >Liked</button>
-                <button
-                  v-if="instancesStore.hasAuthenticatedInstance"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('bookmarks')"
-                >Saved</button>
-                <span v-if="algorithmsStore.allRecipes.length" class="add-column-menu__title">Algorithms</span>
-                <button
-                  v-for="recipe in algorithmsStore.allRecipes"
-                  :key="recipe.id"
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="addColumn('algorithm', recipe.id)"
-                >{{ recipe.name }}</button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="add-column-menu__item"
-                  @click="algorithmsStore.openEditor(); addMenuOpen = false"
-                >Create algorithm…</button>
-              </template>
-              <div class="add-column-menu__divider" role="separator" />
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">Search</button>
-              <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">Profile</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('notifications')"
-              >Notifications</button>
-              <button
-                v-if="instancesStore.hasAuthenticatedInstance"
-                type="button"
-                role="menuitem"
-                class="add-column-menu__item"
-                @click="addColumn('messages')"
-              >Messages</button>
+              <span class="add-column-menu__title">Add feed</span>
+              <FeedMenuItems
+                variant="add"
+                :timelines-expanded="addAlgorithmsExpanded"
+                :local-host-label="localHostLabel"
+                show-panel-feeds
+                @toggle-timelines="addAlgorithmsExpanded = !addAlgorithmsExpanded"
+                @pick="addColumn"
+                @create-algorithm="algorithmsStore.openEditor(); addMenuOpen = false"
+              />
               <div class="add-column-menu__divider" role="separator" />
               <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
                 <span>Groups</span>
@@ -1675,8 +1636,7 @@ useHead({ title: 'Home | NeoSpace' })
         :inert="slideInert(0)"
         aria-label="Settings"
       >
-        <p class="feed-portal__kicker">Edge</p>
-        <h2 class="feed-portal__title">Settings</h2>
+                <h2 class="feed-portal__title">Settings</h2>
         <p class="feed-portal__body">Appearance, posting defaults, and accounts.</p>
 
         <div class="feed-portal__panel">
@@ -1717,8 +1677,7 @@ useHead({ title: 'Home | NeoSpace' })
         :inert="slideInert(1)"
         aria-label="Profile"
       >
-        <p class="feed-portal__kicker">Edge</p>
-        <h2 class="feed-portal__title">Profile</h2>
+                <h2 class="feed-portal__title">Profile</h2>
 
         <div v-if="portalUser" class="feed-portal__identity">
           <img
@@ -1731,9 +1690,9 @@ useHead({ title: 'Home | NeoSpace' })
             <span>@{{ portalUser.acct }}</span>
           </div>
           <p class="feed-portal__stats">
-            <span><b>{{ portalUser.statusesCount ?? 0 }}</b> posts</span>
-            <span><b>{{ portalUser.followingCount ?? 0 }}</b> following</span>
-            <span><b>{{ portalUser.followersCount ?? 0 }}</b> followers</span>
+            <span>{{ formatCountLabel(portalUser.statusesCount, 'post') }}</span>
+            <span>{{ formatCount(portalUser.followingCount) }} following</span>
+            <span>{{ formatCountLabel(portalUser.followersCount, 'follower') }}</span>
           </p>
         </div>
         <p v-else class="feed-portal__body">
@@ -1801,8 +1760,7 @@ useHead({ title: 'Home | NeoSpace' })
         :inert="slideInert(EDGE_LEFT + columnsStore.columns.length)"
         aria-label="Search"
       >
-        <p class="feed-portal__kicker">Edge</p>
-        <h2 class="feed-portal__title">Search</h2>
+                <h2 class="feed-portal__title">Search</h2>
         <p class="feed-portal__body">People, posts, tags, and servers.</p>
 
         <label class="feed-portal__search">
@@ -1822,7 +1780,7 @@ useHead({ title: 'Home | NeoSpace' })
         </label>
 
         <div class="feed-portal__chips">
-          <button type="button" class="feed-portal__chip" @click="openPortal('search', { q: 'fediverse' })">
+          <button type="button" class="feed-portal__chip" @click="openPortal('search', { q: '#fediverse' })">
             #fediverse
           </button>
           <button
@@ -1850,11 +1808,10 @@ useHead({ title: 'Home | NeoSpace' })
         v-if="isMobileUi"
         class="feed-portal feed-portal--inbox"
         :inert="slideInert(EDGE_LEFT + columnsStore.columns.length + 1)"
-        aria-label="Inbox"
+        aria-label="Messages"
       >
-        <p class="feed-portal__kicker">Edge</p>
-        <h2 class="feed-portal__title">
-          Inbox
+                <h2 class="feed-portal__title">
+          Messages
           <span v-if="conversationsStore.badgeLabel" class="feed-portal__badge">
             {{ conversationsStore.badgeLabel }}
           </span>
@@ -1900,8 +1857,7 @@ useHead({ title: 'Home | NeoSpace' })
         :inert="slideInert(EDGE_LEFT + columnsStore.columns.length + 2)"
         aria-label="Activity"
       >
-        <p class="feed-portal__kicker">Edge</p>
-        <h2 class="feed-portal__title">
+                <h2 class="feed-portal__title">
           Activity
           <span v-if="notificationsStore.badgeLabel" class="feed-portal__badge">
             {{ notificationsStore.badgeLabel }}
@@ -1933,12 +1889,16 @@ useHead({ title: 'Home | NeoSpace' })
             :key="row.id"
             type="button"
             class="feed-portal__list-row"
-            @click="openPortal('activity')"
+            :class="{ 'feed-portal__list-row--unread': row.unread }"
+            @click="openPortalActivityRow(row.notif)"
           >
             <img v-if="row.avatar" :src="row.avatar" alt="" class="feed-portal__list-avatar" loading="lazy" decoding="async" />
             <span v-else class="feed-portal__list-avatar feed-portal__list-avatar--empty" />
             <span class="feed-portal__row-text">
               <strong>{{ row.label }}</strong>
+            </span>
+            <span v-if="row.unread" class="feed-portal__unread-dot">
+              <span class="sr-only">Unread</span>
             </span>
           </button>
         </div>
@@ -1952,10 +1912,9 @@ useHead({ title: 'Home | NeoSpace' })
         v-if="isMobileUi"
         class="feed-portal feed-portal--communities"
         :inert="slideInert(EDGE_LEFT + columnsStore.columns.length + 3)"
-        aria-label="Find communities"
+        aria-label="Groups"
       >
-        <p class="feed-portal__kicker">Edge</p>
-        <h2 class="feed-portal__title">Groups</h2>
+                <h2 class="feed-portal__title">Groups</h2>
         <p class="feed-portal__body">
           {{
             groupsStore.joinedGroups.length
@@ -1970,7 +1929,7 @@ useHead({ title: 'Home | NeoSpace' })
             :key="group.tag"
             type="button"
             class="feed-portal__chip"
-            @click="router.push(`/groups/${encodeURIComponent(group.tag)}`)"
+            @click="void openGroup(group.tag)"
           >
             <span aria-hidden="true">{{ group.icon }}</span>
             {{ group.name }}
@@ -2020,126 +1979,23 @@ useHead({ title: 'Home | NeoSpace' })
         v-model:open="addMenuOpen"
         class="add-column-neo add-column-neo--desktop"
         align="end"
-        :label="`Add column (${columnsStore.columnCount}/${MAX_COLUMNS})`"
+        :label="`Add feed (${columnsStore.columnCount}/${MAX_COLUMNS})`"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
         <template #items>
-          <span class="add-column-menu__title">Add Column</span>
-          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('home')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-            </svg>
-            For You
-          </button>
-          <div class="add-column-menu__divider" role="separator" />
-          <button type="button" role="menuitem" :aria-expanded="addAlgorithmsExpanded" class="add-column-menu__section-toggle" @click.stop="addAlgorithmsExpanded = !addAlgorithmsExpanded">
-            <span>Timelines</span>
-            <svg :class="{ rotated: addAlgorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-          <template v-if="addAlgorithmsExpanded">
-            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('local')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-              </svg>
-              Local ({{ localHostLabel }})
-            </button>
-            <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('federated')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M2 12h20" />
-                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-              </svg>
-              Federated
-            </button>
-            <button
-              v-if="instancesStore.hasAuthenticatedInstance"
-              type="button"
-              role="menuitem"
-              class="add-column-menu__item"
-              @click="addColumn('favourites')"
-            >
-              <NeoIcon name="heart" :size="16" :stroke="1.5" />
-              Liked
-            </button>
-            <button
-              v-if="instancesStore.hasAuthenticatedInstance"
-              type="button"
-              role="menuitem"
-              class="add-column-menu__item"
-              @click="addColumn('bookmarks')"
-            >
-              <NeoIcon name="bookmark" :size="16" :stroke="1.5" />
-              Saved
-            </button>
-            <span v-if="algorithmsStore.allRecipes.length" class="add-column-menu__title">Algorithms</span>
-            <button
-              v-for="recipe in algorithmsStore.allRecipes"
-              :key="`d-${recipe.id}`"
-              type="button"
-              role="menuitem"
-              class="add-column-menu__item"
-              @click="addColumn('algorithm', recipe.id)"
-            >
-              <NeoIcon name="filter" :size="16" :stroke="1.5" />
-              {{ recipe.name }}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              class="add-column-menu__item"
-              @click="algorithmsStore.openEditor(); addMenuOpen = false"
-            >
-              <NeoIcon name="plus" :size="16" :stroke="1.5" />
-              Create algorithm…
-            </button>
-          </template>
-          <div class="add-column-menu__divider" role="separator" />
-          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('search')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-            Search
-          </button>
-          <button type="button" role="menuitem" class="add-column-menu__item" @click="addColumn('profile')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-            Profile
-          </button>
-          <button
-            v-if="instancesStore.hasAuthenticatedInstance"
-            type="button"
-            role="menuitem"
-            class="add-column-menu__item"
-            @click="addColumn('notifications')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 01-3.46 0" />
-            </svg>
-            Notifications
-          </button>
-          <button
-            v-if="instancesStore.hasAuthenticatedInstance"
-            type="button"
-            role="menuitem"
-            class="add-column-menu__item"
-            @click="addColumn('messages')"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-            </svg>
-            Messages
-          </button>
+          <span class="add-column-menu__title">Add feed</span>
+          <FeedMenuItems
+            variant="add"
+            :timelines-expanded="addAlgorithmsExpanded"
+            :local-host-label="localHostLabel"
+            show-panel-feeds
+            @toggle-timelines="addAlgorithmsExpanded = !addAlgorithmsExpanded"
+            @pick="addColumn"
+            @create-algorithm="algorithmsStore.openEditor(); addMenuOpen = false"
+          />
           <div class="add-column-menu__divider" role="separator" />
           <button type="button" role="menuitem" :aria-expanded="addGroupsExpanded" class="add-column-menu__section-toggle" @click.stop="addGroupsExpanded = !addGroupsExpanded">
             <span>Groups</span>
@@ -2186,7 +2042,7 @@ useHead({ title: 'Home | NeoSpace' })
             </div>
           </template>
           <span class="add-column-menu__hint">
-            {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} columns on this device
+            {{ columnsStore.columnCount }}/{{ MAX_COLUMNS }} feeds on this device
           </span>
         </template>
       </NeoMenu>
@@ -2502,15 +2358,6 @@ useHead({ title: 'Home | NeoSpace' })
 
   @media (max-width: 1023px) {
     display: flex;
-  }
-
-  &__kicker {
-    margin: 0;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--neo-text-muted);
   }
 
   &__title {

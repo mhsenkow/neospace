@@ -42,7 +42,7 @@ Key settings in `nuxt.config.ts`:
 | `srcDir` | `app/` | App lives under `app/`, not root |
 | `modules` | `@pinia/nuxt`, `@vite-pwa/nuxt` | State + installable PWA |
 | `runtimeConfig.public.turnstileSiteKey` | env | Optional Turnstile widget |
-| PWA | `registerType: 'autoUpdate'` | Avoids stale SW on home-screen installs |
+| PWA | `registerType: 'prompt'` | Updates apply only when the tab is hidden with nothing open, else an "Update ready" toast (`pwa-update.client.ts`) |
 | Global CSS | `~/assets/css/main.scss` | SCSS with injected `_variables.scss` |
 | Boot scripts | `/boot/rescue.js`, `/boot/prepaint.js` | External scripts in `<head>` (no inline) |
 
@@ -260,7 +260,9 @@ Configured in `nuxt.config.ts` via `@vite-pwa/nuxt`:
 
 - Manifest: standalone display, theme/background `#1a1a18`
 - Workbox: app-shell caching; `navigateFallback: '/'`; excludes `/auth` and `/api/`
-- `registerType: 'autoUpdate'` — new SW activates without prompt
+- `registerType: 'prompt'`, `skipWaiting: false` — a waiting SW is applied when the tab is hidden and nothing modal is open, otherwise the user gets a Reload toast
+- Fonts are runtime-cached (`neo-fonts`, CacheFirst), not precached; `npm run budget` enforces the precache budget in CI
+- CI stamps `build-info.json` (commit + tree digest) on the artifact that the opt-in `deploy` job verifies and uploads without rebuilding; `probe-instances.yml` weekly re-probes the curated server catalog
 - Icons in `public/icons/`
 
 ---

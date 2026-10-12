@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ThemeMenu from '~/components/shell/ThemeMenu.vue'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
@@ -12,6 +13,8 @@ import { useOverlayStore } from '~/stores/overlay'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { categoryTint, useShellAppearance } from '~/composables/useShellAppearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
+import { useSuiteGroups } from '~/composables/useSuiteGroups'
+import { SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
 import type { NeoIconName } from '~/utils/neoIcons'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -21,14 +24,13 @@ const notificationsStore = useNotificationsStore()
 const conversationsStore = useConversationsStore()
 const groupsStore = useGroupsStore()
 const algorithmsStore = useAlgorithmsStore()
-algorithmsStore.hydrate()
 const columnsStore = useColumnsStore()
 const settingsStore = useSettingsStore()
 const themeStore = useThemeStore()
 const overlayStore = useOverlayStore()
 const { open: openAccounts } = useAccountsManager()
 const { boardPortal } = useBoardPortal()
-const { currentThemeLabel, cycleTheme, lookAnnounce } = useShellAppearance()
+const { currentThemeLabel, cycleTheme } = useShellAppearance()
 const router = useRouter()
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
@@ -36,6 +38,10 @@ const messagesBadge = computed(() => conversationsStore.badgeLabel)
 
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
 const sidebarSuggestedGroups = computed(() => groupsStore.suggestedFeaturedGroups.slice(0, 6))
+// Same rule as the desktop sidebar: suggestions only until a few groups are joined
+const showSidebarSuggested = computed(
+  () => sidebarSuggestedGroups.value.length > 0 && sidebarJoinedGroups.value.length < 4,
+)
 
 const instanceHost = computed(() => {
   const url = instancesStore.instanceUrl
@@ -51,13 +57,19 @@ const closeMobileMenu = () => {
   open.value = false
 }
 
-const { openBoardFeed, openFeedOrRoute, openGroup, boardColumnIs } = useBoardNav()
+const { openBoardFeed, openFeedOrRoute, openGroup, boardColumnIs, goHome } = useBoardNav()
 const { path: routePath } = useActivityNav()
 const searchActive = computed(() => routePath.value === '/explore' || boardColumnIs('search'))
 const messagesActive = computed(() => routePath.value === '/messages' || boardColumnIs('messages'))
 const activityActive = computed(
   () => routePath.value === '/notifications' || boardColumnIs('notifications'),
 )
+
+/** Same Home behaviour as the tab bar / header logo: clears column focus and jumps to the Home column */
+const goHomeFromDrawer = () => {
+  closeMobileMenu()
+  void goHome()
+}
 
 const openGroupFromMenu = (tag: string) => {
   closeMobileMenu()
@@ -71,6 +83,9 @@ const localHostLabel = computed(() => {
     resolvePublicInstanceUrl()
   return hostnameOf(preferred) || 'this server'
 })
+
+const algorithmsShowAll = ref(false)
+const ALGORITHMS_COLLAPSED = 5
 
 const drawerAlgorithmItems = computed(() => {
   const items: {
@@ -103,6 +118,21 @@ const drawerAlgorithmItems = computed(() => {
   return items
 })
 
+const visibleAlgorithmItems = computed(() =>
+  algorithmsShowAll.value
+    ? drawerAlgorithmItems.value
+    : drawerAlgorithmItems.value.slice(0, ALGORITHMS_COLLAPSED),
+)
+const algorithmsCanToggle = computed(() => drawerAlgorithmItems.value.length > ALGORITHMS_COLLAPSED)
+
+// Same tools as the desktop waffle, in the drawer so nothing floats over phone content
+const suiteToolGroups = useSuiteGroups()
+const suiteTools = computed(() => suiteToolGroups.value.flatMap((g) => g.tools))
+const runSuiteTool = (tool: SuiteTool) => {
+  closeMobileMenu()
+  tool.action?.()
+}
+
 const openBoardFeedFromDrawer = (feedType: ColumnFeedType, feedParam?: string) => {
   closeMobileMenu()
   void openBoardFeed(feedType, feedParam)
@@ -127,7 +157,7 @@ const openSettingsFromDrawer = async () => {
 const handleLogout = async () => {
   const ok = await overlayStore.openConfirm({
     title: 'Sign out?',
-    body: 'Sign out of this account? You can keep browsing public posts.',
+    body: 'Sign out of this account? You’ll be taken to the sign-in page.',
     confirmLabel: 'Sign out',
     danger: true,
   })
@@ -170,10 +200,10 @@ useFocusTrap(mobileSidebarRef, open, {
     aria-label="Menu"
   >
     <div class="mobile-sidebar__header">
-      <NuxtLink to="/" class="mobile-sidebar__logo" @click="closeMobileMenu">
-        <span class="mobile-sidebar__mark">ns</span>
-        neospace
-      </NuxtLink>
+      <!-- Plain link: the logo isn't a nav item, so it never claims aria-current -->
+      <a href="/" class="mobile-sidebar__logo" aria-label="NeoSpace home" @click.prevent="goHomeFromDrawer">
+        <NeoMark />
+      </a>
       <button class="mobile-sidebar__close" @click="closeMobileMenu" type="button" aria-label="Close menu">
         <NeoIcon name="x" :size="18" :stroke="2" />
       </button>
@@ -181,7 +211,7 @@ useFocusTrap(mobileSidebarRef, open, {
 
     <div class="mobile-sidebar__scroll">
       <nav class="mobile-sidebar__nav" aria-label="Main menu">
-        <NuxtLink to="/" class="mobile-sidebar__link" @click="closeMobileMenu">Home</NuxtLink>
+        <NuxtLink to="/" class="mobile-sidebar__link" @click="goHomeFromDrawer">Home</NuxtLink>
         <button
           type="button"
           class="mobile-sidebar__link"
@@ -240,23 +270,26 @@ useFocusTrap(mobileSidebarRef, open, {
         </NuxtLink>
       </div>
 
-      <section class="mobile-sidebar__groups" aria-label="Algorithms">
+      <section class="mobile-sidebar__groups" aria-labelledby="drawer-algorithms-title">
         <div class="mobile-sidebar__groups-block">
           <div class="mobile-sidebar__groups-head">
-            <h2 class="mobile-sidebar__groups-title">Algorithms</h2>
+            <h2 id="drawer-algorithms-title" class="mobile-sidebar__groups-title">Algorithms</h2>
             <button
               type="button"
               class="mobile-sidebar__groups-all"
+              aria-label="New algorithm"
               @click="openNewAlgorithmFromDrawer"
             >
               New
             </button>
           </div>
           <ul class="mobile-sidebar__suggest-list">
-            <li v-for="item in drawerAlgorithmItems" :key="item.key">
+            <li v-for="item in visibleAlgorithmItems" :key="item.key">
               <button
                 type="button"
                 class="mobile-sidebar__suggest"
+                :class="{ 'mobile-sidebar__suggest--on': boardColumnIs(item.feedType, item.feedParam) }"
+                :aria-current="boardColumnIs(item.feedType, item.feedParam) ? 'true' : undefined"
                 :title="item.tip || item.label"
                 @click="openBoardFeedFromDrawer(item.feedType, item.feedParam)"
               >
@@ -270,12 +303,70 @@ useFocusTrap(mobileSidebarRef, open, {
               </button>
             </li>
           </ul>
+          <button
+            v-if="algorithmsCanToggle"
+            type="button"
+            class="mobile-sidebar__groups-all mobile-sidebar__more"
+            :aria-expanded="algorithmsShowAll"
+            @click="algorithmsShowAll = !algorithmsShowAll"
+          >
+            {{ algorithmsShowAll ? 'Show fewer algorithms' : 'Show more algorithms' }}
+          </button>
+        </div>
+      </section>
+
+      <section class="mobile-sidebar__groups" aria-labelledby="drawer-tools-title">
+        <div class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 id="drawer-tools-title" class="mobile-sidebar__groups-title">Tools</h2>
+            <a
+              class="mobile-sidebar__groups-all"
+              :href="SUITE_TOOLS_MAP"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="All tools (opens in new tab)"
+              @click="closeMobileMenu"
+            >
+              All tools
+            </a>
+          </div>
+          <ul class="mobile-sidebar__suggest-list">
+            <li v-for="tool in suiteTools" :key="tool.id">
+              <button
+                v-if="tool.action"
+                type="button"
+                class="mobile-sidebar__suggest"
+                :aria-pressed="tool.current ? 'true' : 'false'"
+                @click="runSuiteTool(tool)"
+              >
+                <span class="mobile-sidebar__suggest-text">
+                  <span class="mobile-sidebar__suggest-name">{{ tool.label }}</span>
+                  <span class="mobile-sidebar__suggest-tag">{{ tool.blurb }}</span>
+                </span>
+              </button>
+              <a
+                v-else
+                class="mobile-sidebar__suggest"
+                :href="tool.href"
+                :aria-current="tool.current ? 'page' : undefined"
+                :target="tool.current ? undefined : '_blank'"
+                :rel="tool.current ? undefined : 'noopener noreferrer'"
+                :aria-label="tool.current ? tool.label : `${tool.label} (opens in new tab)`"
+                @click="closeMobileMenu"
+              >
+                <span class="mobile-sidebar__suggest-text">
+                  <span class="mobile-sidebar__suggest-name">{{ tool.label }}</span>
+                  <span class="mobile-sidebar__suggest-tag">{{ tool.blurb }}</span>
+                </span>
+              </a>
+            </li>
+          </ul>
         </div>
       </section>
 
       <!-- Threads-style communities hub in the side panel -->
       <section
-        v-if="sidebarJoinedGroups.length || sidebarSuggestedGroups.length"
+        v-if="sidebarJoinedGroups.length || showSidebarSuggested"
         class="mobile-sidebar__groups"
       >
         <div v-if="sidebarJoinedGroups.length" class="mobile-sidebar__groups-block">
@@ -307,7 +398,7 @@ useFocusTrap(mobileSidebarRef, open, {
           </ul>
         </div>
 
-        <div v-if="sidebarSuggestedGroups.length" class="mobile-sidebar__groups-block">
+        <div v-if="showSidebarSuggested" class="mobile-sidebar__groups-block">
           <div class="mobile-sidebar__groups-head">
             <h2 class="mobile-sidebar__groups-title">Suggested</h2>
           </div>
@@ -337,17 +428,19 @@ useFocusTrap(mobileSidebarRef, open, {
     </div>
 
     <div class="mobile-sidebar__footer">
-      <button
-        class="mobile-sidebar__action mobile-sidebar__action--theme"
-        :class="{ 'chrome-hint': boardPortal === 'settings' }"
-        type="button"
-        :aria-label="`Theme: ${currentThemeLabel}`"
-        @click="cycleTheme"
-      >
-        <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
-        <span>Theme · {{ currentThemeLabel }}</span>
-      </button>
-      <p class="sr-only" aria-live="polite">{{ lookAnnounce }}</p>
+      <div class="mobile-sidebar__action-split">
+        <button
+          class="mobile-sidebar__action mobile-sidebar__action--theme"
+          :class="{ 'chrome-hint': boardPortal === 'settings' }"
+          type="button"
+          :aria-label="`Theme: ${currentThemeLabel}. Tap for the next theme.`"
+          @click="cycleTheme"
+        >
+          <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
+          <span>Theme · {{ currentThemeLabel }}</span>
+        </button>
+        <ThemeMenu />
+      </div>
       <button
         class="mobile-sidebar__action"
         :class="{ 'chrome-hint': boardPortal === 'settings' }"
@@ -371,19 +464,13 @@ useFocusTrap(mobileSidebarRef, open, {
           <div class="mobile-sidebar__user-info">
             <span class="mobile-sidebar__user-name">{{ instancesStore.userDisplayName }}</span>
             <span class="mobile-sidebar__user-instance">
-              Posting as · {{ instanceHost }}
+              Posting on {{ instanceHost }}
             </span>
           </div>
         </div>
         <button class="mobile-sidebar__action mobile-sidebar__action--danger" @click="handleLogout" type="button">
           Sign out
         </button>
-      </template>
-      <template v-else>
-        <div class="mobile-sidebar__divider"></div>
-        <NuxtLink to="/login" class="mobile-sidebar__login" @click="closeMobileMenu">
-          Sign in
-        </NuxtLink>
       </template>
     </div>
   </div>
@@ -449,20 +536,6 @@ useFocusTrap(mobileSidebarRef, open, {
     font-weight: 700;
     font-size: 1rem;
     letter-spacing: -0.02em;
-  }
-
-  &__mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    font-size: 0.625rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    color: var(--neo-text-on-accent);
-    background: var(--neo-accent);
-    border-radius: var(--neo-radius-sm, 2px);
   }
 
   &__close {
@@ -705,6 +778,8 @@ useFocusTrap(mobileSidebarRef, open, {
     border-radius: var(--neo-radius-xl, 8px);
     background: transparent;
     text-align: left;
+    text-decoration: none;
+    min-height: 44px;
     cursor: pointer;
     color: inherit;
 
@@ -717,6 +792,16 @@ useFocusTrap(mobileSidebarRef, open, {
         background: var(--neo-bg-hover);
       }
     }
+  }
+
+  &__suggest--on {
+    background: var(--neo-bg-active, var(--neo-bg-hover));
+  }
+
+  &__more {
+    margin: 0;
+    padding: 0 0.35rem;
+    justify-content: flex-start;
   }
 
   &__suggest-icon {
@@ -777,6 +862,13 @@ useFocusTrap(mobileSidebarRef, open, {
     background: var(--neo-bg-secondary);
   }
 
+  &__action-split {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding-right: 0.5rem;
+  }
+
   &__action {
     display: flex;
     align-items: center;
@@ -833,33 +925,16 @@ useFocusTrap(mobileSidebarRef, open, {
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--neo-text-primary);
+    // Long display names stay on one line instead of growing the footer
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__user-instance {
     display: block;
     font-size: 0.75rem;
     color: var(--neo-text-muted);
-  }
-
-  &__login {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding: 0.75rem;
-    background: var(--neo-accent);
-    color: var(--neo-text-on-accent);
-    text-decoration: none;
-    border-radius: var(--neo-radius-sm, 2px);
-    font-size: 0.875rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-
-    @media (hover: hover) {
-      &:hover {
-        background: var(--neo-accent-hover);
-      }
-    }
   }
 
   &__divider {

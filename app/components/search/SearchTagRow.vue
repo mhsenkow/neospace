@@ -21,7 +21,9 @@ const props = withDefaults(
 const emit = defineEmits<{ follow: [tag: mastodon.v1.Tag, e: Event]; open: [] }>()
 
 const slug = computed(() => props.tag.name.replace(/^#/, ''))
-const summary = computed(() => tagHistorySummary(props.tag) || 'No posts this week')
+const summary = computed(() =>
+  props.tag.history?.length ? tagHistorySummary(props.tag) : '',
+)
 </script>
 
 <template>
@@ -39,7 +41,7 @@ const summary = computed(() => tagHistorySummary(props.tag) || 'No posts this we
       class="neo-btn neo-btn--sm"
       :class="following ? 'neo-btn--secondary' : 'neo-btn--ghost'"
       :aria-pressed="following"
-      :aria-label="`${following ? 'Unfollow' : 'Follow'} #${slug}`"
+      :aria-label="`Follow #${slug}`"
       @click="emit('follow', tag, $event)"
     >
       {{ following ? 'Following' : 'Follow' }}

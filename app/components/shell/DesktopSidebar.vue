@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import ThemeMenu from '~/components/shell/ThemeMenu.vue'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
-import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
@@ -18,17 +18,14 @@ import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
 const conversationsStore = useConversationsStore()
-const composeSheet = useComposeSheetStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 const algorithmsStore = useAlgorithmsStore()
-algorithmsStore.hydrate()
 const settingsStore = useSettingsStore()
 const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
-const router = useRouter()
 const route = useRoute()
-const { openFeedOrRoute, openBoardFeed, openGroup, boardColumnIs, goHome } = useBoardNav()
+const { openFeedOrRoute, openBoardFeed, openGroup, boardColumnIs, goHome, openCompose } = useBoardNav()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 const isHome = computed(() => path.value === '/' && !columnsStore.focusedColumnId)
 const { isActivity, isMentions } = useActivityNav()
@@ -39,7 +36,7 @@ const messagesBadge = computed(() => conversationsStore.badgeLabel)
 const {
   sidebarRail,
   lookOpen,
-  lookAnnounce,
+  cycleBoardDensity,
   toggleSidebarRail: toggleRailCore,
   currentThemeLabel,
   currentUiLabel,
@@ -123,6 +120,13 @@ const visibleAlgorithmItems = computed(() =>
 )
 const algorithmsCanToggle = computed(() => sidebarAlgorithmItems.value.length > 5)
 
+/** Native tooltip only where the visible label can't show it (rail) or adds info (the Local host) */
+const rowTitle = (item: { key: string; label: string; tip?: string | null }) => {
+  if (item.key === 'local') return `Local (${localHostLabel.value})`
+  if (item.tip) return item.tip
+  return sidebarRail.value ? item.label : undefined
+}
+
 const boardFeedActive = (feedType: ColumnFeedType, feedParam?: string) =>
   boardColumnIs(feedType, feedParam)
 
@@ -173,23 +177,6 @@ const openDesktopGroup = (tag: string) => {
   void openGroup(tag)
 }
 
-const openCompose = () => {
-  if (!instancesStore.isAuthenticated) {
-    router.push('/login')
-    return
-  }
-  const routeTag =
-    route.path.startsWith('/groups/') && route.params.tag
-      ? String(route.params.tag)
-      : null
-  const focused = columnsStore.focusedColumn
-  const columnTag =
-    focused?.feedType === 'group' && focused.groupTag ? focused.groupTag : null
-  composeSheet.show({
-    groupTag: routeTag || columnTag || undefined,
-  })
-}
-
 const onHomeClick = () => {
   void goHome()
 }
@@ -212,7 +199,7 @@ watch(
       to="/"
       class="sidebar__logo"
       :class="{ 'sidebar__logo--on': isHome }"
-      aria-label="neospace home"
+      aria-label="NeoSpace home"
       @click="onHomeClick"
     >
       <NeoMark :active="isHome" />
@@ -240,8 +227,8 @@ watch(
       <button
         type="button"
         class="sidebar__icon-btn"
-        :title="sidebarRail ? 'Expand sidebar' : 'Collapse sidebar'"
-        :aria-label="sidebarRail ? 'Expand sidebar' : 'Collapse sidebar'"
+        title="Compact sidebar"
+        aria-label="Compact sidebar"
         :aria-pressed="sidebarRail"
         @click="toggleSidebarRail"
       >
@@ -254,7 +241,6 @@ watch(
     <nav class="sidebar__nav" aria-label="Main menu">
       <div class="sidebar__home">
         <NuxtLink
-          v-if="!sidebarRail"
           to="/"
           class="sidebar__link sidebar__link--home"
           :class="{ active: isHome }"
@@ -285,16 +271,16 @@ watch(
         type="button"
         class="sidebar__link"
         :class="{
-          active: route.path === '/explore' || boardColumnIs('search'),
+          active: path === '/explore' || boardColumnIs('search'),
         }"
         title="Search servers and people"
-        :aria-current="route.path === '/explore' || boardColumnIs('search') ? 'page' : undefined"
+        :aria-current="path === '/explore' || boardColumnIs('search') ? 'page' : undefined"
         @click="openSearch"
       >
         <NeoIcon
           name="search"
           :size="22"
-          :stroke="route.path === '/explore' || boardColumnIs('search') ? 2 : 1.5"
+          :stroke="path === '/explore' || boardColumnIs('search') ? 2 : 1.5"
         />
         <span class="sidebar__label">Search</span>
       </button>
@@ -318,7 +304,7 @@ watch(
             name="send"
             :size="22"
             :stroke="inboxActive ? 2 : 1.5"
-            :filled="route.path === '/messages'"
+            :filled="inboxActive"
           />
           <span class="sidebar__label">Inbox</span>
           <span v-if="inboxBadge" class="nav-badge" aria-hidden="true">{{ inboxBadge }}</span>
@@ -327,7 +313,7 @@ watch(
           <button
             type="button"
             role="menuitem"
-            :aria-current="route.path === '/messages' || boardColumnIs('messages') ? 'page' : undefined"
+            :aria-current="path === '/messages' || boardColumnIs('messages') ? 'page' : undefined"
             @click="openDirectMessages"
           >
             <NeoIcon name="message" :size="16" :stroke="1.75" />
@@ -349,28 +335,28 @@ watch(
         type="button"
         class="sidebar__link"
         :class="{
-          active: route.path === '/profile' || boardColumnIs('profile'),
+          active: path === '/profile' || boardColumnIs('profile'),
         }"
-        title="Profile"
-        :aria-current="route.path === '/profile' || boardColumnIs('profile') ? 'page' : undefined"
+        :title="sidebarRail ? 'Profile' : undefined"
+        :aria-current="path === '/profile' || boardColumnIs('profile') ? 'page' : undefined"
         @click="openProfile"
       >
         <NeoIcon
           name="user"
           :size="22"
-          :stroke="route.path === '/profile' || boardColumnIs('profile') ? 2 : 1.5"
+          :stroke="path === '/profile' || boardColumnIs('profile') ? 2 : 1.5"
         />
         <span class="sidebar__label">Profile</span>
       </button>
     </nav>
 
-    <section class="sidebar__section" aria-label="Algorithms">
+    <section class="sidebar__section" aria-labelledby="sidebar-algorithms-title">
       <div class="sidebar__section-head">
-        <h2 class="sidebar__section-title">Algorithms</h2>
+        <h2 id="sidebar-algorithms-title" class="sidebar__section-title">Algorithms</h2>
         <button
           type="button"
           class="sidebar__section-action"
-          title="Create algorithm"
+          aria-label="New algorithm"
           @click="algorithmsStore.openEditor()"
         >
           New
@@ -386,17 +372,14 @@ watch(
               'sidebar__row--stacked': !!item.tip,
             }"
             :aria-current="boardFeedActive(item.feedType, item.feedParam) ? 'true' : undefined"
-            :title="item.tip || (item.key === 'local' ? `Local (${localHostLabel})` : item.label)"
+            :title="rowTitle(item)"
             @click="void openBoardFeed(item.feedType, item.feedParam)"
           >
             <span class="sidebar__row-glyph" aria-hidden="true">
               <NeoIcon :name="item.icon" :size="18" :stroke="1.75" />
             </span>
             <span class="sidebar__label">
-              <span class="sidebar__label-main">
-                <template v-if="item.key === 'local'">Local</template>
-                <template v-else>{{ item.label }}</template>
-              </span>
+              <span class="sidebar__label-main">{{ item.label }}</span>
               <span v-if="item.tip" class="sidebar__label-tip">{{ item.tip }}</span>
             </span>
           </button>
@@ -418,11 +401,11 @@ watch(
     <section
       v-if="visibleJoinedGroups.length || showSidebarSuggested"
       class="sidebar__section"
-      aria-label="Groups"
+      aria-labelledby="sidebar-groups-title"
     >
       <div class="sidebar__section-head">
-        <h2 class="sidebar__section-title">Groups</h2>
-        <NuxtLink to="/groups" class="sidebar__section-action" title="All groups">All</NuxtLink>
+        <h2 id="sidebar-groups-title" class="sidebar__section-title">Groups</h2>
+        <NuxtLink to="/groups" class="sidebar__section-action" aria-label="All groups">All</NuxtLink>
       </div>
 
       <ul v-if="visibleJoinedGroups.length" class="sidebar__section-list">
@@ -431,7 +414,7 @@ watch(
             type="button"
             class="sidebar__row"
             :class="{ 'sidebar__row--on': boardColumnIs('group', group.tag) }"
-            :title="group.name"
+            :title="sidebarRail ? group.name : undefined"
             :aria-current="boardColumnIs('group', group.tag) ? 'true' : undefined"
             @click="openDesktopGroup(group.tag)"
           >
@@ -454,7 +437,7 @@ watch(
             type="button"
             class="sidebar__row"
             :class="{ 'sidebar__row--on': boardColumnIs('group', group.tag) }"
-            :title="group.name"
+            :title="sidebarRail ? group.name : undefined"
             :aria-current="boardColumnIs('group', group.tag) ? 'true' : undefined"
             @click="openDesktopGroup(group.tag)"
           >
@@ -481,9 +464,9 @@ watch(
       </button>
     </section>
 
-    <section class="sidebar__section" aria-label="Board">
+    <section class="sidebar__section" aria-labelledby="sidebar-board-title">
       <div class="sidebar__section-head">
-        <h2 class="sidebar__section-title">Board</h2>
+        <h2 id="sidebar-board-title" class="sidebar__section-title">Board</h2>
       </div>
       <button
         type="button"
@@ -494,9 +477,9 @@ watch(
           'sidebar__density--tabs': columnsStore.deskDensity === 'tabs',
         }"
         :title="densityTitle"
-        :aria-label="`Board density: ${densityLabel}. Click to cycle.`"
-        :aria-describedby="'sidebar-density-desc'"
-        @click="columnsStore.toggleDeskDensity()"
+        :aria-label="`Board density: ${densityLabel}`"
+        aria-describedby="sidebar-density-desc"
+        @click="cycleBoardDensity"
       >
         <span class="sidebar__row-glyph density-glyph" aria-hidden="true">
           <span class="density-glyph__packed"><i /><i /><i /><i /><i /><i /><i /><i /></span>
@@ -508,9 +491,9 @@ watch(
       <p id="sidebar-density-desc" class="sr-only">{{ densityTitle }}</p>
     </section>
 
-    <section class="sidebar__section sidebar__section--look" aria-label="Look">
+    <section class="sidebar__section sidebar__section--look" aria-labelledby="sidebar-look-title">
       <div class="sidebar__section-head">
-        <h2 class="sidebar__section-title">Look</h2>
+        <h2 id="sidebar-look-title" class="sidebar__section-title">Look</h2>
         <button
           type="button"
           class="sidebar__section-action"
@@ -519,29 +502,31 @@ watch(
           :aria-label="lookOpen ? 'Hide look controls' : 'Show look controls'"
           @click="lookOpen = !lookOpen"
         >
-          {{ lookOpen ? 'Hide' : 'Try' }}
+          {{ lookOpen ? 'Hide' : 'Show' }}
         </button>
       </div>
       <p v-if="!lookOpen" class="sidebar__look-desc">
-        Theme, chrome, corners, density, lines.
+        Theme, chrome, corners, spacing, lines.
       </p>
-      <p class="sr-only" aria-live="polite">{{ lookAnnounce }}</p>
 
       <div v-show="lookOpen" id="sidebar-look-controls" class="sidebar__section-list">
+        <div class="sidebar__row-split">
+          <button
+            type="button"
+            class="sidebar__row"
+            :aria-label="`Theme: ${currentThemeLabel}`"
+            @click="cycleTheme"
+          >
+            <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
+            <span class="sidebar__label">{{ currentThemeLabel }}</span>
+          </button>
+          <ThemeMenu v-if="!sidebarRail" placement="end" />
+        </div>
         <button
           type="button"
           class="sidebar__row"
-          :aria-label="`Theme: ${currentThemeLabel}. Click to cycle.`"
-          @click="cycleTheme"
-        >
-          <ThemeSwatch :label="`Theme: ${currentThemeLabel}`" />
-          <span class="sidebar__label">{{ currentThemeLabel }}</span>
-        </button>
-        <button
-          type="button"
-          class="sidebar__row"
-          :title="`Chrome: ${currentUiLabel}`"
-          :aria-label="`Chrome: ${currentUiLabel}. Click to cycle.`"
+          :title="sidebarRail ? `Chrome: ${currentUiLabel}` : undefined"
+          :aria-label="`Chrome: ${currentUiLabel}`"
           @click="cycleUi"
         >
           <span class="sidebar__chrome-mark" aria-hidden="true">Aa</span>
@@ -550,8 +535,8 @@ watch(
         <button
           type="button"
           class="sidebar__row"
-          :title="`Corners: ${currentRadiusLabel}`"
-          :aria-label="`Corners: ${currentRadiusLabel}. Click to cycle.`"
+          :title="sidebarRail ? `Corners: ${currentRadiusLabel}` : undefined"
+          :aria-label="`Corners: ${currentRadiusLabel}`"
           @click="cycleRadius"
         >
           <span class="sidebar__radius-mark" aria-hidden="true" />
@@ -560,8 +545,8 @@ watch(
         <button
           type="button"
           class="sidebar__row"
-          :title="`Density: ${currentDensityLabel}`"
-          :aria-label="`Density: ${currentDensityLabel}. Click to cycle.`"
+          :title="sidebarRail ? `Spacing: ${currentDensityLabel}` : undefined"
+          :aria-label="`Spacing: ${currentDensityLabel}`"
           @click="cycleDensity"
         >
           <span class="sidebar__spacing-mark" aria-hidden="true"><i /><i /><i /></span>
@@ -570,8 +555,8 @@ watch(
         <button
           type="button"
           class="sidebar__row"
-          :title="`Lines: ${currentLineLabel}`"
-          :aria-label="`Lines: ${currentLineLabel}. Click to cycle.`"
+          :title="sidebarRail ? `Lines: ${currentLineLabel}` : undefined"
+          :aria-label="`Lines: ${currentLineLabel}`"
           @click="cycleLine"
         >
           <span class="sidebar__line-mark" aria-hidden="true" />
@@ -585,7 +570,6 @@ watch(
     <button
       class="sidebar__foot-btn"
       type="button"
-      title="Settings"
       aria-label="Settings"
       @click="settingsStore.open()"
     >
@@ -595,7 +579,6 @@ watch(
     <button
       class="sidebar__foot-btn"
       type="button"
-      title="Leave a note"
       aria-label="Leave a note"
       @click="openFeedback"
     >
@@ -605,7 +588,6 @@ watch(
     <button
       class="sidebar__foot-btn"
       type="button"
-      title="Accounts & servers"
       aria-label="Accounts and servers"
       @click="openAccounts"
     >
@@ -617,8 +599,7 @@ watch(
       v-else
       to="/login"
       class="sidebar__foot-btn"
-      :class="{ 'sidebar__foot-btn--on': route.path === '/login' }"
-      title="Sign in"
+      :class="{ 'sidebar__foot-btn--on': path === '/login' }"
       aria-label="Sign in"
     >
       <NeoIcon name="log-in" :size="20" :stroke="1.5" />
@@ -657,7 +638,7 @@ watch(
     padding-right: 0.45rem;
     align-items: center;
 
-    .sidebar__brand,
+    .sidebar__logo :deep(.neo-mark__brand),
     .sidebar__label,
     .sidebar__section-title,
     .sidebar__section-hint,
@@ -703,7 +684,7 @@ watch(
       margin: 0;
     }
 
-    .sidebar__logo--on .sidebar__mark {
+    .sidebar__logo--on :deep(.neo-mark__glyph) {
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--neo-accent) 70%, transparent);
     }
 
@@ -784,33 +765,7 @@ watch(
     }
   }
 
-  &__mark {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    font-size: 0.625rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: var(--neo-text-on-accent);
-    background: var(--neo-accent);
-    border-radius: var(--neo-radius-sm, 4px);
-  }
-
-  &__brand {
-    font-size: 0.9375rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--neo-text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__icon-btn,
-  &__rail-btn {
+  &__icon-btn {
     position: relative;
     display: flex;
     align-items: center;
@@ -949,50 +904,13 @@ watch(
     color: var(--neo-text-secondary);
   }
 
-  &__micro {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    padding: 0.35rem;
-    border-radius: var(--neo-radius-2xl, 14px);
-    background: var(--neo-bg-card, var(--neo-bg-secondary));
-    border: 1px solid var(--neo-border-color);
-    box-shadow: 0 10px 28px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
-
-    &--portal {
-      position: fixed;
-      z-index: var(--neo-z-shell-popover, 200);
-    }
-  }
-
-  &__micro-item {
+  &__link,
+  &__row-split {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    width: 100%;
-    padding: 0.55rem 0.65rem;
-    border: none;
-    border-radius: var(--neo-radius-xl, 10px);
-    background: transparent;
-    color: var(--neo-text-secondary);
-    font: inherit;
-    font-size: 0.875rem;
-    text-align: left;
-    cursor: pointer;
-
-    &:hover {
-      background: var(--neo-bg-hover);
-      color: var(--neo-text-primary);
-    }
-
-    &--on {
-      color: var(--neo-text-primary);
-      background: color-mix(in srgb, var(--neo-bg-hover) 80%, var(--neo-accent) 20%);
-      font-weight: 600;
-    }
+    gap: 0.15rem;
   }
 
-  &__link,
   &__row {
     display: flex;
     align-items: center;
@@ -1317,18 +1235,6 @@ watch(
     max-width: 48px;
     display: flex;
     justify-content: center;
-  }
-
-  &__theme-swatch {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    background:
-      radial-gradient(circle at 30% 30%, var(--neo-accent) 0 35%, transparent 36%),
-      linear-gradient(135deg, var(--neo-bg-card) 45%, var(--neo-text-primary) 46%);
-    border: 1.5px solid var(--neo-border-color-dark);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neo-accent) 35%, transparent);
   }
 
   &__chrome-mark {

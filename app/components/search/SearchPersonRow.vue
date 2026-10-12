@@ -5,7 +5,8 @@
 import type { mastodon } from 'masto'
 import SearchHighlight from '~/components/search/SearchHighlight.vue'
 import { stripHtml } from '~/utils/stripHtml'
-import { formatCompactRelativeTime } from '~/utils/relativeTime'
+import { accountActiveLabel } from '~/utils/relativeTime'
+import { plainDisplayName } from '~/utils/displayName'
 import { formatCount } from '~/utils/searchQuery'
 import { useInstancesStore } from '~/stores/instances'
 
@@ -27,7 +28,9 @@ const emit = defineEmits<{ follow: [account: mastodon.v1.Account, e: Event]; ope
 const instancesStore = useInstancesStore()
 const isSelf = computed(() => props.account.id === instancesStore.currentUser?.id)
 
-const name = computed(() => props.account.displayName || props.account.username)
+const name = computed(() =>
+  plainDisplayName(props.account.displayName, props.account.username),
+)
 const bio = computed(() => (props.account.note ? stripHtml(props.account.note) : ''))
 const mutual = computed(() => !!props.relationship?.following && !!props.relationship?.followedBy)
 
@@ -35,12 +38,18 @@ const meta = computed(() => {
   const parts: string[] = []
   const followers = props.account.followersCount
   if (followers != null) parts.push(`${formatCount(followers)} ${followers === 1 ? 'follower' : 'followers'}`)
-  if (props.account.lastStatusAt) parts.push(`active ${formatCompactRelativeTime(props.account.lastStatusAt)}`)
+  if (props.account.lastStatusAt) parts.push(accountActiveLabel(props.account.lastStatusAt))
   return parts.join(' · ')
 })
 
 const followLabel = computed(() =>
-  props.relationship?.following ? 'Following' : props.relationship?.requested ? 'Requested' : props.account.locked ? 'Request' : 'Follow',
+  props.relationship?.following
+    ? 'Following'
+    : props.relationship?.requested
+      ? 'Requested'
+      : props.account.locked
+        ? 'Follow'
+        : 'Follow',
 )
 </script>
 
@@ -59,7 +68,7 @@ const followLabel = computed(() =>
         </span>
         <em>@<SearchHighlight :text="account.acct" :terms="terms" /></em>
         <span v-if="mutual || relationship?.followedBy || account.bot || account.group" class="search-person__chips">
-          <span v-if="mutual" class="search-chip search-chip--accent">Mutuals</span>
+          <span v-if="mutual" class="search-chip search-chip--accent">Mutual</span>
           <span v-else-if="relationship?.followedBy" class="search-chip">Follows you</span>
           <span v-if="account.bot" class="search-chip">Bot</span>
           <span v-if="account.group" class="search-chip">Group</span>

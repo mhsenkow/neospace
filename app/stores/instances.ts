@@ -16,6 +16,7 @@ import {
   readClientSecret,
   clearClientSecret,
 } from '~/utils/oauthPkce'
+import { useToastStore } from '~/stores/toast'
 import { logError, logWarn } from '~/utils/log'
 import { extractProfileCss } from '~/utils/profileCss'
 import {
@@ -34,6 +35,11 @@ import {
   type ConnectedInstanceInfo,
   type InstanceApiInfo,
 } from '~/utils/instanceInfo'
+import {
+  DEFAULT_MAX_ATTACHMENTS,
+  DEFAULT_MAX_FILE_BYTES,
+  MEDIA_ALT_MAX,
+} from '~/utils/composeConstants'
 import {
   clearCachedOAuthApp,
   OAUTH_FETCH_TIMEOUT_MS,
@@ -98,6 +104,24 @@ const SCOPES = 'read write follow push'
 /** Directory / preview / add-server probes — masto has no default timeout */
 const PEEK_TIMEOUT_MS = 8_000
 
+/** sessionStorage flag: this tab/window already chose its posting account for the session */
+const SESSION_STARTED_KEY = 'neospace_session_started'
+
+/**
+ * "Main" account semantics: a fresh launch (new tab / PWA start — no session flag yet) posts as
+ * the main account; later reloads in the same session keep whatever the user switched to.
+ */
+export function launchAccountId(opts: {
+  activeId: string | null
+  primaryId: string | null
+  authenticatedIds: string[]
+  sessionStarted: boolean
+}): string | null {
+  if (opts.sessionStarted) return opts.activeId
+  if (opts.primaryId && opts.authenticatedIds.includes(opts.primaryId)) return opts.primaryId
+  return opts.activeId
+}
+
 /** Accept raw blobs or `{ v: 1, ... }` wrappers */
 function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
   if (!data || typeof data !== 'object') return null
@@ -110,6 +134,9 @@ function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
 }
 
 let storageListenerBound = false
+/** Tokens verified by completeAuth moments ago — the OAuth callback's follow-up initialize() skips them */
+const RECENT_VERIFY_MS = 60_000
+const recentlyVerified = new Map<string, { token: string; at: number }>()
 /** Coalesces concurrent initialize() callers (layout + notifications cold load, etc.) */
 let initPromise: Promise<void> | null = null
 let storageReloadTimer: ReturnType<typeof setTimeout> | null = null
@@ -257,11 +284,11 @@ export const useInstancesStore = defineStore('instances', {
         info.maxMediaAttachments >= 1 &&
         info.maxMediaAttachments <= 20
           ? info.maxMediaAttachments
-          : 4
+          : DEFAULT_MAX_ATTACHMENTS
       const imageLimit =
         typeof info?.imageSizeLimit === 'number' && info.imageSizeLimit > 0
           ? info.imageSizeLimit
-          : 40 * 1024 * 1024
+          : DEFAULT_MAX_FILE_BYTES
       const videoLimit =
         typeof info?.videoSizeLimit === 'number' && info.videoSizeLimit > 0
           ? info.videoSizeLimit
@@ -271,7 +298,7 @@ export const useInstancesStore = defineStore('instances', {
         typeof info?.mediaDescriptionLimit === 'number' &&
         info.mediaDescriptionLimit >= 100
           ? info.mediaDescriptionLimit
-          : 1500
+          : MEDIA_ALT_MAX
       return { maxAttachments, maxFileBytes, altMax }
     },
 
@@ -369,6 +396,7 @@ export const useInstancesStore = defineStore('instances', {
             this.activeInstanceFilter = null
           }
           this.ensurePrimaryAccount()
+          this.applyLaunchAccount()
           clearClientCache()
         }
       } catch (e) {
@@ -529,6 +557,24 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
+    /** Fresh launch → post as the main account (see launchAccountId). */
+    applyLaunchAccount() {
+      if (typeof sessionStorage === 'undefined') return
+      let started = false
+      try {
+        started = sessionStorage.getItem(SESSION_STARTED_KEY) === '1'
+        sessionStorage.setItem(SESSION_STARTED_KEY, '1')
+      } catch {
+        return
+      }
+      this.activeAccountId = launchAccountId({
+        activeId: this.activeAccountId,
+        primaryId: this.primaryAccountId,
+        authenticatedIds: this.authenticatedInstances.map((i) => i.id),
+        sessionStarted: started,
+      })
+    },
+
     setPrimaryAccount(instanceId: string) {
       if (!this.authenticatedInstances.some((i) => i.id === instanceId)) return
       this.primaryAccountId = instanceId
@@ -594,6 +640,8 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     setActiveAccount(instanceId: string | null) {
+      // Toasts (and their Undo closures) belong to the account that raised them
+      if (instanceId !== this.activeAccountId) useToastStore().clear()
       this.activeAccountId = instanceId
       this.authNotice = null
       this.saveToStorage()
@@ -855,6 +903,7 @@ export const useInstancesStore = defineStore('instances', {
         })
 
         instance.user = await client.v1.accounts.verifyCredentials()
+        recentlyVerified.set(instance.id, { token: instance.accessToken!, at: Date.now() })
         instance.isConnecting = false
         instance.error = null
 
@@ -913,6 +962,8 @@ export const useInstancesStore = defineStore('instances', {
 
       if (this.activeAccountId === instanceId) {
         this.activeAccountId = this.authenticatedInstances[0]?.id ?? null
+        // The signed-out account's toasts (and Undo closures) must not outlive it
+        useToastStore().clear()
       }
       if (this.primaryAccountId === instanceId) {
         this.primaryAccountId = this.authenticatedInstances[0]?.id ?? null
@@ -982,6 +1033,17 @@ export const useInstancesStore = defineStore('instances', {
         .map(async (instance) => {
           try {
             const client = clientFor(instance.id)
+            const recent = recentlyVerified.get(instance.id)
+            recentlyVerified.delete(instance.id)
+            if (
+              recent &&
+              instance.user &&
+              recent.token === instance.accessToken &&
+              Date.now() - recent.at < RECENT_VERIFY_MS
+            ) {
+              void this.refreshInstanceInfo(instance.id, client)
+              return
+            }
             instance.user = await client.v1.accounts.verifyCredentials()
             instance.error = null
             // Refresh compose limit when possible (older saved instances may lack it).

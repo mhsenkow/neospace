@@ -5,7 +5,7 @@
  * `sheet`: mobile bottom-sheet (backdrop + slide-up) for dense pickers like Add Feed.
  */
 
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, useId, watch } from 'vue'
 import { typeaheadMatch } from '~/utils/typeahead'
 
 const props = withDefaults(
@@ -33,7 +33,7 @@ const rootRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
 const panelStyle = ref<Record<string, string>>({})
-const menuId = `neo-menu-${Math.random().toString(36).slice(2, 9)}`
+const menuId = `neo-menu-${useId()}`
 const usePortal = computed(() => props.teleport || props.sheet)
 
 const ITEM_SEL =
@@ -320,6 +320,7 @@ defineExpose({ open, close, toggle })
       <slot />
     </button>
     <Teleport to="body" :disabled="!usePortal">
+      <Transition name="neo-menu-sheet">
       <div
         v-if="sheet && open"
         class="neo-menu__sheet-root"
@@ -346,8 +347,9 @@ defineExpose({ open, close, toggle })
           <slot name="items" />
         </div>
       </div>
+      </Transition>
       <div
-        v-else-if="!sheet"
+        v-if="!sheet"
         v-show="open"
         :id="menuId"
         ref="menuRef"
@@ -428,7 +430,29 @@ defineExpose({ open, close, toggle })
   flex-direction: column;
   justify-content: flex-end;
   box-sizing: border-box;
-  animation: neo-menu-sheet-in 160ms ease-out;
+}
+
+// Sheet slides up on enter and back down on leave (matches NeoSheet), instead of an abrupt cut
+.neo-menu-sheet-enter-active,
+.neo-menu-sheet-leave-active {
+  transition: opacity 160ms ease-out;
+
+  .neo-menu__panel--sheet {
+    transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+.neo-menu-sheet-leave-active {
+  transition-timing-function: ease-in;
+}
+
+.neo-menu-sheet-enter-from,
+.neo-menu-sheet-leave-to {
+  opacity: 0;
+
+  .neo-menu__panel--sheet {
+    transform: translateY(24px);
+  }
 }
 
 .neo-menu__sheet-backdrop {
@@ -469,18 +493,12 @@ defineExpose({ open, close, toggle })
   background: color-mix(in srgb, var(--neo-text-muted) 45%, transparent);
 }
 
-@keyframes neo-menu-sheet-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .neo-menu__sheet-root {
-    animation: none;
+  .neo-menu-sheet-enter-active,
+  .neo-menu-sheet-leave-active,
+  .neo-menu-sheet-enter-active .neo-menu__panel--sheet,
+  .neo-menu-sheet-leave-active .neo-menu__panel--sheet {
+    transition: none;
   }
 }
 

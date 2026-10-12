@@ -28,18 +28,18 @@ const CATEGORY_KEYWORDS: Array<{ category: GroupCategoryGuess; words: string[] }
   },
   {
     category: 'gaming',
-    words: ['game', 'gaming', 'gamedev', 'steam', 'nintendo', 'playstation', 'xbox', 'rpg', 'indie'],
+    words: ['game', 'gaming', 'gamedev', 'nintendo', 'playstation', 'xbox', 'rpg'],
   },
   {
     category: 'social',
     words: [
       'cat', 'dog', 'food', 'cook', 'garden', 'travel', 'parent', 'lgbt', 'disability',
-      'mentalhealth', 'introduction', 'ask', 'help', 'friend',
+      'mentalhealth', 'introduction', 'friend',
     ],
   },
   {
     category: 'news',
-    words: ['news', 'politics', 'climate', 'science', 'world', 'election', 'breaking'],
+    words: ['news', 'politics', 'climate', 'science', 'election', 'breaking'],
   },
 ]
 
@@ -64,7 +64,7 @@ export function guessCategory(tag: string): GroupCategoryGuess {
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-zA-Z])(\d)|(\d)([a-zA-Z])/g, '$1$3 $2$4')
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
+    .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean)
   for (const bucket of CATEGORY_KEYWORDS) {
     if (bucket.words.some((w) => tokens.some((t) => tokenMatches(t, w)))) {

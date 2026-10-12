@@ -202,7 +202,7 @@ describe('tag names and categories', () => {
     expect(guessCategory('CatsOfMastodon')).not.toBe('other')
     expect(guessCategory('DogWalks')).toBe('social')
     expect(guessCategory('LinuxGaming')).toBe('tech')
-    expect(guessCategory('IndieDev')).not.toBe('other')
+    expect(guessCategory('IndieDev')).toBe('other')
     expect(guessCategory('education')).toBe('other')
   })
 })

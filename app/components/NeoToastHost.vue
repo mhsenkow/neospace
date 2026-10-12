@@ -124,6 +124,11 @@ function onAction(id: number, fn?: () => void) {
   max-width: min(22rem, calc(100vw - 2rem));
   pointer-events: none;
 
+  // Desktop: the bottom dock (suite waffle / install banner) owns the bottom-right corner — stack above it
+  @media (min-width: 1024px) {
+    bottom: calc(var(--neo-spacing-4, 1rem) + 3.5rem);
+  }
+
   // Mobile: sit above the tab bar (and home indicator) instead of on top of it
   @media (max-width: 1023px) {
     left: max(0.75rem, env(safe-area-inset-left));
@@ -134,6 +139,8 @@ function onAction(id: number, fn?: () => void) {
         env(safe-area-inset-bottom, 0px) + var(--neo-keyboard-inset, 0px) + 0.75rem
     );
     max-width: none;
+    // Rides down with the auto-hiding tab bar (_structural.scss) like the dock
+    transition: translate 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
 

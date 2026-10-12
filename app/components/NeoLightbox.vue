@@ -25,6 +25,13 @@ const positionLabel = computed(() => {
   return `${overlay.lightbox.index + 1} of ${overlay.lightbox.items.length}`
 })
 
+const galleryLiveLabel = computed(() => {
+  const pos = positionLabel.value
+  const alt = overlay.lightbox.alt?.trim() || caption.value
+  if (!pos) return alt
+  return alt ? `${pos}: ${alt}` : pos
+})
+
 const onKeydown = (e: KeyboardEvent) => {
   if (!overlay.lightbox.open) return
   if (e.key === 'ArrowLeft') {
@@ -41,11 +48,15 @@ useFocusTrap(rootRef, isOpen, {
   initialFocus: '.neo-lightbox__close',
 })
 
-// Always mounted via NeoOverlayHost — only listen while a lightbox is open
-watch(isOpen, (open) => {
-  if (open) window.addEventListener('keydown', onKeydown)
-  else window.removeEventListener('keydown', onKeydown)
-})
+// Mounted lazily by NeoOverlayHost (already open on first mount) — only listen while a lightbox is open
+watch(
+  isOpen,
+  (open) => {
+    if (open) window.addEventListener('keydown', onKeydown)
+    else window.removeEventListener('keydown', onKeydown)
+  },
+  { immediate: true },
+)
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 /**
@@ -128,6 +139,9 @@ const imgStyle = computed(() => {
       @pointerup="onPointerEnd"
       @pointercancel="drag = null"
     >
+      <p v-if="galleryLiveLabel" class="neo-sr-only" aria-live="polite">
+        {{ galleryLiveLabel }}
+      </p>
       <button
         type="button"
         class="neo-btn neo-btn--ghost neo-lightbox__close"

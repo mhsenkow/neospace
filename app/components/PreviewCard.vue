@@ -14,7 +14,24 @@ const hostname = computed(() => {
   }
 })
 
-const hasImage = computed(() => !!props.card.image)
+const imageFailed = ref(false)
+
+watch(
+  () => props.card.image,
+  () => {
+    imageFailed.value = false
+  },
+)
+
+const hasImage = computed(() => !!props.card.image && !imageFailed.value)
+
+const cardImageAlt = computed(() => {
+  const card = props.card as mastodon.v1.PreviewCard & { imageDescription?: string | null }
+  const desc = card.imageDescription?.trim()
+  if (desc) return desc
+  if (props.card.title?.trim()) return props.card.title.trim()
+  return ''
+})
 
 const embedSrc = computed(() => resolvePeerTubeEmbed(props.card))
 
@@ -45,10 +62,11 @@ const startPlayback = () => {
         <span v-if="hasImage" class="preview-card__media preview-card__media--poster">
           <img
             :src="card.image!"
-            alt=""
+            :alt="cardImageAlt"
             class="preview-card__image"
             loading="lazy"
             decoding="async"
+            @error="imageFailed = true"
           />
         </span>
         <span v-else class="preview-card__media preview-card__media--empty" aria-hidden="true" />
@@ -104,10 +122,11 @@ const startPlayback = () => {
       <div v-if="hasImage" class="preview-card__media">
         <img
           :src="card.image!"
-          alt=""
+          :alt="cardImageAlt"
           class="preview-card__image"
           loading="lazy"
           decoding="async"
+          @error="imageFailed = true"
         />
       </div>
       <div class="preview-card__body">

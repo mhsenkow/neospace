@@ -77,14 +77,10 @@ export function kindFromFieldName(name: string): Exclude<PresenceKind, 'mastodon
   return null
 }
 
-/** Turn a handle or URL into a canonical profile URL for a network. */
-export function normalizePresenceInput(
-  kind: Exclude<PresenceKind, 'mastodon'>,
-  raw: string,
-): string {
-  const value = raw.trim()
-  if (!value) return ''
-  if (/^(javascript|data|vbscript):/i.test(value)) return ''
+const BLUESKY_HANDLE_RE =
+  /^([a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
+
+function normalizeWebsiteUrl(value: string): string {
   if (/^https?:\/\//i.test(value)) {
     try {
       const u = new URL(value)
@@ -94,11 +90,34 @@ export function normalizePresenceInput(
       return ''
     }
   }
+  return ''
+}
+
+/** Turn a handle or URL into a canonical profile URL for a network. */
+export function normalizePresenceInput(
+  kind: Exclude<PresenceKind, 'mastodon'>,
+  raw: string,
+): string {
+  const value = raw.trim()
+  if (!value) return ''
+  if (/^(javascript|data|vbscript):/i.test(value)) return ''
 
   if (kind === 'bluesky') {
+    if (/^https?:\/\//i.test(value)) {
+      try {
+        const u = new URL(value)
+        const host = u.hostname.replace(/^www\./, '').toLowerCase()
+        if (host === 'bsky.app' || host.endsWith('.bsky.app')) {
+          return value.replace(/\/+$/, '')
+        }
+      } catch {
+        return ''
+      }
+      return normalizeWebsiteUrl(value)
+    }
     const handle = value.replace(/^@/, '')
-    if (!handle) return ''
-    return `https://bsky.app/profile/${handle}`
+    if (!handle || !BLUESKY_HANDLE_RE.test(handle)) return ''
+    return `https://bsky.app/profile/${encodeURIComponent(handle)}`
   }
 
   if (kind === 'seenu') {
@@ -107,19 +126,24 @@ export function normalizePresenceInput(
         const u = new URL(value)
         if (u.protocol !== 'http:' && u.protocol !== 'https:') return ''
         const host = u.hostname.replace(/^www\./, '').toLowerCase()
-        if (host !== 'seenu.io' && !host.endsWith('.seenu.io')) return ''
-        return value.replace(/\/+$/, '')
+        if (host === 'seenu.io' || host.endsWith('.seenu.io')) {
+          return value.replace(/\/+$/, '')
+        }
       } catch {
         return ''
       }
+      return normalizeWebsiteUrl(value)
     }
     const handle = value.replace(/^@/, '').replace(/^seenu\.io\//i, '')
     if (!handle || handle.includes('.') || handle.includes('/')) return ''
-    return `https://seenu.io/${handle}`
+    return `https://seenu.io/${encodeURIComponent(handle)}`
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return normalizeWebsiteUrl(value)
   }
 
   // website — only http(s) or a host-looking string (never javascript:/data:)
-  if (/^(javascript|data|vbscript):/i.test(value)) return ''
   if (value.includes('.') && !/^\w+:/i.test(value)) {
     const href = `https://${value.replace(/^https?:\/\//i, '')}`
     try {

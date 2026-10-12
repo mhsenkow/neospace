@@ -6,6 +6,8 @@
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
+import { instanceHandle, switchActiveAccount } from '~/composables/useSwitchAccount'
+import { useToastStore } from '~/stores/toast'
 import { plainDisplayName } from '~/utils/displayName'
 
 const instancesStore = useInstancesStore()
@@ -20,19 +22,11 @@ useFocusTrap(sheetRef, menuOpen, {
   initialFocus: '.acct-sheet__avatar-btn--active, .acct-sheet__row--active, .acct-sheet__avatar-btn, .acct-sheet__row',
 })
 
-const switchedToast = ref<string | null>(null)
-let toastTimer: ReturnType<typeof setTimeout> | null = null
-
 const accounts = computed(() => instancesStore.authenticatedInstances)
 const multi = computed(() => accounts.value.length > 1)
 const primary = computed(() => instancesStore.primaryAccount)
 
-const handleOf = (instance: ConnectedInstance) => {
-  const acct = instance.user?.acct || instance.user?.username || ''
-  const host = instance.url.replace(/^https?:\/\//, '')
-  if (acct.includes('@')) return `@${acct}`
-  return `@${acct}@${host}`
-}
+const handleOf = instanceHandle
 
 const hostOf = (instance: ConnectedInstance) =>
   instance.url.replace(/^https?:\/\//, '').replace(/\/$/, '')
@@ -40,23 +34,13 @@ const hostOf = (instance: ConnectedInstance) =>
 const isPrimary = (instance: ConnectedInstance) =>
   instance.id === (primary.value?.id ?? null)
 
-const showSwitched = (instance: ConnectedInstance) => {
-  switchedToast.value = `Posting as ${handleOf(instance)}`
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    switchedToast.value = null
-  }, 1800)
-}
-
 const selectAccount = async (id: string) => {
   if (id === instancesStore.activeAccount?.id) {
     closeMenu()
     return
   }
-  instancesStore.setActiveAccount(id)
+  switchActiveAccount(id)
   closeMenu()
-  const account = accounts.value.find((a) => a.id === id)
-  if (account) showSwitched(account)
   if (route.path === '/profile' && !route.query.user) {
     const { useProfileStore } = await import('~/stores/profile')
     await useProfileStore().fetchProfile()
@@ -83,6 +67,10 @@ const addAccount = () => {
 const makeMain = (id: string) => {
   instancesStore.setPrimaryAccount(id)
   closeMenu()
+  const account = accounts.value.find((a) => a.id === id)
+  if (account) {
+    useToastStore().show({ message: `${handleOf(account)} is now your main account — NeoSpace opens as it` })
+  }
 }
 
 /** Accounts whose revoke request is still running — blocks a second confirm and shows progress */
@@ -109,26 +97,13 @@ const signOutAccount = async (id: string) => {
   if (!accounts.value.length) closeMenu()
 }
 
-watch(menuOpen, (open) => {
-  if (typeof document === 'undefined') return
-  document.documentElement.classList.toggle('acct-sheet-open', open)
-})
-
-onUnmounted(() => {
-  document.documentElement.classList.remove('acct-sheet-open')
-  if (toastTimer) clearTimeout(toastTimer)
-})
+/** First visible letter of the name — placeholder when an account has no avatar */
+const initialOf = (account: { user?: { displayName?: string | null; username?: string | null } | null }) =>
+  (Array.from(plainDisplayName(account.user?.displayName, account.user?.username || '?'))[0] || '?').toUpperCase()
 </script>
 
 <template>
   <Teleport to="body">
-    <!-- Live region stays mounted (a11y); pill chrome only when there is a message -->
-    <div class="acct-switch__toast" role="status" aria-live="polite" aria-atomic="true">
-      <Transition name="acct-toast">
-        <span v-if="switchedToast" class="acct-switch__toast-msg">{{ switchedToast }}</span>
-      </Transition>
-    </div>
-
     <Transition name="acct-sheet">
       <div
         v-if="menuOpen && instancesStore.isAuthenticated"
@@ -161,7 +136,6 @@ onUnmounted(() => {
                 type="button"
                 class="acct-sheet__avatar-btn"
                 :class="{ 'acct-sheet__avatar-btn--active': account.id === instancesStore.activeAccount?.id }"
-                :aria-pressed="account.id === instancesStore.activeAccount?.id"
                 :aria-current="account.id === instancesStore.activeAccount?.id ? 'true' : undefined"
                 @click="selectAccount(account.id)"
               >
@@ -172,6 +146,9 @@ onUnmounted(() => {
                     alt=""
                     class="acct-sheet__avatar-img"
                   />
+                  <span v-else class="acct-sheet__avatar-img acct-sheet__avatar-img--initial" aria-hidden="true">
+                    {{ initialOf(account) }}
+                  </span>
                   <span
                     v-if="account.id === instancesStore.activeAccount?.id"
                     class="acct-sheet__avatar-check"
@@ -226,6 +203,9 @@ onUnmounted(() => {
                   alt=""
                   class="acct-sheet__row-avatar"
                 />
+                <span v-else class="acct-sheet__row-avatar acct-sheet__row-avatar--initial" aria-hidden="true">
+                  {{ initialOf(account) }}
+                </span>
                 <span class="acct-sheet__row-text">
                   <span class="acct-sheet__row-name">
                     {{ plainDisplayName(account.user?.displayName, account.user?.username) }}
@@ -261,6 +241,7 @@ onUnmounted(() => {
               v-if="multi && instancesStore.activeAccount && !isPrimary(instancesStore.activeAccount)"
               type="button"
               class="acct-sheet__action"
+              title="Open NeoSpace as this account on every fresh launch"
               @click="makeMain(instancesStore.activeAccount.id)"
             >
               Make this main
@@ -284,37 +265,6 @@ onUnmounted(() => {
 </template>
 
 <style lang="scss">
-.acct-switch__toast {
-  position: fixed;
-  left: 50%;
-  bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  z-index: var(--neo-z-toast, 1100);
-  pointer-events: none;
-  // No chrome when empty — an always-painted pill was showing as a blank bubble
-
-  @media (min-width: 1024px) {
-    bottom: 2rem;
-  }
-}
-
-.acct-switch__toast-msg {
-  display: block;
-  white-space: nowrap;
-  // Long @user@instance handles must not run off a 320px screen
-  max-width: calc(100vw - 2rem);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0.55rem 0.9rem;
-  border-radius: 999px;
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--neo-text-primary);
-}
-
 .acct-sheet {
   position: fixed;
   inset: 0;
@@ -453,6 +403,24 @@ onUnmounted(() => {
   object-fit: cover;
   display: block;
   background: var(--neo-bg-tertiary);
+}
+
+.acct-sheet__avatar-img--initial,
+.acct-sheet__row-avatar--initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--neo-text-secondary);
+  background: var(--neo-bg-tertiary);
+}
+
+.acct-sheet__avatar-img--initial {
+  font-size: 1.5rem;
+}
+
+.acct-sheet__row-avatar--initial {
+  font-size: 1.125rem;
 }
 
 .acct-sheet__avatar-check {
@@ -660,20 +628,5 @@ onUnmounted(() => {
       transform: translateY(8px) scale(0.98);
     }
   }
-}
-
-.acct-toast-enter-active,
-.acct-toast-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.acct-toast-enter-from,
-.acct-toast-leave-to {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-html.acct-sheet-open {
-  overflow: hidden;
 }
 </style>

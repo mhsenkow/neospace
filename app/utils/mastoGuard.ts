@@ -29,13 +29,20 @@ function isProxyable(v: unknown): v is object {
   return v !== null && (typeof v === 'object' || typeof v === 'function')
 }
 
+const plainProxies = new WeakMap<object, object>()
+const selectProxies = new WeakMap<object, object>()
+
 /**
  * Wrap a masto client (or any action proxy under it). Only `$select` calls are
  * checked; action results (promises, paginators, `$raw` responses) and symbol
  * properties such as `Symbol.dispose` pass through untouched.
  */
 export function guardMastoClient<T extends object>(target: T, isSelect = false): T {
-  return new Proxy(target, {
+  // One proxy per target and mode — hot timeline paths walk the same chain repeatedly
+  const cache = isSelect ? selectProxies : plainProxies
+  const cached = cache.get(target)
+  if (cached) return cached as T
+  const proxy = new Proxy(target, {
     get(t, prop, receiver) {
       const value = Reflect.get(t, prop, receiver)
       if (typeof prop === 'symbol' || !isProxyable(value)) return value
@@ -48,4 +55,6 @@ export function guardMastoClient<T extends object>(target: T, isSelect = false):
       return isProxyable(next) ? guardMastoClient(next) : next
     },
   })
+  cache.set(target, proxy)
+  return proxy
 }

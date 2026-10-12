@@ -7,7 +7,7 @@
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { createRaceGuard } from '~/composables/useRace'
-import { normalizeServer, friendlyServerError, isAuthGatedPublicHost } from '~/utils/instances'
+import { normalizeServer, friendlyServerError, isAuthGatedPublicHost, formatMonthlyActive } from '~/utils/instances'
 
 const props = withDefaults(
   defineProps<{
@@ -31,8 +31,6 @@ const { featured, search } = useCuratedInstances()
 const instancesStore = useInstancesStore()
 
 const query = ref(props.initialQuery || '')
-/** Custom server field is primary — featured list is secondary. */
-const showCustom = ref(true)
 const inputRef = ref<HTMLInputElement | null>(null)
 const localError = ref<string | null>(null)
 
@@ -50,17 +48,16 @@ const peekRace = createRaceGuard()
 const inputErrorId = 'server-picker-input-error'
 
 const catalogHits = computed(() => {
-  const q = query.value.trim()
-  if (q.length < 2) return []
-  return search(q).slice(0, 6)
+  const raw = query.value.trim()
+  if (raw.length < 2) return []
+  // `@alice@hachyderm.io` and pasted URLs search on the host they resolve to
+  const host = normalizeServer(raw)?.replace(/^https?:\/\//, '')
+  const q = host || raw
+  // Once the query is exactly a server's domain (e.g. right after tapping a hit) the list is done
+  const hits = search(q).slice(0, 6)
+  if (hits.some((hit) => hit.domain.toLowerCase() === q.toLowerCase())) return []
+  return hits
 })
-
-const openCustom = async () => {
-  showCustom.value = true
-  localError.value = null
-  await nextTick()
-  inputRef.value?.focus()
-}
 
 const clearPeek = () => {
   peekTitle.value = null
@@ -81,7 +78,7 @@ const schedulePeek = () => {
 const peekNow = () => {
   if (peekTimer) clearTimeout(peekTimer)
   peekTimer = null
-  if (showCustom.value && query.value.trim()) void runPeek()
+  if (query.value.trim()) void runPeek()
 }
 
 const runPeek = async () => {
@@ -123,7 +120,7 @@ const peekAnnouncement = computed(() => {
   if (peekLoading.value) return `Checking ${peekHost.value}…`
   if (!peekTitle.value) return ''
   const bits = [peekTitle.value]
-  if (peekUsers.value != null) bits.push(`${peekUsers.value.toLocaleString()} monthly active`)
+  if (peekUsers.value != null) bits.push(formatMonthlyActive(peekUsers.value))
   if (peekOpen.value === true) bits.push(peekApproval.value ? 'sign-ups open, approval required' : 'sign-ups open')
   else if (peekOpen.value === false) bits.push('sign-ups closed')
   return bits.join(', ')
@@ -131,7 +128,7 @@ const peekAnnouncement = computed(() => {
 
 watch(query, () => {
   localError.value = null
-  if (showCustom.value) schedulePeek()
+  schedulePeek()
 })
 
 const pick = (domainOrUrl: string) => {
@@ -139,7 +136,6 @@ const pick = (domainOrUrl: string) => {
   const url = normalizeServer(domainOrUrl)
   if (!url) {
     localError.value = 'Enter a server name like mastodon.social'
-    showCustom.value = true
     return
   }
   emit('select', url)
@@ -158,16 +154,14 @@ const submitCustom = () => {
 const onCatalogHit = (domain: string) => {
   query.value = domain
   localError.value = null
-  peekNow()
+  pick(domain)
 }
 
 defineExpose({
   setError: (msg: string | null) => {
     localError.value = msg
-    if (msg) showCustom.value = true
   },
   friendlyError: friendlyServerError,
-  openCustom,
 })
 
 onMounted(() => {
@@ -198,7 +192,7 @@ onUnmounted(() => {
           type="text"
           class="server-picker__input"
           placeholder="@you@example.social or example.social"
-          inputmode="url"
+          inputmode="email"
           enterkeyhint="go"
           autocomplete="username"
           autocapitalize="none"
@@ -224,7 +218,7 @@ onUnmounted(() => {
           <template v-else-if="peekTitle">
             <div class="server-picker__peek-title">{{ peekTitle }}</div>
             <div class="server-picker__peek-meta">
-              <span v-if="peekUsers != null">{{ peekUsers.toLocaleString() }} monthly active</span>
+              <span v-if="peekUsers != null">{{ formatMonthlyActive(peekUsers) }}</span>
               <span v-if="peekOpen === true">Sign-ups open</span>
               <span v-else-if="peekOpen === false">Sign-ups closed</span>
               <span v-if="peekOpen === true && peekApproval">Approval required</span>
@@ -236,10 +230,10 @@ onUnmounted(() => {
         </div>
 
         <!-- Catalog matches while typing -->
-        <ul v-if="catalogHits.length && query.trim().length >= 2" class="server-picker__hits">
+        <ul v-if="catalogHits.length" class="server-picker__hits">
           <li v-for="hit in catalogHits" :key="hit.domain">
             <button type="button" class="server-picker__hit" :disabled="disabled" @click="onCatalogHit(hit.domain)">
-              <span>{{ hit.emoji }} {{ hit.domain }}</span>
+              <span><span aria-hidden="true">{{ hit.emoji }}</span> {{ hit.domain }}</span>
               <span class="server-picker__hit-blurb">{{ hit.blurb }}</span>
             </button>
           </li>
@@ -318,7 +312,6 @@ onUnmounted(() => {
   &:focus-visible {
     border-color: var(--neo-accent);
     background: var(--neo-accent-soft);
-    outline: none;
   }
 
   &:active {
@@ -367,26 +360,6 @@ onUnmounted(() => {
 
 .server-picker__custom {
   margin-top: 1.25rem;
-}
-
-.server-picker__toggle {
-  display: block;
-  width: 100%;
-  padding: 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--neo-text-secondary);
-  background: transparent;
-  border: 1px dashed var(--neo-border-color-dark);
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--neo-accent);
-    border-color: var(--neo-accent);
-    outline: none;
-  }
 }
 
 .server-picker__form {
@@ -518,7 +491,7 @@ onUnmounted(() => {
   padding: 0.875rem 1rem;
   font-size: 1rem;
   font-weight: 600;
-  color: var(--neo-text-inverse, #fafaf8);
+  color: var(--neo-text-on-accent);
   background: var(--neo-accent);
   border: none;
   border-radius: 4px;

@@ -13,6 +13,7 @@ import {
 } from '~/utils/edwardSemantics'
 import { useInstancesStore } from '~/stores/instances'
 import { statusIdentity } from '~/utils/statusIdentity'
+import { dropDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 import { compareId } from '~/utils/compareId'
 import {
   emptyAffinityContext,
@@ -618,6 +619,23 @@ export const useEdwardStore = defineStore('edward', {
       )
       if (!gone.size) return
       this.statuses = this.statuses.filter((s) => !gone.has(statusIdentity(s)))
+      this.watchHistory = this.watchHistory.filter((id) => !gone.has(id))
+      if (this.focusedIdentity && gone.has(this.focusedIdentity)) {
+        this.focusedIdentity = null
+        this.watchHold = false
+        this.resumeWatchLive()
+      }
+      if (this.selectedIdentity && gone.has(this.selectedIdentity)) this.selectedIdentity = null
+    },
+
+    /** A post was deleted elsewhere — pull it off the stage (and out of focus/selection/history). */
+    removeDeletedStatus(event: DeletedStatusEvent) {
+      const next = dropDeletedStatus(this.statuses, event)
+      if (next === this.statuses) return
+      const gone = new Set(
+        this.statuses.filter((s) => !next.includes(s)).map((s) => statusIdentity(s)),
+      )
+      this.statuses = next
       this.watchHistory = this.watchHistory.filter((id) => !gone.has(id))
       if (this.focusedIdentity && gone.has(this.focusedIdentity)) {
         this.focusedIdentity = null

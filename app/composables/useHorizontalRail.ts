@@ -18,12 +18,17 @@ export function useHorizontalRail(elRef: Ref<HTMLElement | null>) {
       return
     }
     const max = el.scrollWidth - el.clientWidth
-    canScrollBack.value = el.scrollLeft > 4
-    canScrollForward.value = max > 4 && el.scrollLeft < max - 4
+    // RTL rails report scrollLeft ≤ 0 (0 = start, negative = scrolled toward the end)
+    const offset = Math.abs(el.scrollLeft)
+    canScrollBack.value = offset > 4
+    canScrollForward.value = max > 4 && offset < max - 4
   }
 
   const scrollBy = (delta: number) => {
-    elRef.value?.scrollBy({ left: delta, behavior: reduceMotion.value ? 'auto' : 'smooth' })
+    const el = elRef.value
+    // `delta` is in reading order (positive = toward the end); RTL flips the physical direction
+    const sign = el && getComputedStyle(el).direction === 'rtl' ? -1 : 1
+    el?.scrollBy({ left: delta * sign, behavior: reduceMotion.value ? 'auto' : 'smooth' })
   }
 
   let ro: ResizeObserver | null = null

@@ -10,7 +10,13 @@ type Handler = (status: mastodon.v1.Status) => void
 const handlers = new Set<Handler>()
 
 export function emitComposedStatus(status: mastodon.v1.Status) {
-  for (const handler of handlers) handler(status)
+  for (const handler of handlers) {
+    try {
+      handler(status)
+    } catch (e) {
+      console.warn('composed status handler failed', e)
+    }
+  }
 }
 
 export function onComposedStatus(handler: Handler) {

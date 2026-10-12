@@ -34,7 +34,10 @@ export type ConfirmState = {
 
 export type ConfirmChoice = 'confirm' | 'secondary' | 'cancel'
 
-export type ReportCategory = 'spam' | 'violation' | 'other'
+export type ReportCategory = 'spam' | 'legal' | 'violation' | 'other'
+
+/** A recent post by the reported account that can be attached to the report */
+export type ReportPost = { id: string; text: string; createdAt: string }
 
 export type ReportState = {
   open: boolean
@@ -42,12 +45,24 @@ export type ReportState = {
   category: ReportCategory
   comment: string
   forward: boolean
+  /** Server supports the `legal` category (Mastodon 4.2+) */
+  allowLegal: boolean
+  /** The opener supplied a post loader — show the "Add more posts" step */
+  canAddPosts: boolean
+  /** Recent posts to offer ("Add more posts"); null until loaded */
+  posts: ReportPost[] | null
+  postsLoading: boolean
+  postsError: string | null
+  /** Ids of the extra posts the reporter ticked */
+  extraStatusIds: string[]
 }
 
 export type ReportPayload = {
   category: ReportCategory
   comment: string
   forward: boolean
+  /** Additional post ids (besides the one being reported) */
+  extraStatusIds: string[]
 }
 
 type ConfirmResolver = (choice: ConfirmChoice) => void
@@ -55,6 +70,7 @@ type ReportResolver = (payload: ReportPayload | null) => void
 
 let confirmResolve: ConfirmResolver | null = null
 let reportResolve: ReportResolver | null = null
+let reportLoadPosts: (() => Promise<ReportPost[]>) | null = null
 
 export type AccountSwitcherState = {
   open: boolean
@@ -63,6 +79,10 @@ export type AccountSwitcherState = {
 export const useOverlayStore = defineStore('overlay', {
   state: () => ({
     accountSwitcher: {
+      open: false,
+    } as AccountSwitcherState,
+    /** Accounts & servers manager — stacks with confirm/lightbox like the switcher */
+    accountsManager: {
       open: false,
     } as AccountSwitcherState,
     lightbox: {
@@ -86,10 +106,24 @@ export const useOverlayStore = defineStore('overlay', {
       category: 'other',
       comment: '',
       forward: true,
+      allowLegal: false,
+      canAddPosts: false,
+      posts: null,
+      postsLoading: false,
+      postsError: null,
+      extraStatusIds: [],
     } as ReportState,
   }),
 
   actions: {
+    openAccountsManager() {
+      this.accountsManager.open = true
+    },
+
+    closeAccountsManager() {
+      this.accountsManager.open = false
+    },
+
     openAccountSwitcher() {
       this.accountSwitcher.open = true
     },
@@ -173,21 +207,49 @@ export const useOverlayStore = defineStore('overlay', {
       resolve?.(typeof ok === 'string' ? ok : ok ? 'confirm' : 'cancel')
     },
 
-    openReport(opts: { accountAcct: string }): Promise<ReportPayload | null> {
+    openReport(opts: {
+      accountAcct: string
+      allowLegal?: boolean
+      /** Loads the account's recent posts (local ids) for the optional "Add more posts" step */
+      loadPosts?: () => Promise<ReportPost[]>
+    }): Promise<ReportPayload | null> {
       if (reportResolve) {
         reportResolve(null)
         reportResolve = null
       }
+      reportLoadPosts = opts.loadPosts ?? null
       this.report = {
         open: true,
         accountAcct: opts.accountAcct,
         category: 'other',
         comment: '',
         forward: true,
+        allowLegal: !!opts.allowLegal,
+        canAddPosts: !!opts.loadPosts,
+        posts: null,
+        postsLoading: false,
+        postsError: null,
+        extraStatusIds: [],
       }
       return new Promise<ReportPayload | null>((resolve) => {
         reportResolve = resolve
       })
+    },
+
+    /** Fetch the offer list once, when the reporter opens "Add more posts" */
+    async loadReportPosts() {
+      if (!reportLoadPosts || this.report.posts || this.report.postsLoading) return
+      const loader = reportLoadPosts
+      this.report.postsLoading = true
+      this.report.postsError = null
+      try {
+        const posts = await loader()
+        if (loader === reportLoadPosts) this.report.posts = posts
+      } catch {
+        if (loader === reportLoadPosts) this.report.postsError = 'Couldn’t load posts.'
+      } finally {
+        if (loader === reportLoadPosts) this.report.postsLoading = false
+      }
     },
 
     resolveReport(payload: ReportPayload | null) {

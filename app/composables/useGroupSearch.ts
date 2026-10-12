@@ -6,6 +6,7 @@
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
 import { useGroupsStore, type Group } from '~/stores/groups'
 import { createRaceGuard } from '~/composables/useRace'
+import { normalizeHashtagInput } from '~/utils/hashtag'
 
 export function useGroupSearch(
   query: Ref<string>,
@@ -55,8 +56,8 @@ export function useGroupSearch(
   watch(query, (q) => {
     if (timer) clearTimeout(timer)
     timer = null
-    const trimmed = q.trim()
-    if (trimmed.length < minLength) {
+    const trimmed = normalizeHashtagInput(q)
+    if (!trimmed || trimmed.length < minLength) {
       reset()
       return
     }
@@ -70,8 +71,8 @@ export function useGroupSearch(
 
   /** Re-run the current query now (the Retry button) */
   const retry = () => {
-    const trimmed = query.value.trim()
-    if (trimmed.length < minLength) return
+    const trimmed = normalizeHashtagInput(query.value)
+    if (!trimmed || trimmed.length < minLength) return
     isSearching.value = true
     void run(trimmed)
   }

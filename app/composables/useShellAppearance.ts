@@ -12,6 +12,7 @@ import {
   DENSITY_OPTIONS,
   LINE_OPTIONS,
   resolveTheme,
+  type NeoThemeId,
 } from '~/utils/appearance'
 import { osSchemeTick } from '~/utils/osScheme'
 
@@ -99,6 +100,12 @@ export function useShellAppearance() {
     nextTick(() => announceLook('Theme', currentThemeLabel.value))
   }
 
+  /** Pick a theme directly (incl. Auto) — the picker; cycleTheme only steps forward. */
+  const setTheme = (id: NeoThemeId) => {
+    settingsStore.updateAppearance({ theme: id })
+    nextTick(() => announceLook('Theme', currentThemeLabel.value))
+  }
+
   const cycleUi = () => {
     settingsStore.cycleUi()
     nextTick(() => announceLook('Chrome', currentUiLabel.value))
@@ -111,12 +118,18 @@ export function useShellAppearance() {
 
   const cycleDensity = () => {
     settingsStore.cycleDensity()
-    nextTick(() => announceLook('Density', currentDensityLabel.value))
+    nextTick(() => announceLook('Spacing', currentDensityLabel.value))
   }
 
   const cycleLine = () => {
     settingsStore.cycleLine()
     nextTick(() => announceLook('Lines', currentLineLabel.value))
+  }
+
+  /** Board density (Packed / Roomy / Focused) — announced like the Look cycles */
+  const cycleBoardDensity = () => {
+    columnsStore.toggleDeskDensity()
+    nextTick(() => announceLook('Board density', densityLabel.value))
   }
 
   const densityTitle = computed(() => {
@@ -145,6 +158,7 @@ export function useShellAppearance() {
     sidebarRail,
     lookOpen,
     lookAnnounce,
+    cycleBoardDensity,
     loadSidebarRail,
     toggleSidebarRail,
     syncRailAttr,
@@ -156,6 +170,7 @@ export function useShellAppearance() {
     currentDensityLabel,
     currentLineLabel,
     cycleTheme,
+    setTheme,
     cycleUi,
     cycleRadius,
     cycleDensity,

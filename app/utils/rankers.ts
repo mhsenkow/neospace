@@ -110,7 +110,7 @@ export const RANKERS: Record<
     short: 'Facebook',
     tip: 'Like a Facebook feed — friends and conversations first; comments beat likes; engagement-bait sinks.',
     description:
-      'Ranks for meaningful social interactions: mutuals and close follows rise, a real conversation counts ~30× a like, and clickbait / engagement-bait is demoted.',
+      'Ranks for meaningful social interactions: mutuals and close follows rise, a real conversation counts ~30× a like, and clickbait / engagement-bait is demoted. Engagement-bait detection is English-only today.',
     sources: ['home', 'tag', 'trend'],
     needsAuth: true,
   },
@@ -351,8 +351,10 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
   const inN = scored.filter((x) => x.inNetwork)
   const outN = scored.filter((x) => !x.inNetwork)
   const mixed: typeof scored = []
+  let inCount = 0
   while (inN.length || outN.length) {
-    const takeIn = inN.length && (!outN.length || mixed.filter((x) => x.inNetwork).length <= mixed.length / 2)
+    const takeIn = inN.length && (!outN.length || inCount <= mixed.length / 2)
+    if (takeIn) inCount++
     mixed.push((takeIn ? inN : outN).shift()!)
   }
   return mixed.map(({ status, score, why }) => ({ status, score, why }))

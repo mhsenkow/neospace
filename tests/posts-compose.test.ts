@@ -5,6 +5,11 @@ import { formatRelativeTime } from '../app/utils/relativeTime'
 import { useComposeSheetStore } from '../app/stores/composeSheet'
 
 describe('mastodonLength — URL edges', () => {
+  it('counts URLs with balanced parentheses as one token (NS-480)', () => {
+    const url = 'https://en.wikipedia.org/wiki/Foo_(bar)'
+    expect(mastodonLength(url)).toBe(23)
+    expect(mastodonLength(`see ${url} ok`)).toBe(4 + 23 + 3)
+  })
   it('does not swallow sentence punctuation after a link', () => {
     expect(mastodonLength('see https://example.com.')).toBe(4 + 23 + 1)
     expect(mastodonLength('https://a.co/x?!')).toBe(23 + 2)

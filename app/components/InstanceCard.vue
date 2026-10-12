@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CuratedInstance } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
-import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
+import { formatMonthlyActive, friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
 import { getMainScroller } from '~/utils/pageScroll'
 
 const props = defineProps<{
@@ -18,18 +18,23 @@ const cardRef = ref<HTMLElement | null>(null)
 
 const liveData = ref<Awaited<ReturnType<typeof instancesStore.fetchInstanceInfo>>>(null)
 const loading = ref(false)
+/** The live fetch finished (with or without data) — lets a failed check say so */
+const checked = ref(false)
 const loadScheduled = ref(false)
 const isAdding = ref(false)
 const isSigningIn = ref(false)
 const actionError = ref<string | null>(null)
 
-const instanceRow = computed(() =>
-  instancesStore.instances.find((i) => hostnameMatches(i.url, props.instance.domain)),
+const route = useRoute()
+
+const hostRows = computed(() =>
+  instancesStore.instances.filter((i) => hostnameMatches(i.url, props.instance.domain)),
 )
 
-const isWatching = computed(() => !!instanceRow.value)
+const isWatching = computed(() => hostRows.value.length > 0)
 
-const isSignedIn = computed(() => !!(instanceRow.value?.accessToken && instanceRow.value?.user))
+// Any signed-in slot on this host counts — a watch-only row may come first
+const isSignedIn = computed(() => hostRows.value.some((i) => i.accessToken && i.user))
 
 const isGated = computed(() => isAuthGatedPublicHost(props.instance.domain))
 
@@ -40,6 +45,7 @@ const fetchLive = async () => {
     liveData.value = await instancesStore.fetchInstanceInfo(props.instance.domain)
   } finally {
     loading.value = false
+    checked.value = true
   }
 }
 
@@ -95,7 +101,9 @@ const handleSignIn = async () => {
   isSigningIn.value = true
   actionError.value = null
   try {
-    const authUrl = await instancesStore.loginWithInstance(`https://${props.instance.domain}`)
+    const authUrl = await instancesStore.loginWithInstance(`https://${props.instance.domain}`, {
+      returnTo: route.fullPath,
+    })
     window.location.href = authUrl
   } catch (e) {
     actionError.value = friendlyServerError(e)
@@ -119,7 +127,7 @@ const handleSignIn = async () => {
 
     <div v-if="liveData?.stats || liveData?.registrations !== undefined" class="instance-card__stats">
       <span v-if="liveData.stats?.userCount != null">
-        {{ liveData.stats.userCount.toLocaleString() }} monthly active
+        {{ formatMonthlyActive(liveData.stats.userCount) }}
       </span>
       <span v-if="liveData.registrations === true" class="instance-card__open">Open to join</span>
       <span v-else-if="liveData.registrations === false" class="instance-card__closed">Sign-ups closed</span>
@@ -127,6 +135,9 @@ const handleSignIn = async () => {
     </div>
     <div v-else-if="loading" class="instance-card__stats instance-card__stats--muted">
       Checking server…
+    </div>
+    <div v-else-if="checked && !liveData" class="instance-card__stats instance-card__stats--muted">
+      Couldn’t reach server
     </div>
 
     <p v-if="actionError" class="instance-card__error" role="alert">{{ actionError }}</p>
@@ -362,17 +373,5 @@ const handleSignIn = async () => {
     color: var(--neo-text-secondary);
     background: var(--neo-bg-tertiary);
   }
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 </style>

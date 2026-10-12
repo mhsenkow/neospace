@@ -11,6 +11,8 @@
 
 import type { mastodon } from 'masto'
 import { ref, watch, onUnmounted, type Ref } from 'vue'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
+import { dropDeletedStatus } from '~/utils/deletedStatus'
 import { activeClient, activeCredentials, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { mapErrorToMessage } from '~/utils/friendlyError'
@@ -572,7 +574,14 @@ export function useFediverseSearch(opts: {
     },
   )
 
+  // A deleted post vanishes from search results / the tag timeline without a re-search
+  const stopDeletedListen = onDeletedStatus((event) => {
+    statuses.value = dropDeletedStatus(statuses.value, event)
+    tagTimeline.value = dropDeletedStatus(tagTimeline.value, event)
+  })
+
   onUnmounted(() => {
+    stopDeletedListen()
     searchRace.abort()
     resultsGen++
   })

@@ -246,7 +246,12 @@ export const ICONS = {
 export type NeoIconName = keyof typeof ICONS
 
 export function resolveIcon(name: NeoIconName): (ctx: IconCtx) => VNode[] {
-  let def: IconDef = ICONS[name]
+  let def: IconDef | undefined = ICONS[name]
+  // Dynamic strings bypass the NeoIconName type — render nothing rather than blank the parent
+  if (!def) {
+    if (import.meta.dev) console.warn(`[NeoIcon] unknown icon "${String(name)}"`)
+    return () => []
+  }
   const seen = new Set<string>()
   while (typeof def === 'string') {
     if (seen.has(def)) {
@@ -254,6 +259,7 @@ export function resolveIcon(name: NeoIconName): (ctx: IconCtx) => VNode[] {
     }
     seen.add(def)
     def = ICONS[def as NeoIconName]
+    if (!def) return () => []
   }
   return def
 }

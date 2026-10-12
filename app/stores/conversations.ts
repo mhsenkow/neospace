@@ -9,6 +9,7 @@ import { activeClient, clientFor } from '~/composables/useMasto'
 import { useInstancesStore } from './instances'
 import { logWarn } from '~/utils/log'
 import { dmPreviewText, findExactOneToOne } from '~/utils/dmHelpers'
+import { findThreadConversation } from '~/utils/dmThread'
 
 const PAGE_LIMIT = 40
 const POLL_MS = 45_000
@@ -190,22 +191,7 @@ export const useConversationsStore = defineStore('conversations', {
       if (!this.conversations.length) {
         await this.fetchConversations({ quiet: true })
       }
-      const statusSet = new Set(opts.statusIds.filter(Boolean))
-      const acctSet = new Set(opts.accountIds.filter(Boolean))
-
-      let match =
-        this.conversations.find((c) => c.lastStatus?.id && statusSet.has(c.lastStatus.id)) ||
-        null
-
-      if (!match && acctSet.size) {
-        match =
-          this.conversations.find((c) => {
-            const ids = (c.accounts || []).map((a) => a.id)
-            return (
-              ids.length === acctSet.size && ids.length > 0 && ids.every((id) => acctSet.has(id))
-            )
-          }) || null
-      }
+      const match = findThreadConversation(this.conversations, opts)
 
       if (match?.unread) await this.markRead(match.id)
     },

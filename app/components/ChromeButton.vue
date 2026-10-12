@@ -18,12 +18,21 @@ withDefaults(
 </script>
 
 <template>
+  <!-- No native `title`: .neo-tip already draws the label from aria-label (two tooltips otherwise) -->
+  <span
+    v-if="to && disabled"
+    class="chrome-btn chrome-btn--disabled"
+    role="link"
+    aria-disabled="true"
+    :aria-label="ariaLabel || title || undefined"
+  >
+    <slot />
+  </span>
   <NuxtLink
-    v-if="to"
+    v-else-if="to"
     :to="to"
     class="chrome-btn"
     :class="{ 'neo-tip': !!(ariaLabel || title) }"
-    :title="title || undefined"
     :aria-label="ariaLabel || title || undefined"
   >
     <slot />
@@ -33,7 +42,6 @@ withDefaults(
     type="button"
     class="chrome-btn"
     :class="{ 'neo-tip': !!(ariaLabel || title) }"
-    :title="title || undefined"
     :aria-label="ariaLabel || title || undefined"
     :disabled="disabled"
   >
@@ -60,7 +68,8 @@ withDefaults(
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));
   }
 
-  &:disabled {
+  &:disabled,
+  &--disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }

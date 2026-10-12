@@ -223,7 +223,8 @@
 @media (max-width: 1023px) {
   html.neo-nav-hidden {
     .notes-fab,
-    .neo-bottom-dock {
+    .neo-bottom-dock,
+    .neo-toast-host {
       // The bar's height includes the safe area, which the pills keep (below)
       translate: 0 calc(var(--neo-nav-live-h, 56px) - env(safe-area-inset-bottom, 0px));
     }

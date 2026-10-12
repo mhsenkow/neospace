@@ -10,6 +10,7 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { useThemeStore } from './theme'
 import { activeClient, clientFor } from '~/composables/useMasto'
+import { setInAppReducedMotion } from '~/composables/usePrefersReducedMotion'
 import type {
   NeoDensityId,
   NeoFontId,
@@ -39,6 +40,7 @@ import { cursorPage } from '~/utils/linkHeader'
 import { normalizeDomainInput } from '~/utils/domainInput'
 import { listenSuiteLook, readSuiteLook, writeSuiteLook } from '~/utils/suiteLook'
 import { logWarn, logError } from '~/utils/log'
+import { readingPrefsFrom, type ReadingPrefs } from '~/utils/readingPrefs'
 
 // Settings categories for the sidebar
 export interface SettingsCategory {
@@ -341,6 +343,8 @@ function mergeStoredLocalPrefs(partial: Record<string, unknown>) {
 
 /** Active account the loaded `account` / `preferences` / `filters` belong to. */
 let settingsOwnerId: string | null = null
+/** Account the lightweight reading-prefs load last ran for */
+let readingPrefsOwnerId: string | null = null
 let settingsLoadSeq = 0
 
 export const useSettingsStore = defineStore('settings', {
@@ -431,6 +435,9 @@ export const useSettingsStore = defineStore('settings', {
       if (typeof local === 'boolean') return local
       return state.preferences?.['posting:default:sensitive'] || false
     },
+
+    /** Reading prefs the post card honours (server value, else Mastodon's defaults). */
+    readingPrefs: (state): ReadingPrefs => readingPrefsFrom(state.preferences),
 
     /** Post language — server prefs, then browser locale. */
     defaultLanguage: (state): string => {
@@ -539,10 +546,7 @@ export const useSettingsStore = defineStore('settings', {
       })
       ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
       if (typeof document !== 'undefined') {
-        document.documentElement.classList.toggle(
-          'reduce-motion',
-          this.localPreferences.reduceMotion,
-        )
+        setInAppReducedMotion(this.localPreferences.reduceMotion)
       }
       writeSuiteLook({
         theme: this.localPreferences.theme,
@@ -579,7 +583,7 @@ export const useSettingsStore = defineStore('settings', {
           line: this.localPreferences.line,
         })
         ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
-        document.documentElement.classList.toggle('reduce-motion', this.localPreferences.reduceMotion)
+        setInAppReducedMotion(this.localPreferences.reduceMotion)
       }
       if (typeof window !== 'undefined') window.addEventListener('storage', onPrefsStorage)
       const offSuite = listenSuiteLook((slice) => {
@@ -711,6 +715,33 @@ export const useSettingsStore = defineStore('settings', {
       }
     },
     
+    /**
+     * Just the server preferences — post cards honour reading:expand:* / reading:autoplay:gifs
+     * without the user ever opening Settings. Cheap (one request), per active account.
+     */
+    async loadReadingPrefs() {
+      const instancesStore = useInstancesStore()
+      const ownerId = instancesStore.activeAccountId
+      if (!instancesStore.isAuthenticated || !ownerId) {
+        if (readingPrefsOwnerId !== null) this.preferences = null
+        readingPrefsOwnerId = null
+        return
+      }
+      if (readingPrefsOwnerId !== ownerId) {
+        // Another account's reading habits must not leak across the switch
+        if (settingsOwnerId !== ownerId) this.preferences = null
+        readingPrefsOwnerId = ownerId
+      }
+      try {
+        const prefs = await this.getClient().v1.preferences.fetch()
+        if (instancesStore.activeAccountId !== ownerId) return
+        this.preferences = prefs as MastodonPreferences
+      } catch (e) {
+        // Optional: servers without /preferences keep Mastodon's defaults
+        logWarn('Couldn’t load reading preferences:', e)
+      }
+    },
+
     clearModerationLists() {
       moderationEpoch += 1
       moderationCursor.muted = null

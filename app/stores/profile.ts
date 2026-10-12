@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
-import { activeClient, activeCredentials } from '~/composables/useMasto'
+import { activeClient, activeCredentials, readAccountOverride } from '~/composables/useMasto'
 import { accountsMatch, hostOf } from '~/utils/federation'
 import { stripHtml } from '~/utils/stripHtml'
 import { profileFieldLimit } from '~/utils/profileSources'
@@ -113,8 +113,13 @@ export const useProfileStore = defineStore('profile', {
      */
     isOwnProfile(): boolean {
       const instancesStore = useInstancesStore()
-      if (!instancesStore.currentUser || !this.viewedProfile) return false
-      return instancesStore.currentUser.id === this.viewedProfile.id
+      // A route-scoped account (?account=) is the viewer for this page, not the global active one
+      const overrideId = readAccountOverride()
+      const viewer = overrideId
+        ? instancesStore.instances.find((i) => i.id === overrideId)?.user
+        : instancesStore.currentUser
+      if (!viewer || !this.viewedProfile) return false
+      return viewer.id === this.viewedProfile.id
     },
 
     /**
@@ -493,7 +498,7 @@ export const useProfileStore = defineStore('profile', {
     /** Report the viewed profile (no specific post) */
     async reportViewedAccount(opts: {
       comment?: string
-      category: 'spam' | 'violation' | 'other'
+      category: 'spam' | 'legal' | 'violation' | 'other'
       forward: boolean
     }) {
       if (!this.viewedProfile || this.isOwnProfile) return

@@ -19,7 +19,7 @@ test.describe('mobile shell dialogs', () => {
     await expect(dialog).toBeVisible()
     await expect(trigger).toHaveAttribute('aria-expanded', 'true')
     await expect(dialog.getByRole('navigation', { name: 'Main menu' })).toBeVisible()
-    await expect(dialog.getByRole('link', { name: 'Home' })).toBeVisible()
+    await expect(dialog.getByRole('link', { name: 'Home', exact: true })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Search' })).toBeVisible()
     await expect(dialog.getByRole('link', { name: 'Sign in' }).first()).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Settings' })).toBeVisible()
@@ -59,7 +59,7 @@ test.describe('mobile shell dialogs', () => {
     await page.getByRole('button', { name: 'Menu', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Menu' })
     await expect(dialog.getByText('Neo Tester')).toBeVisible()
-    await expect(dialog.getByText(/Posting as · mastodon\.test/)).toBeVisible()
+    await expect(dialog.getByText(/Posting on mastodon\.test/)).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Sign out' })).toBeVisible()
   })
 

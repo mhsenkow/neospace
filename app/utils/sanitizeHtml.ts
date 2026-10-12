@@ -8,6 +8,7 @@ import DOMPurify from 'dompurify'
 const STATUS_TAGS = [
   'p', 'br', 'span', 'a', 'strong', 'em', 'b', 'i', 'u', 's', 'del',
   'code', 'pre', 'blockquote', 'ul', 'ol', 'li',
+  'sub', 'sup', 'ruby', 'rt', 'rp',
 ]
 
 // No arbitrary `class` — remote HTML could spoof app overlay/chrome classes.
@@ -62,7 +63,7 @@ function purifyWithSafeClasses(dirty: string, tags: string[], attr: string[]): s
     ALLOWED_TAGS: tags,
     ALLOWED_ATTR: [...attr, 'class'],
     ALLOW_DATA_ATTR: false,
-    ADD_ATTR: ['target', 'rel'],
+    ADD_ATTR: ['target', 'rel', 'start', 'reversed', 'value'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   })
 }
@@ -113,7 +114,7 @@ export function sanitizeDisplayName(
   html: string,
   allowedEmojiUrls?: Iterable<string> | null,
 ): string {
-  const cleaned = purifyWithSafeClasses(html, NAME_TAGS, NAME_ATTR.filter((a) => a !== 'class'))
+  const cleaned = purifyWithSafeClasses(html, NAME_TAGS, NAME_ATTR)
   return filterEmojiImgs(cleaned, allowedEmojiUrls)
 }
 

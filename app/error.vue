@@ -18,6 +18,9 @@ useHead({
 })
 
 const goHome = () => clearError({ redirect: '/' })
+/** Someone following a stale in-app link can step back instead of losing their place */
+const canGoBack = computed(() => import.meta.client && !!window.history.state?.back)
+const goBack = () => clearError().then(() => window.history.back())
 const reload = () => window.location.reload()
 
 /** Short "Error 500 · message" line so a crash can be described in a report */
@@ -51,6 +54,7 @@ const copyDetails = async () => {
         <h1 class="neo-error__title">Page not found</h1>
         <p class="neo-error__desc">This link doesn’t go anywhere in NeoSpace.</p>
         <div class="neo-error__actions">
+          <button v-if="canGoBack" type="button" class="neo-btn neo-btn--tertiary" @click="goBack">Go back</button>
           <button type="button" class="neo-btn neo-btn--primary" @click="goHome">Back home</button>
         </div>
       </div>

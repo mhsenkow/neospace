@@ -4,7 +4,8 @@
  */
 
 import { useEdwardStore, edwardBallFor } from '~/stores/edward'
-import { useComposeSheetStore } from '~/stores/composeSheet'
+import { useEdwardRecessRestore } from '~/composables/useEdwardRecess'
+import { useToastStore } from '~/stores/toast'
 import { useMediaQuery } from '~/composables/useBreakpoint'
 import { useEdwardStream } from '~/composables/useEdwardStream'
 import { EDWARD_FACE_LEGEND, MOOD_GLYPH } from '~/utils/edwardFaces'
@@ -95,7 +96,6 @@ const ageLabel = (createdAt: number) => {
 
 const edward = useEdwardStore()
 const stream = useEdwardStream()
-const composeSheet = useComposeSheetStore()
 const router = useRouter()
 const rootEl = ref<HTMLElement | null>(null)
 const exploreInput = ref<HTMLInputElement | null>(null)
@@ -572,15 +572,8 @@ const resumeLive = (e?: Event) => {
   edward.resumeWatchLive()
 }
 
-// Edward is recessed while the compose sheet is open (reply from the modal / watch deck).
-// Restore on ANY close — Cancel, Discard, Esc — from here: this component outlives the
-// modal and deck that opened the sheet, so cleanup can't be skipped by an unmount.
-watch(
-  () => composeSheet.open,
-  (open) => {
-    if (!open && edward.recessed) edward.setRecessed(false)
-  },
-)
+// Un-recess Edward whenever the compose sheet closes (see useEdwardRecess)
+useEdwardRecessRestore()
 
 const closeModal = () => {
   edward.clearSelection()
@@ -609,6 +602,12 @@ const openProfile = (acct: string) => {
   const query: Record<string, string> = { user: acct.replace(/^@/, '') }
   if (status?._instanceId) query.account = status._instanceId
   leaveTo({ path: '/profile', query })
+}
+
+/** No WebGL: there is no stage to show, so stop polling every server and leave with an explanation */
+const onWebglUnsupported = () => {
+  useToastStore().show({ message: 'Edward needs WebGL, which this browser or device can’t start.' })
+  exit()
 }
 
 let exitTimer: ReturnType<typeof setTimeout> | null = null
@@ -824,7 +823,7 @@ onUnmounted(() => {
       aria-label="Edward mode session"
     >
       <ClientOnly>
-        <EdwardCanvas @pick="onPick" />
+        <EdwardCanvas @pick="onPick" @unsupported="onWebglUnsupported" />
       </ClientOnly>
 
       <div class="edward-mode__scan" aria-hidden="true" />

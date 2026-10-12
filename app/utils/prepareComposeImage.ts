@@ -142,8 +142,6 @@ export async function prepareComposeImage(
     const needsScale =
       bitmap.width > preset.maxDim || bitmap.height > preset.maxDim
     const needsRecompress = file.size > preset.recompressBytes
-    const keepPngAlpha =
-      file.type === 'image/png' && (await pngHasAlpha(bitmap))
 
     if (!needsScale && !needsRecompress) {
       bitmap.close()
@@ -155,6 +153,9 @@ export async function prepareComposeImage(
       bitmap.close()
       return passthrough()
     }
+
+    const keepPngAlpha =
+      file.type === 'image/png' && (await pngHasAlpha(bitmap))
 
     const scale = needsScale
       ? preset.maxDim / Math.max(bitmap.width, bitmap.height)

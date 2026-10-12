@@ -60,6 +60,9 @@ export function normalizeServer(raw: string): string | null {
   value = value.replace(/^https?:\/\//, '')
   value = value.replace(/\/.*$/, '')
   value = value.replace(/\/+$/, '')
+  // Fully-qualified form (`mastodon.social.`) is the same host. Ports are deliberately
+  // not accepted: servers are public hostnames on the default HTTPS port.
+  value = value.replace(/\.$/, '')
 
   // IDN hosts (bücher.social, кириллица.example): convert to punycode first, then validate
   // the ASCII form — the URL parser also rejects forbidden host characters for us
@@ -84,6 +87,11 @@ export function normalizeServer(raw: string): string | null {
   if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(value)) return null
 
   return `https://${value}`
+}
+
+/** One phrase for the monthly-active figure, e.g. "1,234 active this month". */
+export function formatMonthlyActive(count: number): string {
+  return `${count.toLocaleString()} active this month`
 }
 
 export function friendlyServerError(err: unknown): string {

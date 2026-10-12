@@ -3,6 +3,7 @@
  */
 
 import { LOOM_ORIGINS } from '~/utils/loomHandoff'
+import { buildZip } from '~/utils/zip'
 import {
   insightDaysToCsv,
   insightHeatmapToCsv,
@@ -68,29 +69,22 @@ export function buildInsightsExport(report: InsightsReport): {
   }
 }
 
-function downloadCsv(csv: string, filename: string) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+/** One .zip of three valid CSVs — a stacked "bundle" CSV mixes headers and opens as garbage in Excel */
+function downloadZip(files: LoomExportFile[], filename: string) {
+  const bytes = buildZip(files.map((f) => ({ name: f.name, data: f.csv })))
+  const blob = new Blob([bytes as BlobPart], { type: 'application/zip' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`
+  a.download = filename
   a.click()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** Combined fallback when browsers block multiple programmatic downloads. */
-function downloadCombinedCsv(files: LoomExportFile[]) {
-  // trim() also strips each part's \uFEFF — put one BOM back at the very start
-  // so Excel still opens the bundle as UTF-8 (non-ASCII previews otherwise mojibake)
-  const parts = files.map(
-    (f) => `# ${f.name}\n${f.csv.trim()}\n`,
-  )
-  downloadCsv(`\uFEFF${parts.join('\n')}`, files[0]?.name.replace(/\.csv$/i, '') + '-bundle.csv')
-}
-
 export function downloadInsightsCsv(report: InsightsReport) {
   const { files } = buildInsightsExport(report)
-  downloadCombinedCsv(files)
+  const slug = (report.account.acct || 'account').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40)
+  downloadZip(files, `neospace-insights-${slug}.zip`)
 }
 
 /**

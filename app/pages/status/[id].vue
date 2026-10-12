@@ -11,6 +11,8 @@ import { useInstancesStore } from '~/stores/instances'
 import { useConversationsStore } from '~/stores/conversations'
 import { dayKey, daySeparatorLabel, safeHttpUrl } from '~/utils/dmHelpers'
 import { compareId } from '~/utils/compareId'
+import { findThreadConversation, threadNeedsRefetch } from '~/utils/dmThread'
+import { earlierPostMissing } from '~/utils/threadMerge'
 import { createRaceGuard } from '~/composables/useRace'
 import { CHAT_DRAFT_PREFIX } from '~/composables/useDraft'
 import { onDeletedStatus } from '~/composables/useDeletedStatus'
@@ -57,6 +59,14 @@ const descendants = ref<mastodon.v1.Status[]>([])
 const focusEl = ref<HTMLElement | null>(null)
 const chatEndEl = ref<HTMLElement | null>(null)
 let threadPoll: ReturnType<typeof setInterval> | null = null
+/** Replies found by the quiet public-thread poll, held back until the reader asks for them */
+const pendingThread = ref<{
+  status: mastodon.v1.Status
+  ancestors: mastodon.v1.Status[]
+  descendants: mastodon.v1.Status[]
+  newCount: number
+} | null>(null)
+const pollRace = createRaceGuard()
 let resolvedThreadId: string | null = null
 
 const paramId = computed(() => String(route.params.id || ''))
@@ -474,6 +484,19 @@ const showBubbleTime = (status: mastodon.v1.Status, index: number) => {
   return !(gap >= 0 && gap <= BUBBLE_TIME_GAP_MS)
 }
 
+/** Same sender as the bubble above within the stamp gap, with no day separator between */
+const bubbleJoinsPrev = (status: mastodon.v1.Status, index: number) => {
+  const prev = visibleChatMessages.value[index - 1]
+  if (!prev || prev.account.id !== status.account.id) return false
+  if (dayLabelFor(status, index)) return false
+  const gap = new Date(status.createdAt).getTime() - new Date(prev.createdAt).getTime()
+  return gap >= 0 && gap <= BUBBLE_TIME_GAP_MS
+}
+const bubbleJoinsNext = (status: mastodon.v1.Status, index: number) => {
+  const next = visibleChatMessages.value[index + 1]
+  return !!next && bubbleJoinsPrev(next, index + 1)
+}
+
 /** Resolved local id for public inline reply (foreign URLs) */
 const publicReplyId = ref<string | null>(null)
 /** True while resolveReplyId is in flight — dock shows disabled immediately */
@@ -541,6 +564,25 @@ const replyTree = computed((): ReplyNode[] => {
     out.push({ status: s, depth: 0 })
   }
   return out
+})
+
+/** The chain above the thread is cut off (deleted / blocked / never reached this server) */
+const earlierMissing = computed(() =>
+  isDirectThread.value || !focusStatus.value
+    ? null
+    : earlierPostMissing(focusStatus.value, ancestors.value),
+)
+
+/**
+ * Replies the focus post's server counts but this server never received. Decision (NS-628): we do
+ * not merge the origin server's public context — its ids can't be acted on from here (like, reply,
+ * boost need this server's copy) — so the gap is named, with a way to read the full thread.
+ */
+const unseenReplyCount = computed(() => {
+  const focus = focusStatus.value
+  if (!focus || isDirectThread.value) return 0
+  const loaded = descendants.value.filter((s) => s.inReplyToId === focus.id).length
+  return Math.max(0, (focus.repliesCount || 0) - loaded)
 })
 
 const visibleAncestors = computed(() => {
@@ -693,6 +735,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     descendants.value = []
     resolvedThreadId = null
     threadQuery.value = ''
+    pendingThread.value = null
   } else {
     isRefreshing.value = true
   }
@@ -741,6 +784,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     focusStatus.value = thread.status
     ancestors.value = thread.ancestors
     descendants.value = thread.descendants
+    pendingThread.value = null
 
     syncDmLiveRefresh(thread.status.visibility === 'direct')
 
@@ -869,14 +913,67 @@ const stopThreadPoll = () => {
   }
 }
 
+/** Public threads: look for new replies quietly and offer a "N new replies" pill */
+const POLL_PUBLIC_MS = 60_000
+const pollPublicReplies = async () => {
+  if (typeof document !== 'undefined' && document.hidden) return
+  const id = resolvedThreadId
+  if (!id || !focusStatus.value || isLoading.value || isRefreshing.value || isDirectThread.value) return
+  const ticket = pollRace.next()
+  try {
+    const thread = await statusStore.fetchThread(id)
+    if (!ticket.isCurrent() || isDirectThread.value) return
+    const known = new Set(descendants.value.map((s) => s.id))
+    const newCount = thread.descendants.filter((s) => !known.has(s.id)).length
+    pendingThread.value = newCount > 0 ? { ...thread, newCount } : null
+  } catch {
+    /* quiet — the manual refresh button reports errors */
+  }
+}
+
+/** Show the replies the poll found (keeps the reader where they are; pill clears) */
+const showPendingReplies = () => {
+  const pending = pendingThread.value
+  if (!pending) return
+  focusStatus.value = pending.status
+  ancestors.value = pending.ancestors
+  descendants.value = pending.descendants
+  pendingThread.value = null
+}
+
 const startThreadPoll = () => {
   stopThreadPoll()
-  if (!isDirectThread.value) return
+  if (!isDirectThread.value) {
+    threadPoll = setInterval(() => void pollPublicReplies(), POLL_PUBLIC_MS)
+    return
+  }
+  // The inbox poll (shell) already tracks the active account's DMs — the watcher below
+  // refetches only when this conversation's last message changes. Another account's
+  // thread (?account=) isn't in that inbox, so it keeps its own timer.
+  if (!readsAsOtherAccount.value) return
   threadPoll = setInterval(() => {
     if (typeof document !== 'undefined' && document.hidden) return
     void loadThread({ quiet: true })
   }, 40_000)
 }
+
+const loadedStatusIds = computed(() => new Set(chatMessages.value.map((s) => s.id)))
+const dmConversation = computed(() => {
+  if (!isDirectThread.value || readsAsOtherAccount.value || !focusStatus.value) return null
+  return findThreadConversation(conversationsStore.conversations, {
+    statusIds: [...loadedStatusIds.value],
+    accountIds: otherParticipants.value.map((p) => p.id).filter((id): id is string => !!id),
+  })
+})
+watch(
+  () => dmConversation.value?.lastStatus?.id,
+  () => {
+    if (isLoading.value || isRefreshing.value) return
+    if (threadNeedsRefetch(dmConversation.value, loadedStatusIds.value)) {
+      void loadThread({ quiet: true })
+    }
+  },
+)
 
 /** Catch a DM up as soon as the tab is visible again, instead of waiting out the 40s poll */
 let lastVisibleCatchUp = 0
@@ -898,6 +995,7 @@ onUnmounted(() => {
   stopThreadPoll()
   stopImageFollow?.()
   loadRace.abort()
+  pollRace.abort()
   peekRace.abort()
   peekStatusesRace.abort()
   chatBottomRo?.disconnect()
@@ -920,11 +1018,8 @@ watch(() => [route.params.id, route.query.url], () => {
 
 watch(isDirectThread, (dm) => {
   syncDmLiveRefresh(dm)
-  if (dm) startThreadPoll()
-  else {
-    stopThreadPoll()
-    dmPane.value = 'chat'
-  }
+  startThreadPoll()
+  if (!dm) dmPane.value = 'chat'
 })
 
 watch(showDmContextChrome, (show) => {
@@ -1014,6 +1109,17 @@ useHead({
 
       <SubviewChrome v-else class="thread-subview" :title="threadTitle || 'Thread'">
         <template #actions>
+          <button
+            v-if="focusStatus"
+            type="button"
+            class="subview-chrome__btn"
+            aria-label="Refresh thread"
+            :disabled="isRefreshing"
+            @click="loadThread({ quiet: true })"
+          >
+            <FunLoader v-if="isRefreshing" variant="seed" :size="22" label="Refreshing" />
+            <NeoIcon v-else name="refresh" :size="16" :stroke="2" />
+          </button>
           <a
             v-if="originalUrl"
             class="subview-chrome__btn"
@@ -1122,6 +1228,8 @@ useHead({
               :data-status-id="status.id"
               :show-meta="showBubbleMeta(status, index)"
               :show-time="showBubbleTime(status, index)"
+              :join-prev="bubbleJoinsPrev(status, index)"
+              :join-next="bubbleJoinsNext(status, index)"
               :participant-accts="bubbleMentionAccts"
               @deleted="onMessageDeleted"
             />
@@ -1280,6 +1388,21 @@ useHead({
     <!-- Public thread view -->
     <template v-else>
       <div class="thread-stream">
+        <button
+          v-if="pendingThread"
+          type="button"
+          class="thread-new-pill"
+          @click="showPendingReplies"
+        >
+          {{ pendingThread.newCount }} new {{ pendingThread.newCount === 1 ? 'reply' : 'replies' }}
+        </button>
+        <p v-if="earlierMissing && !threadFindQuery.trim()" class="thread-gap" role="note">
+          Earlier post unavailable
+          <template v-if="earlierMissing.url">
+            ·
+            <a :href="earlierMissing.url" target="_blank" rel="noopener noreferrer">Open original</a>
+          </template>
+        </p>
         <RealPostCard
           v-for="status in visibleAncestors"
           :key="status.id"
@@ -1324,8 +1447,14 @@ useHead({
         >
           No posts match “{{ threadFindQuery.trim() }}”.
         </p>
-        <p v-else-if="!threadFindQuery.trim() && !descendants.length && !ancestors.length" class="thread-lonely">
+        <p v-else-if="!threadFindQuery.trim() && !descendants.length && !ancestors.length && !unseenReplyCount" class="thread-lonely">
           No replies yet — be the first.
+        </p>
+        <p v-if="unseenReplyCount && !threadFindQuery.trim()" class="thread-gap" role="note">
+          {{ unseenReplyCount }} {{ unseenReplyCount === 1 ? 'reply isn’t' : 'replies aren’t' }} shown — hidden, blocked, or not on your server yet.
+          <template v-if="originalUrl">
+            <a :href="originalUrl" target="_blank" rel="noopener noreferrer">Read the full thread on the original server</a>
+          </template>
         </p>
 
         <div ref="chatEndEl" class="chat-end" aria-hidden="true" />
@@ -1867,6 +1996,39 @@ useHead({
   border-radius: 4px;
   background: var(--neo-accent-soft);
   border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, transparent);
+}
+
+.thread-new-pill {
+  position: sticky;
+  top: calc(var(--neo-thread-top-h, 7rem) + 0.5rem);
+  z-index: 5;
+  align-self: center;
+  margin: 0.5rem auto;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-accent);
+  color: var(--neo-text-on-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
+}
+
+.thread-gap {
+  margin: 0.6rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--neo-text-muted);
+
+  a {
+    color: var(--neo-accent);
+    font-weight: 600;
+  }
 }
 
 .thread-lonely {

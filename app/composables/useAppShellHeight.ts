@@ -7,6 +7,7 @@ export const useAppShellHeight = () => {
   if (!import.meta.client) return
 
   let raf = 0
+  let lastHeight = 0
 
   const sync = () => {
     cancelAnimationFrame(raf)
@@ -21,7 +22,9 @@ export const useAppShellHeight = () => {
       const h = Math.round(
         Math.min(vvH, window.innerHeight * scale, document.documentElement.clientHeight),
       )
-      if (h > 0) {
+      // Skip identical writes — each one invalidates style on <html> mid-scroll
+      if (h > 0 && h !== lastHeight) {
+        lastHeight = h
         document.documentElement.style.setProperty('--neo-app-height', `${h}px`)
       }
     })

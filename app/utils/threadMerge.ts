@@ -40,3 +40,17 @@ export function mergeThreadBranches<T extends Node>(
   for (const s of all) (byTime(s, focus) < 0 ? ancestors : descendants).push(s)
   return { ancestors, descendants }
 }
+
+/**
+ * Is the post above the visible thread missing (deleted, blocked, or never delivered to this
+ * server)? True when the topmost shown post still says it replies to something. `url` is the
+ * best place to read the original thread (the topmost shown post's page).
+ */
+export function earlierPostMissing(
+  focus: { inReplyToId?: string | null; url?: string | null },
+  ancestors: { inReplyToId?: string | null; url?: string | null }[],
+): { url: string | null } | null {
+  const top = ancestors[0] ?? focus
+  if (!top.inReplyToId) return null
+  return { url: top.url ?? focus.url ?? null }
+}

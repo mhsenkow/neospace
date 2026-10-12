@@ -8,7 +8,12 @@ let rafId = 0
 function loop(now: number) {
   rafId = 0
   for (const cb of listeners) {
-    cb(now)
+    // One throwing loader must not stop the frame loop for every other loader
+    try {
+      cb(now)
+    } catch (e) {
+      if (import.meta.dev) console.warn('[sharedRaf] subscriber threw', e)
+    }
   }
   if (listeners.size > 0 && !rafId) {
     rafId = requestAnimationFrame(loop)

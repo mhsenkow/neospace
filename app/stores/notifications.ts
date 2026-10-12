@@ -8,6 +8,7 @@ import {
   collapseConsecutiveNotifications,
   type CollapsedNotification,
 } from '~/utils/notifGroup'
+import { withinFrontier } from '~/utils/notifHelpers'
 
 export type NotificationFilterType =
   | 'all'
@@ -42,6 +43,8 @@ interface NotificationsState {
   hasMore: boolean
   /** Per-instance max_id cursors for load-more */
   cursors: Record<string, string>
+  /** Per-instance: does an older page exist? Drives the merge frontier (rows below it are held) */
+  moreByInstance: Record<string, boolean>
   filter: NotificationFilterType
   sortOrder: SortOrder
   unreadCount: number
@@ -126,6 +129,7 @@ export const useNotificationsStore = defineStore('notifications', {
     error: null,
     hasMore: true,
     cursors: {},
+    moreByInstance: {},
     filter: 'all',
     sortOrder: 'newest',
     unreadCount: 0,
@@ -144,7 +148,8 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     filteredNotifications: (state): ExtendedNotification[] => {
-      let items = state.notifications
+      // Older rows are held back until every account with pages left has caught up to them
+      let items = withinFrontier(state.notifications, state.moreByInstance)
 
       if (state.filter !== 'all') {
         const types = FILTER_TO_TYPES[state.filter]
@@ -457,6 +462,7 @@ export const useNotificationsStore = defineStore('notifications', {
 
         const merged: ExtendedNotification[] = []
         const nextCursors: Record<string, string> = {}
+        const nextMore: Record<string, boolean> = {}
         const failed: string[] = []
         let anyHasNext = false
         let anyOk = false
@@ -477,12 +483,14 @@ export const useNotificationsStore = defineStore('notifications', {
           if (batch.items.length > 0) {
             nextCursors[batch.instanceId] = batch.items[batch.items.length - 1]!.id
           }
+          nextMore[batch.instanceId] = batch.hasNext
           if (batch.hasNext) anyHasNext = true
         }
 
         if (gen !== this.fetchGeneration) return
 
         this.failedHosts = failed
+        this.moreByInstance = nextMore
         merged.sort(byNewest)
         this.notifications = merged
         this.cursors = nextCursors
@@ -503,8 +511,9 @@ export const useNotificationsStore = defineStore('notifications', {
       }
     },
 
-    async loadMore() {
+    async loadMore(depth = 0) {
       if (this.isLoadingMore || !this.hasMore) return
+      let stalled = false
       const instances = useInstancesStore()
       const authed = instances.authenticatedInstances
       if (!authed.length) return
@@ -553,6 +562,8 @@ export const useNotificationsStore = defineStore('notifications', {
         const seen = new Set(this.notifications.map((n) => n._key))
         let anyHasNext = false
         const nextCursors = { ...this.cursors }
+        const nextMore = { ...this.moreByInstance }
+        const shownBefore = this.filteredNotifications.length
         const fresh: ExtendedNotification[] = []
 
         for (const batch of batches) {
@@ -568,8 +579,10 @@ export const useNotificationsStore = defineStore('notifications', {
           } else {
             delete nextCursors[batch.instanceId]
           }
+          nextMore[batch.instanceId] = batch.items.length > 0 && batch.hasNext
           if (batch.hasNext) anyHasNext = true
         }
+        this.moreByInstance = nextMore
 
         if (fresh.length) {
           // Accounts page independently — re-sort so 'all'/'newest' stays chronological
@@ -578,11 +591,14 @@ export const useNotificationsStore = defineStore('notifications', {
         }
         this.cursors = nextCursors
         this.hasMore = anyHasNext && Object.keys(nextCursors).length > 0
+        // Every new row landed below the frontier: keep paging so the reader isn't left at a dead end
+        stalled = this.hasMore && this.filteredNotifications.length <= shownBefore
       } catch (e: any) {
         if (gen === this.fetchGeneration) logError('Load more notifications error:', e)
       } finally {
         this.isLoadingMore = false
       }
+      if (stalled && depth < 3) await this.loadMore(depth + 1)
     },
 
     setFilter(filter: NotificationFilterType) {

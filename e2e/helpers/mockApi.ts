@@ -88,6 +88,15 @@ const OPTIONAL_PROBES: Record<string, Json> = {
   '/api/v1/followed_tags': [],
   '/api/v1/notifications': [],
   '/api/v1/notifications/unread_count': { count: 0 },
+  // Post cards read the reading prefs (expand media / spoilers, autoplay GIFs) at boot
+  '/api/v1/preferences': {
+    'posting:default:visibility': 'public',
+    'posting:default:sensitive': false,
+    'posting:default:language': null,
+    'reading:expand:media': 'default',
+    'reading:expand:spoilers': false,
+    'reading:autoplay:gifs': true,
+  },
 }
 
 /** 1×1 transparent PNG for avatar/header/logo requests to fixture hosts */

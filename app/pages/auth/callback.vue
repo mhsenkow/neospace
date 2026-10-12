@@ -15,7 +15,9 @@ const themeStore = useThemeStore()
 const instancesStore = useInstancesStore()
 
 const error = ref<string | null>(null)
-const status = ref('Signing you in…')
+const status = ref('Finishing up…')
+/** Success copy is set — the generic sub-line would only repeat it */
+const signedIn = ref(false)
 const errorHeadingRef = ref<HTMLElement | null>(null)
 
 // Leaving the page cancels an in-flight token exchange promptly
@@ -83,7 +85,6 @@ onMounted(async () => {
   }
 
   try {
-    status.value = 'Finishing up…'
     instancesStore.loadFromStorage()
     const state = typeof route.query.state === 'string' ? route.query.state : null
     const result = await instancesStore.completeAuth(code, state, { signal: authAbort.signal })
@@ -106,6 +107,7 @@ onMounted(async () => {
       : fullHandle
         ? `Now posting as ${fullHandle} — opening NeoSpace…`
         : 'You’re in — opening NeoSpace…'
+    signedIn.value = true
 
     scrubUrl()
 
@@ -128,7 +130,7 @@ const handleRetry = () => {
 }
 
 useHead({
-  title: 'Signing in… | NeoSpace',
+  title: computed(() => (error.value ? 'Sign-in failed | NeoSpace' : 'Signing in… | NeoSpace')),
 })
 
 definePageMeta({
@@ -154,7 +156,7 @@ definePageMeta({
       <div v-else class="callback__body" role="status" aria-live="polite">
         <div class="callback__spinner" aria-hidden="true"></div>
         <h1>{{ status }}</h1>
-        <p>Just a moment.</p>
+        <p v-if="!signedIn">Just a moment.</p>
       </div>
     </main>
   </div>

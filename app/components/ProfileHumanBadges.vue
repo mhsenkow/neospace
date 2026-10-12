@@ -68,9 +68,9 @@ const openHumansSettings = () => {
     </p>
     <p class="human-badges__hint">
       <button type="button" class="human-badges__link" @click="openHumansSettings">
-        Settings → Humans first
+        Why this exists
       </button>
-      — why this exists.
+      (Settings → Humans first)
     </p>
   </section>
 </template>
@@ -132,7 +132,6 @@ const openHumansSettings = () => {
   border: 1px dashed var(--neo-border-color);
   border-radius: 10px;
   background: color-mix(in srgb, var(--neo-bg-secondary) 88%, transparent);
-  opacity: 0.92;
 }
 
 .human-badges__card-top {

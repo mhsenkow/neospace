@@ -513,6 +513,8 @@ onMounted(() => {
           type="file"
           :accept="COMPOSE_MEDIA_ACCEPT"
           multiple
+          aria-label="Choose photos to attach"
+          tabindex="-1"
           class="chat-composer__file"
           @change="onFileChange"
         />

@@ -142,7 +142,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run check` | Typecheck Pages Functions + app (`vue-tsc`) + Vitest |
 | `npm run typecheck` | Typecheck `functions/` |
 | `npm run typecheck:app` | Nuxt app typecheck (clean; part of `check` / CI) |
-| `npm run lint` | Same as typecheck + typecheck:app (no separate ESLint yet) |
+| `npm run lint` | ESLint rules (`lint:rules`: Vue + a11y) plus typecheck + typecheck:app |
+| `npm run budget` | Check the PWA precache budget against the generated build |
 | `npm test` | Vitest unit tests |
 | `npm run test:e2e` | Playwright journeys + axe on desktop Chromium and mobile Chromium (requires `npm run generate` first; serves `.output/public` with `scripts/serve-e2e.mjs`; `E2E_WEBKIT=1` adds an iPhone WebKit project) |
 | `npm run check:full` | `check` + `generate` + e2e |
@@ -214,7 +215,7 @@ docker run -p 8080:8080 neospace
 | API client | [masto](https://www.npmjs.com/package/masto) v7 |
 | Auth | OAuth 2.0 PKCE in browser; tokens in localStorage |
 | Sanitization | DOMPurify |
-| PWA | `@vite-pwa/nuxt` (autoUpdate service worker) |
+| PWA | `@vite-pwa/nuxt` (prompt-to-update service worker; fonts runtime-cached) |
 | Hosting | Cloudflare Pages + Pages Functions |
 | Tests | Vitest |
 | CI | GitHub Actions (`.github/workflows/ci.yml`) |

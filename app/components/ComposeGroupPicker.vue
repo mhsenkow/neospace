@@ -102,9 +102,26 @@ const pick = (tag: string) => {
 }
 
 const useQueryAsTag = () => {
-  const raw = query.value.trim().replace(/^#/, '')
-  if (!raw) return
-  pick(raw)
+  if (!queryTag.value) return
+  pick(queryTag.value)
+}
+
+const showNoGroupMatches = computed(() => {
+  const q = query.value.trim()
+  if (q.length < 2 || isSearching.value || showSearchHits.value) return false
+  if (showUseQuery.value) return false
+  return filteredJoined.value.length === 0
+})
+
+const onSearchKeydown = (e: KeyboardEvent) => {
+  if (e.key !== 'Enter') return
+  e.preventDefault()
+  if (showUseQuery.value) {
+    useQueryAsTag()
+    return
+  }
+  const first = searchResults.value[0] || filteredJoined.value[0]
+  if (first) pick(first.tag)
 }
 
 const inlineTriggerRef = ref<HTMLButtonElement | null>(null)
@@ -135,7 +152,6 @@ const toggle = () => {
         type="button"
         class="group-pick__link group-pick__link--on"
         :aria-label="`Change group, currently ${selected.name}`"
-        aria-current="true"
         @click="toggle"
       >
         <span class="group-pick__emoji" aria-hidden="true">{{ selected.icon }}</span>
@@ -169,7 +185,6 @@ const toggle = () => {
           type="button"
           class="group-pick__chip group-pick__chip--active"
           :aria-label="`Change group, currently ${selected.name}`"
-          aria-current="true"
           @click="toggle"
         >
           <span class="group-pick__emoji" aria-hidden="true">{{ selected.icon }}</span>
@@ -235,6 +250,7 @@ const toggle = () => {
                 autocorrect="off"
                 spellcheck="false"
                 enterkeyhint="search"
+                @keydown="onSearchKeydown"
               />
             </div>
 
@@ -276,6 +292,10 @@ const toggle = () => {
               <section v-else-if="isSearching" class="group-pick-sheet__section">
                 <p class="group-pick-sheet__empty">Searching…</p>
               </section>
+
+              <p v-else-if="showNoGroupMatches" class="group-pick-sheet__empty">
+                No groups match “{{ query.trim() }}”
+              </p>
 
               <template v-else>
                 <section v-if="filteredJoined.length" class="group-pick-sheet__section">
@@ -475,51 +495,6 @@ const toggle = () => {
   }
 }
 
-.group-pick-sheet {
-  position: fixed;
-  inset: 0;
-  z-index: 240;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-
-  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-    justify-content: center;
-    align-items: center;
-    padding: 1.5rem;
-  }
-}
-
-.group-pick-sheet__backdrop {
-  position: absolute;
-  inset: 0;
-  border: none;
-  background: var(--neo-bg-overlay);
-  cursor: pointer;
-}
-
-.group-pick-sheet__panel {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-height: min(78dvh, 560px);
-  background: var(--neo-bg-primary);
-  border-radius: 16px 16px 0 0;
-  border: 1px solid var(--neo-border-color);
-  border-bottom: none;
-  box-shadow: var(--neo-shadow-xl);
-  padding-bottom: env(safe-area-inset-bottom, 0);
-  overflow: hidden;
-
-  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-    max-width: 420px;
-    border-radius: 12px;
-    border-bottom: 1px solid var(--neo-border-color);
-  }
-}
-
 // Bound the column so __body (flex:1; overflow-y:auto) actually scrolls
 .group-pick-sheet__inner {
   display: flex;
@@ -682,25 +657,4 @@ const toggle = () => {
   font-size: 0.875rem;
 }
 
-.group-pick-sheet-enter-active,
-.group-pick-sheet-leave-active {
-  transition: opacity 0.18s ease;
-
-  .group-pick-sheet__panel {
-    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-}
-
-.group-pick-sheet-enter-from,
-.group-pick-sheet-leave-to {
-  opacity: 0;
-
-  .group-pick-sheet__panel {
-    transform: translateY(18px);
-
-    @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-      transform: translateY(8px) scale(0.98);
-    }
-  }
-}
 </style>

@@ -39,6 +39,10 @@ const ACTION_MIN_MS = 10000
 /** Per-toast timers — paused while hovered / focused, resumed with what was left */
 const timers = new Map<number, { handle: number | null; remaining: number; startedAt: number }>()
 
+/** Toasts whose clock was stopped by a hidden tab — resumed when it comes back */
+const hiddenPaused = new Set<number>()
+let visibilityBound = false
+
 export const useToastStore = defineStore('toast', {
   state: () => ({
     toasts: [] as ToastItem[],
@@ -66,6 +70,7 @@ export const useToastStore = defineStore('toast', {
         return same.id
       }
 
+      this.bindVisibility()
       const id = ++idSeq
       const item: ToastItem = { id, ...opts, kind, duration }
       while (this.toasts.length >= MAX_TOASTS) this.dismiss(this.toasts[0]!.id)
@@ -75,6 +80,24 @@ export const useToastStore = defineStore('toast', {
         this.resume(id)
       }
       return id
+    },
+
+    /** A 10s "Undo" shouldn't expire unseen while the user is in another tab or app */
+    bindVisibility() {
+      if (visibilityBound || typeof document === 'undefined') return
+      visibilityBound = true
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          for (const [id, t] of timers) {
+            if (t.handle === null) continue
+            this.pause(id)
+            hiddenPaused.add(id)
+          }
+        } else {
+          for (const id of hiddenPaused) this.resume(id)
+          hiddenPaused.clear()
+        }
+      })
     },
 
     /** Stop the auto-dismiss clock (hover / focus inside the toast) */
@@ -99,6 +122,7 @@ export const useToastStore = defineStore('toast', {
       const t = timers.get(id)
       if (t?.handle != null) window.clearTimeout(t.handle)
       timers.delete(id)
+      hiddenPaused.delete(id)
       this.toasts = this.toasts.filter((t) => t.id !== id)
     },
 
@@ -107,6 +131,7 @@ export const useToastStore = defineStore('toast', {
         if (t.handle != null) window.clearTimeout(t.handle)
       }
       timers.clear()
+      hiddenPaused.clear()
       this.toasts = []
     },
   },

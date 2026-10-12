@@ -16,6 +16,7 @@
  */
 
 import { onMounted, onUnmounted, watch, type Ref } from 'vue'
+import { matchesMedia } from '~/utils/cachedMedia'
 
 const DURATION_MS = 240
 const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
@@ -24,6 +25,8 @@ const HIDE_AFTER = 28
 const SHOW_AFTER = 14
 /** Always visible this close to the top of a scroller */
 const TOP_ZONE = 12
+/** …and this close to the bottom of one */
+const END_ZONE = 24
 
 /** Scrolls that aren't "reading" — sheets, menus, pickers, horizontal strips */
 const IGNORE =
@@ -33,10 +36,10 @@ type Phase = 'shown' | 'hiding' | 'hidden' | 'showing'
 
 const reducedMotion = () =>
   typeof window !== 'undefined' &&
-  (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+  (matchesMedia('(prefers-reduced-motion: reduce)') ||
     document.documentElement.classList.contains('reduce-motion'))
 
-const isMobileShell = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
+const isMobileShell = () => matchesMedia('(max-width: 1023px)')
 
 export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
   const route = useRoute()
@@ -178,6 +181,13 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     }
     // Rubber-band past the end on iOS reads as "scroll up" — ignore it
     if (top + target.clientHeight >= target.scrollHeight - 2 && delta < 0 && phase === 'hidden') return
+
+    // Reaching the end of a list brings the bar back — nothing is left to read past it
+    if (delta > 0 && top + target.clientHeight >= target.scrollHeight - END_ZONE) {
+      travelled = 0
+      show()
+      return
+    }
 
     if (Math.sign(delta) !== Math.sign(travelled)) travelled = 0
     travelled += delta

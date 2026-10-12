@@ -197,3 +197,19 @@ const compactNumber = new Intl.NumberFormat(undefined, { notation: 'compact', ma
 export function formatCount(n: number | undefined | null): string {
   return compactNumber.format(Number(n) || 0)
 }
+
+const pluralRules = new Intl.PluralRules(undefined)
+
+/** "1 post" / "1.2K posts" — compact number plus the right singular/plural noun. */
+export function formatCountLabel(n: number | undefined | null, one: string, other = `${one}s`): string {
+  const value = Number(n) || 0
+  return `${compactNumber.format(value)} ${pluralRules.select(value) === 'one' ? one : other}`
+}
+
+/** Mastodon search wants 2+ ASCII chars; a single CJK (etc.) character is enough. */
+export function searchQueryTooShort(raw: string): boolean {
+  const q = raw.trim()
+  if (q.length >= 2) return false
+  if (!q.length) return true
+  return !/[^\u0000-\u007F]/.test(q)
+}

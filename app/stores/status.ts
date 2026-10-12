@@ -34,6 +34,7 @@ import {
   type FederationFailure,
 } from '~/utils/federation'
 import { logWarn } from '~/utils/log'
+import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
 
 /** Per-account LRU for resolve=true status lookups (thread poll / actions). */
 const RESOLVE_CACHE_MAX = 64
@@ -801,6 +802,24 @@ export const useStatusStore = defineStore('status', {
       await this.getClient().v1.accounts.$select(id).block()
     },
 
+    /** Recent posts by an account (ids on the acting server) for the report dialog's "Add more posts" */
+    async listReportablePosts(
+      accountId: string,
+      opts?: { acct?: string },
+    ): Promise<{ id: string; text: string; createdAt: string }[]> {
+      const id = opts?.acct ? await this.resolveAccount(opts.acct) : accountId
+      if (!id) throw new Error('Couldn’t find that account on your server')
+      const posts = await this.getClient().v1.accounts.$select(id).statuses.list({
+        limit: 20,
+        excludeReblogs: true,
+      })
+      return posts.map((p) => ({
+        id: p.id,
+        text: clipGraphemes(stripHtml(p.spoilerText?.trim() ? `CW: ${p.spoilerText}` : p.content || ''), 140),
+        createdAt: p.createdAt,
+      }))
+    },
+
     async reportStatus(
       statusId: string,
       accountId: string,
@@ -808,8 +827,10 @@ export const useStatusStore = defineStore('status', {
       opts?: {
         statusUrl?: string
         acct?: string
-        category?: 'spam' | 'violation' | 'other'
+        category?: 'spam' | 'legal' | 'violation' | 'other'
         forward?: boolean
+        /** More of the account's posts (ids on this server) attached to the same report */
+        extraStatusIds?: string[]
       },
     ) {
       let localStatusId = statusId
@@ -830,7 +851,7 @@ export const useStatusStore = defineStore('status', {
 
       await this.getClient().v1.reports.create({
         accountId: localAccountId,
-        statusIds: [localStatusId],
+        statusIds: [...new Set([localStatusId, ...(opts?.extraStatusIds || [])])],
         comment: comment || '',
         category: opts?.category || 'other',
         forward: opts?.forward ?? true,

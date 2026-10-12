@@ -31,7 +31,7 @@ Open [http://localhost:3000](http://localhost:3000). Sign in against any Mastodo
 | `npm run cf:deploy` | Ship static build to Cloudflare Pages (maintainers) |
 | `npm run analyze` | Investigate bundle size |
 
-CI (`.github/workflows/ci.yml`) runs `npm ci` → `npm run check` → `npm run generate` on push/PR to `main`.
+CI (`.github/workflows/ci.yml`) runs `npm ci` → `npm run check` (lint rules, typechecks, vitest) → `npm run generate` → `node scripts/build-info.mjs write` on push/PR to `main`, and uploads the stamped `.output/public` as the `site-<sha>` artifact. The opt-in `deploy` job (repo variable `CF_PAGES_DEPLOY=true`, `production` environment) verifies that artifact's commit + digest and uploads it as-is — it never rebuilds.
 
 `npm run typecheck:app` (full Nuxt/vue-tsc) still has known masto typing gaps — do not treat it as a hard gate yet. Prefer `generate` for app compile health.
 

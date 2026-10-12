@@ -14,6 +14,18 @@ export type ServerCategory =
   | 'general'
   | 'regional'
 
+/** Software as classified by the probe (distinct from the capability matrix in serverCapabilities) */
+export type CuratedSoftware =
+  | 'mastodon'
+  | 'glitch'
+  | 'hometown'
+  | 'pleroma'
+  | 'akkoma'
+  | 'iceshrimp'
+  | 'sharkey'
+  | 'gotosocial'
+  | 'other'
+
 export interface CuratedInstance {
   domain: string
   name: string
@@ -24,7 +36,9 @@ export interface CuratedInstance {
   blurb: string
   /** Show on login shortlist */
   featured?: boolean
-  /** ISO date when this entry was last verified still online */
+  /** Server software, from the entry's own /api/v2/instance (scripts/probe-instances.mjs) */
+  software?: CuratedSoftware
+  /** ISO date when this entry was last verified still online (set by the probe script) */
   verifiedAt?: string
   /** Soft accent for cards (instrument chrome, not Meta purple) */
   color: string
@@ -37,6 +51,16 @@ export interface ServerCategoryDef {
   label: string
 }
 
+/** Hide catalogue entries the probe has not refreshed within this window. */
+const VERIFIED_MAX_AGE_DAYS = 120
+
+function catalogEntryFresh(entry: CuratedInstance, now = Date.now()): boolean {
+  if (!entry.verifiedAt) return true
+  const t = Date.parse(`${entry.verifiedAt}T12:00:00Z`)
+  if (!Number.isFinite(t)) return true
+  return now - t <= VERIFIED_MAX_AGE_DAYS * 86_400_000
+}
+
 const CATALOG: CuratedInstance[] = [
   {
     domain: 'mastodon.social',
@@ -46,7 +70,8 @@ const CATALOG: CuratedInstance[] = [
     description: 'The flagship Mastodon server — a bit of everything and everyone.',
     blurb: 'Most popular',
     featured: true,
-    verifiedAt: '2026-10-01',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#c45c26',
     emoji: '🌐',
     tags: ['general', 'beginner', 'popular'],
@@ -59,7 +84,8 @@ const CATALOG: CuratedInstance[] = [
     description: 'For free and open source software lovers — Linux, privacy, and hacking.',
     blurb: 'Open source & tech',
     featured: true,
-    verifiedAt: '2026-10-01',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#2f7d4a',
     emoji: '🐧',
     tags: ['foss', 'linux', 'privacy'],
@@ -72,7 +98,8 @@ const CATALOG: CuratedInstance[] = [
     description: 'A carefully moderated tech community for engineers, designers, and builders.',
     blurb: 'Welcoming community',
     featured: true,
-    verifiedAt: '2026-10-01',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3d6b8e',
     emoji: '💻',
     tags: ['tech', 'engineering'],
@@ -85,7 +112,8 @@ const CATALOG: CuratedInstance[] = [
     description: 'Information security professionals sharing research, news, and war stories.',
     blurb: 'Security folks',
     featured: true,
-    verifiedAt: '2026-10-01',
+    verifiedAt: '2026-10-12',
+    software: 'glitch',
     color: '#8b3a3a',
     emoji: '🔐',
     tags: ['security', 'infosec'],
@@ -98,7 +126,8 @@ const CATALOG: CuratedInstance[] = [
     description: 'A cozy home for artists, illustrators, and creative folks.',
     blurb: 'Artists & makers',
     featured: true,
-    verifiedAt: '2026-10-01',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#a84d6a',
     emoji: '🎨',
     tags: ['art', 'illustration'],
@@ -110,6 +139,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'gaming',
     description: 'Game developers sharing devlogs, screenshots, and the grind of shipping games.',
     blurb: 'Indie game makers',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#6b4f8a',
     emoji: '🎮',
     tags: ['games', 'indiedev'],
@@ -121,6 +152,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'writing',
     description: 'Writers, authors, poets, and storytellers — share words, find readers.',
     blurb: 'Writers & poets',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#b87a3a',
     emoji: '✍️',
     tags: ['writing', 'books'],
@@ -132,6 +165,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'art',
     description: 'Photographers sharing landscapes, portraits, and street work.',
     blurb: 'Photographers',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a7a8c',
     emoji: '📸',
     tags: ['photo', 'camera'],
@@ -143,6 +178,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'gaming',
     description: 'Board games, TTRPGs, and card games — roll dice, paint minis, tell stories.',
     blurb: 'Board games & RPGs',
+    verifiedAt: '2026-10-12',
+    software: 'glitch',
     color: '#6b5344',
     emoji: '🎲',
     tags: ['boardgames', 'ttrpg'],
@@ -154,6 +191,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'science',
     description: 'Mathematicians and enthusiasts — proofs, puzzles, and beautiful equations.',
     blurb: 'Math & puzzles',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#5a4a8a',
     emoji: '🔢',
     tags: ['math', 'science'],
@@ -165,6 +204,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'music',
     description: 'Metal fans united — bands, concerts, and headbanging moments.',
     blurb: 'Metal music',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#2a2a2a',
     emoji: '🤘',
     tags: ['metal', 'music'],
@@ -176,6 +217,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'Australians and friends — local news, culture, and wildlife pics.',
     blurb: 'Australia',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#8a7a2a',
     emoji: '🦘',
     tags: ['australia', 'regional'],
@@ -187,6 +230,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'LGBTQ+ folks in tech — a safe space to be yourself and talk shop.',
     blurb: 'LGBTQ+ in tech',
+    verifiedAt: '2026-10-12',
+    software: 'glitch',
     color: '#8a4a8a',
     emoji: '🏳️‍🌈',
     tags: ['lgbtq', 'tech'],
@@ -198,6 +243,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'A Canadian Mastodon community — bilingual-friendly and welcoming.',
     blurb: 'Canada',
+    verifiedAt: '2026-10-12',
+    software: 'glitch',
     color: '#8a3a3a',
     emoji: '🍁',
     tags: ['canada', 'regional'],
@@ -209,6 +256,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'People building personal websites, blogs, and the open web.',
     blurb: 'Indie web',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a6a8a',
     emoji: '🕸️',
     tags: ['indieweb', 'blogging'],
@@ -220,6 +269,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'general',
     description: 'A large general-purpose server with a friendly moderation team.',
     blurb: 'General & friendly',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#4a5a7a',
     emoji: '🪐',
     tags: ['general'],
@@ -232,7 +283,8 @@ const CATALOG: CuratedInstance[] = [
     description: 'A large, well-moderated general server popular across Europe.',
     blurb: 'General · EU',
     featured: true,
-    verifiedAt: '2026-10-01',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#5a6a8a',
     emoji: '🇪🇺',
     tags: ['general', 'europe'],
@@ -244,6 +296,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'general',
     description: 'A straightforward general-purpose Mastodon home.',
     blurb: 'General',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#6a5a4a',
     emoji: '🏠',
     tags: ['general'],
@@ -255,6 +309,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'Run by the Vivaldi team — browsers, privacy, and the open web.',
     blurb: 'Vivaldi community',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#ef3939',
     emoji: '🧭',
     tags: ['vivaldi', 'browser', 'tech'],
@@ -266,6 +322,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'Rubyists, Rails folks, and friends talking code and craft.',
     blurb: 'Ruby & Rails',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#a33a3a',
     emoji: '💎',
     tags: ['ruby', 'rails', 'dev'],
@@ -277,6 +335,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'Chaos Computer Club–adjacent: hackers, makers, and digital rights.',
     blurb: 'Hackers & CCC',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#2a6a4a',
     emoji: '⚡',
     tags: ['hacker', 'ccc', 'privacy'],
@@ -288,6 +348,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'social',
     description: 'A cooperatively owned Mastodon — democratic, member-run.',
     blurb: 'Co-op owned',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#4a7a5a',
     emoji: '🤝',
     tags: ['coop', 'solidarity'],
@@ -299,6 +361,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'social',
     description: 'Anarchist and left communities — mutual aid, organizing, and culture.',
     blurb: 'Left & mutual aid',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#8a3a4a',
     emoji: '🌹',
     tags: ['anarchist', 'mutualaid'],
@@ -310,6 +374,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'social',
     description: 'A Mastodon home centered on Black voices and culture.',
     blurb: 'Black community',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a3a3a',
     emoji: '🖤',
     tags: ['black', 'culture'],
@@ -321,6 +387,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'social',
     description: 'Disability justice, accessibility, and chronically ill community.',
     blurb: 'Disability community',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#5a6a9a',
     emoji: '♿',
     tags: ['disability', 'a11y'],
@@ -332,6 +400,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'social',
     description: 'A queer-friendly general server with a warm, conversational vibe.',
     blurb: 'Queer & cozy',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#c4a574',
     emoji: '✨',
     tags: ['lgbtq', 'general'],
@@ -343,6 +413,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'GrapheneOS community — private Android, security, and FOSS phones.',
     blurb: 'GrapheneOS',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a5a7a',
     emoji: '📱',
     tags: ['privacy', 'android', 'graphene'],
@@ -354,6 +426,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'tech',
     description: 'Mastodon for the long-running SDF public-access unix community.',
     blurb: 'SDF · unix culture',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#4a6a4a',
     emoji: '🖥️',
     tags: ['unix', 'sdf', 'retro', 'mastodon'],
@@ -365,6 +439,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'science',
     description: 'Academics, researchers, and grad students across disciplines.',
     blurb: 'Academia',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#4a5a8a',
     emoji: '🎓',
     tags: ['academia', 'research'],
@@ -376,6 +452,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'science',
     description: 'Scientists sharing papers, fieldwork, and open science.',
     blurb: 'Scientists',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a7a6a',
     emoji: '🔬',
     tags: ['science', 'research'],
@@ -387,6 +465,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'science',
     description: 'Neuroscience and computational brain science community.',
     blurb: 'Neuroscience',
+    verifiedAt: '2026-10-12',
+    software: 'glitch',
     color: '#6a4a8a',
     emoji: '🧠',
     tags: ['neuro', 'science'],
@@ -398,6 +478,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'music',
     description: 'Musicians, producers, and listeners across genres.',
     blurb: 'Music community',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#7a4a6a',
     emoji: '🎵',
     tags: ['music'],
@@ -409,20 +491,11 @@ const CATALOG: CuratedInstance[] = [
     category: 'music',
     description: 'Podcasts, radio, and people who think in sound.',
     blurb: 'Audio & podcasts',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#5a4a7a',
     emoji: '🎙️',
     tags: ['podcast', 'audio'],
-  },
-  {
-    domain: 'gamers.town',
-    name: 'Gamers Town',
-    vibe: 'PC & console',
-    category: 'gaming',
-    description: 'Gamers talking PC, console, indie, and the culture around play.',
-    blurb: 'Gamers',
-    color: '#3a5a8a',
-    emoji: '🕹️',
-    tags: ['gaming', 'pc'],
   },
   {
     domain: 'dice.camp',
@@ -431,6 +504,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'gaming',
     description: 'Tabletop RPG players and GMs — systems, sessions, and stories.',
     blurb: 'TTRPGs',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#6a4a3a',
     emoji: '♟️',
     tags: ['ttrpg', 'rpg'],
@@ -442,6 +517,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'general',
     description: 'A smaller, carefully tended general server with a gentle pace.',
     blurb: 'Cozy general',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#7a8a4a',
     emoji: '🌻',
     tags: ['cozy', 'general'],
@@ -453,6 +530,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'One of the largest Japanese-language Mastodon communities.',
     blurb: 'Japan',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#8a4a5a',
     emoji: '🇯🇵',
     tags: ['japan', 'japanese'],
@@ -464,6 +543,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'New Zealanders and friends — local news, nature, and chat.',
     blurb: 'New Zealand',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a6a5a',
     emoji: '🥝',
     tags: ['nz', 'aotearoa'],
@@ -475,6 +556,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'Irish Mastodon — news, culture, and a bit of craic.',
     blurb: 'Ireland',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a7a4a',
     emoji: '☘️',
     tags: ['ireland', 'irish'],
@@ -486,6 +569,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'Scottish community on the Fediverse.',
     blurb: 'Scotland',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a4a7a',
     emoji: '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
     tags: ['scotland'],
@@ -497,6 +582,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'general',
     description: 'A long-running European general server.',
     blurb: 'General · EU',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#4a6a8a',
     emoji: '☁️',
     tags: ['general', 'europe'],
@@ -508,6 +595,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'regional',
     description: 'A popular French-language Mastodon community.',
     blurb: 'Francophone',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a5a9a',
     emoji: '🇫🇷',
     tags: ['france', 'french'],
@@ -519,6 +608,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'science',
     description: 'Climate, ecology, and environmental action.',
     blurb: 'Climate',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#3a8a4a',
     emoji: '🌍',
     tags: ['climate', 'environment'],
@@ -530,6 +621,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'writing',
     description: 'Journalists and newsroom folks on the open social web.',
     blurb: 'Journalists',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#5a5a6a',
     emoji: '📰',
     tags: ['journalism', 'news'],
@@ -541,6 +634,8 @@ const CATALOG: CuratedInstance[] = [
     category: 'general',
     description: 'A busy general-purpose server with an active timeline.',
     blurb: 'General',
+    verifiedAt: '2026-10-12',
+    software: 'mastodon',
     color: '#6a5a7a',
     emoji: '💬',
     tags: ['general'],
@@ -561,7 +656,7 @@ export const SERVER_CATEGORIES: ServerCategoryDef[] = [
 ]
 
 export function useCuratedInstances() {
-  const instances = CATALOG
+  const instances = CATALOG.filter(catalogEntryFresh)
 
   const categories = SERVER_CATEGORIES
 

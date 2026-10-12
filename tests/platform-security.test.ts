@@ -386,7 +386,7 @@ describe('feedback Pages Function', () => {
     for (const body of ['null', '[]', '7', '{"title":{"x":1},"body":5,"kind":[]}']) {
       const res = await onRequestPost({ request: post(body), env })
       expect([400, 200], body).toContain(res.status)
-      expect(res.headers.get('Content-Type')).toBe('application/json')
+      expect(res.headers.get('Content-Type')).toMatch(/^application\/json/)
     }
   })
 

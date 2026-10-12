@@ -6,11 +6,22 @@ const overlay = useOverlayStore()
 const dialogRef = ref<HTMLElement | null>(null)
 const isOpen = computed(() => overlay.report.open)
 
-const categories: { id: ReportCategory; label: string; hint: string }[] = [
+const allCategories: { id: ReportCategory; label: string; hint: string }[] = [
   { id: 'spam', label: 'Spam', hint: 'Unwanted or repetitive content' },
+  { id: 'legal', label: 'Legal issue', hint: 'Copyright or other legal concerns' },
   { id: 'violation', label: 'Policy violation', hint: 'Harassment, hate, or illegal content' },
   { id: 'other', label: 'Something else', hint: 'Other concerns for moderators' },
 ]
+// `legal` needs Mastodon 4.2+ — only offered when the dialog was opened for a server that has it
+const categories = computed(() =>
+  allCategories.filter((c) => c.id !== 'legal' || overlay.report.allowLegal),
+)
+
+const postsOpen = ref(false)
+const onPostsToggle = (e: Event) => {
+  postsOpen.value = (e.target as HTMLDetailsElement).open
+  if (postsOpen.value) void overlay.loadReportPosts()
+}
 
 useFocusTrap(dialogRef, isOpen, {
   onEscape: () => overlay.resolveReport(null),
@@ -21,9 +32,17 @@ useFocusTrap(dialogRef, isOpen, {
 /** Forwarding only means something when the account lives on another server */
 const isRemoteAccount = computed(() => overlay.report.accountAcct.includes('@'))
 
-watch(isOpen, (open) => {
-  if (open) overlay.report.comment = ''
-})
+// Lazily mounted already open — `immediate` so the first report starts with an empty comment
+watch(
+  isOpen,
+  (open) => {
+    if (open) {
+      overlay.report.comment = ''
+      postsOpen.value = false
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -79,6 +98,30 @@ watch(isOpen, (open) => {
           />
         </label>
 
+        <!-- Optional: attach more of the account's recent posts as evidence -->
+        <details v-if="overlay.report.canAddPosts" class="neo-report__posts" @toggle="onPostsToggle">
+          <summary>Add more posts (optional)</summary>
+          <p v-if="overlay.report.postsLoading" class="neo-report__posts-note" role="status">Loading posts…</p>
+          <p v-else-if="overlay.report.postsError" class="neo-report__posts-note" role="alert">
+            {{ overlay.report.postsError }}
+          </p>
+          <p v-else-if="overlay.report.posts && !overlay.report.posts.length" class="neo-report__posts-note">
+            No other posts to add.
+          </p>
+          <ul v-else-if="overlay.report.posts" class="neo-report__post-list">
+            <li v-for="post in overlay.report.posts" :key="post.id">
+              <label class="neo-report__post">
+                <input
+                  v-model="overlay.report.extraStatusIds"
+                  type="checkbox"
+                  :value="post.id"
+                />
+                <span>{{ post.text || 'Post without text' }}</span>
+              </label>
+            </li>
+          </ul>
+        </details>
+
         <label v-if="isRemoteAccount" class="neo-report__forward">
           <input v-model="overlay.report.forward" type="checkbox" />
           <span>Forward to the remote server (when applicable)</span>
@@ -99,6 +142,7 @@ watch(isOpen, (open) => {
               category: overlay.report.category,
               comment: overlay.report.comment.trim(),
               forward: overlay.report.forward,
+              extraStatusIds: [...overlay.report.extraStatusIds],
             })"
           >
             Submit report
@@ -196,6 +240,44 @@ watch(isOpen, (open) => {
   font-size: var(--neo-font-size-sm);
   font-weight: 600;
   color: var(--neo-text-primary);
+}
+
+.neo-report__posts {
+  margin-bottom: var(--neo-spacing-3, 0.5rem);
+  font-size: var(--neo-font-size-sm);
+
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+}
+
+.neo-report__posts-note {
+  margin: 0.4rem 0 0;
+  color: var(--neo-text-secondary);
+}
+
+.neo-report__post-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+
+.neo-report__post {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  color: var(--neo-text-secondary);
+  cursor: pointer;
+
+  input {
+    margin-top: 0.2rem;
+    flex-shrink: 0;
+  }
 }
 
 .neo-report__forward {

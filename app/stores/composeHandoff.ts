@@ -15,6 +15,7 @@ import {
   storyBase,
   suggestedChartAlt,
 } from '~/utils/loomHandoff'
+import { dropHandoffBuffer, readHandoffBuffer, stashHandoffBuffer } from '~/utils/handoffBuffers'
 
 export type ComposeHandoffDraft = {
   text: string
@@ -32,6 +33,8 @@ type StoredShare = {
   /** data URL for the chart image (optional; story fetch is preferred) */
   imageDataUrl?: string
   imageName?: string
+  /** Large image kept in IndexedDB (see utils/handoffBuffers) instead of a data URL */
+  imageBufferKey?: string
   /** Which suite tool sent this. Text-only tools (bruh / notebook) never carry an image. */
   source?: 'loom' | 'bruh' | 'notebook'
 }
@@ -130,6 +133,7 @@ export function persistLoomShare(share: StoredShare) {
     if (share.imageDataUrl && share.imageDataUrl.length < 500_000) {
       slim.imageDataUrl = share.imageDataUrl
     }
+    if (share.imageBufferKey) slim.imageBufferKey = share.imageBufferKey
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(slim))
   } catch {
     /* quota / private */
@@ -149,6 +153,9 @@ export function peekPersistedLoomShare(): StoredShare | null {
 
 export function clearPersistedLoomShare() {
   try {
+    // The stashed image goes with the share it belonged to
+    const key = peekPersistedLoomShare()?.imageBufferKey
+    if (key) void dropHandoffBuffer(key)
     sessionStorage.removeItem(STORAGE_KEY)
   } catch {
     /* ignore */
@@ -257,6 +264,14 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
           if (f) files.push(f)
         }
 
+        // Large postMessage image saved before a login redirect: bytes live in IndexedDB
+        if (!files.length && share.imageBufferKey) {
+          const stored = await readHandoffBuffer(share.imageBufferKey)
+          if (stored && ALLOWED_IMAGE_TYPES.test(stored.type) && stored.buffer.byteLength <= MAX_HANDOFF_BYTES) {
+            files.push(new File([stored.buffer], stored.name || imageName, { type: stored.type }))
+          }
+        }
+
         if (this._shouldSkipTextOnlyUpdate(key, files.length > 0)) {
           return true
         }
@@ -352,6 +367,12 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
         imageDataUrl,
         imageName,
         source: data.source || 'loom',
+      }
+      // Too big for a data URL in sessionStorage: keep the bytes in IndexedDB, keyed by this share,
+      // so a signed-out reader still has the chart after the login / OAuth round trip
+      if (buffer && !imageDataUrl && !share.story) {
+        const ok = await stashHandoffBuffer(storyKey(share), { buffer, type: imageType, name: imageName })
+        if (ok) share.imageBufferKey = storyKey(share)
       }
       persistLoomShare(share)
 

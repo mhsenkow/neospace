@@ -28,6 +28,8 @@ const windows: { days: InsightsWindowDays; label: string }[] = [
 ]
 
 const report = computed(() => insights.report)
+/** Exports read the public-only copy — followers-only posts stay on this screen */
+const exportReport = computed(() => insights.exportReport)
 
 const load = async (days?: InsightsWindowDays) => {
   exportNote.value = ''
@@ -64,26 +66,26 @@ const setWindow = async (days: InsightsWindowDays) => {
 }
 
 const onExportLoom = async () => {
-  if (!report.value || exportBusy.value) return
+  if (!exportReport.value || exportBusy.value) return
   exportBusy.value = true
   exportNote.value = ''
   try {
-    const result = await exportInsightsToLoom(report.value)
+    const result = await exportInsightsToLoom(exportReport.value)
     exportNote.value =
       result === 'posted'
         ? 'Opened Loom with your insight datasets.'
-        : 'Loom didn’t acknowledge — CSVs downloaded instead.'
+        : 'Loom didn’t acknowledge — a zip of CSVs was downloaded instead.'
   } catch {
-    exportNote.value = 'Export failed — try Download CSV.'
+    exportNote.value = 'Export failed — try Download CSVs.'
   } finally {
     exportBusy.value = false
   }
 }
 
 const onDownload = () => {
-  if (!report.value) return
-  downloadInsightsCsv(report.value)
-  exportNote.value = 'CSVs downloaded.'
+  if (!exportReport.value) return
+  downloadInsightsCsv(exportReport.value)
+  exportNote.value = 'Zip with 3 CSVs downloaded.'
 }
 
 /** Area chart path for daily engagement */
@@ -229,8 +231,8 @@ const kpi = computed(() => {
         <h2 class="insights__title">Insights</h2>
         <p class="insights__sub">
           Known engagement from your posts — favourites, boosts, replies, quotes.
-          Mastodon does not expose views or reach. Direct and private posts are excluded from
-          charts and CSV/Loom export.
+          Mastodon does not expose views or reach. Direct messages are excluded. Followers-only
+          posts count in these charts but are never included in the CSV / Loom export.
         </p>
       </div>
       <div class="insights__windows" role="group" aria-label="Time window">
@@ -268,7 +270,7 @@ const kpi = computed(() => {
         <button
           type="button"
           class="neo-btn neo-btn--primary"
-          :disabled="exportBusy || !report.posts.length"
+          :disabled="exportBusy || !exportReport?.posts.length"
           @click="onExportLoom"
         >
           {{ exportBusy ? 'Opening Loom…' : 'Open in Loom' }}
@@ -276,10 +278,10 @@ const kpi = computed(() => {
         <button
           type="button"
           class="neo-btn neo-btn--secondary"
-          :disabled="!report.posts.length"
+          :disabled="!exportReport?.posts.length"
           @click="onDownload"
         >
-          Download CSV
+          Download CSVs (.zip)
         </button>
         <p v-if="exportNote" class="insights__note" role="status">{{ exportNote }}</p>
       </div>

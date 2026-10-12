@@ -12,6 +12,7 @@ import { useInstancesStore } from '~/stores/instances'
 import { useColumnsStore } from '~/stores/columns'
 import { categoryColor } from '~/composables/useShellAppearance'
 import { logError } from '~/utils/log'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
 import { joinGroupFailure } from '~/utils/groupErrors'
 import { getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
 import { useMobileViewport } from '~/composables/useBreakpoint'
@@ -128,7 +129,11 @@ watch(tag, async (newTag, oldTag) => {
   if (newTag) await loadTimeline(newTag)
 })
 
+// A post deleted from any surface leaves this timeline too
+const stopDeletedListen = onDeletedStatus((event) => groupsStore.removeDeletedStatus(event))
+
 onBeforeUnmount(() => {
+  stopDeletedListen()
   groupsStore.clearTimeline(tag.value, getPageScrollTop())
 })
 
@@ -292,7 +297,7 @@ useHead({
             @click="addToBoard"
           >
             <NeoIcon :name="isOnBoard ? 'check' : 'plus'" :size="14" :stroke="2.5" />
-            <span class="action-btn__text">{{ isOnBoard ? 'On board' : 'Add column' }}</span>
+            <span class="action-btn__text">{{ isOnBoard ? 'On board' : 'Add feed' }}</span>
           </button>
           <button
             v-if="displayGroup.isMember"

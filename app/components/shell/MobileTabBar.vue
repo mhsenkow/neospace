@@ -2,17 +2,12 @@
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
-import { useComposeSheetStore } from '~/stores/composeSheet'
-import { useColumnsStore } from '~/stores/columns'
 
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
 const conversationsStore = useConversationsStore()
-const composeSheet = useComposeSheetStore()
-const columnsStore = useColumnsStore()
 const { boardPortal } = useBoardPortal()
-const { openFeedOrRoute, boardColumnIs, goHome } = useBoardNav()
-const router = useRouter()
+const { openFeedOrRoute, boardColumnIs, goHome, openCompose } = useBoardNav()
 const route = useRoute()
 const { path, isActivity } = useActivityNav()
 
@@ -52,23 +47,6 @@ const openMessages = () => {
 
 const openActivity = () => {
   void openFeedOrRoute('notifications', '/notifications')
-}
-
-const openCompose = () => {
-  if (!instancesStore.isAuthenticated) {
-    router.push('/login')
-    return
-  }
-  const routeTag =
-    route.path.startsWith('/groups/') && route.params.tag
-      ? String(route.params.tag)
-      : null
-  const focused = columnsStore.focusedColumn
-  const columnTag =
-    focused?.feedType === 'group' && focused.groupTag ? focused.groupTag : null
-  composeSheet.show({
-    groupTag: routeTag || columnTag || undefined,
-  })
 }
 </script>
 
@@ -110,7 +88,6 @@ const openCompose = () => {
     to="/login"
     class="mobile-nav__item"
     :class="{
-      active: path === '/login',
       'chrome-hint': boardPortal === 'inbox',
     }"
     aria-label="Messages — sign in"
@@ -178,6 +155,7 @@ const openCompose = () => {
       'chrome-hint': boardPortal === 'profile',
     }"
     aria-label="Sign in"
+    :aria-current="route.path === '/login' ? 'page' : undefined"
   >
     <NeoIcon name="user" :size="22" :stroke="1.5" />
   </NuxtLink>

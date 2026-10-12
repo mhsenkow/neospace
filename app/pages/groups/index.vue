@@ -13,8 +13,28 @@ import { useGroupSearch } from '~/composables/useGroupSearch'
 const groupsStore = useGroupsStore()
 const instancesStore = useInstancesStore()
 const router = useRouter()
+const route = useRoute()
 
-const selectedCategory = ref('all')
+function categoryFromQuery(raw: unknown): string {
+  const id = typeof raw === 'string' ? raw : 'all'
+  return GROUP_CATEGORIES.some((c) => c.id === id) ? id : 'all'
+}
+
+const selectedCategory = ref(categoryFromQuery(route.query.cat))
+
+watch(
+  () => route.query.cat,
+  (cat) => {
+    selectedCategory.value = categoryFromQuery(cat)
+  },
+)
+
+watch(selectedCategory, (cat) => {
+  const query = { ...route.query }
+  if (cat === 'all') delete query.cat
+  else query.cat = cat
+  router.replace({ query })
+})
 const searchQuery = ref('')
 
 /** Results filter live — on touch, Enter just puts the keyboard away */
@@ -37,9 +57,7 @@ onMounted(async () => {
 const filteredGroups = computed(() => groupsStore.getByCategory(selectedCategory.value))
 const joinedGroups = computed(() => groupsStore.joinedGroups)
 const recommendedGroups = computed(() => groupsStore.suggestedFeaturedGroups)
-const trendingGroups = computed(() =>
-  groupsStore.trendingGroups.filter((g) => !g.isMember).slice(0, 10),
-)
+const trendingGroups = computed(() => groupsStore.trendingGroups.slice(0, 10))
 
 /** The host the trends were actually fetched from (guests get a public fallback server, not "your server") */
 const trendingServerLabel = computed(() => {
@@ -158,7 +176,11 @@ useHead({
 
       <section v-else-if="searchResults.length > 0" class="groups-section">
         <h2 class="section-title">Search results</h2>
-        <div class="groups-grid">
+        <div
+          class="groups-grid"
+          :class="{ 'groups-grid--busy': isSearching }"
+          :aria-busy="isSearching || undefined"
+        >
           <GroupCard
             v-for="group in searchResults"
             :key="group.tag"
@@ -203,11 +225,10 @@ useHead({
                 class="jump-chip-item"
                 role="listitem"
               >
-                <button
-                  type="button"
+                <NuxtLink
+                  :to="`/groups/${encodeURIComponent(group.tag)}`"
                   class="jump-chip"
                   :title="`Open ${group.name}`"
-                  @click="viewGroup(group.tag)"
                 >
                   <span
                     class="jump-chip__icon"
@@ -217,7 +238,7 @@ useHead({
                     {{ group.icon }}
                   </span>
                   <span class="jump-chip__name">{{ group.name }}</span>
-                </button>
+                </NuxtLink>
               </div>
             </div>
             <button
@@ -310,13 +331,22 @@ useHead({
           </div>
         </section>
 
+        <section
+          v-else-if="instancesStore.hasAuthenticatedInstance && !groupsStore.isLoading"
+          class="groups-rail-section groups-trending-empty"
+        >
+          <p class="groups-trending-empty__text">
+            {{ trendingServerLabel }} doesn't share trending tags. Search any hashtag above.
+          </p>
+        </section>
+
         <!-- Browse all -->
         <section class="groups-section">
           <div class="section-heading">
             <h2 class="section-title">Browse</h2>
           </div>
 
-          <nav class="category-nav" aria-label="Group categories">
+          <div class="category-nav" role="group" aria-label="Filter by category">
             <button
               v-for="cat in GROUP_CATEGORIES"
               :key="cat.id"
@@ -328,7 +358,7 @@ useHead({
               <span class="cat-emoji" aria-hidden="true">{{ cat.emoji }}</span>
               <span class="cat-label">{{ cat.label }}</span>
             </button>
-          </nav>
+          </div>
 
           <!-- Featured groups are seeded up front: only block the grid when there is nothing to show -->
           <div v-if="groupsStore.isLoading && filteredGroups.length === 0" class="loading-state" aria-busy="true">
@@ -337,7 +367,13 @@ useHead({
 
           <div v-else-if="filteredGroups.length === 0" class="empty-state">
             <span class="empty-emoji" aria-hidden="true">😕</span>
-            <p>No groups found in this category.</p>
+            <p class="empty-state__text">
+              {{
+                selectedCategory === 'all'
+                  ? 'No groups here yet — search any hashtag above.'
+                  : 'No groups found in this category.'
+              }}
+            </p>
           </div>
 
           <p v-if="groupsStore.isLoading && filteredGroups.length > 0" class="groups-refreshing" role="status">
@@ -509,12 +545,6 @@ useHead({
   overflow-wrap: anywhere;
 }
 
-.section-lede {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-}
-
 .section-count {
   font-size: 0.75rem;
   font-weight: 600;
@@ -526,6 +556,13 @@ useHead({
 
 .groups-rail-section {
   margin-bottom: 1.75rem;
+}
+
+.groups-trending-empty__text {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+  line-height: 1.45;
 }
 
 .groups-rail-wrap {
@@ -632,6 +669,7 @@ useHead({
   background: transparent;
   cursor: pointer;
   color: inherit;
+  text-decoration: none;
   scroll-snap-align: start;
   -webkit-tap-highlight-color: transparent;
 
@@ -737,6 +775,12 @@ useHead({
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.75rem;
+  transition: opacity 0.15s ease;
+
+  &--busy {
+    opacity: 0.55;
+    pointer-events: none;
+  }
 
   @media (min-width: 560px) {
     grid-template-columns: repeat(2, minmax(0, 1fr));

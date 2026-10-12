@@ -48,7 +48,7 @@ export function emojify(
     const url = e?.url?.trim()
     if (!code || !url || !isHttpUrl(url)) continue
     const still = reduceMotion ? e.staticUrl?.trim() : ''
-    byCode.set(code.toLowerCase(), still && isHttpUrl(still) ? still : url)
+    byCode.set(code, still && isHttpUrl(still) ? still : url)
   }
   if (!byCode.size) return out
 
@@ -56,7 +56,7 @@ export function emojify(
   // href in sanitized status HTML — can't have an <img> spliced into it.
   return out.replace(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)|:([a-zA-Z0-9_]+):/g, (match, tag?: string, code?: string) => {
     if (tag || !code) return match
-    const url = byCode.get(code.toLowerCase())
+    const url = byCode.get(code)
     if (!url) return match
     const safeSrc = escapeHtml(url)
     const alt = escapeHtml(`:${code}:`)

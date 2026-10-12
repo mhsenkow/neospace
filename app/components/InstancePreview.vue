@@ -10,6 +10,7 @@ const emit = defineEmits<{
 }>()
 
 const instancesStore = useInstancesStore()
+const route = useRoute()
 const { getByDomain } = useCuratedInstances()
 
 const modalRef = ref<HTMLElement | null>(null)
@@ -23,10 +24,12 @@ const isWatching = computed(() => {
   return instancesStore.instances.some((i) => hostnameMatches(i.url, domain.value!))
 })
 
+// Any signed-in slot on this host counts, not just the first row
 const isLoggedIn = computed(() => {
   if (!domain.value) return false
-  const instance = instancesStore.instances.find((i) => hostnameMatches(i.url, domain.value!))
-  return !!(instance?.accessToken && instance?.user)
+  return instancesStore.instances.some(
+    (i) => hostnameMatches(i.url, domain.value!) && i.accessToken && i.user,
+  )
 })
 
 const isGated = computed(() => !!domain.value && isAuthGatedPublicHost(domain.value))
@@ -56,7 +59,8 @@ const safeRemoteUrl = (raw: string | null | undefined): string | null => {
 const signupUrl = computed(() => {
   const d = domain.value
   if (!d) return '#'
-  return safeRemoteUrl(instanceInfo.value?.registrationsUrl) || `https://${d}/auth/sign_up`
+  // Not every server software has Mastodon's /auth/sign_up — the landing page always works
+  return safeRemoteUrl(instanceInfo.value?.registrationsUrl) || `https://${d}`
 })
 
 const close = () => {
@@ -90,7 +94,7 @@ const handleLogin = async () => {
   addError.value = null
 
   try {
-    const authUrl = await instancesStore.loginWithInstance(`https://${domain.value}`)
+    const authUrl = await instancesStore.loginWithInstance(`https://${domain.value}`, { returnTo: route.fullPath })
     window.location.href = authUrl
   } catch (e: any) {
     addError.value = friendlyServerError(e)
@@ -98,9 +102,32 @@ const handleLogin = async () => {
   }
 }
 
+/** ISO codes → readable names in the user's language ("English, German, Japanese") */
+const languageList = computed(() => {
+  const codes = (instanceInfo.value?.languages ?? []).slice(0, 3)
+  let names: Intl.DisplayNames | null = null
+  try {
+    names = new Intl.DisplayNames([], { type: 'language' })
+  } catch {
+    /* unsupported runtime — fall back to codes */
+  }
+  return codes
+    .map((code) => {
+      try {
+        return names?.of(code) || code
+      } catch {
+        return code
+      }
+    })
+    .join(', ')
+})
+
+const RULES_SHOWN = 5
+const extraRules = computed(() => Math.max(0, (instanceInfo.value?.rules?.length ?? 0) - RULES_SHOWN))
+
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr)
-  return date.toLocaleDateString('en-US', {
+  return date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -159,9 +186,9 @@ const formatDate = (dateStr: string) => {
             <p class="description">{{ curatedInfo?.description || instanceInfo.description }}</p>
             
             <div class="info-grid" v-if="instanceInfo.stats">
-              <div class="info-item">
-                <span class="label">Active Users</span>
-                <span class="value">{{ instanceInfo.stats.userCount?.toLocaleString() || 'N/A' }}</span>
+              <div v-if="instanceInfo.stats.userCount != null" class="info-item">
+                <span class="label">Active this month</span>
+                <span class="value">{{ instanceInfo.stats.userCount.toLocaleString() }}</span>
               </div>
               <div class="info-item">
                 <span class="label">Registration</span>
@@ -177,7 +204,7 @@ const formatDate = (dateStr: string) => {
               </div>
               <div class="info-item" v-if="instanceInfo.languages?.length">
                 <span class="label">Languages</span>
-                <span class="value">{{ instanceInfo.languages.slice(0, 3).join(', ') }}</span>
+                <span class="value">{{ languageList }}</span>
               </div>
             </div>
 
@@ -185,10 +212,17 @@ const formatDate = (dateStr: string) => {
             <div class="rules" v-if="instanceInfo.rules?.length">
               <h3>Community Rules</h3>
               <ol>
-                <li v-for="rule in instanceInfo.rules.slice(0, 5)" :key="rule.id">
+                <li v-for="rule in instanceInfo.rules.slice(0, RULES_SHOWN)" :key="rule.id">
                   {{ rule.text }}
                 </li>
               </ol>
+              <a
+                v-if="extraRules"
+                :href="`https://${domain}/about`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="rules-more"
+              >+{{ extraRules }} more {{ extraRules === 1 ? 'rule' : 'rules' }}</a>
             </div>
           </div>
 
@@ -204,7 +238,7 @@ const formatDate = (dateStr: string) => {
 
             <div v-if="instancesStore.previewLoading" class="loading" role="status">
               <div class="spinner"></div>
-              <span>Loading timeline...</span>
+              <span>Loading timeline…</span>
             </div>
 
             <div v-else-if="instancesStore.previewError" class="error" role="alert">
@@ -259,7 +293,7 @@ const formatDate = (dateStr: string) => {
 
               <p v-if="!instancesStore.previewTimeline.length" class="no-posts">
                 <template v-if="isGated">
-                  This server hides its public feed until you sign in. You can still Sign in or create an account.
+                  This server hides its public feed until you sign in. You can still sign in or create an account.
                 </template>
                 <template v-else>
                   No recent public posts to show right now.
@@ -458,6 +492,14 @@ const formatDate = (dateStr: string) => {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--neo-text-muted);
+  }
+
+  .rules-more {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--neo-accent);
   }
 
   ol {

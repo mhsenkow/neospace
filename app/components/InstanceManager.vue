@@ -7,6 +7,7 @@ import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { useOverlayStore } from '~/stores/overlay'
 import { useToastStore } from '~/stores/toast'
 import { useAccountsManager } from '~/composables/useAccountsManager'
+import { switchActiveAccount } from '~/composables/useSwitchAccount'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
 import { plainDisplayName } from '~/utils/displayName'
 
@@ -15,6 +16,7 @@ const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
 const { isOpen, close } = useAccountsManager()
 const router = useRouter()
+const route = useRoute()
 
 const modalRef = ref<HTMLElement | null>(null)
 const newServerUrl = ref('')
@@ -45,6 +47,19 @@ const closeAndReset = () => {
 useFocusTrap(modalRef, isOpen, {
   onEscape: () => closeAndReset(),
   initialFocus: '.accounts-close',
+})
+
+/** Enter while an IME is composing confirms the candidate — it must not submit */
+const onWatchEnter = (e: KeyboardEvent) => {
+  if (e.isComposing) return
+  void watchServer()
+}
+
+// Stale "Watching x" / error text goes as soon as another server is being typed
+watch(newServerUrl, (value) => {
+  if (!value) return
+  addError.value = null
+  addSuccess.value = null
 })
 
 const watchServer = async () => {
@@ -110,13 +125,13 @@ const signInErrors = ref<Record<string, string>>({})
 const signIn = async (instance: ConnectedInstance) => {
   signInErrors.value = { ...signInErrors.value, [instance.id]: '' }
   try {
-    const authUrl = await instancesStore.startAuth(instance.id)
+    // Land back on this page after approving, not on Home
+    const authUrl = await instancesStore.startAuth(instance.id, { returnTo: route.fullPath })
+    // Success navigates away — keep the busy state so the button doesn't flip back meanwhile
     window.location.href = authUrl
   } catch (e) {
-    const msg = friendlyServerError(e)
-    signInErrors.value = { ...signInErrors.value, [instance.id]: msg }
-    toastStore.show({ message: msg })
-  } finally {
+    // One error surface: the inline row message (role="alert")
+    signInErrors.value = { ...signInErrors.value, [instance.id]: friendlyServerError(e) }
     const row = instancesStore.instances.find((i) => i.id === instance.id)
     if (row) row.isConnecting = false
   }
@@ -124,7 +139,7 @@ const signIn = async (instance: ConnectedInstance) => {
 
 const makeMain = (instance: ConnectedInstance) => {
   instancesStore.setPrimaryAccount(instance.id)
-  toastStore.show({ message: `${handleOf(instance)} is now your main profile` })
+  toastStore.show({ message: `${handleOf(instance)} is now your main account — NeoSpace opens as it` })
 }
 
 const signOut = async (instance: ConnectedInstance) => {
@@ -140,9 +155,22 @@ const signOut = async (instance: ConnectedInstance) => {
   toastStore.show({ message: `Signed out of ${handleOf(instance)}` })
 }
 
+const signOutAll = async () => {
+  const ok = await overlayStore.openConfirm({
+    title: 'Sign out of all accounts?',
+    body: 'You will need to sign in again on each instance.',
+    confirmLabel: 'Sign out all',
+    danger: true,
+  })
+  if (!ok) return
+  await instancesStore.logoutAll()
+  closeAndReset()
+  toastStore.show({ message: 'Signed out of all accounts', duration: 2500 })
+  router.push('/login')
+}
+
 const useForPosting = (instance: ConnectedInstance) => {
-  instancesStore.setActiveAccount(instance.id)
-  toastStore.show({ message: `Posting as ${handleOf(instance)}`, duration: 2500 })
+  switchActiveAccount(instance.id)
 }
 
 const addAccount = () => {
@@ -228,7 +256,7 @@ const isActive = (instance: ConnectedInstance) =>
                     </div>
                     <span class="account-row__handle">{{ handleOf(instance) }}</span>
                     <span class="account-row__server">{{ hostOf(instance) }}</span>
-                    <p v-if="instance.sessionExpired || !instance.accessToken" class="account-row__error" role="status">
+                    <p v-if="instance.sessionExpired || !instance.accessToken" class="account-row__error">
                       Session expired — sign in again
                     </p>
                     <p v-else-if="instance.error" class="account-row__error" role="status">
@@ -251,6 +279,7 @@ const isActive = (instance: ConnectedInstance) =>
                         v-if="instance.id !== instancesStore.primaryAccount?.id"
                         type="button"
                         class="action-label"
+                        title="Open NeoSpace as this account on every fresh launch"
                         @click="makeMain(instance)"
                       >
                         Make main
@@ -275,6 +304,11 @@ const isActive = (instance: ConnectedInstance) =>
                   </div>
                 </li>
               </ul>
+              <div v-if="signedIn.length > 1" class="accounts-footer-action">
+                <button type="button" class="action-label action-label--danger" @click="signOutAll">
+                  Sign out of all accounts
+                </button>
+              </div>
             </section>
 
             <!-- Watching -->
@@ -295,8 +329,13 @@ const isActive = (instance: ConnectedInstance) =>
                   type="text"
                   class="neo-input"
                   placeholder="mastodon.social or @you@example.social"
+                  inputmode="url"
+                  autocapitalize="none"
+                  autocorrect="off"
+                  spellcheck="false"
+                  enterkeyhint="go"
                   :disabled="isAdding"
-                  @keydown.enter="watchServer"
+                  @keydown.enter="onWatchEnter"
                 />
                 <button
                   type="button"
@@ -409,12 +448,18 @@ const isActive = (instance: ConnectedInstance) =>
   max-width: 36ch;
 }
 
+.accounts-footer-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
 .accounts-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
   color: var(--neo-text-muted);
   background: transparent;
@@ -711,16 +756,4 @@ const isActive = (instance: ConnectedInstance) =>
   .accounts-modal {
     transform: scale(0.96) translateY(8px);
   }
-}
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-</style>
+}</style>

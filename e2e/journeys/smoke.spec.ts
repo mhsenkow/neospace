@@ -147,6 +147,6 @@ test.describe('critical journeys', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByLabel('Your handle or server')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Sign in on this server' })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Browse servers by interest' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Explore servers' })).toBeVisible()
   })
 })

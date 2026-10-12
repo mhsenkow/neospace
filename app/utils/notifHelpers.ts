@@ -1,6 +1,34 @@
 /** Shared notification icon / label helpers */
 
+import type { RouteLocationRaw } from 'vue-router'
 import type { NeoIconName } from '~/utils/neoIcons'
+
+type NotificationRouteInput = {
+  type: string
+  account?: { acct?: string } | null
+  status?: { id?: string; url?: string | null; uri?: string | null } | null
+  _instanceId?: string
+}
+
+/** Deep-link target for a notification row (Activity column + board portal). */
+export function notificationRoute(notif: NotificationRouteInput): RouteLocationRaw | null {
+  const via = notif._instanceId ? { account: notif._instanceId } : {}
+  if (notif.type === 'follow' || notif.type === 'follow_request') {
+    const acct = notif.account?.acct
+    if (acct) return { path: '/profile', query: { user: acct, ...via } }
+  }
+  const status = notif.status
+  if (status?.id) {
+    const url = status.url || status.uri
+    return {
+      path: `/status/${status.id}`,
+      query: { ...(url ? { url } : {}), ...via },
+    }
+  }
+  const acct = notif.account?.acct
+  if (acct) return { path: '/profile', query: { user: acct, ...via } }
+  return null
+}
 
 export function notifIconName(type: string): NeoIconName {
   switch (type) {
@@ -49,4 +77,60 @@ export function notifLabel(type: string): string {
     case 'quote': return 'quoted your post'
     default: return 'notification'
   }
+}
+
+const FILTER_LABELS: Record<string, string> = {
+  mention: 'Mentions',
+  favourite: 'Likes',
+  reblog: 'Boosts',
+  follow: 'Follows',
+  poll: 'Polls',
+  status: 'Posts',
+  update: 'Edits',
+}
+
+/**
+ * Describes a non-default Activity view ("Mentions · Oldest first") so a column that shares
+ * the /notifications filter/sort can show what is narrowing it. Null when nothing is applied.
+ */
+export function notificationViewLabel(filter: string, sortOrder: string): string | null {
+  const parts: string[] = []
+  const label = FILTER_LABELS[filter]
+  if (label) parts.push(label)
+  if (sortOrder === 'oldest') parts.push('Oldest first')
+  return parts.length ? parts.join(' · ') : null
+}
+
+/**
+ * Accounts page independently, but the list is merged by time. A quiet account's month-old
+ * row would sit between a busy account's last-hour rows, and "load more" would then insert the
+ * busy account's older rows *above* it — rows jumping under the reader.
+ *
+ * The frontier is the newest "oldest loaded row" among accounts that still have older pages:
+ * nothing older than that can be shown yet, because an account with pages left may still owe
+ * rows between here and there. Returns null when every account is fully loaded.
+ */
+export function notificationFrontier(
+  rows: ReadonlyArray<{ _instanceId: string; _tsMs: number }>,
+  moreByInstance: Readonly<Record<string, boolean>>,
+): number | null {
+  const oldest = new Map<string, number>()
+  for (const r of rows) {
+    if (!moreByInstance[r._instanceId]) continue
+    const prev = oldest.get(r._instanceId)
+    if (prev === undefined || r._tsMs < prev) oldest.set(r._instanceId, r._tsMs)
+  }
+  if (!oldest.size) return null
+  return Math.max(...oldest.values())
+}
+
+/** Rows safe to show now (see notificationFrontier); returns the same array when nothing is held. */
+export function withinFrontier<T extends { _instanceId: string; _tsMs: number }>(
+  rows: T[],
+  moreByInstance: Readonly<Record<string, boolean>>,
+): T[] {
+  const frontier = notificationFrontier(rows, moreByInstance)
+  if (frontier === null) return rows
+  const shown = rows.filter((r) => r._tsMs >= frontier)
+  return shown.length === rows.length ? rows : shown
 }

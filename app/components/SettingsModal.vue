@@ -77,10 +77,7 @@ const profileBaseline = reactive({
   discoverable: true,
 })
 
-const postingBaseline = reactive({
-  visibility: 'public' as 'public' | 'unlisted' | 'private' | 'direct',
-  sensitive: false,
-})
+const postingPanelDirty = ref(false)
 
 const syncProfileBaseline = () => {
   profileBaseline.displayName = profileForm.displayName
@@ -88,11 +85,6 @@ const syncProfileBaseline = () => {
   profileBaseline.locked = profileForm.locked
   profileBaseline.bot = profileForm.bot
   profileBaseline.discoverable = profileForm.discoverable
-}
-
-const syncPostingBaseline = () => {
-  postingBaseline.visibility = postingForm.visibility
-  postingBaseline.sensitive = postingForm.sensitive
 }
 
 const profileDirty = computed(
@@ -105,13 +97,7 @@ const profileDirty = computed(
 
 const privacyDirty = computed(() => profileForm.locked !== profileBaseline.locked)
 
-const postingDirty = computed(
-  () =>
-    postingForm.visibility !== postingBaseline.visibility ||
-    postingForm.sensitive !== postingBaseline.sensitive,
-)
-
-const isDirty = computed(() => profileDirty.value || privacyDirty.value || postingDirty.value)
+const isDirty = computed(() => profileDirty.value || privacyDirty.value || postingPanelDirty.value)
 
 const displayNameInvalid = computed(() => profileForm.displayName.length > DISPLAY_NAME_MAX)
 const noteInvalid = computed(() => profileForm.note.length > NOTE_MAX)
@@ -188,30 +174,6 @@ const profileForm = reactive({
   discoverable: true,
 })
 
-// Posting defaults form
-const postingForm = reactive({
-  visibility: 'public' as 'public' | 'unlisted' | 'private' | 'direct',
-  sensitive: false,
-})
-
-const mediaQualityOptions = [
-  {
-    value: 'efficient' as const,
-    label: 'Efficient',
-    desc: 'Smaller files (~1600px) — kinder to small instances and slow links',
-  },
-  {
-    value: 'balanced' as const,
-    label: 'Balanced',
-    desc: 'Everyday posts (~2048px) — sharp enough, much faster than full camera files',
-  },
-  {
-    value: 'original' as const,
-    label: 'Original',
-    desc: 'Near-full camera files (only clamps above 4096px) — heavier on your server',
-  },
-]
-
 // Watch for settings load to populate forms
 watch(() => settingsStore.account, (account) => {
   // Cleared on account switch — drop the previous account's name/bio so they
@@ -225,17 +187,6 @@ watch(() => settingsStore.account, (account) => {
   profileForm.discoverable = account ? account.discoverable !== false : true
   syncProfileBaseline()
 }, { immediate: true })
-
-watch(
-  // The getters resolve this account's override (or server pref), so they also fire on switch
-  () => [settingsStore.preferences, settingsStore.defaultVisibility, settingsStore.defaultSensitive],
-  () => {
-    postingForm.visibility = settingsStore.defaultVisibility
-    postingForm.sensitive = settingsStore.defaultSensitive
-    syncPostingBaseline()
-  },
-  { immediate: true },
-)
 
 const privacyListsLoaded = ref(false)
 
@@ -318,15 +269,6 @@ const confirmDeleteFilter = async (filterId: string, title: string) => {
   runModeration(() => settingsStore.deleteFilter(filterId))
 }
 
-const savePostingDefaults = async () => {
-  await settingsStore.updatePostingDefaults({
-    visibility: postingForm.visibility,
-    sensitive: postingForm.sensitive,
-  })
-  syncPostingBaseline()
-  settingsStore.clearSuccess()
-}
-
 const newFilterTitle = ref('')
 const newFilterKeywords = ref('')
 const newFilterAction = ref<'warn' | 'hide'>('warn')
@@ -377,14 +319,6 @@ const submitBlockDomain = async () => {
     isBlockingDomain.value = false
   }
 }
-
-// Visibility options
-const visibilityOptions = [
-  { value: 'public', label: 'Public', icon: 'globe' as const, desc: 'Visible to everyone' },
-  { value: 'unlisted', label: 'Unlisted', icon: 'unlisted' as const, desc: 'Visible but not on public timelines' },
-  { value: 'private', label: 'Followers Only', icon: 'lock' as const, desc: 'Only your followers can see' },
-  { value: 'direct', label: 'Direct', icon: 'message' as const, desc: 'Only mentioned users can see' },
-]
 
 </script>
 
@@ -778,29 +712,7 @@ const visibilityOptions = [
                 </div>
               </section>
 
-              <!-- Notifications -->
-              <section v-if="settingsStore.activeCategory === 'notifications'" class="settings-section">
-                <SettingsSectionHeader :category="settingsStore.currentCategory" />
-
-                <div class="settings-group">
-                  <p class="settings-hint">
-                    Notification preferences are managed on your instance's settings page.
-                    NeoSpace will respect your instance's notification settings.
-                  </p>
-
-                  <a 
-                    v-if="serverLink('notifications')"
-                    :href="serverLink('notifications')!"
-                    target="_blank" rel="noopener noreferrer"
-                    class="settings-btn settings-btn--primary"
-                  >
-                    Open Instance Notification Settings →
-                  </a>
-                  <p v-else-if="instancesStore.instanceUrl" class="settings-hint">
-                    Open your server's own website to change notification preferences.
-                  </p>
-                </div>
-              </section>
+              <SettingsNotificationsPanel v-if="settingsStore.activeCategory === 'notifications'" />
 
               <!-- Appearance -->
               <SettingsAppearancePanel
@@ -809,135 +721,10 @@ const visibilityOptions = [
                 :mobile-panel-open="mobilePanelOpen"
               />
 
-              <!-- Posting Defaults -->
-              <section v-if="settingsStore.activeCategory === 'posting'" class="settings-section">
-                <SettingsSectionHeader :category="settingsStore.currentCategory" />
-
-                <div class="settings-group">
-                  <fieldset class="settings-fieldset">
-                    <legend class="settings-subheading">Default Visibility</legend>
-                  <p class="settings-hint">Choose who can see your posts by default.</p>
-                  
-                  <div class="settings-option-list">
-                    <label 
-                      v-for="option in visibilityOptions"
-                      :key="option.value"
-                      :class="['settings-option-row', { active: postingForm.visibility === option.value }]"
-                    >
-                      <input 
-                        v-model="postingForm.visibility" 
-                        type="radio" 
-                        name="settings-visibility"
-                        :value="option.value"
-                        class="settings-radio-hidden"
-                      />
-                      <span class="settings-option-row__icon">
-                        <NeoIcon :name="option.icon" :size="20" :stroke="1.75" />
-                      </span>
-                      <div class="settings-option-row__text">
-                        <span class="settings-option-row__label">{{ option.label }}</span>
-                        <span class="settings-option-row__desc">{{ option.desc }}</span>
-                      </div>
-                      <span v-if="postingForm.visibility === option.value" class="settings-option-row__check">
-                        <NeoIcon name="check" :size="16" :stroke="2.5" />
-                      </span>
-                    </label>
-                  </div>
-
-                  <div class="settings-divider" />
-
-                  <label class="settings-toggle">
-                    <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">Collapse duplicate reposts</span>
-                      <span class="settings-toggle__desc">In Home, show “Alice and 2 others reposted” instead of separate cards</span>
-                    </div>
-                    <input
-                      :checked="settingsStore.localPreferences.collapseReblogs"
-                      type="checkbox"
-                      class="settings-checkbox"
-                      @change="settingsStore.updateAppearance({ collapseReblogs: ($event.target as HTMLInputElement).checked })"
-                    />
-                  </label>
-
-                  <div class="settings-divider" />
-
-                  <label class="settings-toggle">
-                    <div class="settings-toggle__info">
-                      <span class="settings-toggle__label">Mark media as sensitive by default</span>
-                      <span class="settings-toggle__desc">Media will be hidden behind a warning</span>
-                    </div>
-                    <input v-model="postingForm.sensitive" type="checkbox" class="settings-checkbox" />
-                  </label>
-
-                  <div class="settings-divider" />
-
-                  <div
-                    class="settings-media-quality"
-                    role="group"
-                    aria-labelledby="settings-media-quality-label"
-                  >
-                    <p id="settings-media-quality-label" class="settings-subheading">
-                      Photo upload size
-                    </p>
-                    <p class="settings-hint">
-                      Photos are resized on your device before upload so they don’t overwhelm your
-                      server. Media is stored on the instance you post from — not on NeoSpace.
-                    </p>
-                    <div class="settings-option-list">
-                      <label
-                        v-for="option in mediaQualityOptions"
-                        :key="option.value"
-                        :class="[
-                          'settings-option-row',
-                          {
-                            active:
-                              settingsStore.localPreferences.mediaUploadQuality === option.value,
-                          },
-                        ]"
-                      >
-                        <input
-                          type="radio"
-                          name="settings-media-quality"
-                          class="settings-radio-hidden"
-                          :value="option.value"
-                          :checked="
-                            settingsStore.localPreferences.mediaUploadQuality === option.value
-                          "
-                          @change="
-                            settingsStore.updateAppearance({ mediaUploadQuality: option.value })
-                          "
-                        />
-                        <div class="settings-option-row__text">
-                          <span class="settings-option-row__label">{{ option.label }}</span>
-                          <span class="settings-option-row__desc">{{ option.desc }}</span>
-                        </div>
-                        <span
-                          v-if="
-                            settingsStore.localPreferences.mediaUploadQuality === option.value
-                          "
-                          class="settings-option-row__check"
-                        >
-                          <NeoIcon name="check" :size="16" :stroke="2.5" />
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-                  </fieldset>
-                </div>
-
-                <SettingsDrafts />
-                <SettingsScheduledPosts />
-
-                <div class="settings-actions">
-                  <button 
-                    class="settings-btn settings-btn--primary"
-                    :disabled="!postingDirty"
-                    @click="savePostingDefaults"
-                  >
-                    Save Posting Defaults
-                  </button>
-                </div>
-              </section>
+              <SettingsPostingPanel
+                v-if="settingsStore.activeCategory === 'posting'"
+                v-model:dirty="postingPanelDirty"
+              />
 
               <!-- Filters -->
               <section v-if="settingsStore.activeCategory === 'filters'" class="settings-section">

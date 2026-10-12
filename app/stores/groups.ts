@@ -12,12 +12,13 @@ import { useInstancesStore } from './instances'
 import { useSettingsStore } from './settings'
 import { activeClient, publicClient } from '~/composables/useMasto'
 import { guessCategory as guessCategoryUtil } from '~/utils/guessCategory'
-import { normalizeHashtagInput } from '~/utils/hashtag'
+import { normalizeHashtagInput, tagHistorySummary, tagKey } from '~/utils/hashtag'
 import { resolvePublicInstanceUrl } from '~/utils/instances'
 import { logWarn, logError } from '~/utils/log'
 import { cursorPage, nextMaxIdFromLink } from '~/utils/linkHeader'
 import { formatTagAsName as formatTagName } from '~/utils/tagName'
 import { tagIsFiltered } from '~/utils/tagFilters'
+import { dropDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 
 /** Prevent concurrent initializeGroups races that double-push trending tags */
 let groupsInitPromise: Promise<void> | null = null
@@ -98,8 +99,6 @@ export type GroupCategory =
   | 'gaming'
   | 'social'
   | 'news'
-  | 'local'
-  | 'trending'
   | 'other'
 
 export interface Group {
@@ -498,7 +497,6 @@ const FEATURED_GROUPS: Omit<Group, 'isMember'>[] = [
 // Category definitions
 export const GROUP_CATEGORIES = [
   { id: 'all', label: 'All Groups', emoji: '✨' },
-  { id: 'trending', label: 'Trending', emoji: '🔥' },
   { id: 'tech', label: 'Tech', emoji: '💻' },
   { id: 'creative', label: 'Creative', emoji: '🎨' },
   { id: 'gaming', label: 'Gaming', emoji: '🎮' },
@@ -507,7 +505,6 @@ export const GROUP_CATEGORIES = [
   { id: 'other', label: 'Other', emoji: '🌈' },
 ]
 
-/** Rough bucket for live tags so they land somewhere useful */
 /** Bumps on each timeline fetch so a slow prior tag cannot overwrite the current one */
 let timelineRequestId = 0
 /** Back/forward restore cache is LRU-bounded so browsing many tags doesn't grow forever */
@@ -553,7 +550,7 @@ export const useGroupsStore = defineStore('groups', {
       return [...state.groups]
         .filter((g) => {
           if (g.isMember || !(g.featured || g.trending)) return false
-          const key = g.tag.toLowerCase()
+          const key = tagKey(g.tag)
           if (seen.has(key)) return false
           seen.add(key)
           return true
@@ -566,13 +563,13 @@ export const useGroupsStore = defineStore('groups', {
         .slice(0, 16)
     },
 
-    /** Live trending tags from the active server (deduped) */
+    /** Live trending tags from the active server (deduped, unjoined) */
     trendingGroups: (state): Group[] => {
       const seen = new Set<string>()
       const out: Group[] = []
       for (const g of state.groups) {
-        if (!g.trending) continue
-        const key = g.tag.toLowerCase()
+        if (!g.trending || g.isMember) continue
+        const key = tagKey(g.tag)
         if (seen.has(key)) continue
         seen.add(key)
         out.push(g)
@@ -586,7 +583,7 @@ export const useGroupsStore = defineStore('groups', {
       const seen = new Set<string>()
       return state.groups.filter((g) => {
         if (!g.featured || g.isMember) return false
-        const key = g.tag.toLowerCase()
+        const key = tagKey(g.tag)
         if (seen.has(key)) return false
         seen.add(key)
         return true
@@ -598,9 +595,7 @@ export const useGroupsStore = defineStore('groups', {
       const list =
         category === 'all'
           ? state.groups
-          : category === 'trending'
-            ? state.groups.filter((g) => g.trending || g.category === 'trending')
-            : state.groups.filter((g) => g.category === category)
+          : state.groups.filter((g) => g.category === category)
 
       return [...list].sort((a, b) => {
         if (a.isMember !== b.isMember) return a.isMember ? 1 : -1
@@ -612,13 +607,15 @@ export const useGroupsStore = defineStore('groups', {
 
     /** Get a specific group by tag */
     getGroup: (state) => (tag: string): Group | undefined => {
-      return state.groups.find(g => g.tag.toLowerCase() === tag.toLowerCase())
+      const key = tagKey(tag)
+      return state.groups.find((g) => tagKey(g.tag) === key)
     },
 
     /** Current group being viewed */
     currentGroup: (state): Group | undefined => {
       if (!state.currentGroupTag) return undefined
-      return state.groups.find(g => g.tag.toLowerCase() === state.currentGroupTag!.toLowerCase())
+      const key = tagKey(state.currentGroupTag)
+      return state.groups.find((g) => tagKey(g.tag) === key)
     }
   },
 
@@ -1070,6 +1067,13 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     /**
+     * A post was deleted elsewhere — drop it from the open group timeline without a refetch
+     */
+    removeDeletedStatus(event: DeletedStatusEvent) {
+      this.groupTimeline = dropDeletedStatus(this.groupTimeline, event)
+    },
+
+    /**
      * Load more posts in the group timeline
      */
     async loadMoreTimeline() {
@@ -1133,25 +1137,33 @@ export const useGroupsStore = defineStore('groups', {
 
       const mapped = results.hashtags.map((tag) => {
         const existing = this.groups.find(
-          (g) => g.tag.toLowerCase() === tag.name.toLowerCase(),
+          (g) => tagKey(g.tag) === tagKey(tag.name),
         )
         if (existing) return existing
+
+        const uses7d = (tag.history || []).reduce((sum, day) => sum + Number(day.uses || 0), 0)
+        const summary = tagHistorySummary(tag)
 
         return {
           tag: tag.name,
           name: this.formatTagAsName(tag.name),
-          description: `Join #${tag.name} as a group`,
+          description: summary || `Join #${tag.name} as a group`,
           icon: '🏷️',
           category: this.guessCategory(tag.name),
           isMember: false,
           featured: false,
           trending: false,
+          postsCount: uses7d > 0 ? uses7d : undefined,
         }
       })
 
-      const exact = q.toLowerCase()
-      if (isOfferableGroupTag(q) && !mapped.some((g) => g.tag.toLowerCase() === exact)) {
-        const existing = this.groups.find((g) => g.tag.toLowerCase() === exact)
+      const exactKey = tagKey(q)
+      const exactIdx = mapped.findIndex((g) => tagKey(g.tag) === exactKey)
+      if (exactIdx > 0) {
+        const [hit] = mapped.splice(exactIdx, 1)
+        if (hit) mapped.unshift(hit)
+      } else if (isOfferableGroupTag(q) && exactIdx < 0) {
+        const existing = this.groups.find((g) => tagKey(g.tag) === exactKey)
         mapped.unshift(
           existing || {
             tag: q,
@@ -1170,10 +1182,10 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     cacheTimeline(tag: string, scrollY = 0) {
-      const key = tag.toLowerCase()
+      const key = tagKey(tag)
       // Only snapshot a loaded feed for this tag — caching a still-loading
       // (empty) or another tag's timeline would restore as "No posts yet"
-      if (!this.groupTimeline.length || this.currentGroupTag?.toLowerCase() !== key) return
+      if (!this.groupTimeline.length || tagKey(this.currentGroupTag || '') !== key) return
       const next = { ...this.timelineCache }
       // Re-insert to mark most recent; evict least-recent beyond the cap
       delete next[key]
@@ -1195,7 +1207,7 @@ export const useGroupsStore = defineStore('groups', {
     },
 
     restoreTimeline(tag: string): number | null {
-      const key = tag.toLowerCase()
+      const key = tagKey(tag)
       const cached = this.timelineCache[key]
       if (!cached) return null
       cached.cachedAt = ++timelineCacheClock
@@ -1209,27 +1221,6 @@ export const useGroupsStore = defineStore('groups', {
       this.currentGroupTag = tag
       this.timelineError = null
       return cached.scrollY
-    },
-
-    /**
-     * Create a custom group from any hashtag
-     */
-    addCustomGroup(tag: string, name?: string, icon?: string) {
-      const cleanTag = tag.replace(/^#/, '')
-      
-      // Check if already exists
-      if (this.groups.find(g => g.tag.toLowerCase() === cleanTag.toLowerCase())) {
-        return
-      }
-
-      this.groups.push({
-        tag: cleanTag,
-        name: name || this.formatTagAsName(cleanTag),
-        icon: icon || '🏷️',
-        category: this.guessCategory(cleanTag),
-        isMember: false,
-        featured: false
-      })
     },
 
     /**

@@ -196,6 +196,11 @@ export function buildInsightsReport(opts: {
   windowDays: InsightsWindowDays
   truncated?: boolean
   now?: Date
+  /**
+   * Count followers-only posts (the owner's own on-screen charts). Default false — exports and
+   * anything leaving the app must never carry them. Direct messages are always excluded.
+   */
+  includePrivate?: boolean
 }): InsightsReport {
   const now = opts.now || new Date()
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -203,7 +208,7 @@ export function buildInsightsReport(opts: {
   cutoff.setDate(cutoff.getDate() - (opts.windowDays - 1))
   const rows = opts.statuses
     .map(statusToInsightRow)
-    .filter((r) => r.visibility !== 'direct' && r.visibility !== 'private')
+    .filter((r) => r.visibility !== 'direct' && (opts.includePrivate || r.visibility !== 'private'))
     .filter((r) => {
       const t = Date.parse(r.created_at)
       return Number.isFinite(t) && t >= cutoff.getTime() && t <= now.getTime()
@@ -420,4 +425,20 @@ export function formatCompact(nVal: number): string {
   }
   if (Number.isInteger(nVal)) return nVal.toLocaleString('en')
   return nVal.toFixed(1)
+}
+
+/**
+ * Whether a capped fetch actually leaves the *requested* window incomplete: if the pages we got
+ * already reach back past the window's start, a 7d or 30d view isn't "capped" just because the
+ * 90d backfill was.
+ */
+export function windowTruncated(
+  truncated: boolean,
+  oldestLoadedMs: number | null,
+  windowDays: number,
+  now: number = Date.now(),
+): boolean {
+  if (!truncated) return false
+  if (oldestLoadedMs === null || !Number.isFinite(oldestLoadedMs)) return true
+  return oldestLoadedMs > now - windowDays * 86_400_000
 }

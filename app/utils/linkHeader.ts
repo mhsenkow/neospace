@@ -25,7 +25,7 @@ export function nextMaxIdFromLink(link: string | null | undefined): string | nul
     const match = part.match(/<([^>]+)>\s*;\s*rel="?([^";]+)"?/)
     if (!match || match[2] !== 'next') continue
     try {
-      return new URL(match[1]!).searchParams.get('max_id')
+      return new URL(match[1]!, 'https://x.invalid').searchParams.get('max_id')
     } catch {
       return null
     }

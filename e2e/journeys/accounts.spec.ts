@@ -28,8 +28,8 @@ test.describe('account switching', () => {
     await page.getByRole('button', { name: 'Neo Tester, switch accounts' }).click()
 
     const sheet = page.getByRole('dialog', { name: 'Accounts' })
-    await expect(sheet.getByRole('button', { name: /Neo Tester/ })).toHaveAttribute('aria-pressed', 'true')
-    await expect(sheet.getByRole('button', { name: /Trin Tester/ })).toHaveAttribute('aria-pressed', 'false')
+    await expect(sheet.getByRole('button', { name: /Neo Tester/ })).toHaveAttribute('aria-current', 'true')
+    await expect(sheet.getByRole('button', { name: /Trin Tester/ })).not.toHaveAttribute('aria-current', 'true')
 
     await sheet.getByRole('button', { name: /Trin Tester/ }).click()
     await expect(page.getByRole('dialog', { name: 'Accounts' })).toHaveCount(0)

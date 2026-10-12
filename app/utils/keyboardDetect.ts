@@ -7,6 +7,8 @@
  *   focused text field + vv height vs screen / pre-focus baseline.
  */
 
+import { matchesMedia } from '~/utils/cachedMedia'
+
 export type KeyboardMeasure = {
   /** Overlay lift for fixed docks (0 when resizes-content already shrank layout). */
   inset: number
@@ -57,8 +59,8 @@ export function measureKeyboard(): KeyboardMeasure {
 
   // Don't treat small desktop / split windows as a soft keyboard
   const touchish =
-    window.matchMedia('(max-width: 1023px)').matches ||
-    window.matchMedia('(pointer: coarse)').matches
+    matchesMedia('(max-width: 1023px)') ||
+    matchesMedia('(pointer: coarse)')
   if (!touchish) return { inset: 0, open: false }
 
   const screenH = window.screen?.availHeight || window.outerHeight || 0

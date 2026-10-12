@@ -26,6 +26,11 @@ const props = withDefaults(
     fill?: boolean
     variant?: 'mark' | 'region' | 'pull' | 'seed'
     label?: string
+    /**
+     * Decorative only (aria-hidden, no status role) — for loaders whose container already
+     * carries `aria-busy`, so a board of loading columns doesn't queue identical announcements.
+     */
+    quiet?: boolean
   }>(),
   {
     size: 160,
@@ -489,7 +494,8 @@ const markBoxStyle = computed(() => {
       'fun-loader--pull': mode === 'pull',
       'fun-loader--seed': mode === 'seed',
     }"
-    role="status"
+    :role="quiet ? undefined : 'status'"
+    :aria-hidden="quiet ? 'true' : undefined"
     :style="markBoxStyle"
   >
     <canvas

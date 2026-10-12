@@ -17,6 +17,12 @@ import {
 import { dialectForHost, paintServerDialect } from '~/utils/edwardServers'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import {
+  edgeCueVisible,
+  edgeDwellStep,
+  edgeScrubGain,
+  renderIntervalMs,
+} from '~/utils/edwardRender'
+import {
   EDWARD_RAIL_COLUMN,
   EDWARD_WIDE_MIN,
   edwardBallCap,
@@ -27,11 +33,16 @@ import {
 
 const emit = defineEmits<{
   pick: [identity: string]
+  /** No WebGL on this device — the host exits Edward (there is no 2D stage to fall back to) */
+  unsupported: []
 }>()
 
 const edward = useEdwardStore()
 const hostEl = ref<HTMLElement | null>(null)
-/** shallowRef: replaced wholesale (up to every frame) — no deep proxying */
+/**
+ * The hover card's *content*. It is replaced only when the hovered ball (or its flip side)
+ * changes — never per frame; the card follows the ball via a transform on `hoverEl` instead.
+ */
 const hoverCard = shallowRef<{
   name: string
   preview: string
@@ -50,19 +61,104 @@ const hoverCard = shallowRef<{
   /** Flip the card left / up when it would leave the screen */
   flipX: boolean
   flipY: boolean
-  x: number
-  y: number
 } | null>(null)
+const hoverEl = ref<HTMLElement | null>(null)
+let hoverShownFor: string | null = null
+let hoverX = 0
+let hoverY = 0
+const placeHoverCard = () => {
+  if (hoverEl.value) hoverEl.value.style.transform = `translate(${hoverX}px, ${hoverY}px)`
+}
+// The element mounts a tick after the card first appears — position it as soon as it exists
+watch(hoverEl, placeHoverCard, { flush: 'post' })
 
 /** Readable name + snippet under the most prominent balls (DOM = crisp text) */
-const captions = shallowRef<
-  { id: string; name: string; text: string; glyph: string; accent: string; x: number; y: number; o: number }[]
->([])
-let captionTick = 0
+type CaptionOverlay = {
+  id: string
+  name: string
+  text: string
+  glyph: string
+  accent: string
+  x: number
+  y: number
+  o: number
+}
+type BubbleOverlay = { id: string; text: string; x: number; y: number; scale: number }
 
-const bubbles = shallowRef<
-  { id: string; text: string; x: number; y: number; scale: number }[]
->([])
+const bubbleLayer = ref<HTMLElement | null>(null)
+const captionLayer = ref<HTMLElement | null>(null)
+const bubbleDom = new Map<string, HTMLDivElement>()
+const captionDom = new Map<string, HTMLDivElement>()
+let bubbleOverlayCount = 0
+let captionOverlayCount = 0
+
+const syncBubbleLayer = (items: BubbleOverlay[]) => {
+  const layer = bubbleLayer.value
+  if (!layer) return
+  bubbleOverlayCount = items.length
+  const keep = new Set(items.map((i) => i.id))
+  for (const [id, el] of bubbleDom) {
+    if (!keep.has(id)) {
+      el.remove()
+      bubbleDom.delete(id)
+    }
+  }
+  for (const b of items) {
+    let el = bubbleDom.get(b.id)
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'edward-canvas__bubble'
+      bubbleDom.set(b.id, el)
+      layer.appendChild(el)
+    }
+    if (el.textContent !== b.text) el.textContent = b.text
+    el.style.transform = `translate(${b.x}px, ${b.y}px) scale(${b.scale})`
+  }
+}
+
+const syncCaptionLayer = (items: CaptionOverlay[]) => {
+  const layer = captionLayer.value
+  if (!layer) return
+  captionOverlayCount = items.length
+  const keep = new Set(items.map((i) => i.id))
+  for (const [id, el] of captionDom) {
+    if (!keep.has(id)) {
+      el.remove()
+      captionDom.delete(id)
+    }
+  }
+  for (const c of items) {
+    let el = captionDom.get(c.id)
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'edward-canvas__caption'
+      captionDom.set(c.id, el)
+      layer.appendChild(el)
+    }
+    el.style.setProperty('--srv', c.accent)
+    el.style.transform = `translate(${c.x}px, ${c.y}px) translateX(-50%)`
+    el.style.opacity = String(c.o)
+    let strong = el.querySelector('strong')
+    let span = el.querySelector('span')
+    if (!strong || !span) {
+      el.replaceChildren()
+      strong = document.createElement('strong')
+      span = document.createElement('span')
+      el.append(strong, span)
+    }
+    strong.replaceChildren()
+    if (c.glyph) {
+      const em = document.createElement('em')
+      em.setAttribute('aria-hidden', 'true')
+      em.textContent = c.glyph
+      strong.append(em)
+    }
+    strong.append(document.createTextNode(c.name))
+    span.textContent = c.text
+  }
+}
+
+let captionTick = 0
 const focusFrame = computed(() => edward.focusMode)
 
 type ThreeMod = typeof import('three')
@@ -443,11 +539,80 @@ let lastExploreKey = ''
 const disposeBall = (b: BallRuntime) => {
   ballGroup?.remove(b.root)
   ;(b.face.material as { dispose: () => void }).dispose()
-  ;(b.shell.material as { dispose: () => void }).dispose()
+  // Shell material is shared per dialect / quality tier
   b.texture.dispose()
   if (b.ring) {
     ;(b.ring.material as { dispose: () => void }).dispose()
   }
+}
+
+/** Bubbles evicted by a newer post shrink away instead of popping out of existence mid-screen */
+const LEAVE_MS = 400
+const MAX_LEAVING = 24
+const leaving: { b: BallRuntime; t0: number; s0: number }[] = []
+
+const retireBall = (b: BallRuntime) => {
+  if (disposed || reducedMotion) {
+    disposeBall(b)
+    return
+  }
+  // A burst of evictions never piles up GPU objects: the oldest leavers go immediately
+  while (leaving.length >= MAX_LEAVING) disposeBall(leaving.shift()!.b)
+  leaving.push({ b, t0: performance.now(), s0: b.root.scale.x })
+}
+
+const tickLeaving = (now: number) => {
+  for (let i = leaving.length - 1; i >= 0; i--) {
+    const l = leaving[i]!
+    const k = (now - l.t0) / LEAVE_MS
+    if (k >= 1) {
+      disposeBall(l.b)
+      leaving.splice(i, 1)
+    } else {
+      // Ease-in shrink: lingers a beat, then collapses
+      l.b.root.scale.setScalar(Math.max(0.001, l.s0 * (1 - k * k)))
+    }
+  }
+}
+
+let shellQuality: 'full' | 'lean' = 'full'
+let qualitySlowStreak = 0
+const shellMatCache = new Map<string, InstanceType<ThreeMod['MeshPhysicalMaterial']>>()
+
+const shellMaterialFor = (
+  tintHex: string,
+  fillHex: string,
+): InstanceType<ThreeMod['MeshPhysicalMaterial']> | null => {
+  if (!THREE) return null
+  const key = `${tintHex}|${fillHex}|${shellQuality}`
+  const cached = shellMatCache.get(key)
+  if (cached) return cached
+  const atten = new THREE.Color(fillHex)
+  const tintColor = new THREE.Color(tintHex)
+  const lean = shellQuality === 'lean'
+  const shellMat = new THREE.MeshPhysicalMaterial({
+    color: tintColor.clone().lerp(new THREE.Color('#fff8f0'), 0.28),
+    metalness: 0.05,
+    roughness: lean ? 0.22 : 0.12,
+    transmission: lean ? 0 : 0.42,
+    thickness: lean ? 0.35 : 0.55,
+    ior: 1.4,
+    transparent: true,
+    opacity: lean ? 0.88 : 0.92,
+    clearcoat: lean ? 0.25 : 0.85,
+    clearcoatRoughness: 0.08,
+    iridescence: lean ? 0 : 0.65,
+    iridescenceIOR: 1.6,
+    iridescenceThicknessRange: [200, 480],
+    envMapIntensity: lean ? 0.85 : 1.35,
+    attenuationColor: atten.clone(),
+    attenuationDistance: 1.4,
+    side: THREE.FrontSide,
+    depthWrite: false,
+  })
+  if (envMap) shellMat.envMap = envMap
+  shellMatCache.set(key, shellMat)
+  return shellMat
 }
 
 const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null => {
@@ -477,36 +642,17 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
   const affBoost = 1 + d.affinity * 0.55 + d.exploreRankNorm * 0.65
   const size = (0.95 + d.size * 1.55) * nearBoost * affBoost
   const dialect = dialectForHost(d.instanceHost)
-  const tint =
+  const shellTint =
     d.affinity > 0.45 || d.exploreRankNorm > 0.7 ? '#ff7eb3' : dialect.accent || spec.rim
 
   const root = new THREE.Group()
   root.userData.identity = d.identity
 
-  // Candy glass — lighter than full soap transmission (that melts mobile GPUs)
+  const shellMat = shellMaterialFor(shellTint, spec.fill)
+  if (!shellMat) return null
+  // Per-ball colors for caustics / runtime tint (materials are shared by tint+fill)
   const atten = new THREE.Color(spec.fill)
-  const tintColor = new THREE.Color(tint)
-  const shellMat = new THREE.MeshPhysicalMaterial({
-    color: tintColor.clone().lerp(new THREE.Color('#fff8f0'), 0.28),
-    metalness: 0.05,
-    roughness: 0.12,
-    transmission: 0.42,
-    thickness: 0.55,
-    ior: 1.4,
-    transparent: true,
-    opacity: 0.92,
-    clearcoat: 0.85,
-    clearcoatRoughness: 0.08,
-    iridescence: 0.65,
-    iridescenceIOR: 1.6,
-    iridescenceThicknessRange: [200, 480],
-    envMapIntensity: 1.35,
-    attenuationColor: atten.clone(),
-    attenuationDistance: 1.4,
-    side: THREE.FrontSide,
-    depthWrite: false,
-  })
-  if (envMap) shellMat.envMap = envMap
+  const tintColor = new THREE.Color(shellTint)
   const shell = new THREE.Mesh(sphereGeo, shellMat)
   shell.userData.identity = d.identity
 
@@ -546,13 +692,13 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
       d.kind === 'boost')
   if (wantRing && torusGeo) {
     const ringMat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : tint),
+      color: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : shellTint),
       metalness: 0.55,
       roughness: 0.22,
       clearcoat: 0.9,
       transparent: true,
       opacity: 0.9,
-      emissive: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : tint),
+      emissive: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : shellTint),
       emissiveIntensity: 0.4,
       envMapIntensity: 1.2,
     })
@@ -663,7 +809,7 @@ const syncBallsFromStore = () => {
 
   for (const [id, b] of [...identityToBall.entries()]) {
     if (!keep.has(id)) {
-      disposeBall(b)
+      retireBall(b)
       identityToBall.delete(id)
     }
   }
@@ -888,7 +1034,7 @@ const rebuildFilaments = () => {
 
 /** Scratch vector — projection runs for every ball, every frame */
 let _projV: InstanceType<ThreeMod['Vector3']> | null = null
-/** Host size, read once per frame (was one layout read per ball) */
+/** Host size, cached by the ResizeObserver (onResize) — no layout read per frame or per ball */
 let hostW = 1
 let hostH = 1
 
@@ -1097,13 +1243,13 @@ const placeCaptions = (
       o: Math.min(1, 0.55 + (c.r - 30) / 60),
     })
   }
-  if (out.length || captions.value.length) captions.value = out
+  syncCaptionLayer(out)
 }
 
 const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
+  // hostW / hostH come from the ResizeObserver (onResize) — reading clientWidth here forced a
+  // synchronous layout every frame, right after the previous frame's overlay writes
   if (!camera || !THREE || !hostEl.value) return
-  hostW = Math.max(1, hostEl.value.clientWidth)
-  hostH = Math.max(1, hostEl.value.clientHeight)
   // Header / console sizes rarely change — re-measure the lens a few times a second
   if (lensTick++ % 20 === 0 || (edward.focusMode === 'off') !== !lens.value) measureLens()
   const maxBubbles = hostW < PHONE_MAX_W ? 3 : 5
@@ -1203,11 +1349,10 @@ const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
     }
   }
 
-  // Don't re-render the overlay every frame just to keep it empty
-  if (nextBubbles.length || bubbles.value.length) bubbles.value = nextBubbles
+  syncBubbleLayer(nextBubbles)
 
   if (doCaptions) placeCaptions(captionCands, nextBubbles)
-  else if (!edward.captions && captions.value.length) captions.value = []
+  else if (!edward.captions && captionOverlayCount) syncCaptionLayer([])
 
   // Sticky focus: let the reader finish — swap only once the watched post
   // drifts out of the lens (it used to flip to every slightly-closer ball)
@@ -1245,9 +1390,19 @@ const projectHover = (b: BallRuntime) => {
     hoverCard.value = null
     return
   }
-  const rect = hostEl.value.getBoundingClientRect()
-  const x = (v.x * 0.5 + 0.5) * rect.width
-  const y = (-v.y * 0.5 + 0.5) * rect.height
+  // Host size is cached from the ResizeObserver — no layout read per frame
+  const x = (v.x * 0.5 + 0.5) * hostW
+  const y = (-v.y * 0.5 + 0.5) * hostH
+  hoverX = x
+  hoverY = y
+  const flipX = x > hostW - 300
+  const flipY = y > hostH - 260
+  const shown = hoverCard.value
+  if (shown && hoverShownFor === b.identity && shown.flipX === flipX && shown.flipY === flipY) {
+    placeHoverCard()
+    return
+  }
+  hoverShownFor = b.identity
   const cw = b.badges.includes('cw')
   hoverCard.value = {
     name: b.label,
@@ -1264,10 +1419,8 @@ const projectHover = (b: BallRuntime) => {
     counts: b.counts,
     accent: dialectForHost(b.host).accent,
     reasons: b.reasons,
-    flipX: x > rect.width - 300,
-    flipY: y > rect.height - 260,
-    x,
-    y,
+    flipX,
+    flipY,
   }
 }
 
@@ -1457,9 +1610,21 @@ const onWheel = (e: WheelEvent) => {
   applyCamera()
 }
 
-/** Hovering the rim gently feeds the stream — invisible scroll */
+/** Seconds the pointer has rested in the rim, and whether the chevron cue is showing */
+let edgeDwell = 0
+const edgeActive = ref(false)
+
+/**
+ * Resting the pointer in the rim feeds the stream — but only after a short dwell, with a
+ * visible chevron cue first, so a parked cursor can't make the stream run away unexplained.
+ */
 const applyEdgeHoverScroll = (dt: number) => {
-  if (!pointerInside || dragging || reducedMotion) return
+  const inEdge = pointerInside && !dragging && !reducedMotion && pointerInScrollEdge()
+  edgeDwell = edgeDwellStep(edgeDwell, dt, inEdge)
+  const cue = edgeCueVisible(edgeDwell)
+  if (cue !== edgeActive.value) edgeActive.value = cue
+  const gain = edgeScrubGain(edgeDwell)
+  if (!inEdge || !gain) return
   const { x: nx, y: ny } = pointerUv
   let scrub = 0
   // Top / bottom bands — stronger the closer to the rim
@@ -1471,7 +1636,7 @@ const applyEdgeHoverScroll = (dt: number) => {
     const fromY = (0.5 - ny) * 3.2
     scrub += fromY * Math.min(1, side)
   }
-  if (Math.abs(scrub) > 0.05) scrubStream(scrub * dt)
+  if (Math.abs(scrub) > 0.05) scrubStream(scrub * gain * dt)
 }
 
 const onResize = () => {
@@ -1480,6 +1645,8 @@ const onResize = () => {
   const h = hostEl.value.clientHeight
   // Mid-teardown / display:none — keep the last good size
   if (!w || !h) return
+  hostW = w
+  hostH = h
   camera.aspect = w / Math.max(1, h)
   camera.updateProjectionMatrix()
   renderer.setSize(w, h, false)
@@ -1495,9 +1662,25 @@ let filamentTick = 0
 /** Simulation clock — advances at the chosen speed (still = frozen) */
 let simT = 0
 
+let lastRenderAt = 0
+
 const frame = () => {
   if (disposed || !renderer || !scene || !camera) return
   const now = performance.now()
+  // Behind the compose sheet / peek modal, or idle under reduced motion: ~10 fps, not display rate.
+  // lastFrameT stays put so the skipped time still counts toward the next step.
+  const interval = renderIntervalMs({
+    recessed: edward.recessed,
+    selected: !!edward.selectedIdentity,
+    reducedMotion,
+    interacting: dragging || (pointerInside && !!hoverIdentity),
+    speedMul: speedMeta(edward.speed).mul,
+  })
+  if (interval && now - lastRenderAt < interval) {
+    raf = requestAnimationFrame(frame)
+    return
+  }
+  lastRenderAt = now
   const t = (now - clockStart) / 1000
   const dt = Math.min(0.05, (now - lastFrameT) / 1000 || 0.016)
   lastFrameT = now
@@ -1522,7 +1705,18 @@ const frame = () => {
 
   if (stars) stars.rotation.y = reducedMotion ? 0 : t * 0.008
 
+  if (leaving.length) tickLeaving(now)
+  const renderT0 = performance.now()
   renderer.render(scene, camera)
+  const renderMs = performance.now() - renderT0
+  if (renderMs > 20) qualitySlowStreak = Math.min(12, qualitySlowStreak + 1)
+  else qualitySlowStreak = Math.max(0, qualitySlowStreak - 1)
+  const nextQuality = qualitySlowStreak >= 6 ? 'lean' : 'full'
+  if (nextQuality !== shellQuality) {
+    shellQuality = nextQuality
+    for (const m of shellMatCache.values()) m.dispose()
+    shellMatCache.clear()
+  }
   raf = requestAnimationFrame(frame)
 }
 
@@ -1621,8 +1815,16 @@ const disposeScene = () => {
   document.removeEventListener('visibilitychange', onVisibility)
 
   for (const b of balls) disposeBall(b)
+  for (const l of leaving) disposeBall(l.b)
+  leaving.length = 0
   balls = []
   identityToBall.clear()
+  for (const m of shellMatCache.values()) m.dispose()
+  shellMatCache.clear()
+  bubbleDom.clear()
+  captionDom.clear()
+  bubbleLayer.value?.replaceChildren()
+  captionLayer.value?.replaceChildren()
 
   const disposedGeo = new Set<object>()
   const disposeMat = (mat: { dispose: () => void } | { dispose: () => void }[] | undefined) => {
@@ -1692,6 +1894,8 @@ const init = async () => {
 
   const w = hostEl.value.clientWidth
   const h = hostEl.value.clientHeight
+  hostW = Math.max(1, w)
+  hostH = Math.max(1, h)
 
   scene = new THREE.Scene()
   scene.fog = new THREE.FogExp2(0x0a0614, 0.018)
@@ -1710,6 +1914,8 @@ const init = async () => {
     })
   } catch {
     edward.setError('Edward needs WebGL, and this browser/device won’t start it.')
+    // Nothing can draw the stage: let the host stop polling every server and leave, with a toast
+    emit('unsupported')
     return
   }
   // Phones drop GPU contexts under memory pressure / backgrounding — say so
@@ -1883,7 +2089,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="hostEl" class="edward-canvas" aria-hidden="true">
+  <div
+    ref="hostEl"
+    class="edward-canvas"
+    :class="{ 'is-edge-active': edgeActive }"
+    aria-hidden="true"
+  >
     <!-- Invisible scroll rails — cursor ns-resize; middle stays 3D -->
     <div class="edward-canvas__edge edward-canvas__edge--l" aria-hidden="true" />
     <div class="edward-canvas__edge edward-canvas__edge--r" aria-hidden="true" />
@@ -1898,36 +2109,15 @@ onUnmounted(() => {
       aria-hidden="true"
     />
 
-    <div
-      v-for="b in bubbles"
-      :key="b.id"
-      class="edward-canvas__bubble"
-      :style="{
-        transform: `translate(${b.x}px, ${b.y}px) scale(${b.scale})`,
-      }"
-    >
-      {{ b.text }}
-    </div>
-
-    <div
-      v-for="c in captions"
-      :key="c.id"
-      class="edward-canvas__caption"
-      :style="{
-        transform: `translate(${c.x}px, ${c.y}px) translateX(-50%)`,
-        opacity: c.o,
-        '--srv': c.accent,
-      }"
-    >
-      <strong><em v-if="c.glyph" aria-hidden="true">{{ c.glyph }}</em>{{ c.name }}</strong>
-      <span>{{ c.text }}</span>
-    </div>
+    <div ref="bubbleLayer" class="edward-canvas__overlay-layer" aria-hidden="true" />
+    <div ref="captionLayer" class="edward-canvas__overlay-layer" aria-hidden="true" />
 
     <div
       v-if="hoverCard"
+      ref="hoverEl"
       class="edward-canvas__hover"
       :class="{ 'is-flip-x': hoverCard.flipX, 'is-flip-y': hoverCard.flipY }"
-      :style="{ transform: `translate(${hoverCard.x}px, ${hoverCard.y}px)`, '--srv': hoverCard.accent }"
+      :style="{ '--srv': hoverCard.accent }"
     >
       <div class="edward-canvas__hover-top">
         <span class="edward-canvas__hover-glyph" aria-hidden="true">{{ hoverCard.glyph }}</span>
@@ -2032,6 +2222,41 @@ onUnmounted(() => {
       color-mix(in srgb, #ffe566 8%, transparent),
       transparent
     );
+  }
+}
+
+/* Rim scrub cue: the bands brighten and a chevron points the way once the pointer has rested there */
+.edward-canvas__edge::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: solid color-mix(in srgb, #fff 80%, transparent);
+  border-width: 0 2px 2px 0;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.edward-canvas__edge--t::after {
+  top: 22%;
+  left: calc(50% - 7px);
+  transform: rotate(-135deg);
+}
+
+.edward-canvas__edge--b::after {
+  bottom: 22%;
+  left: calc(50% - 7px);
+  transform: rotate(45deg);
+}
+
+.edward-canvas.is-edge-active {
+  .edward-canvas__edge {
+    opacity: 1;
+  }
+
+  .edward-canvas__edge--t::after,
+  .edward-canvas__edge--b::after {
+    opacity: 0.85;
   }
 }
 
@@ -2287,6 +2512,13 @@ onUnmounted(() => {
     border-style: solid;
     border-width: 2px;
   }
+}
+
+.edward-canvas__overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .edward-canvas__bubble {

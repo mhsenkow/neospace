@@ -177,3 +177,16 @@ export function serverSettingsUrl(
   if (!path || !baseUrl) return null
   return `${baseUrl.replace(/\/+$/, '')}${path}`
 }
+
+/**
+ * Mastodon 4.2 added the `legal` report category; older Mastodon rejects it, and other
+ * software doesn't document it — so it's offered only when the version proves support.
+ */
+export function supportsLegalReports(caps: Pick<ServerCapabilities, 'software' | 'version'>): boolean {
+  if (caps.software !== 'mastodon' || !caps.version) return false
+  const m = /^(\d+)\.(\d+)/.exec(caps.version.trim())
+  if (!m) return false
+  const major = Number(m[1])
+  const minor = Number(m[2])
+  return major > 4 || (major === 4 && minor >= 2)
+}

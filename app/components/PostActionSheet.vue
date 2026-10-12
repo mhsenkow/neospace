@@ -19,7 +19,8 @@ const emit = defineEmits<{
 }>()
 
 const sheetRef = ref<HTMLElement | null>(null)
-const titleId = computed(() => (props.title ? 'action-sheet-title' : undefined))
+const uid = useId()
+const titleId = computed(() => (props.title ? `action-sheet-title-${uid}` : undefined))
 const isOpen = computed(() => props.open)
 
 useFocusTrap(sheetRef, isOpen, {
@@ -30,7 +31,7 @@ useFocusTrap(sheetRef, isOpen, {
 
 <template>
   <Teleport to="body">
-    <Transition name="action-sheet">
+    <Transition appear name="action-sheet">
       <div
         v-if="open"
         ref="sheetRef"

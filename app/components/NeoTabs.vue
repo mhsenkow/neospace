@@ -3,7 +3,7 @@
  * APG tabs: tablist / tab / tabpanel with arrow-key navigation.
  */
 
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
 
 export type NeoTab = { id: string; label: string }
 
@@ -31,7 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const listRef = ref<HTMLElement | null>(null)
-const uid = props.idPrefix || `neo-tabs-${Math.random().toString(36).slice(2, 9)}`
+const uid = props.idPrefix || `neo-tabs-${useId()}`
 
 const activeId = computed(() => {
   if (props.tabs.some((t) => t.id === props.modelValue)) return props.modelValue
@@ -56,10 +56,14 @@ function onTabKeydown(e: KeyboardEvent, index: number) {
   const n = props.tabs.length
   if (!n) return
   let next = index
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+  // Under dir="rtl" the tab strip runs right-to-left, so ArrowRight steps backwards
+  const rtl = !!listRef.value && getComputedStyle(listRef.value).direction === 'rtl'
+  const forwardKey = rtl ? 'ArrowLeft' : 'ArrowRight'
+  const backwardKey = rtl ? 'ArrowRight' : 'ArrowLeft'
+  if (e.key === forwardKey || e.key === 'ArrowDown') {
     e.preventDefault()
     next = (index + 1) % n
-  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+  } else if (e.key === backwardKey || e.key === 'ArrowUp') {
     e.preventDefault()
     next = (index - 1 + n) % n
   } else if (e.key === 'Home') {
@@ -145,6 +149,13 @@ watch(
   display: flex;
   gap: 2px;
   border-bottom: 1px solid var(--neo-border-color);
+  // Many tabs scroll instead of overflowing the container (revealActive keeps the selected one in view)
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .neo-tabs__tab {
@@ -159,6 +170,8 @@ watch(
   cursor: pointer;
   border-radius: var(--neo-radius-chrome, var(--neo-radius-sm))
     var(--neo-radius-chrome, var(--neo-radius-sm)) 0 0;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: color var(--neo-transition-fast, 100ms), background-color var(--neo-transition-fast, 100ms);
 
   &[aria-selected='true'] {
@@ -167,7 +180,8 @@ watch(
   }
 
   &:hover {
-    color: var(--neo-text-secondary);
+    // Hover must not lower contrast — secondary is lighter than the resting tertiary
+    color: var(--neo-text-primary);
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));
   }
 }

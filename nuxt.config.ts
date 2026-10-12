@@ -38,9 +38,11 @@ export default defineNuxtConfig({
 
   // Installable app for Pixel / iOS home screen
   pwa: {
-    // Auto-activate new SW — Android/home-screen installs were stuck on stale shells
-    // (missing tab bar + old carousel) when registerType stayed on 'prompt'.
-    registerType: 'autoUpdate',
+    // New SW waits instead of reloading tabs mid-use (lost drafts, threads, scroll). The old
+    // 'prompt' setup left Android home-screen installs on stale shells because nothing ever
+    // applied the update — app/plugins/pwa-update.client.ts now offers "Update ready · Reload"
+    // and applies it automatically when the tab is hidden with nothing open.
+    registerType: 'prompt',
     includeAssets: [
       'favicon.ico',
       'icons/apple-touch-icon.png',
@@ -91,11 +93,26 @@ export default defineNuxtConfig({
       navigateFallback: '/',
       navigateFallbackDenylist: [/^\/auth/, /^\/api\//],
       // App shell only — Mastodon API / media stay network-first by default
-      globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,webmanifest}'],
+      // Fonts are deliberately NOT precached: every chrome × face ships ~260 optional woff2 files
+      // (3.6 MB) and first install used to download them all. They're cached on first use instead.
+      globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,webmanifest}'],
       globIgnores: ['**/200.html', '**/404.html', '**/auth/**'],
+      runtimeCaching: [
+        {
+          // Only the faces (and subsets) a reader actually uses get cached — still offline-capable afterwards
+          urlPattern: /\/(?:_nuxt|fonts)\/.*\.woff2$/i,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'neo-fonts',
+            expiration: { maxEntries: 48, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            cacheableResponse: { statuses: [200] },
+          },
+        },
+      ],
       cleanupOutdatedCaches: true,
       clientsClaim: true,
-      skipWaiting: true,
+      // Update waits for pwa-update.client.ts to send SKIP_WAITING
+      skipWaiting: false,
     },
     client: {
       installPrompt: true,

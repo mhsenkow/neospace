@@ -30,7 +30,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Own posts: delete, delete & redraft, and pin/unpin — bound to the right account',
       'Notifications stay unread until you mark them; mobile chat Enter inserts a newline',
       'Fonts are self-hosted; Settings → What’s new has this TLDR',
-      'Hardened leave-a-note (no fake screenshots; better rate limiting); CI browser + a11y tests',
+      'Hardened leave-a-note; stronger CI (browser + a11y + real lint); groups/shell/Edward polish',
+      'PWA updates no longer hijack mid-session; shared feed menus; quieter Edward when recessed',
     ],
   },
   {

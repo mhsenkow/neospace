@@ -26,7 +26,7 @@ const onInstallClick = async () => {
 
 const subtitle = computed(() => {
   if (canNativeInstall.value) return 'Add to your home screen for a full-screen app.'
-  if (isAndroid.value) return 'Chrome may hide Install in the menu — tap below for steps.'
+  if (isAndroid.value) return 'Add it from Chrome’s ⋮ menu — see how.'
   if (isIos.value) return 'Add NeoSpace to your Home Screen from Safari Share.'
   return 'Install NeoSpace on this device.'
 })

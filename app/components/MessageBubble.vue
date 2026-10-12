@@ -13,6 +13,8 @@ import { useOverlayStore } from '~/stores/overlay'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
+import { useSettingsStore } from '~/stores/settings'
+import { activeClient } from '~/composables/useMasto'
 
 const props = defineProps<{
   status: mastodon.v1.Status
@@ -21,6 +23,10 @@ const props = defineProps<{
   showMeta?: boolean
   /** Show the timestamp (hidden mid-run so consecutive lines aren't each stamped). Default true. */
   showTime?: boolean
+  /** Same sender as the bubble above, close in time — squares the top corner on the sender's side */
+  joinPrev?: boolean
+  /** Same sender as the bubble below, close in time — squares the bottom corner */
+  joinNext?: boolean
   /** Optimistic send state for own bubbles */
   delivery?: 'pending' | 'failed' | 'sent'
   /** Group-DM participant handles — only strip leading mention links for these */
@@ -73,7 +79,10 @@ const senderNameHtml = computed(() => {
   )
 })
 
+const settingsStore = useSettingsStore()
 const reduceMotion = usePrefersReducedMotion()
+/** Reduced motion, or the server's "autoplay GIFs" preference off, means tap-to-play */
+const gifAutoplay = computed(() => !reduceMotion.value && settingsStore.readingPrefs.autoplayGifs)
 
 /** A public / unlisted post inside a DM thread must not look like a private bubble */
 const visibilityChip = computed(() => {
@@ -145,6 +154,40 @@ const unknownMedia = computed(() =>
     (m) => !['image', 'gifv', 'video', 'audio'].includes(m.type),
   ),
 )
+
+/** Link preview — http(s) only, and not when media already carries the post (as on post cards) */
+const linkCard = computed(() => {
+  const card = props.status.card
+  if (!card?.url || !/^https?:\/\//i.test(card.url)) return null
+  if (props.status.mediaAttachments?.length) return null
+  return card
+})
+
+// Polls: a DM lives on the viewer's own server, so the poll id votes directly
+const poll = ref<mastodon.v1.Poll | null>(props.status.poll ?? null)
+watch(() => props.status.poll, (next) => {
+  poll.value = next ?? null
+})
+const isVoting = ref(false)
+const votePoll = async (choices: number[]) => {
+  const current = poll.value
+  if (!current || isVoting.value || current.expired || current.voted || !choices.length) return
+  isVoting.value = true
+  try {
+    poll.value = await activeClient().v1.polls.$select(current.id).votes.create({ choices })
+    toast.show({ message: 'Vote sent', duration: 2200 })
+  } catch (e: any) {
+    // Already voted elsewhere / closed: show the real state instead of a vague failure
+    try {
+      poll.value = await activeClient().v1.polls.$select(current.id).fetch()
+    } catch {
+      /* keep what we have */
+    }
+    toast.show({ message: e?.message ? `Couldn’t vote — ${e.message}` : 'Couldn’t vote' })
+  } finally {
+    isVoting.value = false
+  }
+}
 
 const speakerLabel = computed(() => {
   if (props.mine) return 'You said'
@@ -255,6 +298,8 @@ onBeforeUnmount(() => {
       'msg-bubble--mine': mine,
       'msg-bubble--theirs': !mine,
       'msg-bubble--meta': showMeta,
+      'msg-bubble--join-prev': joinPrev,
+      'msg-bubble--join-next': joinNext,
       'msg-bubble--pending': isPending,
       'msg-bubble--failed': isFailed,
       'msg-bubble--menu': menuOpen,
@@ -313,11 +358,11 @@ onBeforeUnmount(() => {
                 :src="item.url || undefined"
                 :poster="item.previewUrl || undefined"
                 class="msg-bubble__img"
-                :autoplay="!reduceMotion"
+                :autoplay="gifAutoplay"
                 loop
                 muted
                 playsinline
-                :controls="reduceMotion"
+                :controls="!gifAutoplay"
                 preload="metadata"
                 :aria-label="item.description?.trim() || 'Animated image'"
               />
@@ -365,6 +410,16 @@ onBeforeUnmount(() => {
               <span v-else>open original</span>
             </p>
           </div>
+
+          <PostPoll
+            v-if="poll"
+            class="msg-bubble__embed"
+            :poll="poll"
+            :can-vote="instancesStore.isAuthenticated"
+            :voting="isVoting"
+            @vote="votePoll"
+          />
+          <PreviewCard v-if="linkCard" class="msg-bubble__embed" :card="linkCard" />
         </div>
 
         <time
@@ -418,6 +473,31 @@ onBeforeUnmount(() => {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* Runs of messages from one sender: tighten the corners that touch their neighbours */
+.msg-bubble--theirs.msg-bubble--join-prev .msg-bubble__body {
+  border-top-left-radius: 0.3rem;
+}
+.msg-bubble--theirs.msg-bubble--join-next .msg-bubble__body {
+  border-bottom-left-radius: 0.3rem;
+}
+.msg-bubble--mine.msg-bubble--join-prev .msg-bubble__body {
+  border-top-right-radius: 0.3rem;
+}
+.msg-bubble--mine.msg-bubble--join-next .msg-bubble__body {
+  border-bottom-right-radius: 0.3rem;
+}
+
+/* Polls / link cards sit on a neutral card so they stay legible on accent ("mine") bubbles */
+.msg-bubble__embed {
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-md, 0.85rem);
+  background: var(--neo-bg-card);
+  color: var(--neo-text-primary);
+  max-width: 18rem;
 }
 
 .msg-bubble__visibility {

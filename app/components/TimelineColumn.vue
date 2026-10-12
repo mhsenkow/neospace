@@ -18,7 +18,7 @@ import {
   statusIdentity,
   statusListKey,
 } from '~/utils/statusIdentity'
-import { recipeTip, statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
+import { statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
 import { RANKERS } from '~/utils/rankers'
 import { useRankedFeed } from '~/composables/useRankedFeed'
 import { useSettingsStore } from '~/stores/settings'
@@ -1444,7 +1444,6 @@ onUnmounted(() => {
         type="button"
         class="neo-chrome-btn column-drag-handle"
         draggable="true"
-        title="Drag to reorder"
         aria-label="Reorder column — drag, or press Left / Right arrow"
         aria-keyshortcuts="ArrowLeft ArrowRight"
         @click.stop
@@ -1492,220 +1491,23 @@ onUnmounted(() => {
             <polyline points="6 9 12 15 18 9" />
           </svg>
           <template #items>
-            <button
-              type="button"
-              role="menuitemradio"
-              :aria-checked="column.feedType === 'home'"
-              class="feed-dropdown__item"
-              :class="{ 'feed-dropdown__item--active': column.feedType === 'home' }"
-              :disabled="!canShowHome"
-              @click="switchFeed('home')"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-              </svg>
-              For You
-            </button>
-            <div class="feed-dropdown__divider" role="separator" />
-            <button
-              type="button"
-              role="menuitem"
-              :aria-expanded="algorithmsExpanded"
-              class="feed-dropdown__section-toggle"
-              @click.stop="algorithmsExpanded = !algorithmsExpanded"
-            >
-              <span>Timelines</span>
-              <svg :class="{ rotated: algorithmsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            <template v-if="algorithmsExpanded">
-              <button
-                type="button"
-                role="menuitemradio"
-                :aria-checked="column.feedType === 'local'"
-                class="feed-dropdown__item"
-                :class="{ 'feed-dropdown__item--active': column.feedType === 'local' }"
-                @click="switchFeed('local')"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-                </svg>
-                Local
-              </button>
-              <button
-                type="button"
-                role="menuitemradio"
-                :aria-checked="column.feedType === 'federated'"
-                class="feed-dropdown__item"
-                :class="{ 'feed-dropdown__item--active': column.feedType === 'federated' }"
-                @click="switchFeed('federated')"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M2 12h20" />
-                  <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-                </svg>
-                Federated
-              </button>
-              <button
-                v-if="canShowHome"
-                type="button"
-                role="menuitemradio"
-                :aria-checked="column.feedType === 'favourites'"
-                class="feed-dropdown__item"
-                :class="{ 'feed-dropdown__item--active': column.feedType === 'favourites' }"
-                @click="switchFeed('favourites')"
-              >
-                <NeoIcon name="heart" :size="16" :stroke="1.5" />
-                Liked
-              </button>
-              <button
-                v-if="canShowHome"
-                type="button"
-                role="menuitemradio"
-                :aria-checked="column.feedType === 'bookmarks'"
-                class="feed-dropdown__item"
-                :class="{ 'feed-dropdown__item--active': column.feedType === 'bookmarks' }"
-                @click="switchFeed('bookmarks')"
-              >
-                <NeoIcon name="bookmark" :size="16" :stroke="1.5" />
-                Saved
-              </button>
-              <span v-if="algorithmsStore.allRecipes.length" class="feed-dropdown__subhead">Algorithms</span>
-              <button
-                v-for="recipe in algorithmsStore.allRecipes"
-                :key="recipe.id"
-                type="button"
-                role="menuitemradio"
-                :aria-checked="column.feedType === 'algorithm' && column.algorithmId === recipe.id"
-                class="feed-dropdown__item"
-                :class="{
-                  'feed-dropdown__item--active':
-                    column.feedType === 'algorithm' && column.algorithmId === recipe.id,
-                  'feed-dropdown__item--algo': !!recipeTip(recipe),
-                }"
-                :title="recipeTip(recipe) || recipe.name"
-                @click="switchFeed('algorithm', recipe.id)"
-              >
-                <NeoIcon name="filter" :size="16" :stroke="1.5" />
-                <span class="feed-dropdown__algo">
-                  <span class="feed-dropdown__algo-name">{{ recipe.name }}</span>
-                  <span v-if="recipeTip(recipe)" class="feed-dropdown__algo-tip">{{ recipeTip(recipe) }}</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="feed-dropdown__item"
-                @click="feedMenuOpen = false; algorithmsStore.openEditor()"
-              >
-                <NeoIcon name="plus" :size="16" :stroke="1.5" />
-                Create algorithm…
-              </button>
-              <button
-                v-if="column.feedType === 'algorithm' && column.algorithmId"
-                type="button"
-                role="menuitem"
-                class="feed-dropdown__item"
-                @click="feedMenuOpen = false; algorithmsStore.openEditor(column.algorithmId)"
-              >
-                <NeoIcon name="edit" :size="16" :stroke="1.5" />
-                Edit / share…
-              </button>
-            </template>
-
-            <template v-if="joinedGroups.length > 0">
-              <div class="feed-dropdown__divider" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                :aria-expanded="groupsExpanded"
-                class="feed-dropdown__section-toggle"
-                @click.stop="groupsExpanded = !groupsExpanded"
-              >
-                <span>Groups</span>
-                <svg :class="{ rotated: groupsExpanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <template v-if="groupsExpanded">
-                <button
-                  v-for="group in joinedGroups"
-                  :key="group.tag"
-                  type="button"
-                  role="menuitemradio"
-                  :aria-checked="column.feedType === 'group' && column.groupTag === group.tag"
-                  class="feed-dropdown__item feed-dropdown__item--group"
-                  :class="{ 'feed-dropdown__item--active': column.feedType === 'group' && column.groupTag === group.tag }"
-                  @click="switchFeed('group', group.tag)"
-                >
-                  <span class="feed-dropdown__group-icon">{{ group.icon }}</span>
-                  {{ group.name }}
-                </button>
-              </template>
-            </template>
-
-            <div class="feed-dropdown__divider" role="separator" />
-            <button
-              type="button"
-              role="menuitemradio"
-              :aria-checked="column.feedType === 'search'"
-              class="feed-dropdown__item"
-              :class="{ 'feed-dropdown__item--active': column.feedType === 'search' }"
-              @click="switchFeed('search')"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
-              Search
-            </button>
-            <button
-              type="button"
-              role="menuitemradio"
-              :aria-checked="column.feedType === 'profile'"
-              class="feed-dropdown__item"
-              :class="{ 'feed-dropdown__item--active': column.feedType === 'profile' }"
-              @click="switchFeed('profile')"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-              Profile
-            </button>
-            <button
-              v-if="canShowHome"
-              type="button"
-              role="menuitemradio"
-              :aria-checked="column.feedType === 'notifications'"
-              class="feed-dropdown__item"
-              :class="{ 'feed-dropdown__item--active': column.feedType === 'notifications' }"
-              @click="switchFeed('notifications')"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 01-3.46 0" />
-              </svg>
-              Notifications
-            </button>
-            <button
-              v-if="canShowHome"
-              type="button"
-              role="menuitemradio"
-              :aria-checked="column.feedType === 'messages'"
-              class="feed-dropdown__item"
-              :class="{ 'feed-dropdown__item--active': column.feedType === 'messages' }"
-              @click="switchFeed('messages')"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-              </svg>
-              Messages
-            </button>
+            <FeedMenuItems
+              variant="switch"
+              :timelines-expanded="algorithmsExpanded"
+              local-host-label=""
+              :active-feed-type="column.feedType"
+              :active-algorithm-id="column.algorithmId"
+              :active-group-tag="column.groupTag"
+              :can-show-home="canShowHome"
+              :groups-expanded="groupsExpanded"
+              :joined-groups="joinedGroups"
+              show-panel-feeds
+              @toggle-timelines="algorithmsExpanded = !algorithmsExpanded"
+              @toggle-groups="groupsExpanded = !groupsExpanded"
+              @pick="switchFeed"
+              @create-algorithm="feedMenuOpen = false; algorithmsStore.openEditor()"
+              @edit-algorithm="(id) => { feedMenuOpen = false; algorithmsStore.openEditor(id) }"
+            />
             <div class="feed-dropdown__divider" role="separator" />
             <NuxtLink
               to="/groups"
@@ -1729,7 +1531,6 @@ onUnmounted(() => {
         <button
           type="button"
           class="neo-chrome-btn"
-          title="Move left"
           aria-label="Move column left"
           :disabled="isFirst"
           @pointerdown.stop
@@ -1742,7 +1543,6 @@ onUnmounted(() => {
         <button
           type="button"
           class="neo-chrome-btn"
-          title="Move right"
           aria-label="Move column right"
           :disabled="isLast"
           @pointerdown.stop
@@ -1796,7 +1596,6 @@ onUnmounted(() => {
         type="button"
         class="neo-chrome-btn column-focus"
         :class="{ 'column-focus--push': !canReorder && !showModeSwitch, 'neo-chrome-btn--on': focused }"
-        :title="focused ? 'Show all views' : 'Focus this view'"
         :aria-label="focused ? 'Show all views' : 'Focus this view'"
         :aria-pressed="focused"
         @pointerdown.stop
@@ -1814,7 +1613,6 @@ onUnmounted(() => {
         v-if="canRemove"
         type="button"
         class="neo-chrome-btn neo-chrome-btn--danger column-close"
-        title="Remove column"
         aria-label="Remove column"
         @pointerdown.stop
         @click.stop="emit('remove')"
@@ -1882,7 +1680,7 @@ onUnmounted(() => {
 
       <!-- Loading -->
       <div v-if="isLoading" class="column-state" aria-busy="true">
-        <FunLoader fill label="Loading" />
+        <FunLoader fill quiet label="Loading" />
       </div>
 
       <!-- Error -->
@@ -1983,7 +1781,7 @@ onUnmounted(() => {
         <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
           <Transition name="fade">
             <div v-if="isLoadingMore" class="column-loading-more" role="status" aria-busy="true">
-              <FunLoader :size="120" label="Loading more" />
+              <FunLoader :size="120" quiet label="Loading more" />
             </div>
           </Transition>
           <div v-if="loadMoreError" class="column-load-more-error" role="alert">

@@ -8,9 +8,18 @@ import { STANDALONE_MQ, isStandaloneNow } from '~/composables/useStandaloneShell
 
 const DISMISS_KEY = 'neo-install-dismissed'
 
+/** "Not now" is a snooze, not a verdict — the promo comes back after this long */
+export const INSTALL_DISMISS_TTL_MS = 30 * 86_400_000
+
+/** The stored value is the dismissal time (legacy "1" reads as long expired). */
+export function isInstallDismissalActive(raw: string | null, now = Date.now()): boolean {
+  const at = Number(raw)
+  return Number.isFinite(at) && at > 0 && now - at < INSTALL_DISMISS_TTL_MS
+}
+
 const readDismissed = () => {
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem(DISMISS_KEY) === '1'
+    return typeof localStorage !== 'undefined' && isInstallDismissalActive(localStorage.getItem(DISMISS_KEY))
   } catch {
     return false
   }
@@ -77,7 +86,7 @@ export function useInstallApp() {
   const dismissPromo = () => {
     dismissedRef.value = true
     try {
-      localStorage.setItem(DISMISS_KEY, '1')
+      localStorage.setItem(DISMISS_KEY, String(Date.now()))
     } catch {
       /* ignore */
     }

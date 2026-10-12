@@ -11,7 +11,7 @@ const props = withDefaults(
   {
     canReorder: false,
     isFirst: false,
-    isLast: true,
+    isLast: false,
   },
 )
 
@@ -39,7 +39,6 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
       type="button"
       class="neo-chrome-btn column-drag-handle"
       draggable="true"
-      title="Drag to reorder"
       aria-label="Reorder column — drag, or press Left / Right arrow"
       aria-keyshortcuts="ArrowLeft ArrowRight"
       @click.stop
@@ -68,7 +67,6 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
       <button
         type="button"
         class="neo-chrome-btn"
-        title="Move left"
         aria-label="Move column left"
         :disabled="isFirst"
         @pointerdown.stop
@@ -81,7 +79,6 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
       <button
         type="button"
         class="neo-chrome-btn"
-        title="Move right"
         aria-label="Move column right"
         :disabled="isLast"
         @pointerdown.stop
@@ -103,5 +100,21 @@ const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = u
 .column-header__title {
   flex: 1;
   min-width: 0;
+}
+
+.column-drag-handle {
+  cursor: grab;
+  touch-action: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.column-reorder {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 0.125rem;
 }
 </style>

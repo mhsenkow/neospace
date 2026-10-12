@@ -5,6 +5,7 @@
 
 import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useScrollLock } from '~/composables/useScrollLock'
+import { matchesMedia } from '~/utils/cachedMedia'
 import {
   captureKeyboardBaseline,
   measureKeyboard,
@@ -32,6 +33,8 @@ let insetRaf = 0
 
 function publishKeyboardOpen(open: boolean) {
   const next = open || sheetKeyboardOpen
+  // visualViewport scroll fires per frame — skip the ref write and attribute toggle when nothing changed
+  if (next === lastOpen && sharedKeyboardOpen.value === next) return
   lastOpen = next
   sharedKeyboardOpen.value = next
   document.documentElement.toggleAttribute('data-keyboard-open', next)
@@ -101,9 +104,7 @@ export function useKeyboardViewport(
   const syncViewport = () => {
     if (typeof window === 'undefined') return
     // Desktop mouse/trackpad: keep the centered card — don't pin to visualViewport.
-    const deskFine = window.matchMedia(
-      '(min-width: 1024px) and (hover: hover) and (pointer: fine)',
-    ).matches
+    const deskFine = matchesMedia('(min-width: 1024px) and (hover: hover) and (pointer: fine)')
     const vv = window.visualViewport
     if (deskFine || !vv) {
       viewportStyle.value = {}
@@ -248,8 +249,11 @@ const scheduleKeyboardInset = () => {
 }
 
 const onInsetFocusIn = () => scheduleKeyboardInset()
+let insetFocusOutTimer: ReturnType<typeof setTimeout> | null = null
 const onInsetFocusOut = () => {
-  window.setTimeout(() => {
+  if (insetFocusOutTimer) clearTimeout(insetFocusOutTimer)
+  insetFocusOutTimer = setTimeout(() => {
+    insetFocusOutTimer = null
     captureKeyboardBaseline()
     scheduleKeyboardInset()
   }, 80)
@@ -278,6 +282,11 @@ const detachKeyboardInset = () => {
   if (insetRaf) {
     cancelAnimationFrame(insetRaf)
     insetRaf = 0
+  }
+  // A pending focusout re-measure would re-publish the inset after the last subscriber left
+  if (insetFocusOutTimer) {
+    clearTimeout(insetFocusOutTimer)
+    insetFocusOutTimer = null
   }
   lastInset = 0
   document.documentElement.style.setProperty('--neo-keyboard-inset', '0px')

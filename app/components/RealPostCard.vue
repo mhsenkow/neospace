@@ -41,36 +41,54 @@ function syncGifv(video: HTMLVideoElement) {
   }
 }
 
-/** `v-gifv-autoplay="isGifv"` — a false value leaves the video alone */
+/** `v-gifv-autoplay="isGifv"` — a false value leaves the video alone (controls stay available) */
+function attachGifv(video: HTMLVideoElement) {
+  if (!gifvMotionWatched) {
+    gifvMotionWatched = true
+    // App-lifetime watcher: pause/resume visible loops when the setting flips
+    watch(usePrefersReducedMotion(), () => gifvVisible.forEach(syncGifv))
+  }
+  if (typeof IntersectionObserver === 'undefined') {
+    gifvVisible.add(video)
+    syncGifv(video)
+    return
+  }
+  gifvObserver ??= new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const video = entry.target as HTMLVideoElement
+        if (entry.isIntersecting) gifvVisible.add(video)
+        else gifvVisible.delete(video)
+        syncGifv(video)
+      }
+    },
+    { threshold: 0.25 },
+  )
+  gifvObserver.observe(video)
+}
+
+function detachGifv(video: HTMLVideoElement) {
+  gifvVisible.delete(video)
+  gifvObserver?.unobserve(video)
+}
+
 const gifvAutoplay = {
   mounted(video: HTMLVideoElement, binding: { value?: boolean }) {
     if (binding.value === false) return
-    if (!gifvMotionWatched) {
-      gifvMotionWatched = true
-      // App-lifetime watcher: pause/resume visible loops when the setting flips
-      watch(usePrefersReducedMotion(), () => gifvVisible.forEach(syncGifv))
+    attachGifv(video)
+  },
+  // The "autoplay GIFs" server preference can arrive after the card mounted
+  updated(video: HTMLVideoElement, binding: { value?: boolean; oldValue?: boolean }) {
+    if (binding.value === binding.oldValue) return
+    if (binding.value === false) {
+      detachGifv(video)
+      if (!video.paused) video.pause()
+    } else {
+      attachGifv(video)
     }
-    if (typeof IntersectionObserver === 'undefined') {
-      gifvVisible.add(video)
-      syncGifv(video)
-      return
-    }
-    gifvObserver ??= new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const video = entry.target as HTMLVideoElement
-          if (entry.isIntersecting) gifvVisible.add(video)
-          else gifvVisible.delete(video)
-          syncGifv(video)
-        }
-      },
-      { threshold: 0.25 },
-    )
-    gifvObserver.observe(video)
   },
   beforeUnmount(video: HTMLVideoElement) {
-    gifvVisible.delete(video)
-    gifvObserver?.unobserve(video)
+    detachGifv(video)
   },
 }
 </script>
@@ -81,6 +99,8 @@ import { authorizeInteractionUrl, hostOf } from '~/utils/federation'
 import { lookupAcctFor } from '~/utils/edwardSemantics'
 import { activeCredentials } from '~/composables/useMasto'
 import { useStatusStore } from '~/stores/status'
+import { supportsLegalReports } from '~/utils/serverCapabilities'
+import { mediaIsHidden } from '~/utils/readingPrefs'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeSheet'
@@ -259,11 +279,28 @@ const cwOpen = ref(false)
 
 const hasSpoiler = computed(() => !!displayStatus.value.spoilerText?.trim())
 const isSensitive = computed(() => !!displayStatus.value.sensitive)
-const mediaHidden = computed(
-  () =>
-    !!displayStatus.value.mediaAttachments?.length &&
-    ((hasSpoiler.value && !cwOpen.value) ||
-      (isSensitive.value && !mediaRevealed.value && !cwOpen.value)),
+/** Server reading prefs (always expand CWs, show / hide all media, autoplay GIFs) */
+const readingPrefs = computed(() => settingsStore.readingPrefs)
+const mediaHidden = computed(() =>
+  mediaIsHidden({
+    hasMedia: !!displayStatus.value.mediaAttachments?.length,
+    hasSpoiler: hasSpoiler.value,
+    isSensitive: isSensitive.value,
+    cwOpen: cwOpen.value,
+    mediaRevealed: mediaRevealed.value,
+    expandMedia: readingPrefs.value.expandMedia,
+  }),
+)
+
+/** Apply "always expand" server prefs (initially, after a post swap, and when prefs load late) */
+const applyReadingPrefs = () => {
+  if (readingPrefs.value.expandSpoilers && hasSpoiler.value) cwOpen.value = true
+  if (readingPrefs.value.expandMedia === 'show_all') mediaRevealed.value = true
+}
+watch(
+  () => [readingPrefs.value.expandSpoilers, readingPrefs.value.expandMedia] as const,
+  applyReadingPrefs,
+  { immediate: true },
 )
 
 const onCwToggle = (e: Event) => {
@@ -284,6 +321,7 @@ watch(
     cwOpen.value = false
     contentExpanded.value = false
     contentOverflows.value = false
+    applyReadingPrefs()
   },
 )
 
@@ -556,7 +594,13 @@ const copyLink = async () => {
   }
 }
 
-const handleShare = () => {
+const shareSheetMounted = ref(false)
+
+const handleShare = async () => {
+  if (!shareSheetMounted.value) {
+    shareSheetMounted.value = true
+    await nextTick()
+  }
   shareOpen.value = true
 }
 
@@ -696,27 +740,38 @@ const handleBlock = async () => {
   }
 }
 
+/** The post's account lives on the acting server already (no remote lookup needed) */
+const reportFromActive = () => {
+  const ext = props.status as ExtendedStatus
+  let activeUrl = ''
+  try {
+    activeUrl = activeCredentials().url
+  } catch {
+    /* guest */
+  }
+  return !!ext._instanceUrl && hostOf(ext._instanceUrl) === hostOf(activeUrl)
+}
+
 const handleReport = async () => {
   if (!canInteract.value) return
   const acct = authorAcct.value
   if (!acct) return
 
+  const reportedAccountId = displayStatus.value.account.id
   const payload = await overlayStore.openReport({
     accountAcct: acct,
+    allowLegal: supportsLegalReports(instancesStore.serverCapabilities),
+    // Same resolution as the report itself: a remote author's posts by their id on our server
+    loadPosts: () =>
+      statusStore.listReportablePosts(reportedAccountId, {
+        acct: reportFromActive() ? undefined : acct,
+      }),
   })
   if (!payload) return
 
   try {
     const ctx = await getActionContext()
-    const ext = props.status as ExtendedStatus
-    let activeUrl = ''
-    try {
-      activeUrl = activeCredentials().url
-    } catch {
-      /* guest */
-    }
-    const fromActive =
-      !!ext._instanceUrl && hostOf(ext._instanceUrl) === hostOf(activeUrl)
+    const fromActive = reportFromActive()
     await statusStore.reportStatus(
       ctx?.id || displayStatus.value.id,
       displayStatus.value.account.id,
@@ -726,6 +781,7 @@ const handleReport = async () => {
         acct: fromActive ? undefined : acct,
         category: payload.category,
         forward: payload.forward,
+        extraStatusIds: payload.extraStatusIds,
       },
     )
     toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
@@ -1351,7 +1407,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                 :poster="media.previewUrl ?? undefined"
                 controls
                 preload="none"
-                v-gifv-autoplay="media.type === 'gifv'"
+                v-gifv-autoplay="media.type === 'gifv' && readingPrefs.autoplayGifs"
                 :loop="media.type === 'gifv'"
                 :muted="media.type === 'gifv'"
                 playsinline
@@ -1446,7 +1502,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                   :poster="media.previewUrl ?? undefined"
                   controls
                   preload="none"
-                  v-gifv-autoplay="media.type === 'gifv'"
+                  v-gifv-autoplay="media.type === 'gifv' && readingPrefs.autoplayGifs"
                   :loop="media.type === 'gifv'"
                   :muted="media.type === 'gifv'"
                   playsinline
@@ -1555,9 +1611,9 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       </div>
     </div>
 
-    <Teleport v-if="shareOpen || boostOpen" to="body">
+    <Teleport v-if="shareSheetMounted || boostOpen" to="body">
       <PostActionSheet
-        v-if="shareOpen"
+        v-if="shareSheetMounted"
         :open="shareOpen"
         title="Share"
         :actions="shareActions"

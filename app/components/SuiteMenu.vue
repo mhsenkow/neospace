@@ -4,8 +4,8 @@
  * Catalog lives in suiteCatalog so bruh / loom / words stay aligned.
  */
 
-import { edwardActive, toggleEdward } from '~/utils/edwardShell'
-import { suiteGroups, SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
+import { EDWARD_SHORTCUT_LABEL, useSuiteGroups } from '~/composables/useSuiteGroups'
+import { SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
 import { rememberSuiteVisit } from '~/utils/suiteLook'
 
 const open = ref(false)
@@ -16,26 +16,7 @@ onMounted(() => {
   rememberSuiteVisit('neospace')
 })
 
-const groups = computed(() =>
-  suiteGroups({
-    currentId: 'neospace',
-    extraGroups: [
-      {
-        id: 'play',
-        label: 'play',
-        tools: [
-          {
-            id: 'edward',
-            label: 'edward',
-            blurb: 'stream · balls',
-            current: edwardActive.value,
-            action: () => void toggleEdward(),
-          },
-        ],
-      },
-    ],
-  }),
-)
+const groups = useSuiteGroups()
 
 const runAction = (tool: SuiteTool) => {
   tool.action?.()
@@ -134,20 +115,31 @@ onUnmounted(() => {
               :class="{ 'is-current': tool.current }"
               :aria-pressed="tool.current ? 'true' : 'false'"
               :aria-label="tool.label"
+              :aria-keyshortcuts="tool.id === 'edward' ? 'Alt+Shift+E' : undefined"
+              :title="tool.id === 'edward' ? `${tool.label} — ${EDWARD_SHORTCUT_LABEL}` : undefined"
               @click="runAction(tool)"
             >
               <span class="suite-menu__tile-label">{{ tool.label }}</span>
               <span class="suite-menu__tile-blurb">{{ tool.blurb }}</span>
             </button>
+            <!-- The tool you're already in: a link would reload the app and drop open columns / drafts -->
+            <span
+              v-else-if="tool.current"
+              class="suite-menu__tile is-current"
+              aria-current="page"
+              role="link"
+              aria-disabled="true"
+            >
+              <span class="suite-menu__tile-label">{{ tool.label }}</span>
+              <span class="suite-menu__tile-blurb">{{ tool.blurb }}</span>
+            </span>
             <a
               v-else
               class="suite-menu__tile"
-              :class="{ 'is-current': tool.current }"
               :href="tool.href"
-              :aria-current="tool.current ? 'page' : undefined"
-              :target="tool.current ? undefined : '_blank'"
-              :rel="tool.current ? undefined : 'noopener noreferrer'"
-              :aria-label="tool.current ? tool.label : `${tool.label} (opens in new tab)`"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="`${tool.label} (opens in new tab)`"
               @click="close({ restoreFocus: false })"
             >
               <span class="suite-menu__tile-label">{{ tool.label }}</span>
@@ -194,7 +186,7 @@ onUnmounted(() => {
   height: 44px;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--neo-radius-sm, 2px);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -207,7 +199,7 @@ onUnmounted(() => {
     content: '';
     position: absolute;
     inset: 8px;
-    border-radius: 2px;
+    border-radius: var(--neo-radius-sm, 2px);
     background: color-mix(in srgb, var(--neo-bg-primary) 88%, transparent);
     z-index: -1;
   }
@@ -241,7 +233,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   background: color-mix(in srgb, var(--neo-bg-card) 96%, var(--neo-text-primary) 4%);
   border: 1px solid var(--neo-border-color);
-  border-radius: 2px;
+  border-radius: var(--neo-radius-sm, 2px);
   box-shadow: 0 8px 28px color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
   scrollbar-width: thin;
 }
@@ -293,7 +285,7 @@ onUnmounted(() => {
   font: inherit;
   color: var(--neo-text-muted);
   border: 1px solid transparent;
-  border-radius: 2px;
+  border-radius: var(--neo-radius-sm, 2px);
   background: transparent;
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
@@ -319,6 +311,10 @@ onUnmounted(() => {
   }
 }
 
+span.suite-menu__tile {
+  cursor: default;
+}
+
 .suite-menu__tile-label {
   font-size: 0.8125rem;
   letter-spacing: 0.03em;
@@ -326,7 +322,7 @@ onUnmounted(() => {
 }
 
 .suite-menu__tile-blurb {
-  font-size: 0.625rem;
+  font-size: max(0.6875rem, 11px);
   line-height: 1.3;
 }
 

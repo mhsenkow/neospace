@@ -13,6 +13,8 @@ const settingsStore = useSettingsStore()
 const router = useRouter()
 const route = useRoute()
 
+/** Signed-in fast path is leaving — keep the picker from flashing */
+const redirecting = ref(false)
 const isConnecting = ref(false)
 const connectingTo = ref<string | null>(null)
 const pickerRef = ref<{ setError: (msg: string | null) => void } | null>(null)
@@ -71,6 +73,7 @@ onMounted(async () => {
         const parsed = JSON.parse(raw) as { instances?: { accessToken?: string }[] }
         const hasToken = parsed?.instances?.some((i) => !!i.accessToken)
         if (hasToken) {
+          redirecting.value = true
           router.replace(returnTo.value || '/')
         }
       }
@@ -83,6 +86,8 @@ onMounted(async () => {
   settingsStore.loadLocalPreferences()
   // The fast path may already have left /login — don't yank the user back
   if (router.currentRoute.value.path !== '/login') return
+  // Stored tokens didn't hold up — show the picker after all
+  redirecting.value = false
   if (instancesStore.isAuthenticated && !isAddMode.value) {
     router.replace(returnTo.value || '/')
   }
@@ -126,7 +131,7 @@ definePageMeta({
   <div class="login">
     <div class="login__atmosphere" aria-hidden="true"></div>
 
-    <main class="login__stage">
+    <main v-if="!redirecting" class="login__stage">
       <header class="login__brand">
         <span class="login__mark" aria-hidden="true">NS</span>
         <h1 class="login__wordmark">
@@ -163,12 +168,10 @@ definePageMeta({
         />
 
         <footer class="login__footer">
-          <p>New to Mastodon?</p>
+          <p>New to the fediverse?</p>
           <div class="login__footer-links">
             <NuxtLink v-if="!isAddMode" to="/">Just browse</NuxtLink>
             <span v-if="!isAddMode" aria-hidden="true">·</span>
-            <NuxtLink to="/explore">Browse servers by interest</NuxtLink>
-            <span aria-hidden="true">·</span>
             <a href="https://joinmastodon.org/servers" target="_blank" rel="noopener">
               Create a free account
             </a>

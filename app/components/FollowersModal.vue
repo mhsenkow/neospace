@@ -11,6 +11,7 @@ import { activeClient } from '~/composables/useMasto'
 import { usePager } from '~/composables/usePager'
 import { cursorPage } from '~/utils/linkHeader'
 import { formatDateOnly } from '~/utils/insights'
+import { plainDisplayName } from '~/utils/displayName'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
 import { logError } from '~/utils/log'
@@ -348,7 +349,7 @@ defineExpose({ open, close })
                       class="account-name"
                       @click="close()"
                     >
-                      {{ account.displayName || account.username }}
+                      {{ plainDisplayName(account.displayName, account.username) }}
                       <span v-if="account.bot" class="bot-badge" title="Automated account">BOT</span>
                     </NuxtLink>
                     <span class="account-handle">@{{ account.acct }}</span>
@@ -416,10 +417,9 @@ defineExpose({ open, close })
                   </div>
                 </div>
 
-                <p v-if="formatLastActive(account.lastStatusAt)" class="recent-post-meta">
+                <p v-if="account.lastStatusAt && formatLastActive(account.lastStatusAt)" class="recent-post-meta">
                   Last post {{ formatLastActive(account.lastStatusAt) }}
                 </p>
-                <p v-else class="no-recent-post">No recent posts</p>
               </div>
 
               <button
@@ -429,7 +429,7 @@ defineExpose({ open, close })
                 :disabled="isLoading || isLoadingMore"
                 @click="loadMore"
               >
-                {{ isLoading || isLoadingMore ? 'Loading...' : 'Load more' }}
+                {{ isLoading || isLoadingMore ? 'Loading…' : 'Load more' }}
               </button>
             </div>
           </div>
@@ -443,7 +443,7 @@ defineExpose({ open, close })
 .followers-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--neo-bg-overlay);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;

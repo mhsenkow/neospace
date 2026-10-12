@@ -7,6 +7,16 @@ export function normalizeHashtagInput(raw: string): string {
   return raw.trim().replace(/^#/, '')
 }
 
+/** Mastodon-style tag identity: NFKC, lowercased, Latin accents folded (café ≡ cafe). */
+export function tagKey(raw: string): string {
+  const clean = normalizeHashtagInput(raw)
+  return clean
+    .normalize('NFKC')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+}
+
 export function isValidHashtag(tag: string): boolean {
   const clean = normalizeHashtagInput(tag)
   if (!clean || clean.length > 64) return false
@@ -15,14 +25,18 @@ export function isValidHashtag(tag: string): boolean {
 
 export function tagHistorySummary(tag: mastodon.v1.Tag): string {
   const history = tag.history || []
+  const nf = new Intl.NumberFormat(undefined)
   const people = history.reduce(
     (sum, day) => sum + Number((day as { accounts?: string | number }).accounts || 0),
     0,
   )
   const uses7d = history.reduce((sum, day) => sum + Number(day.uses || 0), 0)
   const parts: string[] = []
-  if (people > 0) parts.push(`${people} ${people === 1 ? 'person' : 'people'}`)
-  if (uses7d > 0) parts.push(`${uses7d} posts · last 7d`)
-  else if (history.length) parts.push('last 7d')
+  if (people > 0) {
+    parts.push(`${nf.format(people)} accounts (daily sum)`)
+  }
+  if (uses7d > 0) {
+    parts.push(`${nf.format(uses7d)} ${uses7d === 1 ? 'post' : 'posts'} · last 7d`)
+  } else if (history.length) parts.push('last 7d')
   return parts.join(' · ')
 }

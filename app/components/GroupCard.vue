@@ -11,16 +11,15 @@ import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { categoryColor, categoryTint } from '~/composables/useShellAppearance'
 import { joinGroupFailure } from '~/utils/groupErrors'
+import { formatCountLabel } from '~/utils/searchQuery'
 
 interface Props {
   group: Group
-  compact?: boolean
   /** Threads-style discovery tile for horizontal rails */
   tile?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  compact: false,
   tile: false,
 })
 
@@ -109,13 +108,17 @@ const catColor = computed(() =>
 const catTint = computed(() =>
   categoryTint(props.group.trending ? 'trending' : props.group.category),
 )
+
+const tileStatsLine = computed(() => {
+  if (props.group.postsCount == null) return ''
+  return `${formatCountLabel(props.group.postsCount, 'post')} this week`
+})
 </script>
 
 <template>
   <article
     class="group-card"
     :class="{
-      'group-card--compact': compact,
       'group-card--tile': tile,
       'group-card--member': isMember,
     }"
@@ -134,22 +137,32 @@ const catTint = computed(() =>
           {{ group.name }}
         </NuxtLink>
       </h3>
-      <p v-if="!compact && !tile && group.description" class="group-card__description">
+      <p v-if="!tile && group.description" class="group-card__description">
         {{ group.description }}
       </p>
-      <p v-else-if="tile" class="group-card__tagline">
-        {{ group.trending ? 'Trending' : `#${group.tag}` }}
-      </p>
+      <template v-else-if="tile">
+        <p class="group-card__tagline">#{{ group.tag }}</p>
+        <p v-if="tileStatsLine" class="group-card__tagline group-card__tagline--stats">{{ tileStatsLine }}</p>
+        <div class="group-card__meta group-card__meta--tile">
+          <span class="group-card__category">
+            <span v-if="group.trending" aria-hidden="true">🔥 </span>
+            <span class="group-card__category-dot" :style="{ backgroundColor: catColor }" aria-hidden="true" />
+            {{ group.category }}
+          </span>
+        </div>
+      </template>
       <div v-if="!tile" class="group-card__meta">
         <span class="group-card__tag">#{{ group.tag }}</span>
+        <span v-if="group.postsCount != null" class="group-card__stats">{{ tileStatsLine }}</span>
         <span class="group-card__category">
+          <span v-if="group.trending" aria-hidden="true">🔥 </span>
           <span class="group-card__category-dot" :style="{ backgroundColor: catColor }" aria-hidden="true" />
-          {{ group.trending ? 'trending' : group.category }}
+          {{ group.category }}
         </span>
       </div>
     </div>
 
-    <div class="group-card__actions" @click.stop>
+    <div class="group-card__actions">
       <button
         v-if="isMember"
         ref="actionBtnRef"
@@ -220,20 +233,9 @@ const catTint = computed(() =>
   &--member {
     border-color: color-mix(in srgb, var(--neo-accent) 40%, transparent);
     background: var(--neo-accent-soft);
-  }
 
-  &--compact {
-    padding: 0.625rem 0.75rem;
-    gap: 0.625rem;
-    align-items: center;
-
-    .group-card__icon {
-      width: 36px;
-      height: 36px;
-    }
-
-    .group-card__emoji {
-      font-size: 1.125rem;
+    &:hover {
+      background: color-mix(in srgb, var(--neo-accent) 14%, var(--neo-bg-card));
     }
   }
 
@@ -262,7 +264,7 @@ const catTint = computed(() =>
     justify-content: center;
     width: 44px;
     height: 44px;
-    border-radius: var(--neo-radius-md, 8px);
+    border-radius: var(--neo-radius-md, 4px);
     flex-shrink: 0;
   }
 

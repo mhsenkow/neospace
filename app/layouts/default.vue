@@ -9,7 +9,8 @@ import { useEdwardStore } from '~/stores/edward'
 import { useToastStore } from '~/stores/toast'
 import { bumpOsScheme } from '~/utils/osScheme'
 import { useSettingsStore } from '~/stores/settings'
-import { edwardActive } from '~/utils/edwardShell'
+import { edwardActive, toggleEdward } from '~/utils/edwardShell'
+import { isEdwardShortcut } from '~/composables/useSuiteGroups'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
@@ -64,7 +65,9 @@ watchEffect(() => {
   if (settingsStore.isOpen) mounted.settings = true
 })
 
-const { sidebarRail, loadSidebarRail, applyTheme } = useShellAppearance()
+const { sidebarRail, loadSidebarRail, applyTheme, lookAnnounce } = useShellAppearance()
+// Recipe list feeds the sidebar, drawer and board — hydrate once here, not per shell component
+algorithmsStore.hydrate()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
 const isDesk = useDeskViewport()
 useAppShellHeight()
@@ -93,8 +96,14 @@ const isMobileSubview = computed(
     isNotificationsRoute.value ||
     isGroupsDetailRoute.value,
 )
-/** Profile keeps the tab bar so Home / compose stay one thumb away */
-const showMobileNav = computed(() => !isMobileSubview.value || isProfileRoute.value)
+/**
+ * Tab destinations (Profile, Messages, Activity) keep the tab bar, so you can hop
+ * Messages → Activity without Back. Threads and a single group stay focused (no tabs).
+ */
+const isTabRoute = computed(
+  () => isProfileRoute.value || isMessagesRoute.value || isNotificationsRoute.value,
+)
+const showMobileNav = computed(() => !isMobileSubview.value || isTabRoute.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
 
 const closeMobileMenu = () => {
@@ -168,6 +177,15 @@ onMounted(async () => {
     window.removeEventListener('offline', onOffline)
   })
 
+  // Alt+Shift+E — Edward has no other keyboard way in (the waffle is pointer-first)
+  const onEdwardShortcut = (e: KeyboardEvent) => {
+    if (!isEdwardShortcut(e)) return
+    e.preventDefault()
+    void toggleEdward()
+  }
+  window.addEventListener('keydown', onEdwardShortcut)
+  cleanups.push(() => window.removeEventListener('keydown', onEdwardShortcut))
+
   const onVisibility = () => {
     if (document.visibilityState === 'visible' && instancesStore.hasAuthenticatedInstance) {
       void notificationsStore.refreshUnreadBadge()
@@ -188,6 +206,7 @@ onMounted(async () => {
   settingsStore.loadLocalPreferences()
   applyTheme()
   void groupsStore.initializeGroups()
+  void settingsStore.loadReadingPrefs()
 
   if (instancesStore.userCustomCSS) {
     themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
@@ -209,6 +228,7 @@ watch(
   () => instancesStore.activeAccountId,
   (id, prev) => {
     if (id === prev) return
+    void settingsStore.loadReadingPrefs()
     if (prev) void groupsStore.resetForAccountSwitch()
     else void groupsStore.initializeGroups()
   },
@@ -267,6 +287,7 @@ watch(
       'neo-layout--board': isBoardRoute,
       'neo-layout--thread': isThreadRoute,
       'neo-layout--profile': isProfileRoute,
+      'neo-layout--tab': isTabRoute,
       'neo-layout--subview': isMobileSubview,
       'neo-layout--rail': sidebarRail,
       'neo-layout--portal-settings': boardPortal === 'settings',
@@ -285,6 +306,9 @@ watch(
     <MobileHeader v-if="!isDesk && showMobileHeader" v-model:open="mobileMenuOpen" />
 
     <MobileDrawer v-if="!isDesk" v-model:open="mobileMenuOpen" />
+
+    <!-- One shared announcer for Look / board-density changes (both shells report here) -->
+    <p class="sr-only" aria-live="polite">{{ lookAnnounce }}</p>
 
     <!-- Live region stays mounted so the notice is announced when it appears -->
     <div class="neo-auth-notice-region" role="status">
@@ -318,12 +342,13 @@ watch(
       v-show="!composeSheet.open"
       class="neo-bottom-dock"
       :class="{
-        'neo-bottom-dock--subview': isMobileSubview && !isProfileRoute,
+        'neo-bottom-dock--subview': isMobileSubview && !isTabRoute,
         'neo-bottom-dock--thread': isThreadRoute,
       }"
     >
       <InstallAppBanner />
-      <SuiteMenu />
+      <!-- Phones get the same tools inside the drawer (Menu → Tools) instead of a floating waffle -->
+      <SuiteMenu v-if="isDesk" />
     </div>
     <NeoOverlayHost />
     <LazyEdwardMode v-if="edwardActive" />
@@ -387,6 +412,13 @@ watch(
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
+
+  // Touch target on phones/tablets — pad the hit area without growing the notice much
+  @media (max-width: 1023px) {
+    min-height: 44px;
+    min-width: 44px;
+    padding-inline: 0.9rem;
+  }
 }
 
 .neo-layout {
@@ -503,6 +535,11 @@ watch(
   min-height: 100vh;
   min-height: 100dvh;
   min-width: 0;
+
+  @media (min-width: 1024px) {
+    // The shell is already 100dvh; don't force main taller when the auth notice sits above it
+    min-height: auto;
+  }
   width: 100%;
   max-width: 100%;
   padding: 0.5rem;
@@ -584,8 +621,8 @@ watch(
     }
   }
 
-  /* Profile keeps MobileTabBar — leave room so the last posts aren't under it */
-  .neo-layout--profile & {
+  /* Tab destinations keep MobileTabBar — leave room so the last rows aren't under it */
+  .neo-layout--tab & {
     @media (max-width: 1023px) {
       padding-bottom: calc(
         var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.5rem

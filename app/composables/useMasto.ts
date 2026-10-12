@@ -100,6 +100,11 @@ export function setReadAccountOverride(instanceId: string | null): number {
   return ++readAccountOverrideOwner
 }
 
+/** Id of the account reads currently act as (route override), or null for the active account. */
+export function readAccountOverride(): string | null {
+  return readAccountOverrideId
+}
+
 /** Clear the override only if `owner` still holds it. */
 export function clearReadAccountOverride(owner: number) {
   if (owner !== readAccountOverrideOwner) return

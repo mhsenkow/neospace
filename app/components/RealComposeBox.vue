@@ -8,6 +8,7 @@ import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
+import { cycleActiveAccountWithToast } from '~/composables/useSwitchAccount'
 import {
   COMPOSE_MEDIA_ACCEPT,
   COMPOSE_PREVIEWABLE_IMAGE,
@@ -548,7 +549,7 @@ const canSwitchPostingAccount = computed(
 
 const cyclePostingAccount = () => {
   if (!canSwitchPostingAccount.value) return
-  instancesStore.cycleActiveAccount()
+  cycleActiveAccountWithToast()
 }
 
 watch([characterCount, isOverLimit, isNearLimit], () => {

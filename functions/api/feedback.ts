@@ -70,6 +70,12 @@ function hostAllowed(hostname: string): boolean {
   return hostname.endsWith('.neospace-dc4.pages.dev')
 }
 
+const JSON_SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+}
+
 function json(
   data: unknown,
   status = 200,
@@ -78,8 +84,9 @@ function json(
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
+      ...JSON_SECURITY_HEADERS,
       ...extraHeaders,
     },
   })

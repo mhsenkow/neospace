@@ -201,7 +201,9 @@ export function useLoomHandoff() {
       })
       if (buffer || composeHandoff.hasPending) {
         loomShareAccepted = true
-        clearPersistedLoomShare()
+        // Signed out: the saved share (and its stashed image) must survive the login / OAuth
+        // round trip — only a signed-in ingest has consumed it.
+        if (instancesStore.isAuthenticated) clearPersistedLoomShare()
       }
       if (!instancesStore.isAuthenticated) {
         await router.replace('/login')

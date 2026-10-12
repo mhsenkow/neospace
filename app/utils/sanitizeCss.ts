@@ -60,6 +60,8 @@ export function sanitizeProfileCss(raw: string): string {
   css = css.replace(/expression\s*\(/gi, '/* blocked expression( */')
   css = css.replace(/behavior\s*:/gi, '/* blocked behavior: */')
   css = css.replace(/-moz-binding\s*:/gi, '/* blocked -moz-binding: */')
+  css = css.replace(/-moz-element\s*\(/gi, '/* blocked -moz-element( */')
+  css = css.replace(/\belement\s*\(/gi, '/* blocked element( */')
   css = css.replace(/javascript\s*:/gi, '/* blocked javascript: */')
   css = css.replace(/vbscript\s*:/gi, '/* blocked vbscript: */')
   css = css.replace(/-o-link\s*:/gi, '/* blocked -o-link: */')

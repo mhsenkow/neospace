@@ -29,9 +29,6 @@ export function composeAttachmentIcon(mime: string): string {
   return '🎬'
 }
 
-/** Hard ceiling used by the “original” upload preset (extreme phone/raw edges). */
-export const COMPOSE_MAX_IMAGE_DIMENSION = 4096
-
 export type { MediaUploadQuality } from '~/utils/prepareComposeImage'
 export {
   formatByteSize,

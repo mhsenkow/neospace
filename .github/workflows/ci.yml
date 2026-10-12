@@ -28,12 +28,21 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      # check = functions typecheck + full app typecheck (vue-tsc) + vitest
+      # check = lint rules + functions typecheck + full app typecheck (vue-tsc) + vitest
       - run: npm run generate
-      - name: Record checked commit
-        run: |
-          echo "CI_COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "Checked commit: $(git rev-parse HEAD)"
+      # Install-time download budget: no font faces in the precache, entries/bytes under the recorded ceiling
+      - run: npm run budget
+      # Provenance: stamp the checked commit, run id and a digest of every emitted file INTO the
+      # artifact (.output/public/build-info.json), then keep that exact tree. Deploy uploads this
+      # artifact — it never rebuilds — so what ships is what these checks ran against.
+      - name: Stamp build provenance
+        run: node scripts/build-info.mjs write
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: site-${{ github.sha }}
+          path: .output/public/
+          if-no-files-found: error
+          retention-days: 14
 
   e2e:
     runs-on: ubuntu-latest
@@ -68,3 +77,32 @@ jobs:
           path: test-results/
           if-no-files-found: warn
           retention-days: 7
+
+  # Deploys the artifact the `check` job built — only from main, only after check + e2e, and only
+  # through the `production` environment (add required reviewers there for an approval gate).
+  # Opt-in: set repository variable CF_PAGES_DEPLOY=true plus the CLOUDFLARE_API_TOKEN /
+  # CLOUDFLARE_ACCOUNT_ID secrets on that environment; until then deploys stay a manual `npm run cf:deploy`.
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [check, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CF_PAGES_DEPLOY == 'true'
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: site-${{ github.sha }}
+          path: .output/public/
+      # Fails unless the tree still matches the digest recorded when it was checked,
+      # and was built from the commit being deployed
+      - name: Verify artifact provenance
+        run: node scripts/build-info.mjs verify
+      - name: Deploy checked artifact to Cloudflare Pages
+        run: npx wrangler pages deploy .output/public --project-name=neospace --commit-hash="$GITHUB_SHA" --commit-message="CI run $GITHUB_RUN_ID"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

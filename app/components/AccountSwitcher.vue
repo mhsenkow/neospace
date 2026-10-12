@@ -6,6 +6,7 @@
 
 import { useInstancesStore } from '~/stores/instances'
 import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
+import { plainDisplayName } from '~/utils/displayName'
 
 const props = withDefaults(
   defineProps<{
@@ -104,10 +105,9 @@ const onTriggerKeydown = (e: KeyboardEvent) => {
 }
 
 const triggerLabel = computed(() => {
-  const name =
-    instancesStore.userDisplayName ||
-    instancesStore.activeAccount?.user?.username ||
-    'Profile'
+  // `userDisplayName` falls back to "Guest" — read the account itself so the fallback is real
+  const user = instancesStore.activeAccount?.user
+  const name = plainDisplayName(user?.displayName, user?.username || '') || 'Profile'
   if (isNav.value) return `${name}, profile`
   return multi.value ? `${name}, switch accounts` : `${name}, accounts`
 })
@@ -313,8 +313,9 @@ onUnmounted(() => {
   height: 14px;
   padding: 0 3px;
   border-radius: 999px;
-  background: var(--neo-accent);
-  color: var(--neo-text-on-accent, #fff);
+  // Neutral so it never reads as an unread-notification badge
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-secondary);
   border: 1.5px solid var(--neo-bg-primary);
   font-size: 0.5625rem;
   font-weight: 700;

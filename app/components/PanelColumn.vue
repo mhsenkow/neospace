@@ -8,6 +8,8 @@ import { formatCompactRelativeTime } from '~/utils/relativeTime'
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore, type ExtendedNotification } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
+import { dropDeletedStatus } from '~/utils/deletedStatus'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useOverlayStore } from '~/stores/overlay'
 import { useColumnsStore, FEED_LABELS, type ColumnConfig } from '~/stores/columns'
@@ -16,7 +18,8 @@ import { activeClient, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
 import { useLinkedProfileFeed } from '~/composables/useLinkedProfileFeed'
 import { clipGraphemes, stripHtml } from '~/utils/stripHtml'
-import { notifHasActor, notifIconName, notifLabel } from '~/utils/notifHelpers'
+import { notifHasActor, notifIconName, notifLabel, notificationRoute, notificationViewLabel } from '~/utils/notifHelpers'
+import { searchQueryTooShort } from '~/utils/searchQuery'
 import { participantLabel } from '~/utils/dmHelpers'
 import { richDisplayName } from '~/utils/displayName'
 import { useColumnDnd } from '~/composables/useColumnDnd'
@@ -91,6 +94,14 @@ const notifPreview = (status?: mastodon.v1.Status | null) => {
 }
 
 const notifSearchQuery = ref('')
+const notifViewLabel = computed(() =>
+  notificationViewLabel(notificationsStore.filter, notificationsStore.sortOrder),
+)
+const resetNotifView = () => {
+  notificationsStore.setFilter('all')
+  notificationsStore.setSortOrder('newest')
+  void notificationsStore.fetchNotifications(true)
+}
 const msgSearchQuery = ref('')
 
 const panelNotifications = computed(() => {
@@ -140,11 +151,12 @@ const openFullProfile = () => {
     router.push({ path: '/profile', query: { user: props.column.profileAcct } })
     return
   }
+  // Read as the peeked account via ?account= — don't switch the global account and refetch every column
   const peekId = profilePeekId.value
-  if (peekId && peekId !== instancesStore.activeAccountId) {
-    instancesStore.setActiveAccount(peekId)
-  }
-  router.push('/profile')
+  router.push({
+    path: '/profile',
+    query: peekId && peekId !== instancesStore.activeAccountId ? { account: peekId } : {},
+  })
 }
 
 const onFocusClick = () => {
@@ -286,7 +298,7 @@ const searchResultCount = computed(
 
 const runSearch = async (q: string) => {
   const query = q.trim()
-  if (query.length < 2) {
+  if (searchQueryTooShort(query)) {
     searchRace.abort()
     searchAccounts.value = []
     searchHashtags.value = []
@@ -345,28 +357,8 @@ const accountQuery = (instanceId?: string) =>
   instanceId ? { account: instanceId } : {}
 
 const openNotification = (notif: ExtendedNotification) => {
-  const via = accountQuery(notif._instanceId)
-  if (notif.type === 'follow' || notif.type === 'follow_request') {
-    const acct = notif.account?.acct
-    if (acct) {
-      router.push({ path: '/profile', query: { user: acct, ...via } })
-      return
-    }
-  }
-  const status = notif.status
-  if (status?.id) {
-    const url = status.url || status.uri
-    router.push({
-      path: `/status/${status.id}`,
-      query: {
-        ...(url ? { url } : {}),
-        ...via,
-      },
-    })
-    return
-  }
-  const acct = notif.account?.acct
-  if (acct) router.push({ path: '/profile', query: { user: acct, ...via } })
+  const route = notificationRoute(notif)
+  if (route) router.push(route)
 }
 
 const openNotifProfile = (notif: ExtendedNotification, e?: Event) => {
@@ -492,7 +484,14 @@ watch(
   },
 )
 
+// Deleted posts leave the panel's search results and remote profile list too
+const stopDeletedListen = onDeletedStatus((event) => {
+  remoteStatuses.value = dropDeletedStatus(remoteStatuses.value, event)
+  searchStatuses.value = dropDeletedStatus(searchStatuses.value, event)
+})
+
 onUnmounted(() => {
+  stopDeletedListen()
   if (searchTimer) clearTimeout(searchTimer)
   searchRace.next()
   stopDmRefresh()
@@ -529,7 +528,6 @@ onUnmounted(() => {
           v-if="isProfilePeek"
           type="button"
           class="neo-chrome-btn"
-          title="Back"
           aria-label="Back to previous feed"
           @click="exitPeek"
         >
@@ -546,7 +544,6 @@ onUnmounted(() => {
           type="button"
           class="neo-chrome-btn"
           :class="{ 'neo-chrome-btn--on': focused && column.feedType !== 'profile' }"
-          :title="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
           :aria-label="column.feedType === 'profile' ? 'Open full profile' : focused ? 'Show all views' : 'Focus this view'"
           :aria-pressed="column.feedType === 'profile' ? undefined : focused"
           @pointerdown.stop
@@ -565,7 +562,6 @@ onUnmounted(() => {
           v-if="canRemove"
           type="button"
           class="neo-chrome-btn neo-chrome-btn--danger column-close"
-          title="Remove column"
           aria-label="Remove column"
           @pointerdown.stop
           @click.stop="emit('remove')"
@@ -590,7 +586,7 @@ onUnmounted(() => {
         </div>
         <template v-else>
           <div v-if="remoteLoading && !remoteAccount" class="panel-loading" aria-busy="true">
-            <FunLoader fill label="Loading profile" />
+            <FunLoader fill quiet label="Loading profile" />
           </div>
 
           <template v-else-if="remoteAccount">
@@ -607,7 +603,7 @@ onUnmounted(() => {
               class="panel-loading"
               aria-busy="true"
             >
-              <FunLoader fill label="Loading posts" />
+              <FunLoader fill quiet label="Loading posts" />
             </div>
 
             <div v-else-if="remoteStatuses.length" class="profile-panel-posts">
@@ -672,7 +668,7 @@ onUnmounted(() => {
           </div>
 
           <div v-if="profileLoading && !profileAccount" class="panel-loading" aria-busy="true">
-            <FunLoader fill label="Loading profile" />
+            <FunLoader fill quiet label="Loading profile" />
           </div>
 
           <template v-else-if="profileAccount">
@@ -689,7 +685,7 @@ onUnmounted(() => {
               class="panel-loading"
               aria-busy="true"
             >
-              <FunLoader fill label="Loading posts" />
+              <FunLoader fill quiet label="Loading posts" />
             </div>
 
             <div v-else-if="profileStatuses.length" class="profile-panel-posts">
@@ -740,13 +736,15 @@ onUnmounted(() => {
         </label>
         <p class="panel-hint sr-only" aria-live="polite">
           <template v-if="searchBusy">Searching…</template>
-          <template v-else-if="searchQuery.trim().length >= 2 && !searchError">
+          <template v-else-if="searchQuery.trim() && !searchQueryTooShort(searchQuery) && !searchError">
             {{ searchResultCount }} result{{ searchResultCount === 1 ? '' : 's' }}
           </template>
         </p>
         <p v-if="searchBusy" class="panel-hint" aria-hidden="true">Searching…</p>
         <p v-else-if="searchError" class="panel-hint panel-hint--err" role="alert">{{ searchError }}</p>
-        <p v-else-if="searchQuery.trim().length < 2" class="panel-hint">Type at least two characters.</p>
+        <p v-else-if="searchQuery.trim() && searchQueryTooShort(searchQuery)" class="panel-hint">
+          Type at least two characters, or one non-Latin character.
+        </p>
 
         <section v-if="searchAccounts.length" class="panel-section">
           <h3 class="panel-section__title">People</h3>
@@ -807,8 +805,11 @@ onUnmounted(() => {
             <button
               type="button"
               class="neo-btn neo-btn--tertiary neo-btn--icon"
+              :class="{ 'panel-toolbar__refresh--busy': notificationsStore.isLoading }"
               title="Refresh"
               aria-label="Refresh"
+              :disabled="notificationsStore.isLoading"
+              :aria-busy="notificationsStore.isLoading || undefined"
               @click="notificationsStore.fetchNotifications(true)"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -818,6 +819,11 @@ onUnmounted(() => {
               </svg>
             </button>
             <NuxtLink to="/notifications" class="panel-link">Full page</NuxtLink>
+          </div>
+          <!-- The column shares the Activity filter / sort — say so, and let it be cleared here -->
+          <div v-if="notifViewLabel" class="panel-view-chip" role="status">
+            <span>Showing: {{ notifViewLabel }}</span>
+            <button type="button" class="panel-view-chip__reset" @click="resetNotifView">Show all</button>
           </div>
           <label v-if="!notificationsStore.isEmpty" class="search-field panel-list-search">
             <NeoIcon name="search" :size="14" :stroke="1.75" aria-hidden="true" />
@@ -1021,11 +1027,6 @@ onUnmounted(() => {
   }
 }
 
-.column-drag-handle {
-  cursor: grab;
-  &:active { cursor: grabbing; }
-}
-
 .column-feed-label {
   font-size: 0.875rem;
   font-weight: 650;
@@ -1034,13 +1035,6 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.column-reorder {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  gap: 0.125rem;
 }
 
 .column-close {
@@ -1136,6 +1130,30 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+}
+
+.panel-view-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--neo-radius-sm, 4px);
+  background: var(--neo-accent-soft);
+  color: var(--neo-text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.panel-view-chip__reset {
+  border: none;
+  background: transparent;
+  color: var(--neo-accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.2rem 0.25rem;
 }
 
 .panel-link {
@@ -1468,8 +1486,20 @@ onUnmounted(() => {
 
   // Same card edges as TimelineColumn posts
   :deep(.status-card) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
     border: 1px solid var(--neo-border-color);
-    border-radius: 4px;
+    border-radius: var(--neo-radius-md);
+  }
+}
+
+.panel-toolbar__refresh--busy svg {
+  animation: panel-toolbar-spin 0.85s linear infinite;
+}
+
+@keyframes panel-toolbar-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

@@ -18,7 +18,8 @@ const props = withDefaults(
     viewportStyle?: Record<string, string>
   }>(),
   {
-    zIndex: 200,
+    // Unset → the --neo-z-sheet token (callers stacking above another sheet pass a number)
+    zIndex: undefined,
     maxHeight: 'min(92dvh, 100%)',
     desktopWidth: 'compose',
   },
@@ -35,12 +36,12 @@ const pinnedToViewport = computed(
 
 const panelStyle = computed(() => ({
   maxHeight: pinnedToViewport.value ? '100%' : props.maxHeight,
-  zIndex: props.zIndex + 1,
+  zIndex: props.zIndex != null ? props.zIndex + 1 : 'calc(var(--neo-z-sheet, 200) + 1)',
 }))
 
 const rootStyle = computed(() => ({
   ...props.viewportStyle,
-  zIndex: props.zIndex,
+  zIndex: props.zIndex ?? 'var(--neo-z-sheet, 200)',
 }))
 </script>
 

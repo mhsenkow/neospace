@@ -10,6 +10,7 @@ import { activeClient } from '~/composables/useMasto'
 import { useInstancesStore } from '~/stores/instances'
 import {
   buildInsightsReport,
+  windowTruncated,
   type InsightsReport,
   type InsightsWindowDays,
 } from '~/utils/insights'
@@ -37,6 +38,8 @@ type CacheEntry = {
 interface InsightsState {
   windowDays: InsightsWindowDays
   report: InsightsReport | null
+  /** Same window without followers-only posts — the only thing CSV / Loom export may read */
+  exportReport: InsightsReport | null
   annual: AnnualLite[]
   isLoading: boolean
   isLoadingAnnual: boolean
@@ -103,6 +106,15 @@ function coerceAnnual(raw: AnnualReport): AnnualLite {
   }
 }
 
+function oldestMs(statuses: mastodon.v1.Status[]): number | null {
+  let oldest: number | null = null
+  for (const s of statuses) {
+    const t = s.createdAt ? Date.parse(s.createdAt) : NaN
+    if (Number.isFinite(t) && (oldest === null || t < oldest)) oldest = t
+  }
+  return oldest
+}
+
 function statusesCoverWindow(entry: CacheEntry, windowDays: InsightsWindowDays): boolean {
   // Longer window covers shorter ones when cache is fresh
   return entry.windowDays >= windowDays
@@ -112,6 +124,7 @@ export const useInsightsStore = defineStore('insights', {
   state: (): InsightsState => ({
     windowDays: 30,
     report: null,
+    exportReport: null,
     annual: [],
     isLoading: false,
     isLoadingAnnual: false,
@@ -146,6 +159,31 @@ export const useInsightsStore = defineStore('insights', {
       fetchController = new AbortController()
       const { signal } = fetchController
 
+      /** On-screen report counts followers-only posts; the export copy never does */
+      const render = (statuses: mastodon.v1.Status[], truncated: boolean) => {
+        const input = statuses.filter((s) => s.visibility !== 'direct')
+        const oldest = oldestMs(statuses)
+        const capped = windowTruncated(truncated, oldest, days)
+        this.report = markRaw(
+          buildInsightsReport({
+            account,
+            statuses: input,
+            windowDays: days,
+            truncated: capped,
+            includePrivate: true,
+          }),
+        )
+        this.exportReport = markRaw(
+          buildInsightsReport({
+            account,
+            statuses: input,
+            windowDays: days,
+            truncated: capped,
+            includePrivate: false,
+          }),
+        )
+      }
+
       try {
         const key = cacheKey(account.id)
         const cached = statusCache.get(key)
@@ -154,68 +192,77 @@ export const useInsightsStore = defineStore('insights', {
           Date.now() - cached.fetchedAt < CACHE_TTL_MS &&
           statusesCoverWindow(cached, days)
 
-        let collected: mastodon.v1.Status[]
-        let truncated: boolean
-
         if (fresh && cached) {
-          collected = cached.statuses
-          truncated = cached.truncated
-        } else {
-          const client = activeClient()
-          collected = []
-          truncated = false
-          let maxId: string | undefined
-          // Always fetch up to 90d so shorter windows reuse the cache
-          const fetchDays = Math.max(days, 90) as InsightsWindowDays
-          const cutoff = Date.now() - fetchDays * 86_400_000
+          render(cached.statuses, cached.truncated)
+          return
+        }
 
-          for (let page = 0; page < MAX_PAGES; page++) {
-            if (signal.aborted || gen !== fetchGen) return
-            const batch = await client.v1.accounts.$select(account.id).statuses.list({
-              limit: PAGE_LIMIT,
-              maxId,
-              excludeReplies: false,
-              excludeReblogs: false,
-            } as any)
+        const client = activeClient()
+        const collected: mastodon.v1.Status[] = []
+        let truncated = false
+        let maxId: string | undefined
+        // The requested window decides when the first paint happens; the rest of the 90 days
+        // (so shorter windows reuse the cache) is fetched after, in the background.
+        const fullDays = Math.max(days, 90) as InsightsWindowDays
+        const requestCutoff = Date.now() - days * 86_400_000
+        const fullCutoff = Date.now() - fullDays * 86_400_000
+        let rendered = false
 
-            if (!batch.length) break
-            collected.push(...batch)
+        for (let page = 0; page < MAX_PAGES; page++) {
+          if (signal.aborted || gen !== fetchGen) return
+          const batch = await client.v1.accounts.$select(account.id).statuses.list({
+            limit: PAGE_LIMIT,
+            maxId,
+            excludeReplies: false,
+            excludeReblogs: false,
+          } as any)
+          if (signal.aborted || gen !== fetchGen) return
 
-            const oldest = batch[batch.length - 1]
-            maxId = oldest?.id
-            const oldestTs = oldest?.createdAt ? Date.parse(oldest.createdAt) : NaN
-            if (Number.isFinite(oldestTs) && oldestTs < cutoff) break
-            if (batch.length < PAGE_LIMIT) break
-            if (page === MAX_PAGES - 1) truncated = true
+          if (batch.length) collected.push(...batch)
+
+          const oldest = batch[batch.length - 1]
+          maxId = oldest?.id
+          const oldestTs = oldest?.createdAt ? Date.parse(oldest.createdAt) : NaN
+          const lastPage = page === MAX_PAGES - 1
+          const exhausted = !batch.length || batch.length < PAGE_LIMIT
+          const pastFull = Number.isFinite(oldestTs) && oldestTs < fullCutoff
+          if (lastPage && !exhausted && !pastFull) truncated = true
+
+          const coversRequest =
+            exhausted || lastPage || (Number.isFinite(oldestTs) && oldestTs < requestCutoff)
+          if (!rendered && coversRequest) {
+            rendered = true
+            render(collected, truncated)
+            // First paint done — what follows only warms the cache
+            this.isLoading = false
+            statusCache.set(key, {
+              statuses: collected,
+              truncated,
+              fetchedAt: Date.now(),
+              windowDays: days,
+            })
           }
 
-          if (gen !== fetchGen) return
-          statusCache.set(key, {
-            statuses: collected,
-            truncated,
-            fetchedAt: Date.now(),
-            windowDays: Math.max(days, 90) as InsightsWindowDays,
-          })
+          if (exhausted || pastFull) break
         }
 
         if (gen !== fetchGen) return
-        const exportable = collected.filter(
-          (s) => s.visibility !== 'direct' && s.visibility !== 'private',
-        )
-        // Replaced wholesale, never mutated — skip deep proxies over ~500 rows
-        this.report = markRaw(
-          buildInsightsReport({
-            account,
-            statuses: exportable,
-            windowDays: days,
-            truncated,
-          }),
-        )
+        if (!rendered) render(collected, truncated)
+        statusCache.set(key, {
+          statuses: collected,
+          truncated,
+          fetchedAt: Date.now(),
+          windowDays: fullDays,
+        })
       } catch (e: any) {
         if (e?.name === 'AbortError' || gen !== fetchGen) return
         logError('Insights fetch failed:', e)
-        this.error = e?.message || 'Could not load insights'
-        this.report = null
+        // A failed backfill after a good first paint keeps what's on screen
+        if (!this.report) {
+          this.error = e?.message || 'Could not load insights'
+          this.report = null
+          this.exportReport = null
+        }
       } finally {
         if (gen === fetchGen) {
           this.isLoading = false
@@ -244,6 +291,7 @@ export const useInsightsStore = defineStore('insights', {
     clear() {
       this.abortInFlight()
       this.report = null
+      this.exportReport = null
       this.annual = []
       this.error = null
       this.accountId = null

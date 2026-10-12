@@ -36,9 +36,11 @@ import { createRaceGuard } from '~/composables/useRace'
 import { onDeletedStatus } from '~/composables/useDeletedStatus'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { formatCompact } from '~/utils/insights'
+import { plainDisplayName } from '~/utils/displayName'
 import { useToastStore } from '~/stores/toast'
 import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
 import { logError } from '~/utils/log'
+import { supportsLegalReports } from '~/utils/serverCapabilities'
 
 const profileStore = useProfileStore()
 const instancesStore = useInstancesStore()
@@ -265,8 +267,12 @@ const fullHandle = computed(() => {
   const p = profileStore.viewedProfile
   if (!p) return ''
   if (p.acct.includes('@')) return `@${p.acct}`
+  const activeAcct = instancesStore.activeAccount?.user?.acct || ''
+  if (activeAcct.includes('@')) {
+    return `@${p.username}@${activeAcct.split('@')[1]}`
+  }
   try {
-    const host = new URL(p.url || instancesStore.activeAccount?.url || '').hostname
+    const host = new URL(instancesStore.activeAccount?.url || p.url || '').hostname
     return `@${p.username}@${host}`
   } catch {
     return `@${p.acct || p.username}`
@@ -408,7 +414,10 @@ const runRelationshipAction = async (kind: 'mute' | 'unmute' | 'block' | 'unbloc
 const reportProfile = async () => {
   const p = profileStore.viewedProfile
   if (!p) return
-  const payload = await useOverlayStore().openReport({ accountAcct: p.acct })
+  const payload = await useOverlayStore().openReport({
+    accountAcct: p.acct,
+    allowLegal: supportsLegalReports(instancesStore.serverCapabilities),
+  })
   if (!payload || profileStore.viewedProfile?.id !== p.id) return
   try {
     await profileStore.reportViewedAccount({
@@ -446,7 +455,7 @@ const copyHandle = async () => {
 const chromeTitle = computed(() => {
   const p = profileStore.viewedProfile
   if (!p) return 'Profile'
-  return p.displayName || p.username || 'Profile'
+  return plainDisplayName(p.displayName, p.username || 'Profile')
 })
 
 // Followers modal ref
@@ -469,7 +478,7 @@ const BASE_PROFILE_TABS = [
 const profileTabDefs = computed(() =>
   profileStore.isOwnProfile
     ? [...BASE_PROFILE_TABS, { id: 'insights', label: 'Insights' }]
-    : BASE_PROFILE_TABS,
+    : BASE_PROFILE_TABS.filter((t) => t.id !== 'human'),
 )
 
 // File input refs
@@ -493,12 +502,10 @@ const openCompose = () => {
     placeholder: "What's new?",
     title: 'New post',
     onPosted: async () => {
-      await fetchStatusesGuarded(true, tabFetchOpts.value)
+      await fetchStatusesGuarded(true, optsForTab(profileTab.value))
     },
   })
 }
-
-const tabFetchOpts = computed(() => optsForTab(profileTab.value))
 
 const postsQuery = ref('')
 /** Debounced find-in-feed query — filtering parses every loaded post */
@@ -579,7 +586,11 @@ const setProfileTab = async (
   if (profileTab.value === tab) return
   profileTab.value = tab
   postsQuery.value = ''
-  if (tab === 'insights' || tab === 'human') return
+  if (tab === 'insights' || tab === 'human') {
+    await nextTick()
+    document.getElementById('profile-tab-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
   await fetchStatusesGuarded(true, optsForTab(tab))
 }
 
@@ -587,22 +598,20 @@ const shareProfile = async () => {
   const p = profileStore.viewedProfile
   if (!p) return
   const url = p.url || `${window.location.origin}/profile?user=${encodeURIComponent(p.acct)}`
-  const title = p.displayName || p.username
+  const title = plainDisplayName(p.displayName, p.username)
   try {
     if (navigator.share) {
-      await navigator.share({ title, url, text: `@${p.acct}` })
+      await navigator.share({ title, url, text: fullHandle.value })
       return
     }
-  } catch {
-    /* cancelled */
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
   }
   try {
     await navigator.clipboard.writeText(url)
-    const { useToastStore } = await import('~/stores/toast')
-    useToastStore().show({ message: 'Profile link copied' })
+    toastStore.show({ message: 'Profile link copied' })
   } catch {
-    const { useToastStore } = await import('~/stores/toast')
-    useToastStore().show({ message: 'Couldn’t copy link' })
+    toastStore.show({ message: 'Couldn’t copy link' })
   }
 }
 
@@ -613,20 +622,28 @@ const messageUser = async () => {
     router.push('/login')
     return
   }
-  const { openOrComposeDirect } = await import('~/utils/dmHelpers')
-  await openOrComposeDirect(account, router, {
-    onPosted: async (status) => {
-      const { useConversationsStore } = await import('~/stores/conversations')
-      await useConversationsStore().fetchConversations(true)
-      await router.push(`/status/${status.id}`)
-    },
-  })
+  try {
+    const { openOrComposeDirect } = await import('~/utils/dmHelpers')
+    await openOrComposeDirect(account, router, {
+      onPosted: async (status) => {
+        const { useConversationsStore } = await import('~/stores/conversations')
+        await useConversationsStore().fetchConversations(true)
+        await router.push(`/status/${status.id}`)
+      },
+    })
+  } catch (e) {
+    const friendly = mapErrorToMessage(e)
+    toastStore.show({ message: friendly.detail || friendly.title, duration: 4200 })
+  }
 }
+
+const showLinkedBanner = ref(false)
 
 async function loadProfileFromRoute() {
   const ticket = profileRace.next()
   relationship.value = null
   isFillingTab.value = false
+  postsQuery.value = ''
   const userParam = route.query.user
   const username = typeof userParam === 'string' ? userParam : undefined
 
@@ -678,6 +695,11 @@ onMounted(async () => {
 
   await loadProfileFromRoute()
   profileRouteReady.value = true
+  if (route.query.linked === '1' && !route.query.user) {
+    showLinkedBanner.value = true
+    const { linked: _linked, ...rest } = route.query
+    router.replace({ query: rest })
+  }
 })
 
 // `account` switches the read override (set by the watcher above) — reload with it, or the
@@ -838,11 +860,11 @@ const triggerHeaderUpload = () => {
 }
 
 useHead({
-  title: computed(() => 
-    profileStore.viewedProfile 
-      ? `${profileStore.viewedProfile.displayName || profileStore.viewedProfile.username} | NeoSpace`
-      : 'Profile | NeoSpace'
-  ),
+  title: computed(() => {
+    const p = profileStore.viewedProfile
+    if (!p) return 'Profile | NeoSpace'
+    return `${plainDisplayName(p.displayName, p.username)} | NeoSpace`
+  }),
 })
 </script>
 
@@ -927,7 +949,7 @@ useHead({
       :account="profileStore.viewedProfile"
     />
     
-    <p v-if="route.query.linked === '1' && !route.query.user" class="profile-linked-banner" role="status">
+    <p v-if="showLinkedBanner" class="profile-linked-banner" role="status">
       Linked. Tap your name to switch.
     </p>
 
@@ -1012,14 +1034,14 @@ useHead({
               </button>
               <span v-if="softwareLabel" class="profile-handle__badge" :title="softwareLabel">{{ softwareLabel }}</span>
               <span v-for="chip in relationshipChips" :key="chip" class="profile-chip profile-chip--rel">{{ chip }}</span>
-              <span v-if="profileStore.viewedProfile.bot" class="profile-chip">bot</span>
+              <span v-if="profileStore.viewedProfile.bot" class="profile-chip profile-chip--rel">Bot</span>
               <span
                 v-if="profileStore.viewedProfile.locked"
                 class="profile-chip profile-chip--lock"
-                title="Private"
+                title="Approves followers"
               >
                 <NeoIcon name="lock" :size="12" :stroke="2" aria-hidden="true" />
-                <span class="sr-only">Private account</span>
+                <span class="sr-only">Approves followers</span>
               </span>
             </p>
           </div>
@@ -1043,6 +1065,8 @@ useHead({
               ref="avatarInput"
               type="file"
               accept="image/*"
+              aria-label="Choose avatar image"
+              tabindex="-1"
               class="hidden-input"
               @change="handleAvatarChange"
             />
@@ -1274,6 +1298,8 @@ useHead({
             ref="headerInput"
             type="file"
             accept="image/*"
+            aria-label="Choose header image"
+            tabindex="-1"
             class="hidden-input"
             @change="handleHeaderChange"
           />
@@ -1307,7 +1333,7 @@ useHead({
                 :aria-label="`Remove field ${index + 1}`"
                 @click="profileStore.removeField(index)"
               >
-                ✕
+                <NeoIcon name="x" :size="14" :stroke="2.5" aria-hidden="true" />
               </button>
             </div>
             <button
@@ -1355,7 +1381,7 @@ useHead({
             v-model="postsQuery"
             type="search"
             class="profile-search__input"
-            placeholder="Search posts…"
+            placeholder="Find in loaded posts…"
             autocomplete="off"
             enterkeyhint="search"
           />
@@ -1464,7 +1490,7 @@ useHead({
               v-if="profileStore.hasMoreStatuses && !profileStore.isLoadingStatuses && !isFillingTab"
               type="button"
               class="neo-btn neo-btn--secondary profile-load-more"
-              @click="fetchStatusesGuarded(false, tabFetchOpts)"
+              @click="fetchStatusesGuarded(false, optsForTab(profileTab))"
             >
               Load more
             </button>
@@ -1539,6 +1565,7 @@ useHead({
 .profile-chip--rel {
   background: var(--neo-accent-soft);
   color: var(--neo-text-secondary);
+  text-transform: none;
 }
 
 .profile-social__posts {

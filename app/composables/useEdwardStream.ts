@@ -7,6 +7,8 @@ import { watch } from 'vue'
 import { useEdwardStore, EDWARD_MAX_BALLS, newestIdPerInstance } from '~/stores/edward'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
+import { onDeletedStatus } from '~/composables/useDeletedStatus'
+import { matchesDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 import { statusIdentity, dedupeStatusesByIdentity } from '~/utils/statusIdentity'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 import { publicClient } from '~/composables/useMasto'
@@ -124,6 +126,24 @@ export function useEdwardStream() {
     if (changed) syncBackpackCount()
   }
   watch(() => edward.excludedAuthors, purgeExcluded)
+
+  /** A deleted post must not drip onto the stage later either */
+  let stopDeletedListen: (() => void) | null = null
+  const purgeDeleted = (event: DeletedStatusEvent) => {
+    edward.removeDeletedStatus(event)
+    let changed = false
+    for (const src of Object.keys(backpack) as EdwardSource[]) {
+      const keep: ExtendedStatus[] = []
+      for (const s of backpack[src]) {
+        if (matchesDeletedStatus(s, event)) {
+          backpackKeys.delete(statusIdentity(s))
+          changed = true
+        } else keep.push(s)
+      }
+      backpack[src] = keep
+    }
+    if (changed) syncBackpackCount()
+  }
 
   /** Weighted round-robin across sources so the field stays varied */
   const takeNext = (): ExtendedStatus | null => {
@@ -567,6 +587,8 @@ export function useEdwardStream() {
   const start = async () => {
     if (running) return
     running = true
+    stopDeletedListen?.()
+    stopDeletedListen = onDeletedStatus(purgeDeleted)
     affinityLoaded = false
     pollCount = 0
     failStreak = 0
@@ -588,6 +610,8 @@ export function useEdwardStream() {
 
   const stop = () => {
     running = false
+    stopDeletedListen?.()
+    stopDeletedListen = null
     generation += 1
     inFlight = false
     affinityLoaded = false
@@ -602,6 +626,7 @@ export function useEdwardStream() {
     }
     for (const src of Object.keys(backpack) as EdwardSource[]) backpack[src] = []
     backpackKeys.clear()
+    syncBackpackCount()
     homeSince = null
     for (const k of Object.keys(tagSince)) delete tagSince[k]
     if (typeof document !== 'undefined') {

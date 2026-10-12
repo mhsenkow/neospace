@@ -87,7 +87,11 @@ export function formatCompactRelativeTime(
   if (!Number.isFinite(then.getTime()) || !Number.isFinite(base.getTime())) return ''
 
   const loc = locale || (typeof navigator !== 'undefined' ? navigator.language : 'en')
-  const elapsed = Math.max(0, (base.getTime() - then.getTime()) / 1000)
+  const diff = (base.getTime() - then.getTime()) / 1000
+  // Scheduled posts: a time clearly in the future gets a short date, not "now".
+  // Under a minute is just clock skew.
+  if (diff < -60) return formatCompactDate(then, base, loc)
+  const elapsed = Math.max(0, diff)
 
   if (elapsed < 7 * 86_400) {
     for (const { seconds, unit } of COMPACT_UNITS) {
@@ -101,6 +105,10 @@ export function formatCompactRelativeTime(
     return getRtf(loc).format(0, 'second')
   }
 
+  return formatCompactDate(then, base, loc)
+}
+
+function formatCompactDate(then: Date, base: Date, loc: string): string {
   const withYear = then.getFullYear() !== base.getFullYear()
   return cachedFormat(
     `d|${loc}|${withYear ? 'y' : ''}`,
@@ -114,6 +122,20 @@ export function formatCompactRelativeTime(
 }
 
 /** Full localized date/time for `<time title>` / tooltips. */
+/** Mastodon `last_status_at` is often a calendar date — compare local midnights, not UTC hours. */
+export function accountActiveLabel(lastStatusAt: string, locale?: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(lastStatusAt.trim())
+  if (!m) return `active ${formatCompactRelativeTime(lastStatusAt, undefined, locale)}`
+  const then = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  then.setHours(0, 0, 0, 0)
+  const diffDays = Math.round((today.getTime() - then.getTime()) / 86_400_000)
+  if (diffDays <= 0) return 'active today'
+  if (diffDays === 1) return 'active yesterday'
+  return `active ${diffDays} days ago`
+}
+
 export function formatAbsoluteTime(
   date: Date | string | number,
   locale?: string,

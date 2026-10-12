@@ -35,8 +35,15 @@ function select(value: string) {
 function onKeydown(e: KeyboardEvent, index: number) {
   const n = props.options.length
   if (!n) return
+  if (e.altKey || e.ctrlKey || e.metaKey) return
   let next = index
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+  if (e.key === 'Home') {
+    e.preventDefault()
+    next = 0
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    next = n - 1
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     e.preventDefault()
     next = (index + 1) % n
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
@@ -127,8 +134,14 @@ function onKeydown(e: KeyboardEvent, index: number) {
     width: 100%;
   }
 
+  .neo-radio-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+    gap: 2px;
+  }
+
   .neo-radio-group__btn {
-    flex: 1 1 calc(33.333% - 2px);
+    flex: unset;
     padding: 0.45rem 0.5rem;
   }
 }

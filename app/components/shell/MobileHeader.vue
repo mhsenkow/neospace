@@ -35,7 +35,7 @@ const openSearch = () => {
     <NuxtLink
       to="/"
       class="mobile-header__logo"
-      aria-label="neospace home"
+      aria-label="NeoSpace home"
       @click="void goHome()"
     >
       <NeoMark :show-brand="false" :active="route.path === '/'" />
