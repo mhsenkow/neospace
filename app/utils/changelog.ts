@@ -17,22 +17,23 @@ export type ChangelogEntry = {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     date: '2026-10-12',
-    title: 'Safety, compose, and trust pass',
+    title: 'Big safety & polish day',
     summary:
-      'Cross-server actions are safer, compose gained polls and real upload progress, and busy feeds no longer silently drop posts.',
+      'Safer cross-server actions, stronger compose, quieter Edward, and a clearer Settings experience — plus this What’s new feed.',
     highlights: [
       'Mute, block, report, and reply use full @user@host identities — no more lookalike mix-ups',
       'Content warnings hide previews, polls, and media until you expand them',
       'Busy timelines catch up correctly; a banner appears if anything may still be missing',
       'Board full? You’re asked before a column is replaced (with Undo)',
-      'Drafts are per-account (Save draft & close, drafts list, reply/group restore)',
-      'Compose: polls, schedule queue, upload progress/cancel, @ / # / :emoji: autocomplete',
+      'Drafts are per-account — Save draft & close, drafts list, reply/group restore',
+      'Compose: polls (including hide vote counts), schedule queue, upload progress/cancel, @ / # / :emoji: autocomplete',
       'Own posts: delete, delete & redraft, and pin/unpin — bound to the right account',
       'Notifications stay unread until you mark them; mobile chat Enter inserts a newline',
-      'Fonts are self-hosted; Settings → What’s new has this TLDR',
-      'Hardened leave-a-note; stronger CI (browser + a11y + real lint); groups/shell/Edward polish',
-      'PWA updates no longer hijack mid-session; shared feed menus; quieter Edward when recessed',
-      'Settings panels split out; Edward uses less GPU idle time; compose polls and shell polish',
+      'Fonts are self-hosted (no Google Fonts calls); Settings panels are clearer to navigate',
+      'PWA updates wait politely instead of hijacking mid-session',
+      'Edward: less GPU drain when idle/recessed, clearer hover cards, Restart 3D if the scene glitches',
+      'Leave-a-note feedback hardened; stronger CI (browser + a11y + real lint)',
+      'Shared feed menus, shell polish, and lots of small UX fixes across groups and ranked feeds',
     ],
   },
   {
