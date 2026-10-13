@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CMD="${1:-sync}"
-WORKSPACE="ios/App/App.xcworkspace"
+PROJECT="ios/App/App.xcodeproj"
 SCHEME="App"
 ARCHIVE_PATH="ios/build/NeoSpace.xcarchive"
 EXPORT_PATH="ios/build"
@@ -35,29 +35,10 @@ case "$CMD" in
   build)
     npm run ios:sync
     test -d ios/App || { echo "Missing ios/ — run: npx cap add ios" >&2; exit 1; }
-    if [[ ! -f "$EXPORT_PLIST" ]]; then
-      mkdir -p ios
-      cat > "$EXPORT_PLIST" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key>
-  <string>app-store-connect</string>
-  <key>destination</key>
-  <string>export</string>
-  <key>signingStyle</key>
-  <string>automatic</string>
-  <key>teamID</key>
-  <string>WC44W2QVE4</string>
-  <key>uploadSymbols</key>
-  <true/>
-</dict>
-</plist>
-PLIST
-    fi
+    test -f "$EXPORT_PLIST" || { echo "Missing $EXPORT_PLIST" >&2; exit 1; }
     mkdir -p ios/build
-    xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" \
+    # Capacitor 8 SPM project — use .xcodeproj (no CocoaPods workspace)
+    xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
       -configuration Release -destination 'generic/platform=iOS' \
       -archivePath "$ARCHIVE_PATH" archive
     xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" \

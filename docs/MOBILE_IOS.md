@@ -27,7 +27,9 @@ npm run ios:xcode   # sync then open
 2. Enable Associated Domains on the Xcode target: `applinks:neospace.ibm.io`.
 3. URL Types → URL Schemes: `neospace` (for scheme fallback).
 4. App Store Connect → new app → bundle ID matches.
-5. Deploy web so `/.well-known/apple-app-site-association` is live (see `public/.well-known/`).
+5. Deploy web so AASA is live:
+   - https://neospace.ibm.io/apple-app-site-association (static)
+   - https://neospace.ibm.io/.well-known/apple-app-site-association (Pages Function)
 
 ## OAuth flow
 
