@@ -6,6 +6,7 @@
 import { useThemeStore } from '~/stores/theme'
 import { useInstancesStore } from '~/stores/instances'
 import { friendlyAuthError } from '~/utils/authErrors'
+import { closeOAuthBrowser } from '~/utils/nativeAuth'
 import { clearPendingAuth, peekPendingAuth, sanitizeReturnTo } from '~/utils/oauthPkce'
 import { useToastStore } from '~/stores/toast'
 
@@ -46,6 +47,9 @@ const scrubUrl = () => {
 }
 
 onMounted(async () => {
+  // Native shell may still have the system browser sheet open from authorize
+  void closeOAuthBrowser()
+
   // Repeated params arrive as arrays — only a single string is a real code/state
   const code = typeof route.query.code === 'string' ? route.query.code : ''
   const errorParam = route.query.error ? String(route.query.error) : ''

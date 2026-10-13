@@ -50,6 +50,7 @@ import {
   requireAccessToken,
   writeCachedOAuthApp,
 } from '~/utils/oauthApp'
+import { oauthRedirectUri } from '~/utils/nativeShell'
 import {
   freezeCapabilities,
   isCapabilitiesStale,
@@ -162,10 +163,7 @@ function rememberRemoteInstanceInfo(key: string, entry: InstanceInfoCacheEntry) 
   }
 }
 
-const getRedirectUri = () => {
-  if (typeof window === 'undefined') return 'http://localhost:3000/auth/callback'
-  return `${window.location.origin}/auth/callback`
-}
+const getRedirectUri = () => oauthRedirectUri()
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
 

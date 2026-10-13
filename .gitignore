@@ -30,3 +30,14 @@ logs
 coverage/
 playwright-report/
 test-results/
+
+# Capacitor / Xcode
+/ios/App/Pods
+/ios/App/build
+/ios/build
+/ios/DerivedData
+/ios/App/App/public/
+!/ios/App/App/public/.gitkeep
+*.xcuserstate
+*.ipa
+*.xcarchive

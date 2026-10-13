@@ -29,3 +29,11 @@
 /manifest.webmanifest
   Cache-Control: public, max-age=0, must-revalidate
   Content-Type: application/manifest+json
+
+# Apple Universal Links (OAuth return into the iOS app)
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=300
+/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=300

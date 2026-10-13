@@ -6,6 +6,7 @@
 import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { friendlyServerError } from '~/utils/instances'
+import { openOAuthAuthorize } from '~/utils/nativeAuth'
 import { sanitizeReturnTo } from '~/utils/oauthPkce'
 
 const instancesStore = useInstancesStore()
@@ -110,7 +111,7 @@ const startLogin = async (url: string) => {
       returnTo: returnTo.value,
     })
     if (attempt !== loginAttempt) return
-    window.location.href = authUrl
+    await openOAuthAuthorize(authUrl)
   } catch (e) {
     if (attempt !== loginAttempt) return
     pickerRef.value?.setError(friendlyServerError(e))

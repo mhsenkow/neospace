@@ -2,6 +2,7 @@
 import { useInstancesStore } from '~/stores/instances'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
+import { openOAuthAuthorize } from '~/utils/nativeAuth'
 import { stripHtml } from '~/utils/stripHtml'
 import { plainDisplayName } from '~/utils/displayName'
 
@@ -95,7 +96,7 @@ const handleLogin = async () => {
 
   try {
     const authUrl = await instancesStore.loginWithInstance(`https://${domain.value}`, { returnTo: route.fullPath })
-    window.location.href = authUrl
+    await openOAuthAuthorize(authUrl)
   } catch (e: any) {
     addError.value = friendlyServerError(e)
     isSigningIn.value = false

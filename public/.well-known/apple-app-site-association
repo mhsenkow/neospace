@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "WC44W2QVE4.io.ibm.neospace",
+        "paths": ["/auth/callback", "/auth/callback/*"]
+      }
+    ]
+  }
+}

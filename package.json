@@ -29,9 +29,17 @@
     "analyze": "nuxt analyze",
     "cf:preview": "npm run generate && wrangler pages dev",
     "cf:deploy": "npm run generate && wrangler pages deploy --commit-dirty=true",
-    "cf:deploy:ci": "npm run generate && wrangler pages deploy"
+    "cf:deploy:ci": "npm run generate && wrangler pages deploy",
+    "ios:sync": "npm run generate && npx cap sync ios",
+    "ios:open": "npx cap open ios",
+    "ios:xcode": "npm run ios:sync && npx cap open ios"
   },
   "dependencies": {
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
     "@pinia/nuxt": "^0.11.3",
     "dompurify": "^3.4.16",
     "masto": "^7.12.0",

@@ -2,6 +2,7 @@
 import type { CuratedInstance } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { formatMonthlyActive, friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
+import { openOAuthAuthorize } from '~/utils/nativeAuth'
 import { getMainScroller } from '~/utils/pageScroll'
 
 const props = defineProps<{
@@ -104,7 +105,7 @@ const handleSignIn = async () => {
     const authUrl = await instancesStore.loginWithInstance(`https://${props.instance.domain}`, {
       returnTo: route.fullPath,
     })
-    window.location.href = authUrl
+    await openOAuthAuthorize(authUrl)
   } catch (e) {
     actionError.value = friendlyServerError(e)
     isSigningIn.value = false

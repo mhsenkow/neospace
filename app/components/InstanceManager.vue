@@ -9,6 +9,7 @@ import { useToastStore } from '~/stores/toast'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { switchActiveAccount } from '~/composables/useSwitchAccount'
 import { normalizeServer, friendlyServerError } from '~/utils/instances'
+import { openOAuthAuthorize } from '~/utils/nativeAuth'
 import { plainDisplayName } from '~/utils/displayName'
 
 const instancesStore = useInstancesStore()
@@ -128,7 +129,7 @@ const signIn = async (instance: ConnectedInstance) => {
     // Land back on this page after approving, not on Home
     const authUrl = await instancesStore.startAuth(instance.id, { returnTo: route.fullPath })
     // Success navigates away — keep the busy state so the button doesn't flip back meanwhile
-    window.location.href = authUrl
+    await openOAuthAuthorize(authUrl)
   } catch (e) {
     // One error surface: the inline row message (role="alert")
     signInErrors.value = { ...signInErrors.value, [instance.id]: friendlyServerError(e) }

@@ -7,6 +7,8 @@ Multi-column Fediverse client for Mastodon, GoToSocial, and other ActivityPub-co
 
 **Live:** [neospace.ibm.io](https://neospace.ibm.io) · [neospace-dc4.pages.dev](https://neospace-dc4.pages.dev)
 
+**iOS (TestFlight):** Capacitor shell — see [docs/MOBILE_IOS.md](docs/MOBILE_IOS.md). `npm run ios:xcode` after Apple team signing is set up.
+
 ---
 
 ## What NeoSpace is
