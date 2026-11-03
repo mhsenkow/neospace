@@ -14,6 +14,7 @@ import {
   FONT_OPTIONS,
   FONT_SIZE_OPTIONS,
   LINE_OPTIONS,
+  MOTION_OPTIONS,
   RADIUS_OPTIONS,
   THEME_OPTIONS,
   UI_OPTIONS,
@@ -22,6 +23,7 @@ import {
   type NeoFontId,
   type NeoFontSizeId,
   type NeoLineId,
+  type NeoMotionId,
   type NeoRadiusId,
   type NeoThemeId,
   type NeoUiId,
@@ -60,6 +62,7 @@ const appearanceForm = reactive({
   radius: 'match' as NeoRadiusId,
   density: 'cozy' as NeoDensityId,
   line: 'clean' as NeoLineId,
+  motion: 'match' as NeoMotionId,
   reduceMotion: false,
   customProfileCss: false,
   flipTextAlign: 'center' as 'left' | 'center' | 'right',
@@ -87,6 +90,7 @@ watch(() => settingsStore.localPreferences, (prefs) => {
     appearanceForm.radius = prefs.radius
     appearanceForm.density = prefs.density
     appearanceForm.line = prefs.line
+    appearanceForm.motion = prefs.motion
     appearanceForm.reduceMotion = prefs.reduceMotion
     appearanceForm.customProfileCss = prefs.customProfileCss
     appearanceForm.flipTextAlign = prefs.flipTextAlign
@@ -103,6 +107,7 @@ const saveAppearance = () => {
     radius: appearanceForm.radius,
     density: appearanceForm.density,
     line: appearanceForm.line,
+    motion: appearanceForm.motion,
     reduceMotion: appearanceForm.reduceMotion,
     customProfileCss: appearanceForm.customProfileCss,
     flipTextAlign: appearanceForm.flipTextAlign,
@@ -236,6 +241,23 @@ const onLineChange = (value: string) => {
   saveAppearance()
 }
 
+const onMotionChange = (value: NeoMotionId) => {
+  appearanceForm.motion = value
+  appearanceForm.reduceMotion = value === 'still'
+  settingsStore.updateAppearance({ motion: value })
+  settingsStore.clearSuccess()
+}
+
+const onReduceMotionToggle = () => {
+  appearanceForm.motion = appearanceForm.reduceMotion
+    ? 'still'
+    : appearanceForm.motion === 'still'
+      ? 'match'
+      : appearanceForm.motion
+  settingsStore.updateAppearance({ reduceMotion: appearanceForm.reduceMotion })
+  settingsStore.clearSuccess()
+}
+
 const hasProfileCss = computed(() => !!instancesStore.userCustomCSS)
 
 const themeOptions = [
@@ -258,6 +280,7 @@ const densityOptions = DENSITY_OPTIONS
 const densityRadioOptions = DENSITY_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
 const lineOptions = LINE_OPTIONS
 const lineRadioOptions = LINE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
+const motionOptions = MOTION_OPTIONS
 
 const fontPreviewStack = (fontId: NeoFontId) => {
   const ui = appearanceForm.ui || 'braun'
@@ -448,16 +471,43 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <fieldset class="settings-fieldset">
         <legend class="settings-subheading">Motion &amp; accessibility</legend>
+      <p class="settings-hint">
+        Twelve Principles motion personality — hover or tap a card to feel its squash, arc, and settle.
+      </p>
+      <div class="settings-motion-grid" role="radiogroup" aria-label="Motion personality">
+        <label
+          v-for="option in motionOptions"
+          :key="option.id"
+          :class="['settings-motion-card', { active: appearanceForm.motion === option.id }]"
+          :data-preview-motion="option.id"
+        >
+          <input
+            :checked="appearanceForm.motion === option.id"
+            type="radio"
+            name="settings-motion"
+            :value="option.id"
+            class="settings-radio-hidden"
+            @change="onMotionChange(option.id)"
+          />
+          <span class="settings-motion-card__stage" aria-hidden="true">
+            <span class="settings-motion-card__trail" />
+            <span class="settings-motion-card__orb" />
+          </span>
+          <span class="settings-motion-card__label">{{ option.label }}</span>
+          <span class="settings-motion-card__desc">{{ option.desc }}</span>
+        </label>
+      </div>
+
       <label class="settings-toggle">
         <div class="settings-toggle__info">
           <span class="settings-toggle__label">Reduce motion</span>
-          <span class="settings-toggle__desc">Disable animations and auto-playing content</span>
+          <span class="settings-toggle__desc">Disable animations and auto-playing content (sets Motion to Still)</span>
         </div>
         <input
           v-model="appearanceForm.reduceMotion"
           type="checkbox"
           class="settings-checkbox"
-          @change="saveAppearance"
+          @change="onReduceMotionToggle"
         />
       </label>
       </fieldset>
@@ -791,10 +841,128 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   }
 }
 
+.settings-motion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 0.625rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-motion-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.625rem;
+  background: var(--neo-bg-primary);
+  border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+  border-radius: var(--neo-radius-sm, 4px);
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    border-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
+
+  &:hover {
+    border-color: var(--neo-border-color-dark);
+  }
+
+  &:active {
+    transform: scale3d(var(--neo-press-squash-x, 1.06), var(--neo-press-squash-y, 0.91), 1);
+  }
+
+  &.active {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  &__stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 4px;
+    margin-bottom: 0.15rem;
+    border-radius: 999px;
+    background: var(--neo-bg-tertiary);
+    overflow: hidden;
+  }
+
+  &__trail {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    height: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--neo-text-muted) 35%, transparent);
+  }
+
+  &__orb {
+    position: relative;
+    z-index: 1;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--neo-accent);
+    transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  &[data-preview-motion='lively'] &__orb,
+  &[data-preview-motion='match'] &__orb {
+    transition: transform 320ms cubic-bezier(0.34, 1.68, 0.64, 1);
+  }
+
+  &[data-preview-motion='crisp'] &__orb {
+    border-radius: 2px;
+    transition: transform 170ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  &[data-preview-motion='editorial'] &__orb {
+    transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  &[data-preview-motion='still'] &__orb {
+    background: var(--neo-text-muted);
+    transition: none;
+  }
+
+  &:hover &__orb,
+  &.active &__orb {
+    transform: translateX(26px) scale(1.12);
+  }
+
+  &[data-preview-motion='lively']:hover &__orb,
+  &[data-preview-motion='match']:hover &__orb {
+    transform: translateX(28px) translateY(-2px) scale3d(1.18, 0.88, 1);
+  }
+
+  &[data-preview-motion='editorial']:hover &__orb {
+    transform: translateX(24px) scale(1.02);
+  }
+
+  &[data-preview-motion='still']:hover &__orb,
+  &[data-preview-motion='still'].active &__orb {
+    transform: none;
+  }
+
+  &__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    line-height: 1.3;
+  }
+}
+
 @media (max-width: 768px) {
   .settings-theme-grid,
   .settings-chrome-grid,
-  .settings-font-grid {
+  .settings-font-grid,
+  .settings-motion-grid {
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   }
 }
@@ -802,7 +970,8 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 @media (max-width: 480px) {
   .settings-theme-grid,
   .settings-chrome-grid,
-  .settings-font-grid {
+  .settings-font-grid,
+  .settings-motion-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

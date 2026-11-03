@@ -233,7 +233,9 @@ const imgStyle = computed(() => {
   gap: 0.75rem;
   margin: 0;
   max-width: 100%;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out)),
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 }
 
 .neo-lightbox__close {
@@ -278,6 +280,7 @@ const imgStyle = computed(() => {
   border-radius: var(--neo-radius-sm);
   user-select: none;
   -webkit-user-drag: none;
+  animation: lightbox-media-in var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out)) both;
 
   // Leave room for the caption when there is one
   .neo-lightbox__figure:has(.neo-lightbox__alt) & {
@@ -297,6 +300,30 @@ const imgStyle = computed(() => {
   white-space: pre-line;
   // The root's `pinch-zoom` would block one-finger scrolling of long alt text
   touch-action: pan-y;
+  animation: lightbox-caption-in var(--neo-dur-normal, 240ms) var(--neo-ease-out)
+    var(--neo-delay-secondary, 50ms) both;
+}
+
+@keyframes lightbox-media-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes lightbox-caption-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .neo-lightbox__loading {

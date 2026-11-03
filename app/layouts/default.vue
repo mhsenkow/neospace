@@ -581,13 +581,13 @@ watch(
   }
 
   &:hover {
-    transform: translateY(-1px);
+    transform: translateY(var(--neo-hover-lift, -2px)) scale(1.03);
     box-shadow:
       0 4px 12px color-mix(in srgb, var(--neo-text-primary) 26%, transparent),
       0 14px 32px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
 
     :deep(.neo-icon) {
-      transform: rotate(90deg);
+      transform: rotate(90deg) scale(1.08);
     }
   }
 
@@ -597,7 +597,13 @@ watch(
   }
 
   &:active {
-    transform: scale(0.91);
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: translateY(var(--neo-anticipate-y, 2px))
+      scale3d(var(--neo-press-squash-x, 1.08), var(--neo-press-squash-y, 0.88), 1);
+
+    :deep(.neo-icon) {
+      transform: rotate(45deg) scale(0.9);
+    }
   }
 }
 

@@ -190,12 +190,21 @@ const rootStyle = computed(() => ({
   transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .neo-sheet__panel {
-    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-spring, var(--neo-ease-out));
   }
 
+  /* Principle 5: Overlapping Action — header, body, and footer settle in layered cascade */
   .neo-sheet__panel > * {
     animation: neo-sheet-body-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
-    animation-delay: 40ms;
+    animation-delay: var(--neo-delay-secondary, 50ms);
+  }
+
+  .neo-sheet__panel > :first-child {
+    animation-delay: calc(var(--neo-delay-secondary, 50ms) * 0.5);
+  }
+
+  .neo-sheet__panel > :last-child {
+    animation-delay: calc(var(--neo-delay-secondary, 50ms) * 1.5);
   }
 }
 
@@ -212,10 +221,10 @@ const rootStyle = computed(() => ({
   opacity: 0;
 
   .neo-sheet__panel {
-    transform: translateY(18px);
+    transform: translateY(20px) scale(0.985);
 
     @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-      transform: translateY(8px) scale(0.98);
+      transform: translateY(10px) scale(0.96);
     }
   }
 }

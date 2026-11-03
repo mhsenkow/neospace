@@ -2903,10 +2903,14 @@ useHead({ title: 'Home | NeoSpace' })
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    transition: color 0.18s ease, background 0.18s ease;
+    transition:
+      color var(--neo-transition-fast),
+      background-color var(--neo-transition-fast),
+      transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
 
     &:active:not(:disabled) {
-      transform: scale(0.96);
+      transition-duration: var(--neo-dur-instant, 90ms);
+      transform: scale3d(var(--neo-press-squash-x, 1.06), var(--neo-press-squash-y, 0.91), 1);
     }
 
     &--flip {
@@ -2985,10 +2989,10 @@ useHead({ title: 'Home | NeoSpace' })
       box-shadow: none;
       color: var(--neo-text-tertiary);
       transition:
-        color 0.16s ease,
-        background-color 0.16s ease,
-        box-shadow 0.16s ease,
-        transform 0.12s ease;
+        color var(--neo-transition-fast),
+        background-color var(--neo-transition-fast),
+        box-shadow var(--neo-transition-fast),
+        transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
 
       &[aria-selected='true'] {
         color: var(--neo-text-primary);
@@ -2997,7 +3001,8 @@ useHead({ title: 'Home | NeoSpace' })
       }
 
       &:active {
-        transform: scale(0.97);
+        transition-duration: var(--neo-dur-instant, 90ms);
+        transform: scale3d(var(--neo-press-squash-x, 1.06), var(--neo-press-squash-y, 0.91), 1);
       }
 
       &:focus-visible {
@@ -3018,7 +3023,9 @@ useHead({ title: 'Home | NeoSpace' })
   &__flip {
     position: absolute;
     inset: 0;
-    transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    transition:
+      opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
   }
 
   &__flow {

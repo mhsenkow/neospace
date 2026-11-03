@@ -847,12 +847,34 @@ const TABS: { id: PreviewTab; label: string }[] = [
   border: 1px solid color-mix(in srgb, var(--neo-info) 40%, transparent);
 }
 
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.2s ease;
+.modal-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .preview-modal {
-    transition: transform 0.2s ease;
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-spring, var(--neo-ease-out));
+  }
+
+  .preview-header {
+    animation: preview-layer-in var(--neo-dur-normal, 240ms) var(--neo-ease-out)
+      calc(var(--neo-delay-secondary, 50ms) * 0.4) both;
+  }
+
+  .preview-body {
+    animation: preview-layer-in var(--neo-dur-normal, 240ms) var(--neo-ease-out)
+      var(--neo-delay-secondary, 50ms) both;
+  }
+
+  .preview-footer {
+    animation: preview-layer-in var(--neo-dur-normal, 240ms) var(--neo-ease-out)
+      calc(var(--neo-delay-secondary, 50ms) * 1.5) both;
+  }
+}
+
+.modal-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .preview-modal {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -861,7 +883,18 @@ const TABS: { id: PreviewTab; label: string }[] = [
   opacity: 0;
 
   .preview-modal {
-    transform: scale(0.95) translateY(20px);
+    transform: scale(0.95) translateY(18px);
+  }
+}
+
+@keyframes preview-layer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

@@ -116,12 +116,13 @@
   --neo-spacing-unit: #{vars.$spacing-unit};
   
   // === Motion (Twelve Principles) ===
-  // Directional easing: Slow Out / Slow In / on-screen / follow-through
+  // Directional easing: Slow Out / Slow In / on-screen / follow-through / anticipation
   --neo-ease-out: #{vars.$ease-out};
   --neo-ease-in: #{vars.$ease-in};
   --neo-ease-in-out: #{vars.$ease-io};
   --neo-ease-spring: #{vars.$ease-spring};
   --neo-ease-bounce: #{vars.$ease-bounce};
+  --neo-ease-anticipate: #{vars.$ease-anticipate};
 
   // Weight & enter/exit asymmetry (entrances ~35% longer than exits)
   --neo-dur-instant: #{vars.$dur-instant};
@@ -133,11 +134,25 @@
   --neo-dur-slow: #{vars.$dur-slow};
   --neo-dur-slower: #{vars.$dur-slower};
 
+  // Principle 1 & 2: Squash & Stretch + Anticipation
+  --neo-press-scale: #{vars.$press-scale};
+  --neo-press-squash-x: #{vars.$press-squash-x};
+  --neo-press-squash-y: #{vars.$press-squash-y};
+  --neo-anticipate-y: #{vars.$anticipate-y};
+  --neo-hover-lift: #{vars.$hover-lift};
+
+  // Principle 5, 7, 8 & 10: Follow-through, Arcs, Secondary Action, Exaggeration
+  --neo-overshoot-scale: #{vars.$overshoot-scale};
+  --neo-arc-x: #{vars.$arc-x};
+  --neo-arc-y: #{vars.$arc-y};
+  --neo-delay-secondary: #{vars.$delay-secondary};
+  --neo-stagger-step: #{vars.$stagger-step};
+
   // Composite transitions (duration + default Slow Out)
-  --neo-transition-fast: #{vars.$transition-fast};
-  --neo-transition-normal: #{vars.$transition-normal};
-  --neo-transition-slow: #{vars.$transition-slow};
-  --neo-transition-slower: #{vars.$transition-slower};
+  --neo-transition-fast: var(--neo-dur-quick) var(--neo-ease-out);
+  --neo-transition-normal: var(--neo-dur-normal) var(--neo-ease-out);
+  --neo-transition-slow: var(--neo-dur-slow) var(--neo-ease-out);
+  --neo-transition-slower: var(--neo-dur-slower) var(--neo-ease-out);
   --neo-transition: var(--neo-transition-normal);
 
   --neo-transition-timing-ease: #{vars.$transition-timing-ease};
@@ -293,9 +308,20 @@ html[data-rail] {
   :root {
     --neo-ease-spring: var(--neo-ease-out);
     --neo-ease-bounce: var(--neo-ease-out);
+    --neo-ease-anticipate: var(--neo-ease-out);
     --neo-dur-celebrate: var(--neo-dur-quick);
     --neo-dur-sheet-enter: var(--neo-dur-quick);
     --neo-dur-sheet-leave: var(--neo-dur-instant);
+    --neo-press-scale: 1;
+    --neo-press-squash-x: 1;
+    --neo-press-squash-y: 1;
+    --neo-anticipate-y: 0px;
+    --neo-hover-lift: 0px;
+    --neo-overshoot-scale: 1;
+    --neo-arc-x: 0px;
+    --neo-arc-y: 0px;
+    --neo-delay-secondary: 0ms;
+    --neo-stagger-step: 0ms;
   }
 
   .notes-fab,
@@ -304,12 +330,24 @@ html[data-rail] {
   }
 }
 
-html.reduce-motion {
+html.reduce-motion,
+html[data-motion='still'] {
   --neo-ease-spring: var(--neo-ease-out);
   --neo-ease-bounce: var(--neo-ease-out);
+  --neo-ease-anticipate: var(--neo-ease-out);
   --neo-dur-celebrate: var(--neo-dur-quick);
   --neo-dur-sheet-enter: var(--neo-dur-quick);
   --neo-dur-sheet-leave: var(--neo-dur-instant);
+  --neo-press-scale: 1;
+  --neo-press-squash-x: 1;
+  --neo-press-squash-y: 1;
+  --neo-anticipate-y: 0px;
+  --neo-hover-lift: 0px;
+  --neo-overshoot-scale: 1;
+  --neo-arc-x: 0px;
+  --neo-arc-y: 0px;
+  --neo-delay-secondary: 0ms;
+  --neo-stagger-step: 0ms;
 
   *,
   *::before,

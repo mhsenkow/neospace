@@ -442,7 +442,7 @@ defineExpose({ open, close, toggle })
   transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .neo-menu__panel--sheet {
-    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-spring, var(--neo-ease-out));
   }
 }
 

@@ -1089,3 +1089,141 @@ html[data-line='crayon'] .neo-btn--primary {
     1px 1px 0 color-mix(in srgb, var(--neo-text-primary) 25%, transparent),
     -1px 0.5px 0 color-mix(in srgb, var(--neo-text-primary) 15%, transparent);
 }
+
+// ============================================
+// Motion Personalities (data-motion) — Twelve Basic Principles of Animation
+// "match" adapts automatically to chrome (data-ui), corners (data-radius), and theme
+// ============================================
+
+// Match defaults to expressive Lively 12-Principles energy, with chrome/corner refinements:
+html[data-motion='match'][data-ui='monocle'],
+html[data-motion='match'][data-ui='nyt'] {
+  --neo-ease-out: cubic-bezier(0.25, 1, 0.35, 1);
+  --neo-ease-in: cubic-bezier(0.4, 0, 0.85, 1);
+  --neo-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --neo-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --neo-ease-bounce: cubic-bezier(0.25, 1.18, 0.45, 1);
+  --neo-dur-instant: 110ms;
+  --neo-dur-quick: 190ms;
+  --neo-dur-normal: 280ms;
+  --neo-dur-sheet-enter: 340ms;
+  --neo-dur-sheet-leave: 210ms;
+  --neo-dur-celebrate: 460ms;
+  --neo-press-scale: 0.96;
+  --neo-press-squash-x: 1.02;
+  --neo-press-squash-y: 0.97;
+  --neo-anticipate-y: 1px;
+  --neo-hover-lift: -1.5px;
+  --neo-overshoot-scale: 1.08;
+  --neo-arc-x: 4px;
+  --neo-arc-y: -6px;
+  --neo-delay-secondary: 65ms;
+  --neo-stagger-step: 32ms;
+}
+
+html[data-motion='match'][data-ui='noyes'],
+html[data-motion='match'][data-ui='military'],
+html[data-motion='match'][data-ui='terminal'] {
+  --neo-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --neo-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --neo-ease-spring: cubic-bezier(0.2, 0.95, 0.3, 1.08);
+  --neo-ease-bounce: cubic-bezier(0.25, 1.25, 0.45, 1);
+  --neo-dur-instant: 75ms;
+  --neo-dur-quick: 130ms;
+  --neo-dur-normal: 195ms;
+  --neo-dur-sheet-enter: 240ms;
+  --neo-dur-sheet-leave: 150ms;
+  --neo-dur-celebrate: 340ms;
+  --neo-press-scale: 0.95;
+  --neo-press-squash-x: 1.03;
+  --neo-press-squash-y: 0.95;
+  --neo-anticipate-y: 1px;
+  --neo-hover-lift: -1px;
+  --neo-overshoot-scale: 1.08;
+  --neo-arc-x: 4px;
+  --neo-arc-y: -5px;
+  --neo-delay-secondary: 35ms;
+  --neo-stagger-step: 20ms;
+}
+
+// Playful corner sets in Match mode dial up the Disney squash, stretch & bounce
+html[data-motion='match'][data-radius='soft'],
+html[data-motion='match'][data-radius='bubble'],
+html[data-motion='match'][data-radius='jagged'],
+html[data-motion='lively'] {
+  --neo-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --neo-ease-in: cubic-bezier(0.36, 0, 0.85, 1);
+  --neo-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --neo-ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.32);
+  --neo-ease-bounce: cubic-bezier(0.34, 1.68, 0.64, 1);
+  --neo-ease-anticipate: cubic-bezier(0.36, 0, 0.66, -0.56);
+  --neo-dur-instant: 90ms;
+  --neo-dur-quick: 165ms;
+  --neo-dur-normal: 250ms;
+  --neo-dur-sheet-enter: 320ms;
+  --neo-dur-sheet-leave: 195ms;
+  --neo-dur-celebrate: 480ms;
+  --neo-press-scale: 0.89;
+  --neo-press-squash-x: 1.09;
+  --neo-press-squash-y: 0.88;
+  --neo-anticipate-y: 2.5px;
+  --neo-hover-lift: -2.5px;
+  --neo-overshoot-scale: 1.24;
+  --neo-arc-x: 10px;
+  --neo-arc-y: -12px;
+  --neo-delay-secondary: 55ms;
+  --neo-stagger-step: 28ms;
+}
+
+// Crisp: Rams / instrument precision — fast deceleration, tight 3% settle, zero wobble
+html[data-motion='crisp'] {
+  --neo-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --neo-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --neo-ease-in-out: cubic-bezier(0.35, 0, 0.2, 1);
+  --neo-ease-spring: cubic-bezier(0.2, 0.96, 0.32, 1.04);
+  --neo-ease-bounce: cubic-bezier(0.22, 1.12, 0.36, 1);
+  --neo-ease-anticipate: cubic-bezier(0.3, 0, 0.6, -0.2);
+  --neo-dur-instant: 70ms;
+  --neo-dur-quick: 130ms;
+  --neo-dur-normal: 190ms;
+  --neo-dur-sheet-enter: 240ms;
+  --neo-dur-sheet-leave: 150ms;
+  --neo-dur-celebrate: 320ms;
+  --neo-press-scale: 0.96;
+  --neo-press-squash-x: 1.02;
+  --neo-press-squash-y: 0.96;
+  --neo-anticipate-y: 1px;
+  --neo-hover-lift: -1px;
+  --neo-overshoot-scale: 1.05;
+  --neo-arc-x: 3px;
+  --neo-arc-y: -4px;
+  --neo-delay-secondary: 35ms;
+  --neo-stagger-step: 18ms;
+}
+
+// Editorial: Measured, cinema-grade Slow In / Slow Out — smooth glides, zero overshoot
+html[data-motion='editorial'] {
+  --neo-ease-out: cubic-bezier(0.25, 1, 0.35, 1);
+  --neo-ease-in: cubic-bezier(0.42, 0, 0.85, 1);
+  --neo-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --neo-ease-spring: cubic-bezier(0.25, 1, 0.35, 1);
+  --neo-ease-bounce: cubic-bezier(0.25, 1, 0.35, 1);
+  --neo-ease-anticipate: cubic-bezier(0.4, 0, 0.2, 1);
+  --neo-dur-instant: 120ms;
+  --neo-dur-quick: 210ms;
+  --neo-dur-normal: 310ms;
+  --neo-dur-sheet-enter: 370ms;
+  --neo-dur-sheet-leave: 230ms;
+  --neo-dur-celebrate: 500ms;
+  --neo-press-scale: 0.98;
+  --neo-press-squash-x: 1;
+  --neo-press-squash-y: 0.98;
+  --neo-anticipate-y: 0px;
+  --neo-hover-lift: -1px;
+  --neo-overshoot-scale: 1.02;
+  --neo-arc-x: 2px;
+  --neo-arc-y: -3px;
+  --neo-delay-secondary: 70ms;
+  --neo-stagger-step: 36ms;
+}
+

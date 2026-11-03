@@ -16,6 +16,7 @@ import type {
   NeoFontId,
   NeoFontSizeId,
   NeoLineId,
+  NeoMotionId,
   NeoRadiusId,
   NeoThemeId,
   NeoUiId,
@@ -26,11 +27,13 @@ import {
   normalizeFont,
   normalizeFontSize,
   normalizeLine,
+  normalizeMotion,
   normalizeRadius,
   normalizeTheme,
   normalizeUi,
   nextDensity,
   nextLine,
+  nextMotion,
   nextRadius,
   nextTheme,
   nextUi,
@@ -174,6 +177,7 @@ interface SettingsState {
     radius: NeoRadiusId
     density: NeoDensityId
     line: NeoLineId
+    motion: NeoMotionId
     reduceMotion: boolean
     /** @deprecated use density === 'dense'; kept in sync for older prefs */
     compactMode: boolean
@@ -250,6 +254,8 @@ type AppearancePrefs = typeof DEFAULT_APPEARANCE
 
 /** Normalize the appearance subset of stored / imported prefs JSON. */
 function parseAppearance(parsed: Record<string, any>, legacyCompact?: boolean): AppearancePrefs {
+  const reduceMotion = !!parsed.reduceMotion || parsed.motion === 'still'
+  const motion = normalizeMotion(parsed.motion, !!parsed.reduceMotion)
   return {
     theme: normalizeTheme(parsed.theme),
     ui: normalizeUi(parsed.ui),
@@ -258,7 +264,8 @@ function parseAppearance(parsed: Record<string, any>, legacyCompact?: boolean): 
     radius: normalizeRadius(parsed.radius),
     density: normalizeDensity(parsed.density, legacyCompact),
     line: normalizeLine(parsed.line),
-    reduceMotion: !!parsed.reduceMotion,
+    motion,
+    reduceMotion,
     customProfileCss: !!parsed.customProfileCss,
     flipTextAlign: (['left', 'center', 'right'].includes(parsed.flipTextAlign)
       ? parsed.flipTextAlign
@@ -282,7 +289,7 @@ const moderationCursor: { muted: string | null; blocked: string | null } = {
 
 const DEFAULT_APPEARANCE: Pick<
   SettingsState['localPreferences'],
-  'theme' | 'ui' | 'font' | 'fontSize' | 'radius' | 'density' | 'line' | 'reduceMotion' | 'customProfileCss' | 'flipTextAlign' | 'flipTextSize'
+  'theme' | 'ui' | 'font' | 'fontSize' | 'radius' | 'density' | 'line' | 'motion' | 'reduceMotion' | 'customProfileCss' | 'flipTextAlign' | 'flipTextSize'
 > = {
   theme: 'auto',
   ui: 'braun',
@@ -291,6 +298,7 @@ const DEFAULT_APPEARANCE: Pick<
   radius: 'match',
   density: 'cozy',
   line: 'clean',
+  motion: 'match',
   reduceMotion: false,
   customProfileCss: false,
   flipTextAlign: 'center',
@@ -369,6 +377,7 @@ export const useSettingsStore = defineStore('settings', {
       radius: 'match',
       density: 'cozy',
       line: 'clean',
+      motion: 'match',
       reduceMotion: false,
       compactMode: false,
       customProfileCss: false,
@@ -549,10 +558,14 @@ export const useSettingsStore = defineStore('settings', {
         radius: this.localPreferences.radius,
         density: this.localPreferences.density,
         line: this.localPreferences.line,
+        motion: this.localPreferences.motion,
+        reduceMotion: this.localPreferences.reduceMotion,
       })
       ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
       if (typeof document !== 'undefined') {
-        setInAppReducedMotion(this.localPreferences.reduceMotion)
+        setInAppReducedMotion(
+          this.localPreferences.reduceMotion || this.localPreferences.motion === 'still',
+        )
       }
       writeSuiteLook({
         theme: this.localPreferences.theme,
@@ -587,9 +600,13 @@ export const useSettingsStore = defineStore('settings', {
           radius: this.localPreferences.radius,
           density: this.localPreferences.density,
           line: this.localPreferences.line,
+          motion: this.localPreferences.motion,
+          reduceMotion: this.localPreferences.reduceMotion,
         })
         ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
-        setInAppReducedMotion(this.localPreferences.reduceMotion)
+        setInAppReducedMotion(
+          this.localPreferences.reduceMotion || this.localPreferences.motion === 'still',
+        )
       }
       if (typeof window !== 'undefined') window.addEventListener('storage', onPrefsStorage)
       const offSuite = listenSuiteLook((slice) => {
@@ -616,6 +633,8 @@ export const useSettingsStore = defineStore('settings', {
           radius: this.localPreferences.radius,
           density: this.localPreferences.density,
           line: this.localPreferences.line,
+          motion: this.localPreferences.motion,
+          reduceMotion: this.localPreferences.reduceMotion,
         })
         ensureFontsLoaded(this.localPreferences.ui, this.localPreferences.font)
         // Only the look fields changed — don't rewrite the rest of the blob from this tab's state
@@ -1010,6 +1029,17 @@ export const useSettingsStore = defineStore('settings', {
      * Update local appearance preferences
      */
     updateAppearance(data: Partial<SettingsState['localPreferences']>) {
+      let nextMotionVal = normalizeMotion(data.motion ?? this.localPreferences.motion)
+      let nextReduceVal = data.reduceMotion ?? this.localPreferences.reduceMotion
+
+      // Keep Still and Reduce Motion in sync when either is explicitly toggled
+      if (data.motion !== undefined) {
+        nextReduceVal = nextMotionVal === 'still'
+      } else if (data.reduceMotion !== undefined) {
+        if (data.reduceMotion) nextMotionVal = 'still'
+        else if (nextMotionVal === 'still') nextMotionVal = 'match'
+      }
+
       this.localPreferences = {
         ...this.localPreferences,
         ...data,
@@ -1020,6 +1050,8 @@ export const useSettingsStore = defineStore('settings', {
         radius: normalizeRadius(data.radius ?? this.localPreferences.radius),
         density: normalizeDensity(data.density ?? this.localPreferences.density),
         line: normalizeLine(data.line ?? this.localPreferences.line),
+        motion: nextMotionVal,
+        reduceMotion: nextReduceVal,
         compactMode: normalizeDensity(data.density ?? this.localPreferences.density) === 'dense',
       }
       this.saveLocalPreferences()
@@ -1062,6 +1094,12 @@ export const useSettingsStore = defineStore('settings', {
       return upcoming
     },
 
+    cycleMotion() {
+      const upcoming = nextMotion(this.localPreferences.motion)
+      this.updateAppearance({ motion: upcoming })
+      return upcoming
+    },
+
     resetAppearance() {
       this.updateAppearance({ ...DEFAULT_APPEARANCE })
     },
@@ -1077,6 +1115,7 @@ export const useSettingsStore = defineStore('settings', {
         radius: this.localPreferences.radius,
         density: this.localPreferences.density,
         line: this.localPreferences.line,
+        motion: this.localPreferences.motion,
         reduceMotion: this.localPreferences.reduceMotion,
         customProfileCss: this.localPreferences.customProfileCss,
         flipTextAlign: this.localPreferences.flipTextAlign,

@@ -304,18 +304,35 @@ onUnmounted(() => {
     background: transparent;
     border: none;
     border-radius: var(--neo-radius-sm, 4px);
-    transition: color var(--neo-transition-fast), background-color var(--neo-transition-fast);
+    transition:
+      color var(--neo-transition-fast),
+      background-color var(--neo-transition-fast),
+      transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
     position: relative;
     cursor: pointer;
     flex-shrink: 0;
 
+    :deep(.neo-icon) {
+      transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+    }
+
     &:active {
       background: var(--neo-bg-hover);
+      transition-duration: var(--neo-dur-instant, 90ms);
+      transform: scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
+
+      :deep(.neo-icon) {
+        transform: scale(0.88) translateY(1px);
+      }
     }
 
     &.active {
       color: var(--neo-accent);
       background: var(--neo-accent-soft);
+
+      :deep(.neo-icon) {
+        transform: translateY(-1px) scale(1.06);
+      }
     }
   }
 
@@ -328,7 +345,7 @@ onUnmounted(() => {
     }
 
     &:active .mobile-nav__compose-mark {
-      transform: scale(0.94);
+      transform: scale3d(var(--neo-press-squash-x, 1.08), var(--neo-press-squash-y, 0.88), 1);
     }
   }
 
@@ -341,7 +358,9 @@ onUnmounted(() => {
     border-radius: var(--neo-radius-xl, 10px);
     background: var(--neo-accent);
     color: var(--neo-text-on-accent, var(--neo-text-inverse));
-    transition: transform 0.12s ease, background 0.12s ease;
+    transition:
+      transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring),
+      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out);
   }
 }
 </style>

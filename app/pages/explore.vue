@@ -1534,15 +1534,32 @@ onUnmounted(() => {
   }
 }
 
-.card-enter-active,
+.card-enter-active {
+  transition:
+    opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out));
+
+  @for $i from 1 through 8 {
+    &:nth-child(#{$i}) {
+      transition-delay: calc(#{$i - 1} * var(--neo-stagger-step, 26ms));
+    }
+  }
+}
+
 .card-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-in);
+}
+
+.card-move {
+  transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out));
 }
 
 .card-enter-from,
 .card-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(10px) scale(0.985);
 }
 
 .explore-hint {

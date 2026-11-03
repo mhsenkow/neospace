@@ -1714,6 +1714,18 @@ useHead({
 // Threads-style hero — name left, avatar right, presence row
 .profile-hero {
   padding: 0.85rem 1rem 0.35rem;
+  animation: profile-hero-in var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out)) both;
+}
+
+@keyframes profile-hero-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .profile-head {

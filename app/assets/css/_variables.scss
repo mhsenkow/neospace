@@ -134,15 +134,28 @@ $ease-in: cubic-bezier(0.4, 0, 1, 1);
 $ease-io: cubic-bezier(0.4, 0, 0.2, 1);
 $ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
 $ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+$ease-anticipate: cubic-bezier(0.36, 0, 0.66, -0.56);
 
 $dur-instant: 90ms;
 $dur-quick: 160ms;
 $dur-normal: 240ms;
 $dur-sheet-enter: 300ms;
 $dur-sheet-leave: 190ms;
-$dur-celebrate: 420ms;
+$dur-celebrate: 440ms;
 $dur-slow: 320ms;
 $dur-slower: 480ms;
+
+// Twelve Principles expressive defaults (Squash & Stretch, Anticipation, Arcs, Overlapping Action)
+$press-scale: 0.91;
+$press-squash-x: 1.07;
+$press-squash-y: 0.9;
+$anticipate-y: 2px;
+$hover-lift: -2px;
+$overshoot-scale: 1.2;
+$arc-x: 8px;
+$arc-y: -10px;
+$delay-secondary: 50ms;
+$stagger-step: 26ms;
 
 $transition-fast: $dur-quick $ease-out;
 $transition-normal: $dur-normal $ease-out;

@@ -12,7 +12,9 @@ import {
   RADIUS_OPTIONS,
   DENSITY_OPTIONS,
   LINE_OPTIONS,
+  MOTION_OPTIONS,
   resolveTheme,
+  resolveMotionPersonality,
   type NeoThemeId,
 } from '~/utils/appearance'
 import { osSchemeTick } from '~/utils/osScheme'
@@ -101,6 +103,21 @@ export function useShellAppearance() {
       LINE_OPTIONS.find((l) => l.id === settingsStore.localPreferences.line)?.label
       || settingsStore.localPreferences.line,
   )
+  const currentMotionLabel = computed(() => {
+    const motion = settingsStore.localPreferences.motion
+    if (motion === 'match') {
+      const resolved = resolveMotionPersonality({
+        motion,
+        ui: settingsStore.localPreferences.ui,
+        theme: settingsStore.localPreferences.theme,
+        radius: settingsStore.localPreferences.radius,
+        reduceMotion: settingsStore.localPreferences.reduceMotion,
+      })
+      const name = MOTION_OPTIONS.find((m) => m.id === resolved)?.label || resolved
+      return `Match · ${name}`
+    }
+    return MOTION_OPTIONS.find((m) => m.id === motion)?.label || motion
+  })
 
   const cycleTheme = () => {
     settingsStore.cycleTheme()
@@ -131,6 +148,11 @@ export function useShellAppearance() {
   const cycleLine = () => {
     settingsStore.cycleLine()
     nextTick(() => announceLook('Lines', currentLineLabel.value))
+  }
+
+  const cycleMotion = () => {
+    settingsStore.cycleMotion()
+    nextTick(() => announceLook('Motion', currentMotionLabel.value))
   }
 
   /** Board density (Packed / Roomy / Focused) — announced like the Look cycles */
@@ -176,12 +198,14 @@ export function useShellAppearance() {
     currentRadiusLabel,
     currentDensityLabel,
     currentLineLabel,
+    currentMotionLabel,
     cycleTheme,
     setTheme,
     cycleUi,
     cycleRadius,
     cycleDensity,
     cycleLine,
+    cycleMotion,
     densityTitle,
     densityLabel,
   }

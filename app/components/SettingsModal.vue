@@ -1323,13 +1323,30 @@ watch(
   color: var(--neo-text-muted);
 }
 
-// Transitions
-.modal-enter-active,
-.modal-leave-active {
-  transition: all 0.25s ease;
+// Transitions — directional asymmetry + overlapping body settle (Principles 5, 6, 9)
+.modal-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .settings-modal {
-    transition: all 0.25s ease;
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-spring, var(--neo-ease-out));
+  }
+
+  .settings-header {
+    animation: settings-layer-in var(--neo-dur-normal, 240ms) var(--neo-ease-out)
+      calc(var(--neo-delay-secondary, 50ms) * 0.4) both;
+  }
+
+  .settings-body {
+    animation: settings-layer-in var(--neo-dur-normal, 240ms) var(--neo-ease-out)
+      var(--neo-delay-secondary, 50ms) both;
+  }
+}
+
+.modal-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .settings-modal {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -1338,13 +1355,27 @@ watch(
   opacity: 0;
 
   .settings-modal {
-    transform: scale(0.95) translateY(20px);
+    transform: scale(0.95) translateY(18px);
   }
 }
 
-.fade-enter-active,
+@keyframes settings-layer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-enter-active {
+  transition: opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out);
+}
+
 .fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in);
 }
 
 .fade-enter-from,

@@ -220,8 +220,8 @@ watch(
   background: var(--neo-accent);
   pointer-events: none;
   transition:
-    transform var(--neo-dur-normal, 240ms) var(--neo-ease-in-out),
-    width var(--neo-dur-normal, 240ms) var(--neo-ease-in-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-in-out)),
+    width var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-in-out)),
     opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 }
 
@@ -257,14 +257,15 @@ watch(
   }
 
   &:active {
-    transform: scale(0.97);
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: scale3d(var(--neo-press-squash-x, 1.05), var(--neo-press-squash-y, 0.92), 1);
   }
 }
 
 .neo-tabs__panel {
   padding-top: var(--neo-spacing-4, 0.75rem);
   outline: none;
-  animation: neo-tab-panel-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
+  animation: neo-tab-panel-in var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out)) both;
 
   // Panels are a Tab stop — keep keyboard focus visible
   &:focus-visible {

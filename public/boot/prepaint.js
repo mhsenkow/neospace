@@ -80,7 +80,10 @@
     var lines = ["clean","ink","crayon","dashed"]
     var ln = lines.indexOf(p.line) >= 0 ? p.line : 'clean'
     root.setAttribute('data-line', ln)
-    if (p.reduceMotion) root.classList.add('reduce-motion')
+    var motions = ["match","lively","crisp","editorial","still"]
+    var mo = motions.indexOf(p.motion) >= 0 ? p.motion : p.reduceMotion ? 'still' : 'match'
+    root.setAttribute('data-motion', mo)
+    if (p.reduceMotion || mo === 'still') root.classList.add('reduce-motion')
     if (localStorage.getItem('neospace_sidebar_rail') === '1') root.setAttribute('data-rail', '')
     if (f === 'dyslexic') {
       try {
@@ -102,6 +105,7 @@
     root.setAttribute('data-radius', 'match')
     root.setAttribute('data-density', 'cozy')
     root.setAttribute('data-line', 'clean')
+    root.setAttribute('data-motion', 'match')
   }
   setThemeColor(resolved)
 })()

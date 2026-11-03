@@ -43,11 +43,13 @@ const {
   currentRadiusLabel,
   currentDensityLabel,
   currentLineLabel,
+  currentMotionLabel,
   cycleTheme,
   cycleUi,
   cycleRadius,
   cycleDensity,
   cycleLine,
+  cycleMotion,
   densityTitle,
   densityLabel,
 } = useShellAppearance()
@@ -505,7 +507,7 @@ watch(
         </button>
       </div>
       <p v-if="!lookOpen" class="sidebar__look-desc">
-        Theme, chrome, corners, spacing, lines.
+        Theme, chrome, corners, spacing, lines, motion.
       </p>
 
       <div v-show="lookOpen" id="sidebar-look-controls" class="sidebar__section-list">
@@ -560,6 +562,16 @@ watch(
         >
           <span class="sidebar__line-mark" aria-hidden="true" />
           <span class="sidebar__label">{{ currentLineLabel }}</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar__row"
+          :title="sidebarRail ? `Motion: ${currentMotionLabel}` : undefined"
+          :aria-label="`Motion: ${currentMotionLabel}`"
+          @click="cycleMotion"
+        >
+          <span class="sidebar__motion-mark" aria-hidden="true"><i /></span>
+          <span class="sidebar__label">{{ currentMotionLabel }}</span>
         </button>
       </div>
     </section>
@@ -941,11 +953,32 @@ watch(
     font: inherit;
     transition:
       background-color var(--neo-transition-fast),
-      color var(--neo-transition-fast);
+      color var(--neo-transition-fast),
+      transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
+
+    :deep(.neo-icon),
+    .sidebar__row-glyph {
+      transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+    }
 
     &:hover {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);
+
+      :deep(.neo-icon),
+      .sidebar__row-glyph {
+        transform: translateY(-1px) scale(1.06);
+      }
+    }
+
+    &:active {
+      transition-duration: var(--neo-dur-instant, 90ms);
+      transform: scale3d(var(--neo-press-squash-x, 1.05), var(--neo-press-squash-y, 0.92), 1);
+
+      :deep(.neo-icon),
+      .sidebar__row-glyph {
+        transform: scale(0.9);
+      }
     }
 
     &.active,
@@ -1321,6 +1354,56 @@ watch(
     html[data-line='dashed'] & {
       border-style: dashed;
     }
+  }
+
+  &__motion-mark {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 18px;
+    height: 12px;
+    flex-shrink: 0;
+    padding: 0 2px;
+    border-radius: 999px;
+    border: 1.5px solid var(--neo-text-primary);
+    background: color-mix(in srgb, var(--neo-accent) 18%, transparent);
+
+    i {
+      display: block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--neo-accent);
+      transition:
+        transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring),
+        background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out);
+    }
+
+    html[data-motion='lively'] & i {
+      transform: translateX(6px) scale(1.15);
+    }
+
+    html[data-motion='crisp'] & i {
+      border-radius: 1px;
+      transform: translateX(5px);
+    }
+
+    html[data-motion='editorial'] & i {
+      transform: translateX(3px) scaleX(1.25);
+    }
+
+    html[data-motion='still'] & {
+      border-style: dotted;
+      i {
+        transform: translateX(0);
+        background: var(--neo-text-muted);
+      }
+    }
+  }
+
+  &__row:hover &__motion-mark i {
+    transform: translateX(6px) scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
   }
 
 }

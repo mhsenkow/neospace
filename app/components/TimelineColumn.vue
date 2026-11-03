@@ -2442,26 +2442,40 @@ onUnmounted(() => {
   border-radius: var(--neo-radius-sm);
   cursor: pointer;
   box-shadow: 0 2px 8px color-mix(in srgb, var(--neo-accent) 28%, transparent);
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition:
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring),
+    background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
   &:hover {
     background: var(--neo-accent-hover);
+    transform: translateY(var(--neo-hover-lift, -2px));
+    box-shadow: 0 5px 14px color-mix(in srgb, var(--neo-accent) 36%, transparent);
   }
 
   &:active {
-    transform: scale(0.97);
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: translateY(var(--neo-anticipate-y, 2px))
+      scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
   }
 }
 
-.pill-slide-enter-active,
+.pill-slide-enter-active {
+  transition:
+    opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-bounce, var(--neo-ease-spring));
+}
+
 .pill-slide-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-in);
 }
 
 .pill-slide-enter-from,
 .pill-slide-leave-to {
   opacity: 0;
-  transform: translateY(-0.5rem);
+  transform: translateY(-0.65rem) scale(0.92);
 }
 
 .column-feed-select {
@@ -3093,14 +3107,24 @@ onUnmounted(() => {
   max-height: 300px;
 }
 
-// Just-prepended cards (see withPrependMotion) — same feel as the old enter transition
+// Just-prepended cards (see withPrependMotion) — directional spring settle + bounded micro-cascade
 .post-list-enter {
-  animation: post-list-enter 0.25s ease backwards;
+  animation: post-list-enter var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out)) backwards;
+
+  @for $i from 1 through 8 {
+    &:nth-child(#{$i}) {
+      animation-delay: calc(#{$i - 1} * var(--neo-stagger-step, 26ms));
+    }
+  }
 }
 @keyframes post-list-enter {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

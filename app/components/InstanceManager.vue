@@ -742,12 +742,19 @@ const isActive = (instance: ConnectedInstance) =>
   }
 }
 
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.2s ease;
+.modal-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .accounts-modal {
-    transition: transform 0.2s ease;
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-spring, var(--neo-ease-out));
+  }
+}
+
+.modal-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .accounts-modal {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -756,6 +763,6 @@ const isActive = (instance: ConnectedInstance) =>
   opacity: 0;
 
   .accounts-modal {
-    transform: scale(0.96) translateY(8px);
+    transform: scale(0.95) translateY(12px);
   }
 }</style>

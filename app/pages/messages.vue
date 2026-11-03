@@ -821,12 +821,34 @@ useHead(() => ({ title: pageTitle.value }))
   list-style: none;
   margin: 0;
   padding: 0;
+
+  > li {
+    animation: msg-row-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) backwards;
+
+    @for $i from 1 through 8 {
+      &:nth-child(#{$i}) {
+        animation-delay: calc(#{$i - 1} * var(--neo-stagger-step, 26ms));
+      }
+    }
+  }
+}
+
+@keyframes msg-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .messages-row {
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--neo-border-color);
+  transition: background-color var(--neo-transition-fast);
 
   &--unread {
     background: color-mix(in srgb, var(--neo-accent) 5%, transparent);

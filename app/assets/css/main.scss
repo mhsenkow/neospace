@@ -203,10 +203,27 @@ ul, ol {
     background-color var(--neo-transition-fast),
     color var(--neo-transition-fast),
     border-color var(--neo-transition-fast),
-    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring, var(--neo-ease-out));
+    box-shadow var(--neo-transition-fast),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring, var(--neo-ease-out));
+
+  .neo-icon,
+  svg {
+    transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+  }
+
+  @include hover(':not(:disabled)') {
+    transform: translateY(calc(var(--neo-hover-lift, -2px) * 0.5));
+  }
 
   &:active:not(:disabled) {
-    transform: scale(0.97);
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: translateY(var(--neo-anticipate-y, 1px))
+      scale3d(var(--neo-press-squash-x, 1.05), var(--neo-press-squash-y, 0.92), 1);
+
+    .neo-icon,
+    svg {
+      transform: scale(0.92) translateY(1px);
+    }
   }
   
   &--primary {
@@ -327,7 +344,12 @@ ul, ol {
   transition:
     background-color var(--neo-transition-fast),
     color var(--neo-transition-fast),
-    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring, var(--neo-ease-out));
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring, var(--neo-ease-out));
+
+  .neo-icon,
+  svg {
+    transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+  }
 
   @media (hover: none), (pointer: coarse) {
     width: 44px;
@@ -338,6 +360,12 @@ ul, ol {
     &:hover:not(:disabled) {
       background: var(--neo-bg-tertiary);
       color: var(--neo-chrome-fg-strong);
+      transform: translateY(calc(var(--neo-hover-lift, -2px) * 0.45));
+
+      .neo-icon,
+      svg {
+        transform: scale(1.06);
+      }
     }
 
     &--danger:hover:not(:disabled) {
@@ -349,7 +377,13 @@ ul, ol {
   &:active:not(:disabled) {
     background: var(--neo-bg-tertiary);
     color: var(--neo-chrome-fg-strong);
-    transform: scale(0.97);
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: scale3d(var(--neo-press-squash-x, 1.06), var(--neo-press-squash-y, 0.91), 1);
+
+    .neo-icon,
+    svg {
+      transform: scale(0.9);
+    }
   }
 
   &:disabled {

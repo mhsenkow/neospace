@@ -111,7 +111,16 @@ function onKeydown(e: KeyboardEvent, index: number) {
   flex: 1 1 auto;
   min-width: 0;
   text-align: center;
-  transition: background-color var(--neo-transition-fast, 100ms), color var(--neo-transition-fast, 100ms);
+  transition:
+    background-color var(--neo-transition-fast, 160ms),
+    color var(--neo-transition-fast, 160ms),
+    box-shadow var(--neo-transition-fast, 160ms),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
+
+  &:active {
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: scale3d(var(--neo-press-squash-x, 1.05), var(--neo-press-squash-y, 0.92), 1);
+  }
 
   &[aria-checked='true'] {
     background: var(--neo-bg-card, var(--neo-bg-primary));

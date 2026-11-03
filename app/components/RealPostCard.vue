@@ -2873,23 +2873,81 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 }
 
 @keyframes like-pop {
-  0% { transform: scale(1); }
-  15% { transform: scale(0.82); }
-  50% { transform: scale(1.32) translateY(-2px) rotate(-6deg); }
-  100% { transform: scale(1) translateY(0) rotate(0deg); }
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  18% {
+    /* Principle 2: Anticipation dip & wind-back */
+    transform: translateY(var(--neo-anticipate-y, 2px)) scale3d(1.12, 0.78, 1) rotate(-10deg);
+  }
+  52% {
+    /* Principle 1, 7 & 10: Stretch along upward arc with overshoot */
+    transform: translate(calc(var(--neo-arc-x, 8px) * 0.25), calc(var(--neo-arc-y, -10px) * 0.45))
+      scale3d(calc(var(--neo-overshoot-scale, 1.2) * 0.96), var(--neo-overshoot-scale, 1.2), 1)
+      rotate(7deg);
+  }
+  78% {
+    /* Principle 5: Follow-through settle */
+    transform: translateY(1px) scale3d(1.04, 0.95, 1) rotate(-2deg);
+  }
+  100% {
+    transform: scale(1) translateY(0) rotate(0deg);
+  }
 }
 
 @keyframes repost-spin {
-  0% { transform: rotate(0deg) scale(1); }
-  45% { transform: rotate(180deg) scale(1.18); }
-  100% { transform: rotate(180deg) scale(1); }
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  18% {
+    /* Principle 2: Anticipation wind-back */
+    transform: rotate(-22deg) scale3d(1.08, 0.88, 1);
+  }
+  58% {
+    /* Principle 10: Overshoot spin */
+    transform: rotate(196deg) scale(var(--neo-overshoot-scale, 1.18));
+  }
+  82% {
+    transform: rotate(175deg) scale(0.97);
+  }
+  100% {
+    transform: rotate(180deg) scale(1);
+  }
 }
 
 @keyframes bookmark-snap {
-  0% { transform: scaleY(1) translateY(0); }
-  40% { transform: scaleY(1.24) translateY(2px); }
-  70% { transform: scaleY(0.94) translateY(0); }
-  100% { transform: scaleY(1) translateY(0); }
+  0% {
+    transform: scale3d(1, 1, 1) translateY(0);
+  }
+  20% {
+    /* Pull-down stretch */
+    transform: scale3d(0.86, 1.28, 1) translateY(3px);
+  }
+  56% {
+    /* Elastic upward snap */
+    transform: scale3d(1.1, 0.88, 1) translateY(-2.5px);
+  }
+  80% {
+    transform: scale3d(0.97, 1.04, 1) translateY(0.5px);
+  }
+  100% {
+    transform: scale3d(1, 1, 1) translateY(0);
+  }
+}
+
+@keyframes count-tick-pop {
+  0% {
+    transform: translateY(3px) scale(0.88);
+    opacity: 0.65;
+  }
+  55% {
+    transform: translateY(-2px) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3034,7 +3092,9 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 
   &:active:not(:disabled) {
-    transform: scale(0.92);
+    transition-duration: var(--neo-dur-instant, 90ms);
+    transform: translateY(var(--neo-anticipate-y, 1.5px))
+      scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
   }
 
   &:disabled {
@@ -3059,26 +3119,36 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
   &--pop .neo-icon,
   &--pop svg {
-    animation: like-pop var(--neo-dur-celebrate, 420ms) var(--neo-ease-bounce) both;
+    animation: like-pop var(--neo-dur-celebrate, 440ms) var(--neo-ease-bounce) both;
+  }
+
+  &--pop .status-action__count,
+  &--boost-pop .status-action__count {
+    animation: count-tick-pop var(--neo-dur-normal, 240ms) var(--neo-ease-spring)
+      var(--neo-delay-secondary, 50ms) both;
   }
 
   &--share {
     @include hover(':not(:disabled)') {
       .neo-icon {
-        transform: translate(1.5px, -1.5px);
+        transform: translate(2px, -2px) scale(1.06);
       }
     }
 
     &:active:not(:disabled) .neo-icon {
-      transform: translate(1px, -1px) scale(0.94);
+      transform: translate(-1px, 1px) scale(0.9);
     }
   }
 
   &--reply {
     @include hover(':not(:disabled)') {
       .neo-icon {
-        transform: rotate(-8deg) translateY(-1px);
+        transform: rotate(-10deg) translateY(-1.5px) scale(1.06);
       }
+    }
+
+    &:active:not(:disabled) .neo-icon {
+      transform: rotate(4deg) translateY(1px) scale(0.9);
     }
   }
 

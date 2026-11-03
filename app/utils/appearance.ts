@@ -123,6 +123,17 @@ export const LINE_OPTIONS: { id: NeoLineId; label: string; desc: string }[] = [
   { id: 'dashed', label: 'Dashed', desc: 'Sketch / notebook' },
 ]
 
+/** Motion personality — Twelve Basic Principles of Animation */
+export type NeoMotionId = 'match' | 'lively' | 'crisp' | 'editorial' | 'still'
+
+export const MOTION_OPTIONS: { id: NeoMotionId; label: string; desc: string }[] = [
+  { id: 'match', label: 'Match', desc: 'Follows chrome & corners · 12-Principles tuned' },
+  { id: 'lively', label: 'Lively', desc: 'Squash & stretch · anticipation · bouncy arcs' },
+  { id: 'crisp', label: 'Crisp', desc: 'Instrument precision · fast decel · tight settle' },
+  { id: 'editorial', label: 'Editorial', desc: 'Calm slow-in / slow-out · zero bounce' },
+  { id: 'still', label: 'Still', desc: 'Instant state flips · no spatial travel' },
+]
+
 /** Cycle lists derived from *_OPTIONS so ids stay in sync */
 export const THEME_CYCLE: Exclude<NeoThemeId, 'auto'>[] = THEME_OPTIONS.map((o) => o.id)
 export const UI_CYCLE: NeoUiId[] = UI_OPTIONS.map((o) => o.id)
@@ -131,6 +142,7 @@ export const FONT_SIZE_CYCLE: NeoFontSizeId[] = FONT_SIZE_OPTIONS.map((o) => o.i
 export const RADIUS_CYCLE: NeoRadiusId[] = RADIUS_OPTIONS.map((o) => o.id)
 export const DENSITY_CYCLE: NeoDensityId[] = DENSITY_OPTIONS.map((o) => o.id)
 export const LINE_CYCLE: NeoLineId[] = LINE_OPTIONS.map((o) => o.id)
+export const MOTION_CYCLE: NeoMotionId[] = MOTION_OPTIONS.map((o) => o.id)
 
 /** Body type stacks — chrome × font (wordcount TYPE_FACES_WEB) */
 export const TYPE_FACES: Record<NeoUiId, Record<NeoFontId, string>> = {
@@ -270,6 +282,44 @@ export function nextLine(current: NeoLineId): NeoLineId {
   return LINE_CYCLE[(idx + 1) % LINE_CYCLE.length]!
 }
 
+export function normalizeMotion(
+  raw: string | null | undefined,
+  legacyReduceMotion?: boolean,
+): NeoMotionId {
+  if (raw && MOTION_CYCLE.includes(raw as NeoMotionId)) return raw as NeoMotionId
+  if (legacyReduceMotion) return 'still'
+  return 'match'
+}
+
+export function nextMotion(current: NeoMotionId): NeoMotionId {
+  const idx = MOTION_CYCLE.indexOf(normalizeMotion(current))
+  return MOTION_CYCLE[(idx + 1) % MOTION_CYCLE.length]!
+}
+
+/**
+ * Resolve which concrete motion personality applies when `motion === 'match'`.
+ * Expressive 12-Principles (`lively`) is the default energy; editorial chromes
+ * get calm cinema curves, and instrument chromes get crisp precision unless
+ * softened by rounded corners.
+ */
+export function resolveMotionPersonality(opts: {
+  motion?: NeoMotionId
+  ui?: NeoUiId
+  theme?: NeoThemeId
+  radius?: NeoRadiusId
+  reduceMotion?: boolean
+}): Exclude<NeoMotionId, 'match'> {
+  if (opts.reduceMotion) return 'still'
+  const motion = normalizeMotion(opts.motion)
+  if (motion !== 'match') return motion
+  const radius = normalizeRadius(opts.radius)
+  if (radius === 'soft' || radius === 'bubble' || radius === 'jagged') return 'lively'
+  const ui = normalizeUi(opts.ui)
+  if (ui === 'monocle' || ui === 'nyt') return 'editorial'
+  if (ui === 'noyes' || ui === 'military' || ui === 'terminal') return 'crisp'
+  return 'lively'
+}
+
 export function resolveTheme(theme: NeoThemeId): Exclude<NeoThemeId, 'auto'> {
   if (theme !== 'auto') return theme
   if (typeof window !== 'undefined') {
@@ -298,6 +348,8 @@ export function applyAppearance(opts: {
   radius?: NeoRadiusId
   density?: NeoDensityId
   line?: NeoLineId
+  motion?: NeoMotionId
+  reduceMotion?: boolean
 }) {
   if (typeof document === 'undefined') return
   const root = document.documentElement
@@ -310,14 +362,21 @@ export function applyAppearance(opts: {
   const radius = normalizeRadius(opts.radius)
   const density = normalizeDensity(opts.density)
   const line = normalizeLine(opts.line)
+  const motion = normalizeMotion(opts.motion, opts.reduceMotion)
   root.setAttribute('data-ui', ui)
   root.setAttribute('data-font', font)
   root.setAttribute('data-radius', radius)
   root.setAttribute('data-density', density)
   root.setAttribute('data-line', line)
+  root.setAttribute('data-motion', motion)
   root.setAttribute('data-font-size', fontSize)
   // Legacy class some CSS still keys off
   root.classList.toggle('compact-mode', density === 'dense')
+  if (motion === 'still' || opts.reduceMotion) {
+    root.classList.add('reduce-motion')
+  } else if (opts.reduceMotion === false) {
+    root.classList.remove('reduce-motion')
+  }
 
   const typeStack = TYPE_FACES[ui][font]
   const uiStack = UI_FONTS[ui]

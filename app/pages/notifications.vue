@@ -1214,8 +1214,17 @@ const chromeTitle = computed(() => {
   border-bottom: 1px solid var(--neo-border-color);
   border-left: 3px solid transparent;
   background: transparent;
-  transition: background-color 0.15s;
+  transition:
+    background-color var(--neo-transition-fast),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
   position: relative;
+  animation: notif-row-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) backwards;
+
+  @for $i from 1 through 8 {
+    &:nth-child(#{$i}) {
+      animation-delay: calc(#{$i - 1} * var(--neo-stagger-step, 26ms));
+    }
+  }
 
   &--unread {
     border-left-color: var(--neo-accent);
@@ -1580,14 +1589,31 @@ const chromeTitle = computed(() => {
 
 // ====== Dropdown transition ======
 
-.dropdown-enter-active,
+.dropdown-enter-active {
+  transition:
+    opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+}
 .dropdown-leave-active {
-  transition: opacity 0.15s, transform 0.15s;
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-in);
 }
 .dropdown-enter-from,
 .dropdown-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-6px) scale(0.96);
+}
+
+@keyframes notif-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 // ====== Responsive ======

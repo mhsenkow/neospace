@@ -1849,15 +1849,16 @@ useHead({
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  html:not(.reduce-motion) .dm-pane-enter {
-    animation: dm-pane-in 180ms ease-out;
+  html:not(.reduce-motion) .dm-pane-enter,
+  html:not(.reduce-motion) .thread-page {
+    animation: dm-pane-in var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out));
   }
 }
 
 @keyframes dm-pane-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;

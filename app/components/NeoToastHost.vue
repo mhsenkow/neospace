@@ -231,14 +231,42 @@ function onAction(id: number, fn?: () => void) {
   }
 }
 
-.neo-toast-enter-active,
+.neo-toast-enter-active {
+  transition:
+    opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+
+  .neo-toast__icon {
+    animation: toast-icon-pop var(--neo-dur-celebrate, 440ms) var(--neo-ease-bounce)
+      var(--neo-delay-secondary, 50ms) both;
+  }
+}
+
 .neo-toast-leave-active {
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-in);
+}
+
+.neo-toast-move {
+  transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring, var(--neo-ease-out));
 }
 
 .neo-toast-enter-from,
 .neo-toast-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(10px) scale(0.94);
+}
+
+@keyframes toast-icon-pop {
+  0% {
+    transform: scale(0.55) rotate(-12deg);
+  }
+  55% {
+    transform: scale(var(--neo-overshoot-scale, 1.2)) rotate(6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
 }
 </style>
