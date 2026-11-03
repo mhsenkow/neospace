@@ -147,8 +147,7 @@ export function useCrossAccountAction() {
     if (!resolved) throw new Error(`Couldn’t find @${acct} on ${homeHost || 'your server'}`)
 
     const key = cacheKey(instanceId, acct)
-    const prev = relCache.get(key)
-    let current = prev
+    let current: mastodon.v1.Relationship | null | undefined = relCache.get(key)
     if (!current) {
       try {
         const rels = await client.v1.accounts.relationships.fetch({ id: [resolved.id] })

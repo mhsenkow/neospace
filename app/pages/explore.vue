@@ -771,7 +771,7 @@ onUnmounted(() => {
           ref="typeaheadRef"
           :query="query"
           :open="typeaheadOpen && hasQuery"
-          :recent="recents.items"
+          :recent="recentForTab"
           list-id="explore-typeahead"
           @select="onTypeaheadSelect"
           @close="typeaheadOpen = false"
