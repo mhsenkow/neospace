@@ -35,7 +35,7 @@ const emit = defineEmits<{
 
 const listRef = ref<HTMLElement | null>(null)
 const uid = props.idPrefix || `neo-tabs-${useId()}`
-const indicator = ref({ left: 0, width: 0, ready: false })
+const indicatorMetrics = ref({ left: 0, width: 0, ready: false })
 
 const activeId = computed(() => {
   if (props.tabs.some((t) => t.id === props.modelValue)) return props.modelValue
@@ -43,9 +43,9 @@ const activeId = computed(() => {
 })
 
 const indicatorStyle = computed(() => ({
-  transform: `translateX(${indicator.value.left}px)`,
-  width: `${indicator.value.width}px`,
-  opacity: indicator.value.ready ? 1 : 0,
+  transform: `translateX(${indicatorMetrics.value.left}px)`,
+  width: `${indicatorMetrics.value.width}px`,
+  opacity: indicatorMetrics.value.ready ? 1 : 0,
 }))
 
 function select(id: string) {
@@ -67,11 +67,11 @@ function measureIndicator() {
   if (!list) return
   const el = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
   if (!el) {
-    indicator.value = { left: 0, width: 0, ready: false }
+    indicatorMetrics.value = { left: 0, width: 0, ready: false }
     return
   }
   // offsetLeft is relative to the list; abspos children scroll with the strip
-  indicator.value = {
+  indicatorMetrics.value = {
     left: el.offsetLeft,
     width: el.offsetWidth,
     ready: true,
