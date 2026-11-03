@@ -24,9 +24,18 @@ describe('relative time at unit boundaries (NS-271)', () => {
 
 describe('accountActiveLabel (NS-566)', () => {
   it('uses calendar-day wording for last_status_at dates', () => {
-    expect(accountActiveLabel('2026-10-12', 'en')).toBe('active today')
-    expect(accountActiveLabel('2026-10-11', 'en')).toBe('active yesterday')
-    expect(accountActiveLabel('2026-10-09', 'en')).toBe('active 3 days ago')
+    const ymd = (offsetDays: number) => {
+      const d = new Date()
+      d.setHours(0, 0, 0, 0)
+      d.setDate(d.getDate() + offsetDays)
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+    expect(accountActiveLabel(ymd(0), 'en')).toBe('active today')
+    expect(accountActiveLabel(ymd(-1), 'en')).toBe('active yesterday')
+    expect(accountActiveLabel(ymd(-3), 'en')).toBe('active 3 days ago')
   })
 })
 
