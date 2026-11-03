@@ -189,8 +189,15 @@
   --neo-content-width: var(--neo-content-width-base);
   
   --neo-sidebar-width: #{vars.$sidebar-width-expanded};
+  // Phone landscape left nav (safe-area aware)
+  --neo-landscape-rail-w: calc(52px + env(safe-area-inset-left, 0px));
 
-  @media (min-width: 1024px) and (max-width: 1199px) {
+  // Tablet portrait expanded width; html[data-rail] (default on mid widths) pins to rail
+  @media (min-width: #{vars.$bp-tablet}) and (max-width: #{vars.$bp-desk-max}) {
+    --neo-sidebar-width: 200px;
+  }
+
+  @media (min-width: #{vars.$bp-desk}) and (max-width: 1199px) {
     --neo-sidebar-width: 200px;
   }
 
@@ -200,6 +207,14 @@
   --neo-subview-chrome-height: 44px;
   // Board's bottom feed-pill dock (0 off the board / on desktop)
   --neo-feed-tabs-h: 0px;
+
+  // Phone landscape: reclaim vertical space (left rail, no bottom tabs / feed dock)
+  @media (max-height: #{vars.$bp-phone-landscape-h}) and (orientation: landscape) and (max-width: #{vars.$bp-desk-max}) {
+    --neo-mobile-nav-h: 0px;
+    --neo-feed-tabs-h: 0px;
+    --neo-mobile-chrome-top: 0px;
+    --neo-subview-chrome-height: 36px;
+  }
   
   --neo-container-sm: #{vars.$container-sm};
   --neo-container-md: #{vars.$container-md};
@@ -242,7 +257,8 @@ html[data-rail] {
 // Auto-hiding tab bar (useAutoHideNav): floating buttons that sit above it
 // follow it down. `translate` (not transform) so it never fights a component's
 // own transforms; each element declares its own transition.
-@media (max-width: 1023px) {
+// Auto-hide only when the tab bar is bottom-docked (phone portrait)
+@media (max-width: #{vars.$bp-phone-max}) and (min-height: #{vars.$bp-phone-landscape-h + 1px}) {
   html.neo-nav-hidden {
     .notes-fab,
     .neo-bottom-dock,
@@ -255,6 +271,20 @@ html[data-rail] {
   // Board pills take over the bottom edge — keep them above the home indicator
   html.neo-nav-collapsed .mobile-feed-tabs {
     padding-bottom: calc(0.25rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+// Phone landscape: pin left rail offset for docks / toasts
+@media (max-height: #{vars.$bp-phone-landscape-h}) and (orientation: landscape) and (max-width: #{vars.$bp-desk-max}) {
+  html.neo-phone-landscape {
+    .neo-bottom-dock,
+    .neo-toast-host {
+      left: max(0.75rem, var(--neo-landscape-rail-w));
+    }
+  }
+
+  html.neo-route-board {
+    --neo-feed-tabs-h: 0px;
   }
 }
 
@@ -293,7 +323,13 @@ html.reduce-motion {
 
 // Published on <html> (layout toggles the class) so body-teleported FABs and
 // toasts clear the pills-only strip above the mobile tab bar on the board.
-@media (max-width: 1023px) {
+@media (max-width: #{vars.$bp-phone-max}) and (min-height: #{vars.$bp-phone-landscape-h + 1px}) {
+  html.neo-route-board {
+    --neo-feed-tabs-h: 48px;
+  }
+}
+
+@media (max-width: #{vars.$bp-phone-max}) and (orientation: portrait) {
   html.neo-route-board {
     --neo-feed-tabs-h: 48px;
   }

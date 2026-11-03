@@ -39,7 +39,10 @@ const reducedMotion = () =>
   (matchesMedia('(prefers-reduced-motion: reduce)') ||
     document.documentElement.classList.contains('reduce-motion'))
 
-const isMobileShell = () => matchesMedia('(max-width: 1023px)')
+/** Only bottom-docked phone tabs — never the landscape left rail or tablet sidebar */
+const isMobileShell = () =>
+  matchesMedia('(max-width: 767px) and (min-height: 501px)') ||
+  matchesMedia('(max-width: 767px) and (orientation: portrait)')
 
 export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
   const route = useRoute()

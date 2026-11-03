@@ -628,7 +628,8 @@ watch(
   z-index: var(--neo-z-shell-nav, 100);
   transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 
-  @media (min-width: 1024px) {
+  // Tablet portrait+ (rail by default under 1180 / data-rail)
+  @media (min-width: 768px) {
     display: flex;
   }
 

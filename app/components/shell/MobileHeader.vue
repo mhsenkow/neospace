@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
+
 const open = defineModel<boolean>('open', { default: false })
 
 const { boardPortal } = useBoardPortal()
 const { openFeedOrRoute, boardColumnIs, goHome } = useBoardNav()
 const route = useRoute()
+const isPhoneLandscape = usePhoneLandscape()
+const isSidebarShell = useSidebarShell()
 
 const toggleMenu = () => {
   open.value = !open.value
@@ -16,10 +20,13 @@ const searchActive = computed(
 const openSearch = () => {
   void openFeedOrRoute('search', '/explore')
 }
+
+/** Hidden in phone landscape (rail owns menu/search) and tablet+ (sidebar). */
+const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
 </script>
 
 <template>
-<header class="mobile-header">
+<header v-if="visible" class="mobile-header">
   <div class="mobile-header__start">
     <button
       class="mobile-header__btn"
@@ -76,7 +83,12 @@ const openSearch = () => {
   border-bottom: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-header, 90);
   box-sizing: border-box;
-  @media (min-width: 1024px) {
+
+  @media (min-width: 768px) {
+    display: none;
+  }
+
+  @media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
     display: none;
   }
 
@@ -108,7 +120,6 @@ const openSearch = () => {
     text-decoration: none;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
-    // iOS keeps :hover after a tap — only fill on real hover devices
     @media (hover: hover) {
       &:hover {
         background: var(--neo-bg-hover);

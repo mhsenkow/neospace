@@ -565,4 +565,36 @@ const replyPlaceholder = computed(() => {
     opacity: 0.4;
   }
 }
+
+/* Phone landscape: keep footer + textarea usable above soft keyboard */
+@media (max-height: 500px) and (orientation: landscape) {
+  .compose-sheet__inner {
+    --compose-pad-x: 0.55rem;
+    --compose-pad-y: 0.25rem;
+  }
+
+  .compose-sheet__body {
+    padding-bottom: 0.25rem;
+
+    :deep(.compose-input-wrap),
+    :deep(.compose-input) {
+      min-height: 3rem;
+    }
+  }
+
+  .compose-sheet__footer {
+    min-height: 38px;
+    padding: 0.25rem var(--compose-pad-x);
+    padding-bottom: max(0.25rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .compose-sheet__post-options {
+    min-height: 36px;
+    padding: 0.2rem 0.1rem;
+  }
+
+  .compose-sheet__footer-post {
+    min-height: 34px;
+  }
+}
 </style>

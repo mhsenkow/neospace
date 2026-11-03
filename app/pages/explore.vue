@@ -1276,7 +1276,8 @@ onUnmounted(() => {
 .explore-page {
   max-width: 64rem;
   margin: 0 auto;
-  padding: 1rem 0.75rem 5.5rem;
+  padding: 1rem max(0.75rem, env(safe-area-inset-right, 0px)) 5.5rem
+    max(0.75rem, env(safe-area-inset-left, 0px));
   box-sizing: border-box;
   width: 100%;
   min-width: 0;

@@ -1678,7 +1678,8 @@ useHead({
   max-width: 40rem;
   min-width: 0;
   margin: 0 auto;
-  padding: 0.5rem 0.5rem 1.5rem;
+  padding: 0.5rem max(0.5rem, env(safe-area-inset-right, 0px)) 1.5rem
+    max(0.5rem, env(safe-area-inset-left, 0px));
   box-sizing: border-box;
 
   &--can-reply {

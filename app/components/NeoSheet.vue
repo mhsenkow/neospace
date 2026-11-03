@@ -82,6 +82,14 @@ const rootStyle = computed(() => ({
   justify-content: flex-end;
   box-sizing: border-box;
 
+  // Phone landscape + tablet touch: center as a floating card
+  @media (max-height: 500px) and (orientation: landscape),
+    (min-width: 768px) and (max-width: 1366px) and (pointer: coarse) {
+    justify-content: center;
+    align-items: center;
+    padding: 0.5rem;
+  }
+
   @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     justify-content: center;
     align-items: center;
@@ -133,13 +141,36 @@ const rootStyle = computed(() => ({
     height: auto;
   }
 
-  // Touch tablets (iPad Pro landscape is 1366px): keep the bottom sheet a
-  // readable column instead of stretching it edge to edge
-  @media (min-width: 768px) {
-    max-width: 640px;
+  // Phone landscape: wide centered card, leave room for soft keyboard
+  @media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
+    max-width: min(680px, 94vw);
+    width: min(680px, 94vw);
+    min-height: 0;
+    max-height: min(94dvh, 100%);
+    border-radius: 12px;
+    border-bottom: 1px solid var(--neo-border-color);
+    padding-bottom: 0;
     align-self: center;
   }
 
+  // Touch tablets: floating card with rounded corners
+  @media (min-width: 768px) and (max-width: 1366px) and (pointer: coarse) {
+    max-width: 640px;
+    width: min(640px, 94vw);
+    min-height: min(70dvh, 520px);
+    max-height: min(88dvh, 720px);
+    border-radius: 16px;
+    border-bottom: 1px solid var(--neo-border-color);
+    padding-bottom: 0;
+    align-self: center;
+
+    .neo-sheet--compact & {
+      min-height: 0;
+      max-width: 480px;
+    }
+  }
+
+  // Mouse/trackpad desk: centered modal card
   @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
     max-width: 560px;
     max-height: min(80vh, 720px);

@@ -3009,10 +3009,18 @@ onUnmounted(() => {
       max-height: min(70vh, 720px);
       object-fit: contain;
       background: var(--neo-bg-secondary);
+
+      @media (max-height: 500px) and (orientation: landscape) {
+        max-height: calc(100dvh - 4.5rem);
+      }
     }
 
     :deep(.status-media-video) {
       max-height: min(75vh, 800px);
+
+      @media (max-height: 500px) and (orientation: landscape) {
+        max-height: calc(100dvh - 4.5rem);
+      }
     }
   }
 

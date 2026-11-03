@@ -71,11 +71,16 @@ watch(
 const draggingColumnId = ref<string | null>(null)
 const dropTargetColumnId = ref<string | null>(null)
 
-/** Mobile-only: Settings → Profile → feeds → Search → Inbox → Activity → Groups */
-const MOBILE_CAROUSEL_MQ = '(max-width: 1023px)'
+/** Phone carousel only (≤767) — tablets graduate to multi-column board + sidebar rail */
+const MOBILE_CAROUSEL_MQ = '(max-width: 767px)'
 const EDGE_LEFT = 2
 const EDGE_RIGHT = BOARD_RIGHT_PORTALS.length
 const isMobileUi = ref(false)
+/** Phone landscape short shell — merge feed pills into the top chrome */
+const PHONE_LANDSCAPE_MQ =
+  '(max-height: 500px) and (orientation: landscape) and (max-width: 1023px)'
+const isPhoneLandscapeUi = ref(false)
+let landscapeMq: MediaQueryList | null = null
 const carouselSlideIndex = ref(0)
 const portalSearch = ref('')
 let portalActionLock = false
@@ -1265,6 +1270,8 @@ const unbindCarouselGestures = () => {
 
 const syncMobileUi = () => {
   const next = !!mobileMq?.matches
+  const landscape = !!landscapeMq?.matches
+  isPhoneLandscapeUi.value = landscape
   if (next === isMobileUi.value) return
   isMobileUi.value = next
   const el = columnsContainer.value
@@ -1372,8 +1379,11 @@ onMounted(async () => {
   }
 
   mobileMq = window.matchMedia(MOBILE_CAROUSEL_MQ)
+  landscapeMq = window.matchMedia(PHONE_LANDSCAPE_MQ)
   isMobileUi.value = mobileMq.matches
+  isPhoneLandscapeUi.value = landscapeMq.matches
   mobileMq.addEventListener('change', syncMobileUi)
+  landscapeMq.addEventListener('change', syncMobileUi)
 
   nextTick(() => {
     if (disposed) return
@@ -1404,7 +1414,9 @@ onUnmounted(() => {
   setBoardPortal(null)
   unbindCarouselGestures()
   mobileMq?.removeEventListener('change', syncMobileUi)
+  landscapeMq?.removeEventListener('change', syncMobileUi)
   mobileMq = null
+  landscapeMq = null
 })
 
 definePageMeta({ keepalive: true })
@@ -1474,7 +1486,11 @@ useHead({ title: 'Home | NeoSpace' })
     </nav>
 
     <!-- Mobile: feed controls up top — Flip / jump / add — so the bottom strip stays thumb-tabs only -->
-    <nav class="mobile-feed-chrome" aria-label="Feed controls">
+    <nav
+      class="mobile-feed-chrome"
+      :class="{ 'mobile-feed-chrome--landscape': isPhoneLandscapeUi }"
+      aria-label="Feed controls"
+    >
       <button
         type="button"
         class="mobile-feed-chrome__mode"
@@ -1493,9 +1509,30 @@ useHead({ title: 'Home | NeoSpace' })
         </span>
       </button>
 
-      <p class="mobile-feed-chrome__title" :title="activeFeedChromeTitle">
+      <p
+        v-if="!isPhoneLandscapeUi"
+        class="mobile-feed-chrome__title"
+        :title="activeFeedChromeTitle"
+      >
         {{ activeFeedChromeTitle }}
       </p>
+
+      <!-- Phone landscape: feed pills live in the slim top bar (no bottom dock) -->
+      <div
+        v-if="isPhoneLandscapeUi && isMobileUi"
+        ref="feedTabsScroller"
+        class="mobile-feed-chrome__pills"
+      >
+        <NeoTabs
+          class="mobile-feed-tabs__neo"
+          :tabs="feedTabs"
+          controls-id="feed-columns"
+          aria-label="Feeds"
+          :model-value="activeFeedTabId"
+          :panels="false"
+          @update:model-value="(id) => (activeFeedTabId = id)"
+        />
+      </div>
 
       <div class="mobile-feed-chrome__actions">
         <button
@@ -1943,8 +1980,12 @@ useHead({ title: 'Home | NeoSpace' })
 
     </div>
 
-    <!-- Mobile: thumb-zone feed pills only (controls live in .mobile-feed-chrome above) -->
-    <nav class="mobile-feed-tabs" aria-label="Feeds">
+    <!-- Mobile portrait: thumb-zone feed pills (landscape merges pills into top chrome) -->
+    <nav
+      v-if="!isPhoneLandscapeUi"
+      class="mobile-feed-tabs"
+      aria-label="Feeds"
+    >
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
         <NeoTabs
           class="mobile-feed-tabs__neo"
@@ -2055,13 +2096,18 @@ useHead({ title: 'Home | NeoSpace' })
   display: flex;
   overflow: hidden;
 
-  // Desktop: extend into main-content padding to fill the full viewport
-  @media (min-width: 1024px) {
+  // Tablet+ / desk: extend into main-content padding to fill the full viewport
+  @media (min-width: 768px) {
     height: 100vh;
     height: 100dvh;
+    margin: -1rem;
+    width: calc(100% + 2rem);
+    overscroll-behavior-x: none;
+  }
+
+  @media (min-width: 1024px) {
     margin: -1.25rem;
     width: calc(100% + 2.5rem);
-    overscroll-behavior-x: none;
   }
 
   @media (min-width: 1200px) {
@@ -2069,8 +2115,8 @@ useHead({ title: 'Home | NeoSpace' })
     width: calc(100% + 4rem);
   }
 
-  // Mobile: fill the padded main box (don't re-subtract chrome — that grew past the screen)
-  @media (max-width: 1023px) {
+  // Phone carousel: fill the padded main box
+  @media (max-width: 767px) {
     flex: 1;
     flex-direction: column;
     min-height: 0;
@@ -2078,19 +2124,22 @@ useHead({ title: 'Home | NeoSpace' })
     max-width: 100%;
     margin-inline: 0;
     // Publish for layout dock / FAB (inherits up through main → layout)
-    // Slimmer now that thumb controls moved to the top chrome
     --neo-feed-tabs-h: 48px;
+  }
+
+  @media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
+    --neo-feed-tabs-h: 0px;
   }
 
   // Single column / focused tab: center the content
   &:not(.columns-page--multi) {
-    @media (min-width: 1024px) {
+    @media (min-width: 768px) {
       justify-content: center;
     }
   }
 
   &--tabs {
-    @media (min-width: 1024px) {
+    @media (min-width: 768px) {
       flex-direction: column;
       align-items: stretch;
     }
@@ -2142,7 +2191,7 @@ useHead({ title: 'Home | NeoSpace' })
   padding-inline-start: 0.25rem;
   box-sizing: border-box;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     scroll-padding-inline-start: 0.75rem;
     padding-inline-start: 0.5rem;
   }
@@ -2165,8 +2214,8 @@ useHead({ title: 'Home | NeoSpace' })
 
   // Single column: cap width for readability
   .columns-page:not(.columns-page--multi):not(.columns-page--tabs) & {
-    @media (min-width: 1024px) {
-      max-width: 620px;
+    @media (min-width: 768px) {
+      max-width: 640px;
       overflow-x: hidden;
       touch-action: pan-y;
 
@@ -2181,7 +2230,7 @@ useHead({ title: 'Home | NeoSpace' })
   // Focused tab: fill the main pane so media can go edge-to-edge; text stays
   // capped inside the column / card (see TimelineColumn + RealPostCard).
   .columns-page--tabs & {
-    @media (min-width: 1024px) {
+    @media (min-width: 768px) {
       max-width: none;
       width: 100%;
       margin-inline: 0;
@@ -2203,8 +2252,34 @@ useHead({ title: 'Home | NeoSpace' })
     max-width: none;
   }
 
-  // Mobile: full-width pages — JS parks on release (CSS mandatory snap bounced vs settle)
-  @media (max-width: 1023px) {
+  // Tablet portrait: 2 columns side-by-side with proximity snap
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .columns-page--multi.columns-page--packed &,
+    .columns-page--multi.columns-page--roomy & {
+      overflow-x: auto;
+      scroll-snap-type: x proximity;
+
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 0 0 50%;
+        min-width: max(320px, 50%);
+        max-width: none;
+        scroll-snap-align: start;
+      }
+    }
+
+    .columns-page--multi.columns-page--roomy & {
+      :deep(.timeline-column),
+      :deep(.panel-column) {
+        flex: 0 0 55%;
+        min-width: max(340px, 52%);
+        max-width: 520px;
+      }
+    }
+  }
+
+  // Phone: full-width pages — JS parks on release (CSS mandatory snap bounced vs settle)
+  @media (max-width: 767px) {
     width: 100%;
     // No side padding — equal-width pages + scrollLeft math need a clean box
     padding-inline: 0;
@@ -2356,7 +2431,7 @@ useHead({ title: 'Home | NeoSpace' })
     var(--neo-bg-primary);
   color: var(--neo-text-primary);
 
-  @media (max-width: 1023px) {
+  @media (max-width: 767px) {
     display: flex;
   }
 
@@ -2656,7 +2731,7 @@ useHead({ title: 'Home | NeoSpace' })
 .desk-feed-tabs {
   display: none;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -2722,8 +2797,61 @@ useHead({ title: 'Home | NeoSpace' })
   position: relative;
   z-index: var(--neo-z-sticky-bar, 20);
 
-  @media (max-width: 1023px) {
+  @media (max-width: 767px) {
     display: flex;
+  }
+
+  &--landscape {
+    min-height: 36px;
+    padding: 0.1rem 0.25rem;
+    gap: 0.15rem;
+
+    .mobile-feed-chrome__jump,
+    .mobile-feed-chrome__mode {
+      width: 36px;
+      height: 32px;
+    }
+  }
+
+  &__pills {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    :deep(.neo-tabs__list) {
+      display: flex;
+      gap: 0.25rem;
+      border-bottom: none;
+      overflow: visible;
+    }
+
+    :deep(.neo-tabs__tab) {
+      flex-shrink: 0;
+      max-width: 9rem;
+      min-height: 28px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-radius: 6px;
+      box-shadow: none;
+      color: var(--neo-text-tertiary);
+
+      &[aria-selected='true'] {
+        color: var(--neo-text-primary);
+        background: var(--neo-bg-tertiary);
+        box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--neo-accent) 70%, transparent);
+      }
+    }
   }
 
   &__title {
@@ -2807,8 +2935,12 @@ useHead({ title: 'Home | NeoSpace' })
   position: relative;
   z-index: var(--neo-z-sticky-bar, 20);
 
-  @media (max-width: 1023px) {
+  @media (max-width: 767px) {
     display: flex;
+  }
+
+  @media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
+    display: none;
   }
 
   &__scroller {
@@ -2950,7 +3082,7 @@ useHead({ title: 'Home | NeoSpace' })
   position: relative;
   transition: width 0.2s ease;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     display: flex;
   }
 

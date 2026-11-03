@@ -161,4 +161,21 @@ defineEmits<{
   margin-left: auto;
   padding-right: 0.15rem;
 }
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .neo-sheet-header,
+  .neo-sheet-header--title-sr {
+    min-height: 38px;
+  }
+
+  .neo-sheet-header__close {
+    width: 38px;
+    height: 38px;
+  }
+
+  .neo-sheet-header--centered .neo-sheet-header__trailing--spacer {
+    width: 38px;
+    min-height: 38px;
+  }
+}
 </style>

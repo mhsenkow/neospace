@@ -1532,7 +1532,8 @@ useHead({
   max-width: 640px;
   min-width: 0;
   margin: 0 auto;
-  padding: 0 0 2rem;
+  padding: 0 max(0px, env(safe-area-inset-right, 0px)) 2rem
+    max(0px, env(safe-area-inset-left, 0px));
   box-sizing: border-box;
 }
 

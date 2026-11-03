@@ -892,4 +892,77 @@ const TABS: { id: PreviewTab; label: string }[] = [
     padding: max(0.85rem, env(safe-area-inset-top, 0px)) 1rem 0.85rem;
   }
 }
+
+/* Phone landscape: compact header + tabs into one row so posts retain height */
+@media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
+  .preview-overlay {
+    padding: 0.4rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .preview-modal {
+    max-width: min(680px, 94vw);
+    width: min(680px, 94vw);
+    max-height: min(94dvh, 100%);
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--neo-border-color);
+  }
+
+  .preview-header {
+    padding: 0.45rem 0.75rem;
+    border-bottom-width: 2px;
+    gap: 0.5rem;
+
+    .emoji {
+      font-size: 1.35rem;
+    }
+
+    h2 {
+      font-size: 1rem;
+    }
+
+    .domain-link {
+      font-size: 0.75rem;
+    }
+  }
+
+  .close-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .preview-tabs {
+    padding: 0 0.5rem;
+    gap: 0;
+  }
+
+  .preview-tab {
+    min-height: 2rem;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.75rem;
+  }
+
+  .preview-footer {
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+/* Tablet touch: floating centered card */
+@media (min-width: 768px) and (max-width: 1366px) and (pointer: coarse) {
+  .preview-overlay {
+    padding: 1.25rem;
+    align-items: center;
+  }
+
+  .preview-modal {
+    max-width: 640px;
+    width: min(640px, 94vw);
+    max-height: min(88dvh, 720px);
+    height: auto;
+    border-radius: 16px;
+    border: 1px solid var(--neo-border-color);
+  }
+}
 </style>

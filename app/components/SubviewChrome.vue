@@ -76,14 +76,26 @@ const goBack = () => {
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
 
-  @media (min-width: 1024px) {
+  @media (max-height: 500px) and (orientation: landscape) {
+    min-height: 36px;
+    padding-top: max(0.1rem, var(--neo-safe-top, env(safe-area-inset-top, 0px)));
+    padding-bottom: 0.1rem;
+  }
+
+  @media (min-width: 768px) {
     /* Bleed into main’s horizontal pad so the bar spans the content column */
-    margin: 0 -1.25rem;
+    margin: 0 -1rem;
     min-height: 48px;
-    padding-left: 1.25rem;
-    padding-right: 1.25rem;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
     padding-top: max(0.35rem, var(--neo-safe-top, env(safe-area-inset-top, 0px)));
     padding-bottom: 0.35rem;
+  }
+
+  @media (min-width: 1024px) {
+    margin: 0 -1.25rem;
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
   }
 
   @media (min-width: 1200px) {

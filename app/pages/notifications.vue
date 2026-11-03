@@ -788,6 +788,8 @@ const chromeTitle = computed(() => {
   max-width: 820px;
   margin: 0 auto;
   padding-bottom: 2rem;
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   box-sizing: border-box;
 }
 

@@ -2949,13 +2949,17 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   width: 100%;
   max-width: 100%;
   height: auto;
-  max-height: 350px;
+  max-height: min(68dvh, 520px);
   object-fit: cover;
   border-radius: var(--neo-radius-md, 8px);
   display: block;
   cursor: pointer;
   transition: opacity var(--neo-transition-fast, 0.15s ease);
   background: var(--neo-bg-tertiary);
+
+  @media (max-height: 500px) and (orientation: landscape) {
+    max-height: calc(100dvh - 4.5rem);
+  }
 
   &:hover { opacity: 0.95; }
 }
@@ -2969,9 +2973,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 }
 
 .status-media-video {
-  max-height: 500px;
+  max-height: min(68dvh, 560px);
   object-fit: contain;
   background: #000;
+
+  @media (max-height: 500px) and (orientation: landscape) {
+    max-height: calc(100dvh - 4.5rem);
+  }
 }
 
 // ========================================
@@ -2986,6 +2994,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   margin-top: 0.5rem;
   margin-left: -0.35rem;
   max-width: 100%;
+  min-width: 0;
 }
 
 .status-action {
@@ -2993,9 +3002,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   align-items: center;
   gap: 0.3rem;
   padding: 0.45rem 0.5rem;
-  min-height: 44px;
-  min-width: 44px;
+  min-height: 40px;
+  min-width: 40px;
   justify-content: center;
+  flex-shrink: 0;
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
   background: transparent;

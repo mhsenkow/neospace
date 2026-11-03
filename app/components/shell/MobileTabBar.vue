@@ -2,6 +2,9 @@
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
 import { useConversationsStore } from '~/stores/conversations'
+import { usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
+
+const open = defineModel<boolean>('open', { default: false })
 
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
@@ -10,8 +13,10 @@ const { boardPortal } = useBoardPortal()
 const { openFeedOrRoute, boardColumnIs, goHome, openCompose } = useBoardNav()
 const route = useRoute()
 const { path, isActivity } = useActivityNav()
+const isPhoneLandscape = usePhoneLandscape()
+const isSidebarShell = useSidebarShell()
 
-/** Slides away while reading, back on scroll up */
+/** Slides away while reading, back on scroll up — portrait bottom bar only */
 const navEl = ref<HTMLElement | null>(null)
 useAutoHideNav(navEl)
 
@@ -24,6 +29,10 @@ const messagesActive = computed(
 
 const activityActive = computed(
   () => isActivity.value || boardColumnIs('notifications'),
+)
+
+const searchActive = computed(
+  () => route.path === '/explore' || boardColumnIs('search'),
 )
 
 /** Home owns aria-current only when another tab isn't claiming the board column. */
@@ -48,10 +57,65 @@ const openMessages = () => {
 const openActivity = () => {
   void openFeedOrRoute('notifications', '/notifications')
 }
+
+const openSearch = () => {
+  void openFeedOrRoute('search', '/explore')
+}
+
+const toggleMenu = () => {
+  open.value = !open.value
+}
+
+watch(
+  isPhoneLandscape,
+  (on) => {
+    if (typeof document === 'undefined') return
+    document.documentElement.classList.toggle('neo-phone-landscape', on)
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  document.documentElement.classList.remove('neo-phone-landscape')
+})
 </script>
 
 <template>
-<nav ref="navEl" class="mobile-nav" aria-label="Tabs">
+<nav
+  v-if="!isSidebarShell"
+  ref="navEl"
+  class="mobile-nav"
+  :class="{ 'mobile-nav--landscape': isPhoneLandscape }"
+  aria-label="Tabs"
+>
+  <template v-if="isPhoneLandscape">
+    <button
+      type="button"
+      class="mobile-nav__item"
+      :class="{ 'chrome-hint': boardPortal === 'settings' || boardPortal === 'communities' }"
+      aria-label="Menu"
+      :aria-expanded="open"
+      aria-controls="mobile-sidebar"
+      @click="toggleMenu"
+    >
+      <NeoIcon name="menu" :size="20" :stroke="1.75" />
+    </button>
+    <button
+      type="button"
+      class="mobile-nav__item"
+      :class="{
+        active: searchActive,
+        'chrome-hint': boardPortal === 'search',
+      }"
+      aria-label="Search"
+      :aria-current="searchActive ? 'page' : undefined"
+      @click="openSearch"
+    >
+      <NeoIcon name="search" :size="20" :stroke="searchActive || boardPortal === 'search' ? 2 : 1.75" />
+    </button>
+    <span class="mobile-nav__sep" aria-hidden="true" />
+  </template>
+
   <button
     type="button"
     class="mobile-nav__item"
@@ -162,24 +226,16 @@ const openActivity = () => {
 </template>
 
 <style lang="scss" scoped>
-// Auto-hide (useAutoHideNav): give the slot back to `main` while hidden.
-// Sticky would pin it inside the shell's bottom edge, so drop to relative.
-// (Whole selector inside :global — `:global(html.x) &` compiles to just `html.x`.)
-:global(html.neo-nav-collapsed .mobile-nav) {
+:global(html.neo-nav-collapsed .mobile-nav:not(.mobile-nav--landscape)) {
   position: relative;
   margin-bottom: calc(-1 * var(--neo-nav-live-h, 56px));
 }
 
 .mobile-nav {
-  // In-flow flex child of .neo-layout — fixed chrome was clipped by iOS Safari
-  // when the parent used overflow:hidden (DevTools emulation did not reproduce it).
-  // sticky keeps it glued to the visible bottom if the shell ever overscrolls.
   position: sticky;
   bottom: 0;
   flex-shrink: 0;
   width: 100%;
-  /* Icon row + safe area as padding (not inside a fixed content box) so
-     buttons never sit under the home indicator / Android gesture bar. */
   min-height: var(--neo-mobile-nav-h, 56px);
   height: auto;
   display: flex;
@@ -187,18 +243,54 @@ const openActivity = () => {
   justify-content: space-around;
   padding: 0.2rem 0.35rem;
   padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
-  // Solid fill — translucent + backdrop-filter flashes black on iOS while the
-  // auto-hide transform animates (same fix as MobileHeader)
   background: var(--neo-bg-primary);
   border-top: 1px solid var(--neo-border-color);
   z-index: var(--neo-z-shell-header, 90);
   box-sizing: border-box;
-  // Android Chrome paints sticky bars over the gesture bar without this
   padding-left: max(0.35rem, env(safe-area-inset-left, 0px));
   padding-right: max(0.35rem, env(safe-area-inset-right, 0px));
 
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     display: none;
+  }
+
+  &--landscape {
+    position: relative;
+    bottom: auto;
+    order: -1;
+    align-self: stretch;
+    width: var(--neo-landscape-rail-w, 52px);
+    min-width: var(--neo-landscape-rail-w, 52px);
+    max-width: var(--neo-landscape-rail-w, 52px);
+    min-height: 0;
+    height: auto;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.15rem;
+    padding: max(0.35rem, env(safe-area-inset-top, 0px)) 0.2rem
+      max(0.35rem, env(safe-area-inset-bottom, 0px));
+    padding-left: max(0.2rem, env(safe-area-inset-left, 0px));
+    border-top: none;
+    border-right: 1px solid var(--neo-border-color);
+
+    .mobile-nav__item {
+      width: 44px;
+      height: 40px;
+    }
+
+    .mobile-nav__compose-mark {
+      width: 36px;
+      height: 28px;
+    }
+  }
+
+  &__sep {
+    display: block;
+    width: 28px;
+    height: 1px;
+    margin: 0.25rem 0;
+    background: var(--neo-border-color);
+    flex-shrink: 0;
   }
 
   &__item {
@@ -215,6 +307,7 @@ const openActivity = () => {
     transition: color var(--neo-transition-fast), background-color var(--neo-transition-fast);
     position: relative;
     cursor: pointer;
+    flex-shrink: 0;
 
     &:active {
       background: var(--neo-bg-hover);
@@ -223,15 +316,6 @@ const openActivity = () => {
     &.active {
       color: var(--neo-accent);
       background: var(--neo-accent-soft);
-    }
-
-    &--avatar {
-      padding: 4px;
-
-      &.active .mobile-nav__avatar {
-        border-color: var(--neo-accent);
-        box-shadow: 0 0 0 1.5px var(--neo-accent);
-      }
     }
   }
 
@@ -259,26 +343,5 @@ const openActivity = () => {
     color: var(--neo-text-on-accent, var(--neo-text-inverse));
     transition: transform 0.12s ease, background 0.12s ease;
   }
-
-  &__avatar {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 1.5px solid transparent;
-
-    .mobile-nav__item.active & {
-      border-color: var(--neo-accent);
-    }
-
-    &--placeholder {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-muted);
-    }
-  }
 }
-
 </style>

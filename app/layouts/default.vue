@@ -20,7 +20,7 @@ import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useShellAppearance } from '~/composables/useShellAppearance'
 import { useLoomHandoff } from '~/composables/useLoomHandoff'
-import { useDeskViewport } from '~/composables/useBreakpoint'
+import { useDeskViewport, usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
 import { useStandaloneShell } from '~/composables/useStandaloneShell'
 import DesktopSidebar from '~/components/shell/DesktopSidebar.vue'
 import MobileHeader from '~/components/shell/MobileHeader.vue'
@@ -93,6 +93,9 @@ const { sidebarRail, loadSidebarRail, applyTheme, lookAnnounce } = useShellAppea
 algorithmsStore.hydrate()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
 const isDesk = useDeskViewport()
+/** Tablet portrait+ — DesktopSidebar rail instead of phone header/tabs */
+const isSidebarShell = useSidebarShell()
+const isPhoneLandscape = usePhoneLandscape()
 useAppShellHeight()
 // Publish --neo-keyboard-inset for any page (messages list, explore, …)
 useKeyboardBottomInset()
@@ -129,10 +132,10 @@ const isTabRoute = computed(
 const showMobileNav = computed(() => !isMobileSubview.value || isTabRoute.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
 
-/** Desktop Threads-style + — mobile already has the tab-bar compose mark */
+/** Desktop / tablet Threads-style + — phone already has the tab-bar compose mark */
 const showComposeFab = computed(
   () =>
-    isDesk.value &&
+    isSidebarShell.value &&
     instancesStore.hasAuthenticatedInstance &&
     !composeSheet.open &&
     !isThreadRoute.value,
@@ -158,8 +161,8 @@ const stopShellLiveRefresh = () => {
   shellLiveRefresh = false
 }
 
-watch(isDesk, (desk) => {
-  if (desk) closeMobileMenu()
+watch(isSidebarShell, (sidebar) => {
+  if (sidebar) closeMobileMenu()
 })
 
 // Fixed bottom UI (toasts, docks) reads this — the tab bar is gone on subviews
@@ -322,6 +325,7 @@ watch(
       'neo-layout--tab': isTabRoute,
       'neo-layout--subview': isMobileSubview,
       'neo-layout--rail': sidebarRail,
+      'neo-layout--phone-landscape': isPhoneLandscape,
       'neo-layout--portal-settings': boardPortal === 'settings',
       'neo-layout--portal-profile': boardPortal === 'profile',
       'neo-layout--portal-search': boardPortal === 'search',
@@ -332,12 +336,12 @@ watch(
   >
     <a href="#main-content" class="skip-link">Skip to content</a>
 
-    <!-- Only the active breakpoint's navigation is rendered (each is large + reactive) -->
-    <DesktopSidebar v-if="isDesk" />
+    <!-- Tablet portrait+ gets the desk sidebar (rail by default on mid widths) -->
+    <DesktopSidebar v-if="isSidebarShell" />
 
-    <MobileHeader v-if="!isDesk && showMobileHeader" v-model:open="mobileMenuOpen" />
+    <MobileHeader v-if="!isSidebarShell && showMobileHeader" v-model:open="mobileMenuOpen" />
 
-    <MobileDrawer v-if="!isDesk" v-model:open="mobileMenuOpen" />
+    <MobileDrawer v-if="!isSidebarShell" v-model:open="mobileMenuOpen" />
 
     <!-- One shared announcer for Look / board-density changes (both shells report here) -->
     <p class="sr-only" aria-live="polite">{{ lookAnnounce }}</p>
@@ -368,18 +372,18 @@ watch(
       </div>
     </div>
 
+    <MobileTabBar v-if="!isSidebarShell && showMobileNav" v-model:open="mobileMenuOpen" />
+
     <main id="main-content" class="main-content" tabindex="-1">
       <slot />
     </main>
-
-    <MobileTabBar v-if="!isDesk && showMobileNav" />
 
     <!-- Sticky v-if: fetch each sheet's chunk on first open, keep it for close transitions -->
     <LazyComposeSheet v-if="mounted.compose" />
     <LazyAlgorithmSheet v-if="mounted.algorithm" />
     <LazyInstanceManager v-if="mounted.accounts" />
     <AccountSwitcherSheet v-if="instancesStore.hasAuthenticatedInstance" />
-    <FeedbackNotes v-if="isDesk || !isMobileSubview" />
+    <FeedbackNotes v-if="isSidebarShell || !isMobileSubview" />
     <LazySettingsModal v-if="mounted.settings" />
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
     <!-- Hide while compose is open so the waffle never fights the soft keyboard / Post bar -->
@@ -403,7 +407,7 @@ watch(
         <NeoIcon name="plus" :size="26" :stroke="2.25" />
       </button>
       <!-- Phones get the same tools inside the drawer (Menu → Tools) instead of a floating waffle -->
-      <SuiteMenu v-if="isDesk" />
+      <SuiteMenu v-if="isSidebarShell" />
     </div>
     <NeoOverlayHost />
     <LazyEdwardMode v-if="edwardActive" />
@@ -417,15 +421,15 @@ watch(
   z-index: 90;
   flex-shrink: 0;
 
-  // Desktop: SubviewChrome is also sticky at top:0 — a sticky notice would
+  // Sidebar shell: SubviewChrome is also sticky at top:0 — a sticky notice would
   // cover the Back bar while scrolling. Let the notice scroll away instead.
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     position: static;
   }
 
-  // Desktop row shell: own the full first line beside the fixed sidebar — as a
+  // Sidebar row shell: own the full first line beside the fixed sidebar — as a
   // plain flex item it sat under the sidebar and squeezed `main` sideways
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     &:not(:empty) {
       flex: 0 0 calc(100% - var(--neo-sidebar-width, 248px));
       margin-left: var(--neo-sidebar-width, 248px);
@@ -516,17 +520,17 @@ watch(
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
 
-  @media (min-width: 1024px) {
-    // Auth notice takes its own line above `main`
+  @media (min-width: 768px) {
+    // Auth notice takes its own line above `main` (sidebar shell)
     flex-wrap: wrap;
     align-content: flex-start;
   }
 
-  // Mobile: column shell with in-flow header/tabs.
+  // Phone: column shell with in-flow header/tabs.
   // Avoid position:fixed chrome inside overflow:hidden — iOS Safari clips it
   // (Chrome device emulation does not), which hid the bottom tab bar.
   // --neo-app-height tracks visualViewport (Android URL-bar); svh/dvh as fallback.
-  @media (max-width: 1023px) {
+  @media (max-width: 767px) {
     flex-direction: column;
     // Override base min-height: 100dvh — min-height beats max-height when larger
     min-height: 0;
@@ -541,6 +545,14 @@ watch(
     overflow: hidden;
   }
 
+  // Phone landscape: left rail + main row (maximizes vertical reading height)
+  &--phone-landscape {
+    @media (max-width: 1023px) {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      align-content: stretch;
+    }
+  }
 }
 
 /* Bottom-right dock for install banner + suite waffle — below modal/drawer */
@@ -621,7 +633,7 @@ watch(
     }
   }
 
-  @media (max-width: 1023px) {
+  @media (max-width: 767px) {
     left: max(0.75rem, env(safe-area-inset-left));
     right: max(0.75rem, env(safe-area-inset-right));
     max-width: none;
@@ -633,7 +645,12 @@ watch(
     }
   }
 
-  @media (min-width: 1024px) {
+  .neo-layout--phone-landscape & {
+    left: max(0.75rem, var(--neo-landscape-rail-w));
+    --neo-dock-bottom: max(0.5rem, calc(env(safe-area-inset-bottom) + 0.35rem));
+  }
+
+  @media (min-width: 768px) {
     right: max(16px, env(safe-area-inset-right));
     --neo-dock-bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem));
   }
@@ -657,7 +674,7 @@ watch(
   min-height: 100dvh;
   min-width: 0;
 
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     // The shell is already 100dvh; don't force main taller when the auth notice sits above it
     min-height: auto;
   }
@@ -668,10 +685,10 @@ watch(
   background: var(--neo-bg-primary);
   overscroll-behavior-x: none;
 
-  /* Mobile: fill remaining space between in-flow header + tab bar.
+  /* Phone: fill remaining space between in-flow header + tab bar.
      The shell is viewport-locked, so `main` is the page's scroll container
      (search, groups, threads…). Only the column board opts out below. */
-  @media (max-width: 1023px) {
+  @media (max-width: 767px) {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
@@ -684,7 +701,8 @@ watch(
     overscroll-behavior-y: contain;
     // Sticky bars pin to the content edge — they offset by this to sit flush
     --neo-main-pad-top: 0.5rem;
-    padding: var(--neo-main-pad-top) 0.5rem 0;
+    padding: var(--neo-main-pad-top) max(0.5rem, env(safe-area-inset-right, 0px)) 0
+      max(0.5rem, env(safe-area-inset-left, 0px));
 
     // Flex items default to min-width:auto and won't shrink below content
     // (a wide post laid group detail out at 670px inside a 375px viewport).
@@ -699,19 +717,43 @@ watch(
     }
   }
 
-  @media (min-width: 600px) and (max-width: 1023px) {
-    padding-left: 1rem;
-    padding-right: 1rem;
+  .neo-layout--phone-landscape & {
+    @media (max-width: 1023px) {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-left: 0.5rem;
+      padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+
+      .neo-layout--board&,
+      .neo-layout--board & {
+        overflow: hidden;
+      }
+    }
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 600px) and (max-width: 767px) {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  @media (min-width: 768px) {
     display: block;
     height: auto;
     max-height: none;
     overflow: visible;
-    padding: 1.25rem 1.25rem;
-    margin-left: var(--neo-sidebar-width, 248px);
+    padding: 1rem 1rem;
+    margin-left: var(--neo-sidebar-width, 68px);
     transition: margin-left 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (min-width: 1024px) {
+    padding: 1.25rem 1.25rem;
   }
 
   @media (min-width: 1200px) {
@@ -726,6 +768,13 @@ watch(
     --neo-main-pad-top: 0px;
     padding-top: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
+
+    @media (min-width: 768px) {
+      padding-top: 0;
+      padding-left: 1rem;
+      padding-right: 1rem;
+      padding-bottom: 1rem;
+    }
 
     @media (min-width: 1024px) {
       padding-top: 0;
@@ -744,11 +793,15 @@ watch(
 
   /* Tab destinations keep MobileTabBar — leave room so the last rows aren't under it */
   .neo-layout--tab & {
-    @media (max-width: 1023px) {
+    @media (max-width: 767px) {
       padding-bottom: calc(
         var(--neo-mobile-nav-h, 56px) + env(safe-area-inset-bottom, 0px) + 0.5rem
       );
     }
+  }
+
+  .neo-layout--phone-landscape.neo-layout--tab & {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
   }
 }
 </style>

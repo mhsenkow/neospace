@@ -5,6 +5,7 @@
 
 import { useSettingsStore } from '~/stores/settings'
 import { useColumnsStore } from '~/stores/columns'
+import { defaultSidebarRailForWidth } from '~/composables/useBreakpoint'
 import {
   THEME_OPTIONS,
   UI_OPTIONS,
@@ -35,7 +36,13 @@ export function useShellAppearance() {
   const loadSidebarRail = () => {
     if (typeof window === 'undefined') return
     try {
-      sidebarRail.value = localStorage.getItem(SIDEBAR_RAIL_KEY) === '1'
+      const stored = localStorage.getItem(SIDEBAR_RAIL_KEY)
+      if (stored === '1' || stored === '0') {
+        sidebarRail.value = stored === '1'
+      } else {
+        // No explicit preference: default rail on tablet / mid widths (768–1180)
+        sidebarRail.value = defaultSidebarRailForWidth(window.innerWidth)
+      }
       if (sidebarRail.value) lookOpen.value = true
     } catch {
       sidebarRail.value = false

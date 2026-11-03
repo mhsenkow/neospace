@@ -1508,5 +1508,38 @@ watch(
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Phone landscape: compact floating settings card */
+@media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
+  .settings-overlay {
+    padding: 0.4rem;
+    align-items: center;
+  }
+
+  .settings-modal {
+    --settings-h: min(94dvh, 100%);
+    width: min(680px, 94vw);
+    border-radius: 12px;
+  }
+
+  .settings-header {
+    padding: 0.4rem 0.65rem;
+    gap: 0.35rem;
+  }
+}
+
+/* Tablet touch: floating centered card */
+@media (min-width: 768px) and (max-width: 1366px) and (pointer: coarse) {
+  .settings-overlay {
+    padding: 1.25rem;
+    align-items: center;
+  }
+
+  .settings-modal {
+    --settings-h: min(88dvh, 42rem);
+    width: min(640px, 94vw);
+    border-radius: 16px;
+  }
+}
 </style>
 

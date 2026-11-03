@@ -180,14 +180,21 @@ $content-width-wide: 760px;
 $sidebar-width-rail: 68px;
 $sidebar-width-expanded: 248px;
 
-// App shell breakpoints (desktop chrome at ≥1024)
+// App shell breakpoints
+// Phone carousel / bottom tabs: ≤767
+// Tablet portrait rail + board: 768–1023
+// Desk / tablet landscape sidebar: ≥1024
+$bp-phone-max: 767px;
+$bp-tablet: 768px;
 $bp-desk: 1024px;
 $bp-desk-max: 1023px;
 $bp-wide: 1200px;
+$bp-phone-landscape-h: 500px;
+$bp-rail-default-max: 1180px;
 
 $breakpoint-xs: 0;
 $breakpoint-sm: 576px;
-$breakpoint-md: 768px;
+$breakpoint-md: $bp-tablet;
 $breakpoint-lg: $bp-desk;
 $breakpoint-xl: $bp-wide;
 $breakpoint-2xl: 1400px;
