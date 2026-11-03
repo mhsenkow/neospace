@@ -8,6 +8,7 @@ import {
   languageMatches,
   qualifyAcct,
   rankFeed,
+  homeEngagementBreakdown,
   tasteFrom,
   viewerLanguagesFrom,
   X_WEIGHTS,
@@ -308,5 +309,30 @@ describe('contentWords and language', () => {
     c.viewerLang = 'en'
     expect(languageMatches('ja', c)).toBe(true)
     expect(languageMatches('fr', c)).toBe(false)
+  })
+})
+
+describe('RankBreakdown', () => {
+  it('attaches term math that is consistent with the final score shape', () => {
+    const c = ctx()
+    c.following.add('a@ex.social')
+    const talked = post({ acct: 'a@ex.social', repliesCount: 8, favouritesCount: 2 })
+    const out = rankFeed('x', [talked], c)
+    expect(out).toHaveLength(1)
+    const b = out[0]!.breakdown!
+    expect(b.ranker).toBe('x')
+    expect(b.terms.some((t) => t.label === 'Replies')).toBe(true)
+    expect(b.finalScore).toBe(out[0]!.score)
+    expect(b.baseScore).toBeGreaterThan(0)
+    expect(b.recencyMultiplier).toBeGreaterThan(0)
+    expect(b.recencyMultiplier).toBeLessThanOrEqual(1)
+  })
+
+  it('builds a home For You breakdown', () => {
+    const s = post({ favouritesCount: 10, reblogsCount: 2, repliesCount: 1, ageH: 2 })
+    const { score, breakdown } = homeEngagementBreakdown(s, NOW)
+    expect(score).toBe(breakdown.finalScore)
+    expect(breakdown.ranker).toBe('home')
+    expect(breakdown.terms.length).toBeGreaterThan(0)
   })
 })

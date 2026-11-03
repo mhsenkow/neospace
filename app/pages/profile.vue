@@ -42,6 +42,12 @@ import { useToastStore } from '~/stores/toast'
 import { clearReadAccountOverride, setReadAccountOverride } from '~/composables/useMasto'
 import { logError } from '~/utils/log'
 import { supportsLegalReports } from '~/utils/serverCapabilities'
+import {
+  formatSignalNumber,
+  inspectAccountSignals,
+  signalsToJsonSummary,
+  type AccountSignals,
+} from '~/utils/signalInspector'
 
 const profileStore = useProfileStore()
 const instancesStore = useInstancesStore()
@@ -72,6 +78,35 @@ const canSwitchAccounts = computed(
     profileStore.isOwnProfile &&
     !route.query.user &&
     instancesStore.hasAuthenticatedInstance,
+)
+
+const accountInspectOpen = ref(false)
+const accountInspectCopied = ref('')
+const accountSignals = computed((): AccountSignals | null => {
+  const account = profileStore.viewedProfile
+  if (!account) return null
+  return inspectAccountSignals(account, profileStore.statuses)
+})
+const toggleAccountInspect = () => {
+  accountInspectOpen.value = !accountInspectOpen.value
+}
+const copyAccountInspect = async () => {
+  if (!accountSignals.value) return
+  try {
+    await navigator.clipboard.writeText(signalsToJsonSummary('account', accountSignals.value))
+    accountInspectCopied.value = 'Copied'
+  } catch {
+    accountInspectCopied.value = 'Couldn’t copy'
+  }
+  window.setTimeout(() => {
+    accountInspectCopied.value = ''
+  }, 1600)
+}
+watch(
+  () => profileStore.viewedProfile?.id,
+  () => {
+    accountInspectOpen.value = false
+  },
 )
 
 const safeProfileName = computed(() => {
@@ -890,6 +925,10 @@ useHead({
               <NeoIcon name="mention" :size="18" :stroke="1.75" />
               <span>Copy handle</span>
             </button>
+            <button type="button" role="menuitem" class="profile-menu-item" @click="toggleAccountInspect">
+              <NeoIcon name="search" :size="18" :stroke="1.75" />
+              <span>{{ accountInspectOpen ? 'Hide account signals' : 'Inspect account' }}</span>
+            </button>
             <a
               v-if="instanceProfileUrl"
               role="menuitem"
@@ -1378,6 +1417,108 @@ useHead({
           </label>
         </div>
       </section>
+
+      <aside
+        v-if="accountInspectOpen && accountSignals"
+        class="profile-inspector"
+        aria-label="Account signal inspector"
+      >
+        <header class="profile-inspector__head">
+          <strong>Account signals</strong>
+          <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="copyAccountInspect">
+            {{ accountInspectCopied || 'Copy JSON' }}
+          </button>
+          <button
+            type="button"
+            class="neo-btn neo-btn--ghost neo-btn--sm"
+            aria-label="Close inspector"
+            @click="accountInspectOpen = false"
+          >
+            Close
+          </button>
+        </header>
+        <dl class="profile-inspector__grid">
+          <div>
+            <dt>Host</dt>
+            <dd>{{ accountSignals.host || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Age</dt>
+            <dd>
+              {{
+                accountSignals.accountAgeDays != null
+                  ? `${formatSignalNumber(accountSignals.accountAgeDays, 0)} days`
+                  : '—'
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>Cadence</dt>
+            <dd>
+              {{
+                accountSignals.postsPerDay != null
+                  ? `${formatSignalNumber(accountSignals.postsPerDay, 2)} posts/day`
+                  : '—'
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>Follow ratio</dt>
+            <dd>{{ formatSignalNumber(accountSignals.followerFollowingRatio, 2) }}</dd>
+          </div>
+          <div>
+            <dt>Verified fields</dt>
+            <dd>{{ accountSignals.verifiedFieldCount }}</dd>
+          </div>
+          <div>
+            <dt>Custom emoji</dt>
+            <dd>{{ accountSignals.customEmojiCount }}</dd>
+          </div>
+          <div>
+            <dt>Flags</dt>
+            <dd>
+              <template v-if="accountSignals.bot">bot · </template>
+              <template v-if="accountSignals.locked">locked</template>
+              <template v-if="!accountSignals.bot && !accountSignals.locked">—</template>
+            </dd>
+          </div>
+        </dl>
+        <template v-if="accountSignals.observed">
+          <p class="profile-inspector__sub">
+            From {{ accountSignals.observed.sampleSize }} loaded posts
+          </p>
+          <dl class="profile-inspector__grid">
+            <div>
+              <dt>Reply / boost / media</dt>
+              <dd>
+                {{ Math.round(accountSignals.observed.replyRatio * 100) }}% /
+                {{ Math.round(accountSignals.observed.boostRatio * 100) }}% /
+                {{ Math.round(accountSignals.observed.mediaRatio * 100) }}%
+              </dd>
+            </div>
+            <div>
+              <dt>Median gap</dt>
+              <dd>
+                {{
+                  accountSignals.observed.medianHoursBetweenPosts != null
+                    ? `${formatSignalNumber(accountSignals.observed.medianHoursBetweenPosts, 1)} h`
+                    : '—'
+                }}
+              </dd>
+            </div>
+            <div v-if="accountSignals.observed.clients.length">
+              <dt>Clients</dt>
+              <dd>
+                {{
+                  accountSignals.observed.clients
+                    .map((c) => `${c.name} (${c.count})`)
+                    .join(', ')
+                }}
+              </dd>
+            </div>
+          </dl>
+        </template>
+      </aside>
 
       <div class="profile-tabs-wrap neo-sticky-bar neo-sticky-bar--under-chrome">
         <NeoTabs
@@ -2178,6 +2319,72 @@ useHead({
   font-size: 0.875rem;
   color: var(--neo-text-secondary);
   cursor: pointer;
+}
+
+.profile-inspector {
+  margin: 0.75rem 1rem 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 12px;
+  background: var(--neo-bg-secondary);
+
+  @media (min-width: 1024px) {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+.profile-inspector__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.55rem;
+
+  strong {
+    margin-right: auto;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+  }
+}
+
+.profile-inspector__sub {
+  margin: 0.65rem 0 0.4rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+}
+
+.profile-inspector__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+
+  div {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  dt {
+    margin: 0;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--neo-text-tertiary);
+  }
+
+  dd {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neo-text-secondary);
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 .profile-tabs-wrap {

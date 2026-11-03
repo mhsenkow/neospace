@@ -27,11 +27,16 @@ import {
   tasteFrom,
   viewerLanguagesFrom,
   type CandidateSource,
+  type RankBreakdown,
   type RankContext,
   type RankerId,
 } from '~/utils/rankers'
 
-export type RankedStatus = ExtendedStatus & { _rankWhy?: string; _rankSource?: CandidateSource }
+export type RankedStatus = ExtendedStatus & {
+  _rankWhy?: string
+  _rankSource?: CandidateSource
+  _rankBreakdown?: RankBreakdown
+}
 
 const PAGE = 20
 /** Fetch more candidates when fewer than this many ranked posts are left */
@@ -303,6 +308,7 @@ export function useRankedFeed() {
     queue = rankFeed(ranker, unserved, ctx).map((r) => ({
       ...r.status,
       _rankWhy: rankWhyLabel(RANKERS[ranker!].short, r.why),
+      _rankBreakdown: r.breakdown,
     }))
   }
 

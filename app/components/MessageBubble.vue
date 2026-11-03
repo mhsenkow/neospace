@@ -15,6 +15,7 @@ import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { useSettingsStore } from '~/stores/settings'
 import { activeClient } from '~/composables/useMasto'
+import { mediaAttachmentLoupeMeta } from '~/utils/mediaLoupe'
 
 const props = defineProps<{
   status: mastodon.v1.Status
@@ -202,7 +203,15 @@ const openLightbox = (item: mastodon.v1.MediaAttachment) => {
   overlay.openLightbox({
     src,
     alt: caption || 'Image with no description',
-    items: [{ src, alt: caption || 'Image with no description', caption }],
+    items: [
+      {
+        src,
+        alt: caption || 'Image with no description',
+        caption,
+        preview: item.previewUrl && item.previewUrl !== item.url ? item.previewUrl : undefined,
+        meta: mediaAttachmentLoupeMeta(item),
+      },
+    ],
   })
 }
 

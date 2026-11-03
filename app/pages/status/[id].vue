@@ -30,6 +30,11 @@ import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { getMainScroller, getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { stripHtml } from '~/utils/stripHtml'
+import {
+  computeThreadAnatomy,
+  formatDurationShort,
+  type ThreadAnatomy,
+} from '~/utils/threadAnatomy'
 type DmContextPane = 'chat' | 'profile'
 
 const route = useRoute()
@@ -39,6 +44,7 @@ const instancesStore = useInstancesStore()
 const conversationsStore = useConversationsStore()
 const composeSheet = useComposeSheetStore()
 const activityOpen = ref(false)
+const anatomyOpen = ref(false)
 const loadRace = createRaceGuard()
 /** Id our own canonicalising router.replace lands on — its route change isn't a new load */
 let replacedToId: string | null = null
@@ -618,6 +624,23 @@ const replyConnect = (node: { depth: number }, index: number, list: { depth: num
 const openThreadActivity = () => {
   activityOpen.value = true
 }
+
+const threadAnatomy = computed((): ThreadAnatomy | null => {
+  if (!focusStatus.value) return null
+  if (!ancestors.value.length && !descendants.value.length) return null
+  return computeThreadAnatomy({
+    focus: focusStatus.value,
+    ancestors: ancestors.value,
+    descendants: descendants.value,
+  })
+})
+
+watch(
+  () => focusStatus.value?.id,
+  () => {
+    anatomyOpen.value = false
+  },
+)
 
 const expandDockToSheet = () => {
   const focus = focusStatus.value
@@ -1476,17 +1499,97 @@ useHead({
             class="thread-post thread-post--focus"
             @replied="onReplyPosted"
           />
-          <button
-            v-if="focusStatus"
-            type="button"
-            class="thread-activity-link"
-            @click="openThreadActivity"
+          <div v-if="focusStatus" class="thread-meta-links">
+            <button
+              type="button"
+              class="thread-activity-link"
+              @click="openThreadActivity"
+            >
+              View activity
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+            <button
+              v-if="threadAnatomy"
+              type="button"
+              class="thread-activity-link"
+              :aria-expanded="anatomyOpen"
+              aria-controls="thread-anatomy-panel"
+              @click="anatomyOpen = !anatomyOpen"
+            >
+              Thread anatomy
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
+                :style="anatomyOpen ? { transform: 'rotate(90deg)' } : undefined"
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </div>
+          <aside
+            v-if="threadAnatomy && anatomyOpen"
+            id="thread-anatomy-panel"
+            class="thread-anatomy"
+            aria-label="Thread anatomy"
           >
-            View activity
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
+            <p class="thread-anatomy__summary">
+              {{ threadAnatomy.totalNodes }} posts · depth {{ threadAnatomy.maxDepth }} ·
+              {{ threadAnatomy.uniqueParticipants }} people ·
+              {{ threadAnatomy.instanceCount }} servers
+            </p>
+            <ul class="thread-anatomy__stats">
+              <li>
+                <strong>{{ threadAnatomy.rootReplies }}</strong>
+                <span>root replies</span>
+              </li>
+              <li>
+                <strong>{{ threadAnatomy.nestedReplies }}</strong>
+                <span>nested</span>
+              </li>
+              <li>
+                <strong>{{ Math.round(threadAnatomy.authorSelfReplyRatio * 100) }}%</strong>
+                <span>author replies</span>
+              </li>
+              <li>
+                <strong>{{ formatDurationShort(threadAnatomy.timeToFirstReplyMs) }}</strong>
+                <span>to first reply</span>
+              </li>
+              <li>
+                <strong>{{ formatDurationShort(threadAnatomy.medianReplyIntervalMs) }}</strong>
+                <span>median gap</span>
+              </li>
+              <li>
+                <strong>{{ formatDurationShort(threadAnatomy.activeSpanMs) }}</strong>
+                <span>active span</span>
+              </li>
+            </ul>
+            <div
+              v-if="threadAnatomy.replySparkline.length"
+              class="thread-anatomy__spark"
+              role="img"
+              aria-label="Reply velocity over time"
+            >
+              <span
+                v-for="(v, i) in threadAnatomy.replySparkline"
+                :key="i"
+                class="thread-anatomy__spark-bar"
+                :style="{ height: `${Math.max(8, v * 100)}%` }"
+              />
+            </div>
+            <ul v-if="threadAnatomy.instances.length" class="thread-anatomy__hosts">
+              <li v-for="inst in threadAnatomy.instances" :key="inst.host">
+                <span>{{ inst.host }}</span>
+                <span>{{ inst.count }} · {{ inst.percent }}%</span>
+              </li>
+            </ul>
+          </aside>
         </div>
 
         <template v-for="(node, idx) in visibleReplyTree" :key="node.status.id">
@@ -2085,11 +2188,18 @@ useHead({
   border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, transparent);
 }
 
+.thread-meta-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.15rem 0 0.35rem 3.1rem;
+}
+
 .thread-activity-link {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  margin: 0.15rem 0 0.35rem 3.1rem;
+  margin: 0;
   padding: 0.2rem 0;
   border: none;
   background: none;
@@ -2099,8 +2209,84 @@ useHead({
   cursor: pointer;
 
   &:hover,
-  &:focus-visible {
+  &:focus-visible,
+  &[aria-expanded='true'] {
     color: var(--neo-text-primary);
+  }
+}
+
+.thread-anatomy {
+  margin: 0.25rem 0 0.65rem 3.1rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--neo-bg-secondary) 90%, var(--neo-accent) 10%);
+}
+
+.thread-anatomy__summary {
+  margin: 0 0 0.55rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+}
+
+.thread-anatomy__stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  strong {
+    font-size: 0.9375rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--neo-text-primary);
+  }
+
+  span {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+  }
+}
+
+.thread-anatomy__spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 2.25rem;
+  margin: 0.65rem 0 0.35rem;
+}
+
+.thread-anatomy__spark-bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 2px 2px 0 0;
+  background: var(--neo-accent);
+  opacity: 0.85;
+}
+
+.thread-anatomy__hosts {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-secondary);
+
+  li {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-variant-numeric: tabular-nums;
   }
 }
 

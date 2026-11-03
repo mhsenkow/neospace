@@ -83,11 +83,37 @@ export type RankContext = {
   now: number
 }
 
+export type RankTerm = {
+  label: string
+  /** Human-readable raw signal, e.g. "P_reply=0.42" */
+  rawSignal: string
+  weight: number
+  contribution: number
+}
+
+export type RankBreakdown = {
+  /** Ranker id, or `home` for the soft For You engagement sort */
+  ranker: RankerId | 'home'
+  finalScore: number
+  baseScore: number
+  source: CandidateSource
+  inNetwork: boolean
+  reach: number
+  ageHours: number
+  recencyMultiplier: number
+  networkMultiplier: number
+  diversityMultiplier: number
+  interestMultiplier?: number
+  terms: RankTerm[]
+}
+
 export type RankedItem<S extends RankStatus = RankStatus> = {
   status: S
   score: number
   /** Short human reasons, strongest first */
   why: string[]
+  /** Structured math for the score X-Ray panel */
+  breakdown?: RankBreakdown
 }
 
 export const RANKERS: Record<
@@ -344,7 +370,16 @@ export const X_WEIGHTS = {
 } as const
 
 function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedItem<S>[] {
-  const scored: (RankedItem<S> & { f: Features; inNetwork: boolean })[] = []
+  type Row = RankedItem<S> & {
+    f: Features
+    inNetwork: boolean
+    baseScore: number
+    recencyMultiplier: number
+    networkMultiplier: number
+    diversityMultiplier: number
+    terms: RankTerm[]
+  }
+  const scored: Row[] = []
   for (const s of statuses) {
     const f = features(s, ctx)
     const self = qualifyAcct(ctx.selfAcct, ctx.host)
@@ -369,27 +404,75 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
     const authorEngages = f.mentionsYou ? 0.6 : inNetwork && f.asks ? 0.08 : 0
     const negative = Math.min(1, (f.isBot ? 0.25 : 0) + (f.tags.length > 6 ? 0.25 : 0) + (f.cw ? 0.05 : 0))
 
-    const heads = [
-      { w: X_WEIGHTS.fav * pFav, why: 'Lots of likes' },
-      { w: X_WEIGHTS.retweet * pRt, why: 'Widely reposted' },
-      { w: X_WEIGHTS.reply * pReply, why: 'Lots of replies' },
-      { w: X_WEIGHTS.goodProfileClick * goodProfileClick, why: 'By someone you engage with' },
-      { w: X_WEIGHTS.goodClick * goodClick, why: 'Worth opening' },
-      { w: X_WEIGHTS.replyEngagedByAuthor * authorEngages, why: 'Mentions you' },
+    const terms: RankTerm[] = [
+      { label: 'Likes', rawSignal: `P_fav=${pFav.toFixed(3)}`, weight: X_WEIGHTS.fav, contribution: X_WEIGHTS.fav * pFav },
+      { label: 'Reposts', rawSignal: `P_rt=${pRt.toFixed(3)}`, weight: X_WEIGHTS.retweet, contribution: X_WEIGHTS.retweet * pRt },
+      { label: 'Replies', rawSignal: `P_reply=${pReply.toFixed(3)}`, weight: X_WEIGHTS.reply, contribution: X_WEIGHTS.reply * pReply },
+      {
+        label: 'Profile affinity',
+        rawSignal: `affinity=${goodProfileClick.toFixed(3)}`,
+        weight: X_WEIGHTS.goodProfileClick,
+        contribution: X_WEIGHTS.goodProfileClick * goodProfileClick,
+      },
+      {
+        label: 'Worth opening',
+        rawSignal: `click=${goodClick.toFixed(3)}`,
+        weight: X_WEIGHTS.goodClick,
+        contribution: X_WEIGHTS.goodClick * goodClick,
+      },
+      {
+        label: 'Mentions you',
+        rawSignal: `authorEngages=${authorEngages.toFixed(3)}`,
+        weight: X_WEIGHTS.replyEngagedByAuthor,
+        contribution: X_WEIGHTS.replyEngagedByAuthor * authorEngages,
+      },
     ]
-    let score = heads.reduce((a, h) => a + h.w, 0) + X_WEIGHTS.negativeFeedback * negative * 0.1
+    const negContribution = X_WEIGHTS.negativeFeedback * negative * 0.1
+    if (negContribution !== 0) {
+      terms.push({
+        label: 'Negative feedback',
+        rawSignal: `neg=${negative.toFixed(3)}`,
+        weight: X_WEIGHTS.negativeFeedback * 0.1,
+        contribution: negContribution,
+      })
+    }
+    const baseScore = terms.reduce((a, t) => a + t.contribution, 0)
     // Recency: Earlybird-style decay (half-life ~8h)
-    score *= Math.pow(0.5, f.ageH / 8)
-    if (!inNetwork) score *= 0.75
-    const why = heads
-      .filter((h) => h.w > 0.4)
-      .sort((a, b) => b.w - a.w)
+    const recencyMultiplier = Math.pow(0.5, f.ageH / 8)
+    const networkMultiplier = inNetwork ? 1 : 0.75
+    let score = baseScore * recencyMultiplier * networkMultiplier
+    const heads = terms
+      .filter((t) => t.contribution > 0.4 && t.label !== 'Negative feedback')
+      .sort((a, b) => b.contribution - a.contribution)
       .slice(0, 2)
-      .map((h) => h.why)
+    const why: string[] = heads.map((h) =>
+      h.label === 'Likes'
+        ? 'Lots of likes'
+        : h.label === 'Reposts'
+          ? 'Widely reposted'
+          : h.label === 'Replies'
+            ? 'Lots of replies'
+            : h.label === 'Profile affinity'
+              ? 'By someone you engage with'
+              : h.label === 'Worth opening'
+                ? 'Worth opening'
+                : 'Mentions you',
+    )
     why.unshift(
       inNetwork ? 'From your network' : tagHit ? 'A tag you follow' : f.source === 'trend' ? 'From a trending topic' : 'Popular with people you follow',
     )
-    scored.push({ status: s, score: finite(score), why, f, inNetwork })
+    scored.push({
+      status: s,
+      score: finite(score),
+      why,
+      f,
+      inNetwork,
+      baseScore: finite(baseScore),
+      recencyMultiplier,
+      networkMultiplier,
+      diversityMultiplier: 1,
+      terms,
+    })
   }
 
   // Author diversity: each further post by the same author counts for less
@@ -399,7 +482,8 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
     const k = seenAuthor.get(item.f.author) || 0
     if (k) {
       // A demotion, not a reason you're seeing the post — never surfaced in `why`
-      item.score *= Math.max(0.25, Math.pow(0.5, k))
+      item.diversityMultiplier = Math.max(0.25, Math.pow(0.5, k))
+      item.score *= item.diversityMultiplier
     }
     seenAuthor.set(item.f.author, k + 1)
   }
@@ -415,7 +499,24 @@ function rankX<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedIte
     if (takeIn) inCount++
     mixed.push((takeIn ? inN : outN).shift()!)
   }
-  return mixed.map(({ status, score, why }) => ({ status, score, why }))
+  return mixed.map((row) => ({
+    status: row.status,
+    score: finite(row.score),
+    why: row.why,
+    breakdown: {
+      ranker: 'x',
+      finalScore: finite(row.score),
+      baseScore: row.baseScore,
+      source: row.f.source,
+      inNetwork: row.inNetwork,
+      reach: row.f.reach,
+      ageHours: row.f.ageH,
+      recencyMultiplier: row.recencyMultiplier,
+      networkMultiplier: row.networkMultiplier,
+      diversityMultiplier: row.diversityMultiplier,
+      terms: row.terms.filter((t) => Math.abs(t.contribution) > 0.001),
+    },
+  }))
 }
 
 // ── Facebook ───────────────────────────────────────────────────────────────
@@ -426,7 +527,16 @@ export const FB_MSI = { like: 1, reshare: 5, significantComment: 30 } as const
 export const FB_CLOSENESS = { friend: 1, following: 0.7, group: 0.5, stranger: 0.3 } as const
 
 function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): RankedItem<S>[] {
-  const scored: (RankedItem<S> & { f: Features })[] = []
+  type Row = RankedItem<S> & {
+    f: Features
+    baseScore: number
+    recencyMultiplier: number
+    networkMultiplier: number
+    diversityMultiplier: number
+    terms: RankTerm[]
+    inNetwork: boolean
+  }
+  const scored: Row[] = []
   for (const s of statuses) {
     const f = features(s, ctx)
     if (f.author && f.author === qualifyAcct(ctx.selfAcct, ctx.host)) continue
@@ -457,21 +567,56 @@ function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): Ra
     const affinity = 1 + likedAuthorScore(f.author, ctx) * 0.8
 
     // Replies are the "significant comments" (no way to see their length here)
-    const msi =
-      (FB_MSI.like * f.favs + FB_MSI.reshare * f.boosts + FB_MSI.significantComment * f.replies) / f.reach
-    let score = (0.15 + Math.log1p(msi)) * closeness * affinity
+    const likeTerm = (FB_MSI.like * f.favs) / f.reach
+    const reshareTerm = (FB_MSI.reshare * f.boosts) / f.reach
+    const commentTerm = (FB_MSI.significantComment * f.replies) / f.reach
+    const msi = likeTerm + reshareTerm + commentTerm
+    const msiCore = 0.15 + Math.log1p(msi)
+    const terms: RankTerm[] = [
+      { label: 'Likes (MSI)', rawSignal: `likes=${f.favs}`, weight: FB_MSI.like, contribution: likeTerm },
+      { label: 'Reshares (MSI)', rawSignal: `boosts=${f.boosts}`, weight: FB_MSI.reshare, contribution: reshareTerm },
+      {
+        label: 'Significant comments',
+        rawSignal: `replies=${f.replies}`,
+        weight: FB_MSI.significantComment,
+        contribution: commentTerm,
+      },
+      {
+        label: 'Closeness × affinity',
+        rawSignal: `closeness=${closeness.toFixed(2)} · affinity=${affinity.toFixed(2)}`,
+        weight: closeness * affinity,
+        contribution: msiCore * closeness * affinity - msiCore,
+      },
+    ]
+    let score = msiCore * closeness * affinity
+    const baseScore = score
     if (f.replies >= 3 && f.replies * FB_MSI.significantComment >= f.favs) why.push('a real conversation')
     if (affinity > 1.3) why.push('you interact with them')
 
     // Integrity demotions
+    let integrity = 1
     if (ENGAGEMENT_BAIT.test(f.text)) {
-      score *= 0.25
+      integrity *= 0.25
       why.push('engagement bait (demoted)')
     }
-    if (f.hasCard && f.textLen < 40) score *= 0.6
+    if (f.hasCard && f.textLen < 40) integrity *= 0.6
+    score *= integrity
     // Friends' posts stay relevant longer than a page's
-    score *= Math.pow(0.5, f.ageH / (closeness >= 0.85 ? 36 : 18))
-    scored.push({ status: s, score: finite(score), why: why.slice(0, 3), f })
+    const halfLife = closeness >= 0.85 ? 36 : 18
+    const recencyMultiplier = Math.pow(0.5, f.ageH / halfLife)
+    score *= recencyMultiplier
+    scored.push({
+      status: s,
+      score: finite(score),
+      why: why.slice(0, 3),
+      f,
+      baseScore: finite(baseScore),
+      recencyMultiplier,
+      networkMultiplier: closeness,
+      diversityMultiplier: integrity,
+      terms,
+      inNetwork: closeness >= FB_CLOSENESS.following,
+    })
   }
   scored.sort((a, b) => b.score - a.score)
   // No more than two in a row from the same person
@@ -484,7 +629,24 @@ function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): Ra
     if (i < 0) i = 0
     out.push(left.splice(i, 1)[0]!)
   }
-  return out.map(({ status, score, why }) => ({ status, score, why }))
+  return out.map((row) => ({
+    status: row.status,
+    score: finite(row.score),
+    why: row.why,
+    breakdown: {
+      ranker: 'facebook',
+      finalScore: finite(row.score),
+      baseScore: row.baseScore,
+      source: row.f.source,
+      inNetwork: row.inNetwork,
+      reach: row.f.reach,
+      ageHours: row.f.ageH,
+      recencyMultiplier: row.recencyMultiplier,
+      networkMultiplier: row.networkMultiplier,
+      diversityMultiplier: row.diversityMultiplier,
+      terms: row.terms.filter((t) => Math.abs(t.contribution) > 0.001),
+    },
+  }))
 }
 
 // ── TikTok ─────────────────────────────────────────────────────────────────
@@ -493,7 +655,16 @@ function rankFacebook<S extends RankStatus>(statuses: S[], ctx: RankContext): Ra
 export const TIKTOK_VALUES = { like: 1, comment: 2, playtime: 3, play: 1 } as const
 
 function rankTikTok<S extends RankStatus>(statuses: S[], ctx: RankContext, rand: () => number): RankedItem<S>[] {
-  const scored: (RankedItem<S> & { f: Features; fresh: boolean })[] = []
+  type Row = RankedItem<S> & {
+    f: Features
+    fresh: boolean
+    baseScore: number
+    recencyMultiplier: number
+    interestMultiplier: number
+    diversityMultiplier: number
+    terms: RankTerm[]
+  }
+  const scored: Row[] = []
   for (const s of statuses) {
     const f = features(s, ctx)
     if (f.author && f.author === qualifyAcct(ctx.selfAcct, ctx.host)) continue
@@ -508,22 +679,51 @@ function rankTikTok<S extends RankStatus>(statuses: S[], ctx: RankContext, rand:
       : f.hasImage
         ? 0.35
         : Math.min(0.3, f.textLen / 900)
-    const base =
-      pLike * TIKTOK_VALUES.like +
-      pComment * TIKTOK_VALUES.comment +
-      ePlaytime * TIKTOK_VALUES.playtime +
-      pPlay * TIKTOK_VALUES.play
+    const terms: RankTerm[] = [
+      { label: 'Like probability', rawSignal: `P_like=${pLike.toFixed(3)}`, weight: TIKTOK_VALUES.like, contribution: pLike * TIKTOK_VALUES.like },
+      {
+        label: 'Comment probability',
+        rawSignal: `P_comment=${pComment.toFixed(3)}`,
+        weight: TIKTOK_VALUES.comment,
+        contribution: pComment * TIKTOK_VALUES.comment,
+      },
+      {
+        label: 'Playtime',
+        rawSignal: `E_playtime=${ePlaytime.toFixed(3)}`,
+        weight: TIKTOK_VALUES.playtime,
+        contribution: ePlaytime * TIKTOK_VALUES.playtime,
+      },
+      { label: 'Play', rawSignal: `P_play=${pPlay.toFixed(3)}`, weight: TIKTOK_VALUES.play, contribution: pPlay * TIKTOK_VALUES.play },
+    ]
+    const base = terms.reduce((a, t) => a + t.contribution, 0)
     const interest = interestScore(f, ctx)
+    const interestMultiplier = 1 + interest * 1.6
     const langMatch = languageMatches(f.language, ctx) ? 1 : 0.8
-    let score = base * (1 + interest * 1.6) * langMatch * Math.pow(0.5, f.ageH / 48)
-    if (f.cw) score *= 0.7
+    const recencyMultiplier = Math.pow(0.5, f.ageH / 48)
+    let diversityMultiplier = langMatch
+    let score = base * interestMultiplier * langMatch * recencyMultiplier
+    if (f.cw) {
+      diversityMultiplier *= 0.7
+      score *= 0.7
+    }
     const why: string[] = []
     if (interest > 0.25) why.push('matches what you like')
     if (f.hasVideo) why.push('video')
     else if (f.hasImage) why.push('picture')
     if (pComment > 0.3) why.push('people are commenting')
     else if (pLike > 0.4) why.push('people love it')
-    scored.push({ status: s, score: finite(score), why: why.slice(0, 2), f, fresh: f.favs + f.boosts + f.replies <= 1 && f.ageH < 6 })
+    scored.push({
+      status: s,
+      score: finite(score),
+      why: why.slice(0, 2),
+      f,
+      fresh: f.favs + f.boosts + f.replies <= 1 && f.ageH < 6,
+      baseScore: finite(base),
+      recencyMultiplier,
+      interestMultiplier,
+      diversityMultiplier,
+      terms,
+    })
   }
   scored.sort((a, b) => b.score - a.score)
 
@@ -544,7 +744,25 @@ function rankTikTok<S extends RankStatus>(statuses: S[], ctx: RankContext, rand:
     mixed,
     (a, b) => a.f.author === b.f.author || (!!a.f.tags[0] && a.f.tags[0] === b.f.tags[0]),
   )
-  return ordered.map(({ status, score, why }) => ({ status, score, why }))
+  return ordered.map((row) => ({
+    status: row.status,
+    score: finite(row.score),
+    why: row.why,
+    breakdown: {
+      ranker: 'tiktok',
+      finalScore: finite(row.score),
+      baseScore: row.baseScore,
+      source: row.f.source,
+      inNetwork: false,
+      reach: row.f.reach,
+      ageHours: row.f.ageH,
+      recencyMultiplier: row.recencyMultiplier,
+      networkMultiplier: 1,
+      diversityMultiplier: row.diversityMultiplier,
+      interestMultiplier: row.interestMultiplier,
+      terms: row.terms.filter((t) => Math.abs(t.contribution) > 0.001),
+    },
+  }))
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
@@ -559,6 +777,57 @@ export function rankFeed<S extends RankStatus>(
   if (ranker === 'x') return rankX(candidates, ctx)
   if (ranker === 'facebook') return rankFacebook(candidates, ctx)
   return rankTikTok(candidates, ctx, rand)
+}
+
+/**
+ * Soft engagement score used by Home → For You (TimelineColumn). Pure — also
+ * returns a RankBreakdown so the X-Ray panel works without a big-platform ranker.
+ */
+export function homeEngagementBreakdown(status: RankStatus, now = Date.now()): {
+  score: number
+  breakdown: RankBreakdown
+} {
+  const body = status.reblog || status
+  const favs = Math.max(0, Number(body.favouritesCount) || 0)
+  const boosts = Math.max(0, Number(body.reblogsCount) || 0)
+  const replies = Math.max(0, Number(body.repliesCount) || 0)
+  const created = Date.parse(body.createdAt || status.createdAt)
+  const ageH = Math.max(
+    0.25,
+    (now - (Number.isFinite(created) ? created : now)) / 3_600_000,
+  )
+  const favTerm = favs / Math.pow(ageH, 0.55)
+  const boostTerm = (boosts * 2) / Math.pow(ageH, 0.55)
+  const replyTerm = (replies * 1.5) / Math.pow(ageH, 0.55)
+  const freshness = 2 / ageH
+  const score = favTerm + boostTerm + replyTerm + freshness
+  const followers = Math.max(0, Number(body.account?.followersCount) || 0)
+  const reach = 8 + Math.sqrt(followers) * 2.5
+  return {
+    score: finite(score),
+    breakdown: {
+      ranker: 'home',
+      finalScore: finite(score),
+      baseScore: finite(favTerm + boostTerm + replyTerm),
+      source: status._rankSource || 'home',
+      inNetwork: true,
+      reach,
+      ageHours: ageH,
+      recencyMultiplier: 1 / Math.pow(ageH, 0.55),
+      networkMultiplier: 1,
+      diversityMultiplier: 1,
+      terms: [
+        { label: 'Likes', rawSignal: `favs=${favs}`, weight: 1, contribution: finite(favTerm) },
+        { label: 'Reposts', rawSignal: `boosts=${boosts}`, weight: 2, contribution: finite(boostTerm) },
+        { label: 'Replies', rawSignal: `replies=${replies}`, weight: 1.5, contribution: finite(replyTerm) },
+        { label: 'Freshness', rawSignal: `2/ageH`, weight: 2, contribution: finite(freshness) },
+      ].filter((t) => Math.abs(t.contribution) > 0.001),
+    },
+  }
+}
+
+export function homeEngagementScore(status: RankStatus, now = Date.now()): number {
+  return homeEngagementBreakdown(status, now).score
 }
 
 /** Build the taste part of the context from posts you liked / bookmarked */

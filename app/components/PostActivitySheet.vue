@@ -8,6 +8,8 @@ import { useRelationshipCache } from '~/composables/useRelationshipCache'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { logWarn } from '~/utils/log'
+import { computeAccountDistribution, type AccountDistribution } from '~/utils/threadAnatomy'
+import { hostnameOf } from '~/utils/instances'
 
 const props = defineProps<{
   open: boolean
@@ -42,6 +44,16 @@ useFocusTrap(sheetRef, isOpen, {
 })
 
 const accounts = computed(() => (tab.value === 'likes' ? likers.value : reposters.value))
+
+const localHost = computed(() => {
+  const url = instances.activeAccount?.url || instances.instances[0]?.url
+  return url ? hostnameOf(url) : null
+})
+
+const serverDist = computed((): AccountDistribution | null => {
+  if (accounts.value.length < 2) return null
+  return computeAccountDistribution(accounts.value, localHost.value)
+})
 
 const load = async () => {
   if (!props.statusId || !instances.hasAuthenticatedInstance) {
@@ -138,7 +150,26 @@ const onFollow = async (account: mastodon.v1.Account) => {
           <p v-else-if="!accounts.length" class="post-activity__empty">
             {{ tab === 'likes' ? 'No likes yet' : 'No reposts yet' }}
           </p>
-          <ul v-else class="post-activity__list">
+          <details
+            v-if="!loading && !error && serverDist"
+            class="post-activity__dist"
+            open
+          >
+            <summary>
+              Server distribution · {{ serverDist.instanceCount }} servers
+              ({{ serverDist.localCount }} local · {{ serverDist.remoteCount }} remote)
+            </summary>
+            <ul class="post-activity__dist-list">
+              <li v-for="inst in serverDist.instances" :key="inst.host">
+                <span class="post-activity__dist-host">{{ inst.host }}</span>
+                <span class="post-activity__dist-bar" aria-hidden="true">
+                  <span :style="{ width: `${inst.percent}%` }" />
+                </span>
+                <span class="post-activity__dist-count">{{ inst.count }} · {{ inst.percent }}%</span>
+              </li>
+            </ul>
+          </details>
+          <ul v-if="!loading && !error && accounts.length" class="post-activity__list">
             <li v-for="account in accounts" :key="account.id" class="post-activity__row">
               <NuxtLink
                 :to="{ path: '/profile', query: { user: account.acct } }"
@@ -287,6 +318,59 @@ const onFollow = async (account: mastodon.v1.Account) => {
   font-size: 0.875rem;
   color: var(--neo-text-muted);
   text-align: center;
+}
+
+.post-activity__dist {
+  margin: 0 0.45rem 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 10px;
+  background: var(--neo-bg-tertiary);
+  font-size: 0.75rem;
+  color: var(--neo-text-secondary);
+
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+}
+
+.post-activity__dist-list {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.post-activity__dist-host {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.post-activity__dist-bar {
+  display: block;
+  height: 0.3rem;
+  margin: 0.15rem 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-primary) 10%, transparent);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--neo-accent);
+  }
+}
+
+.post-activity__dist-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--neo-text-muted);
 }
 
 .post-activity__list {

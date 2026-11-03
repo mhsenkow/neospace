@@ -4,6 +4,16 @@
 
 import { defineStore } from 'pinia'
 
+/** Optional attachment metadata for the lightbox loupe / analytical HUD */
+export type LightboxMediaMeta = {
+  width?: number | null
+  height?: number | null
+  aspect?: number | null
+  focus?: { x: number; y: number } | null
+  blurhash?: string | null
+  mediaId?: string
+}
+
 export type LightboxItem = {
   src: string
   /** Accessible name — may be a fallback like "Image 1 of 2" */
@@ -12,6 +22,8 @@ export type LightboxItem = {
   caption?: string
   /** Small cached preview shown while the full-size `src` loads */
   preview?: string
+  /** Dimensions, focal point, blurhash — power-user loupe HUD */
+  meta?: LightboxMediaMeta
 }
 
 export type LightboxState = {

@@ -25,7 +25,8 @@ import {
   statusListKey,
 } from '~/utils/statusIdentity'
 import { statusMatchesRecipe, type AlgorithmSource } from '~/utils/algorithms'
-import { RANKERS } from '~/utils/rankers'
+import { RANKERS, homeEngagementBreakdown, homeEngagementScore } from '~/utils/rankers'
+import type { RankBreakdown } from '~/utils/rankers'
 import { useRankedFeed } from '~/composables/useRankedFeed'
 import { useSettingsStore } from '~/stores/settings'
 import { compareId, idLess } from '~/utils/compareId'
@@ -962,27 +963,24 @@ const loadTimelinePage = async (
   )
 }
 
-const homeEngagementScore = (status: mastodon.v1.Status) => {
-  const s = status.reblog || status
-  const favs = s.favouritesCount || 0
-  const boosts = s.reblogsCount || 0
-  const replies = s.repliesCount || 0
-  const ageH = Math.max(
-    0.25,
-    (Date.now() - new Date(s.createdAt).getTime()) / 3_600_000,
-  )
-  // Soft engagement ranking — recency still matters so yesterday's viral post
-  // doesn't bury this morning's quiet follows
-  return (favs + boosts * 2 + replies * 1.5) / Math.pow(ageH, 0.55) + 2 / ageH
-}
-
 const displayStatuses = computed(() => {
   let list = statuses.value
   if (props.column.feedType === 'home' && settingsStore.localPreferences.collapseReblogs) {
     list = collapseDuplicateReblogs(list)
   }
   if (props.column.feedType === 'home' && homeFeedMode.value === 'forYou' && list.length > 1) {
-    return [...list].sort((a, b) => homeEngagementScore(b) - homeEngagementScore(a))
+    const now = Date.now()
+    return [...list]
+      .map((s) => {
+        const { score, breakdown } = homeEngagementBreakdown(s, now)
+        return {
+          ...s,
+          _homeScore: score,
+          _rankWhy: (s as { _rankWhy?: string })._rankWhy || 'For You · engagement',
+          _rankBreakdown: (s as { _rankBreakdown?: RankBreakdown })._rankBreakdown || breakdown,
+        }
+      })
+      .sort((a, b) => (b._homeScore || 0) - (a._homeScore || 0) || homeEngagementScore(b) - homeEngagementScore(a))
   }
   return list
 })

@@ -53,9 +53,47 @@ export type InsightPostRow = {
   has_media: 0 | 1
   has_poll: 0 | 1
   has_cw: 0 | 1
+  /** 1 when preview / body contains a question mark */
+  has_question: 0 | 1
+  /** Stripped body length (for length-bucket analytics) */
+  char_count: number
   tags: string
   preview: string
   url: string
+}
+
+export type InsightLift = {
+  key: string
+  label: string
+  withCount: number
+  withoutCount: number
+  withMean: number
+  withoutMean: number
+  /** withMean / withoutMean (1 = no difference); null when baseline is empty */
+  lift: number | null
+}
+
+export type InsightLengthBucket = {
+  key: 'short' | 'medium' | 'long'
+  label: string
+  count: number
+  meanEngagement: number
+}
+
+export type InsightOutlier = {
+  id: string
+  preview: string
+  engagement: number
+  zScore: number
+}
+
+export type InsightsAnalytical = {
+  lifts: InsightLift[]
+  lengthBuckets: InsightLengthBucket[]
+  bestHour: { hour: number; meanEngagement: number; posts: number } | null
+  engagementMean: number
+  engagementStdDev: number
+  outliers: InsightOutlier[]
 }
 
 export type InsightDayRow = {
@@ -111,6 +149,7 @@ export type InsightsReport = {
   topPosts: InsightPostRow[]
   topTags: { name: string; count: number; engagement: number }[]
   posts: InsightPostRow[]
+  analytical: InsightsAnalytical
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
@@ -190,9 +229,112 @@ export function statusToInsightRow(status: InsightStatusLike): InsightPostRow {
     has_media: (status.mediaAttachments?.length || 0) > 0 ? 1 : 0,
     has_poll: status.poll ? 1 : 0,
     has_cw: status.sensitive || !!(status.spoilerText && status.spoilerText.trim()) ? 1 : 0,
+    has_question: /\?/.test(body) ? 1 : 0,
+    char_count: body.length,
     tags: tags.join(';'),
     preview,
     url: status.url || '',
+  }
+}
+
+const meanOf = (vals: number[]) => (vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0)
+
+const stdDevOf = (vals: number[], mean: number) => {
+  if (vals.length < 2) return 0
+  const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length
+  return Math.sqrt(variance)
+}
+
+const liftFor = (
+  rows: InsightPostRow[],
+  key: string,
+  label: string,
+  predicate: (r: InsightPostRow) => boolean,
+): InsightLift => {
+  const withRows = rows.filter(predicate)
+  const withoutRows = rows.filter((r) => !predicate(r))
+  const withMean = meanOf(withRows.map((r) => r.engagement))
+  const withoutMean = meanOf(withoutRows.map((r) => r.engagement))
+  return {
+    key,
+    label,
+    withCount: withRows.length,
+    withoutCount: withoutRows.length,
+    withMean,
+    withoutMean,
+    lift: withoutRows.length && withoutMean > 0 ? withMean / withoutMean : withRows.length ? null : null,
+  }
+}
+
+/** Correlations, length buckets, best hour by rate, and z-score outliers */
+export function buildInsightsAnalytical(countable: InsightPostRow[]): InsightsAnalytical {
+  const originals = countable.filter((r) => r.kind === 'original')
+  const sample = originals.length ? originals : countable
+
+  const lifts = [
+    liftFor(sample, 'media', 'With media', (r) => r.has_media === 1),
+    liftFor(sample, 'tags', 'With hashtags', (r) => !!r.tags.trim()),
+    liftFor(sample, 'question', 'Asks a question', (r) => r.has_question === 1),
+    liftFor(sample, 'cw', 'Content warning', (r) => r.has_cw === 1),
+    liftFor(countable, 'reply', 'Replies vs originals', (r) => r.kind === 'reply'),
+  ].filter((l) => l.withCount > 0 && l.withoutCount > 0)
+
+  const bucketsDef: { key: InsightLengthBucket['key']; label: string; test: (n: number) => boolean }[] = [
+    { key: 'short', label: 'Short (<80)', test: (n) => n < 80 },
+    { key: 'medium', label: 'Medium (80–240)', test: (n) => n >= 80 && n <= 240 },
+    { key: 'long', label: 'Long (>240)', test: (n) => n > 240 },
+  ]
+  const lengthBuckets = bucketsDef
+    .map((b) => {
+      const rows = sample.filter((r) => b.test(r.char_count))
+      return {
+        key: b.key,
+        label: b.label,
+        count: rows.length,
+        meanEngagement: meanOf(rows.map((r) => r.engagement)),
+      }
+    })
+    .filter((b) => b.count > 0)
+
+  const byHour = new Map<number, number[]>()
+  for (const r of sample) {
+    const list = byHour.get(r.hour) || []
+    list.push(r.engagement)
+    byHour.set(r.hour, list)
+  }
+  let bestHour: InsightsAnalytical['bestHour'] = null
+  for (const [hour, vals] of byHour) {
+    if (vals.length < 2) continue
+    const meanEngagement = meanOf(vals)
+    if (!bestHour || meanEngagement > bestHour.meanEngagement) {
+      bestHour = { hour, meanEngagement, posts: vals.length }
+    }
+  }
+
+  const engagements = sample.map((r) => r.engagement)
+  const engagementMean = meanOf(engagements)
+  const engagementStdDev = stdDevOf(engagements, engagementMean)
+  const outliers: InsightOutlier[] =
+    engagementStdDev > 0
+      ? sample
+          .map((r) => ({
+            id: r.id,
+            preview: r.preview,
+            engagement: r.engagement,
+            zScore: (r.engagement - engagementMean) / engagementStdDev,
+          }))
+          .filter((o) => o.zScore >= 1.5)
+          .sort((a, b) => b.zScore - a.zScore)
+          .slice(0, 8)
+      : []
+
+  return {
+    lifts,
+    lengthBuckets,
+    bestHour,
+    engagementMean,
+    engagementStdDev,
+    outliers,
   }
 }
 
@@ -340,6 +482,7 @@ export function buildInsightsReport(opts: {
       .sort((a, b) => b.engagement - a.engagement || b.count - a.count)
       .slice(0, 12),
     posts: countable,
+    analytical: buildInsightsAnalytical(countable),
   }
 }
 
@@ -375,6 +518,8 @@ export function insightPostsToCsv(rows: InsightPostRow[]): string {
     'has_media',
     'has_poll',
     'has_cw',
+    'has_question',
+    'char_count',
     'tags',
     'preview',
     'url',

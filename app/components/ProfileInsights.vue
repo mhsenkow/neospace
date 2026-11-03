@@ -240,6 +240,21 @@ const kpi = computed(() => {
     { label: 'Replies received', value: formatCompact(t.repliesRecv) },
   ]
 })
+
+const analytical = computed(() => report.value?.analytical || null)
+const lengthMax = computed(() =>
+  Math.max(1, ...(analytical.value?.lengthBuckets.map((b) => b.meanEngagement) || [1])),
+)
+const outlierById = computed(() => {
+  const map = new Map<string, number>()
+  for (const o of analytical.value?.outliers || []) map.set(o.id, o.zScore)
+  return map
+})
+const formatLift = (lift: number | null) => {
+  if (lift == null || !Number.isFinite(lift)) return '—'
+  return `${lift.toFixed(2)}×`
+}
+const formatZ = (z: number) => `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ`
 </script>
 
 <template>
@@ -472,12 +487,74 @@ const kpi = computed(() => {
         </ul>
       </div>
 
+      <details
+        v-if="analytical && (analytical.lifts.length || analytical.lengthBuckets.length || analytical.bestHour)"
+        class="insights__lab"
+      >
+        <summary>Analytical breakdown &amp; correlations</summary>
+        <div v-if="analytical.lifts.length" class="insights__lab-block">
+          <h3 class="insights__card-title">Signal lift</h3>
+          <p class="insights__card-sub">Mean engagement with attribute ÷ without</p>
+          <ul class="insights__lifts">
+            <li v-for="lift in analytical.lifts" :key="lift.key">
+              <div class="insights__lift-head">
+                <span>{{ lift.label }}</span>
+                <strong>{{ formatLift(lift.lift) }}</strong>
+              </div>
+              <p class="insights__lift-meta">
+                with {{ lift.withCount }} · avg {{ formatCompact(lift.withMean) }}
+                · without {{ lift.withoutCount }} · avg {{ formatCompact(lift.withoutMean) }}
+              </p>
+            </li>
+          </ul>
+        </div>
+        <div v-if="analytical.lengthBuckets.length" class="insights__lab-block">
+          <h3 class="insights__card-title">Length vs engagement</h3>
+          <p class="insights__card-sub">Average engagement by character length</p>
+          <ul class="insights__lengths">
+            <li v-for="bucket in analytical.lengthBuckets" :key="bucket.key">
+              <div class="insights__length-head">
+                <span>{{ bucket.label }}</span>
+                <span>{{ bucket.count }} · avg {{ formatCompact(bucket.meanEngagement) }}</span>
+              </div>
+              <div class="insights__length-bar" aria-hidden="true">
+                <span
+                  :style="{
+                    width: `${Math.min(100, Math.round((bucket.meanEngagement / lengthMax) * 100))}%`,
+                  }"
+                />
+              </div>
+            </li>
+          </ul>
+        </div>
+        <p v-if="analytical.bestHour" class="insights__lab-best">
+          Best hour by engagement rate:
+          <strong>{{ formatInsightHour(analytical.bestHour.hour) }}</strong>
+          · avg {{ formatCompact(analytical.bestHour.meanEngagement) }}
+          across {{ analytical.bestHour.posts }} posts
+        </p>
+        <p v-if="analytical.engagementStdDev > 0" class="insights__lab-best">
+          Engagement μ {{ formatCompact(analytical.engagementMean) }} ·
+          σ {{ formatCompact(analytical.engagementStdDev) }}
+          · {{ analytical.outliers.length }} outlier{{ analytical.outliers.length === 1 ? '' : 's' }} ≥ +1.5σ
+        </p>
+      </details>
+
       <div v-if="report.topPosts.length" class="insights__card">
         <h3 class="insights__card-title">Top posts</h3>
         <ol class="insights__tops">
           <li v-for="post in report.topPosts" :key="post.id">
             <NuxtLink :to="`/status/${post.id}`" class="insights__top-link">
-              <span class="insights__top-score">{{ formatCompact(post.engagement) }}</span>
+              <span class="insights__top-score">
+                {{ formatCompact(post.engagement) }}
+                <em
+                  v-if="outlierById.has(post.id)"
+                  class="insights__z"
+                  :title="`Engagement z-score ${formatZ(outlierById.get(post.id)!)}`"
+                >
+                  {{ formatZ(outlierById.get(post.id)!) }}
+                </em>
+              </span>
               <span class="insights__top-preview">{{ post.preview || '(no text)' }}</span>
             </NuxtLink>
           </li>
@@ -908,6 +985,79 @@ const kpi = computed(() => {
   }
 }
 
+.insights__lab {
+  margin: 0;
+  padding: 0.85rem 0 0.25rem;
+  border-top: 1px solid var(--neo-border-color);
+
+  summary {
+    cursor: pointer;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    color: var(--neo-text-primary);
+  }
+}
+
+.insights__lab-block {
+  margin-top: 0.85rem;
+}
+
+.insights__lifts,
+.insights__lengths {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.insights__lift-head,
+.insights__length-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+
+  strong {
+    font-variant-numeric: tabular-nums;
+    color: var(--neo-accent);
+  }
+}
+
+.insights__lift-meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.6875rem;
+  color: var(--neo-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.insights__length-bar {
+  height: 0.4rem;
+  margin-top: 0.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-primary) 8%, transparent);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--neo-accent);
+  }
+}
+
+.insights__lab-best {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--neo-text-secondary);
+
+  strong {
+    color: var(--neo-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 .insights__tops {
   list-style: none;
   margin: 0;
@@ -915,6 +1065,16 @@ const kpi = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+}
+
+.insights__z {
+  display: inline-block;
+  margin-left: 0.25rem;
+  font-style: normal;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--neo-accent);
+  font-variant-numeric: tabular-nums;
 }
 
 .insights__top-link {

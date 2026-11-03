@@ -119,6 +119,15 @@ import { discardRedraftSnapshot, redraftSlot, saveRedraftSnapshot } from '~/util
 import { draftSaveMessage } from '~/composables/useDraft'
 import { httpStatusFrom } from '~/utils/friendlyError'
 import { logError } from '~/utils/log'
+import { mediaAttachmentLoupeMeta } from '~/utils/mediaLoupe'
+import type { RankBreakdown } from '~/utils/rankers'
+import {
+  formatSignalNumber,
+  inspectStatusSignals,
+  signalsToJsonSummary,
+  type StatusSignals,
+} from '~/utils/signalInspector'
+import { hostnameOf } from '~/utils/instances'
 
 /** Reply couldn't import the post: say which server, and offer its own web page (does the import server-side) */
 const replyHandOff = (uri: string) => {
@@ -240,8 +249,52 @@ const accountHandle = computed(() => {
 // useId: the same post can render in several board columns at once
 const cardLabelId = `status-author-${useId()}`
 const isReblog = computed(() => !!props.status.reblog)
-/** Set by ranked algorithm feeds (useRankedFeed) */
+/** Set by ranked algorithm feeds (useRankedFeed) / Home For You */
 const rankWhy = computed(() => (props.status as { _rankWhy?: string })._rankWhy || '')
+const rankBreakdown = computed(
+  () => (props.status as { _rankBreakdown?: RankBreakdown })._rankBreakdown || null,
+)
+const rankXrayOpen = ref(false)
+const rankTermMax = computed(() => {
+  const terms = rankBreakdown.value?.terms || []
+  return Math.max(0.001, ...terms.map((t) => Math.abs(t.contribution)))
+})
+const formatRankScore = (n: number) => {
+  if (!Number.isFinite(n)) return '0'
+  if (Math.abs(n) >= 100) return n.toFixed(1)
+  if (Math.abs(n) >= 10) return n.toFixed(2)
+  return n.toFixed(3)
+}
+
+const inspectOpen = ref(false)
+const inspectCopied = ref('')
+const statusSignals = computed((): StatusSignals => {
+  let browsingHost: string | null = null
+  try {
+    browsingHost = hostnameOf(activeCredentials().url) || null
+  } catch {
+    browsingHost = null
+  }
+  const ext = props.status as ExtendedStatus
+  if (!browsingHost && ext._instanceUrl) browsingHost = hostnameOf(ext._instanceUrl) || null
+  return inspectStatusSignals(props.status, { browsingHost })
+})
+const toggleInspect = () => {
+  inspectOpen.value = !inspectOpen.value
+  isMenuOpen.value = false
+}
+const copyInspectJson = async () => {
+  try {
+    await navigator.clipboard.writeText(signalsToJsonSummary('status', statusSignals.value))
+    inspectCopied.value = 'Copied'
+  } catch {
+    inspectCopied.value = 'Couldn’t copy'
+  }
+  window.setTimeout(() => {
+    inspectCopied.value = ''
+  }, 1600)
+}
+
 const reblogger = computed(() => (isReblog.value ? props.status.account : null))
 const collapsedRebloggers = computed(
   () => (props.status as CollapsedReblogStatus)._collapsedRebloggers,
@@ -330,6 +383,8 @@ watch(
     cwOpen.value = false
     contentExpanded.value = false
     contentOverflows.value = false
+    rankXrayOpen.value = false
+    inspectOpen.value = false
     applyReadingPrefs()
   },
 )
@@ -1286,6 +1341,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       (images.length > 1 ? `Image ${i + 1} of ${images.length}` : 'Image without description'),
     caption: m.description?.trim() || undefined,
     preview: m.previewUrl && m.previewUrl !== m.url ? m.previewUrl : undefined,
+    meta: mediaAttachmentLoupeMeta(m),
   }))
   const index = images.findIndex((m) => m.id === media.id)
   const current = items[index]
@@ -1311,11 +1367,76 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     tabindex="0"
     @keydown="onCardKeydown"
   >
-    <!-- Ranked algorithm feeds say why this post is here -->
-    <p v-if="rankWhy && !isFlip" class="status-rank-why">
-      <NeoIcon name="sort" :size="12" :stroke="1.85" />
-      <span>{{ rankWhy }}</span>
-    </p>
+    <!-- Ranked algorithm feeds / For You — tap for score X-Ray -->
+    <div v-if="rankWhy && !isFlip" class="status-rank">
+      <button
+        type="button"
+        class="status-rank-why"
+        :aria-expanded="rankXrayOpen"
+        :aria-controls="rankBreakdown ? `rank-xray-${cardLabelId}` : undefined"
+        @click.stop="rankBreakdown && (rankXrayOpen = !rankXrayOpen)"
+      >
+        <NeoIcon name="sort" :size="12" :stroke="1.85" />
+        <span>{{ rankWhy }}</span>
+        <svg
+          v-if="rankBreakdown"
+          class="status-rank-why__chevron"
+          :class="{ 'status-rank-why__chevron--open': rankXrayOpen }"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div
+        v-if="rankBreakdown && rankXrayOpen"
+        :id="`rank-xray-${cardLabelId}`"
+        class="status-rank-xray"
+        role="region"
+        aria-label="Ranking score breakdown"
+      >
+        <p class="status-rank-xray__head">
+          <strong>{{ formatRankScore(rankBreakdown.finalScore) }}</strong>
+          <span>
+            {{ rankBreakdown.ranker === 'home' ? 'For You' : `${rankBreakdown.ranker}-style` }}
+            · {{ rankBreakdown.source }}
+            · reach {{ formatRankScore(rankBreakdown.reach) }}
+            · age {{ formatRankScore(rankBreakdown.ageHours) }}h
+          </span>
+        </p>
+        <ul class="status-rank-xray__terms">
+          <li v-for="term in rankBreakdown.terms" :key="term.label">
+            <div class="status-rank-xray__term-head">
+              <span>{{ term.label }}</span>
+              <span class="status-rank-xray__term-val">{{ formatRankScore(term.contribution) }}</span>
+            </div>
+            <div class="status-rank-xray__bar" aria-hidden="true">
+              <span
+                class="status-rank-xray__bar-fill"
+                :class="{ 'status-rank-xray__bar-fill--neg': term.contribution < 0 }"
+                :style="{
+                  width: `${Math.min(100, (Math.abs(term.contribution) / rankTermMax) * 100)}%`,
+                }"
+              />
+            </div>
+            <p class="status-rank-xray__raw">{{ term.rawSignal }} · w={{ term.weight }}</p>
+          </li>
+        </ul>
+        <p class="status-rank-xray__mods">
+          Recency ×{{ formatRankScore(rankBreakdown.recencyMultiplier) }}
+          · Network ×{{ formatRankScore(rankBreakdown.networkMultiplier) }}
+          · Diversity ×{{ formatRankScore(rankBreakdown.diversityMultiplier) }}
+          <template v-if="rankBreakdown.interestMultiplier != null">
+            · Interest ×{{ formatRankScore(rankBreakdown.interestMultiplier) }}
+          </template>
+        </p>
+      </div>
+    </div>
 
     <!-- Reblog indicator -->
     <div v-if="isReblog && !isFlip" class="status-reblog">
@@ -1444,6 +1565,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                   <line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
                 <span>Open original</span>
+              </button>
+              <button type="button" role="menuitem" class="status-dropdown-item" @click="toggleInspect">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <span>{{ inspectOpen ? 'Hide signals' : 'Inspect signals' }}</span>
               </button>
               <template v-if="canManageOwn">
                 <div class="status-dropdown-divider" role="separator" />
@@ -1836,6 +1964,82 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             </svg>
           </button>
         </div>
+
+        <aside v-if="inspectOpen" class="status-inspector" aria-label="Post signal inspector">
+          <header class="status-inspector__head">
+            <strong>Signals</strong>
+            <button type="button" class="status-inspector__copy" @click="copyInspectJson">
+              {{ inspectCopied || 'Copy JSON' }}
+            </button>
+            <button type="button" class="status-inspector__close" aria-label="Close inspector" @click="inspectOpen = false">
+              ×
+            </button>
+          </header>
+          <dl class="status-inspector__grid">
+            <div>
+              <dt>Local id</dt>
+              <dd>{{ statusSignals.localId }}</dd>
+            </div>
+            <div>
+              <dt>Origin</dt>
+              <dd>{{ statusSignals.originHost || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Browsing</dt>
+              <dd>{{ statusSignals.browsingHint || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Client</dt>
+              <dd>{{ statusSignals.application || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Language</dt>
+              <dd>{{ statusSignals.language || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Visibility</dt>
+              <dd>{{ statusSignals.visibility }}</dd>
+            </div>
+            <div>
+              <dt>Length</dt>
+              <dd>{{ statusSignals.charCount }} chars · {{ statusSignals.wordCount }} words · ~{{ formatSignalNumber(statusSignals.readingMinutes, 1) }} min</dd>
+            </div>
+            <div>
+              <dt>Density</dt>
+              <dd>
+                {{ statusSignals.tagCount }} tags · {{ statusSignals.mentionCount }} mentions ·
+                {{ statusSignals.linkCount }} links
+                <template v-if="statusSignals.hasCard"> · card</template>
+                <template v-if="statusSignals.hasCw"> · CW</template>
+              </dd>
+            </div>
+            <div>
+              <dt>Snowflake</dt>
+              <dd>
+                {{ statusSignals.snowflakeIso || '—' }}
+                <template v-if="statusSignals.snowflakeDeltaMs != null">
+                  · Δ {{ statusSignals.snowflakeDeltaMs }} ms
+                </template>
+              </dd>
+            </div>
+            <div>
+              <dt>createdAt</dt>
+              <dd>{{ statusSignals.createdAtIso }}</dd>
+            </div>
+            <div v-if="statusSignals.media.length">
+              <dt>Media</dt>
+              <dd>{{ statusSignals.media.map((m) => `${m.count}× ${m.type}`).join(', ') }}</dd>
+            </div>
+            <div>
+              <dt>Engagement</dt>
+              <dd>
+                {{ statusSignals.engagement.favs }} fav ·
+                {{ statusSignals.engagement.boosts }} boost ·
+                {{ statusSignals.engagement.replies }} reply
+              </dd>
+            </div>
+          </dl>
+        </aside>
       </div>
     </div>
 
@@ -2202,20 +2406,206 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
-// Reblog indicator
+.status-rank {
+  margin: 0 0 0.45rem;
+  min-width: 0;
+}
+
 .status-rank-why {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  margin: 0 0 0.35rem;
-  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.15rem 0.45rem 0.15rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
   font-size: 0.75rem;
   color: var(--neo-text-tertiary);
+  cursor: pointer;
+  text-align: left;
+
+  &:hover,
+  &[aria-expanded='true'] {
+    color: var(--neo-text-secondary);
+    background: color-mix(in srgb, var(--neo-text-primary) 5%, transparent);
+    border-color: var(--neo-border-color);
+  }
 
   span {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  &__chevron {
+    flex-shrink: 0;
+    transition: transform var(--neo-dur-quick, 160ms) var(--neo-ease-out);
+
+    &--open {
+      transform: rotate(180deg);
+    }
+  }
+}
+
+.status-rank-xray {
+  margin: 0.4rem 0 0.15rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--neo-bg-secondary) 88%, var(--neo-accent) 12%);
+}
+
+.status-rank-xray__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+
+  strong {
+    font-size: 0.9375rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--neo-text-primary);
+  }
+}
+
+.status-rank-xray__terms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.status-rank-xray__term-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+}
+
+.status-rank-xray__term-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--neo-text-primary);
+}
+
+.status-rank-xray__bar {
+  height: 0.35rem;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-primary) 8%, transparent);
+  overflow: hidden;
+}
+
+.status-rank-xray__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--neo-accent);
+
+  &--neg {
+    background: var(--neo-danger, #e11d48);
+  }
+}
+
+.status-rank-xray__raw {
+  margin: 0.15rem 0 0;
+  font-size: 0.6875rem;
+  color: var(--neo-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-rank-xray__mods {
+  margin: 0.55rem 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--neo-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-inspector {
+  margin: 0.55rem 0 0.15rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 10px;
+  background: var(--neo-bg-secondary);
+}
+
+.status-inspector__head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.5rem;
+
+  strong {
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--neo-text-muted);
+  }
+}
+
+.status-inspector__copy,
+.status-inspector__close {
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-primary);
+  color: var(--neo-text-secondary);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.status-inspector__copy {
+  margin-left: auto;
+  padding: 0.2rem 0.55rem;
+}
+
+.status-inspector__close {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.status-inspector__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.4rem;
+  margin: 0;
+
+  div {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+
+  dt {
+    margin: 0;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--neo-text-tertiary);
+  }
+
+  dd {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--neo-text-secondary);
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
   }
 }
 
