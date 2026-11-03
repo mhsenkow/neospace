@@ -875,12 +875,12 @@ onUnmounted(() => {
       <template v-if="!hasQuery">
         <div v-if="!isSignedIn" class="explore-cta-row">
           <a href="https://joinmastodon.org/servers" target="_blank" rel="noopener" class="neo-btn neo-btn--primary">
-            Create a free account
+            Find a server &amp; join
           </a>
           <NuxtLink to="/login" class="neo-btn neo-btn--ghost">I already have an account</NuxtLink>
           <p class="explore-cta-row__hint">
-            You can search people and #tags on {{ discovery.sourceHost.value || 'this server' }} as a guest. Sign in to
-            search post text and follow.
+            Mastodon accounts live on a server you choose — start with Find a server, or browse as a guest.
+            You can search people and #tags on {{ discovery.sourceHost.value || 'this server' }} without signing in.
           </p>
         </div>
 
@@ -941,7 +941,9 @@ onUnmounted(() => {
                 @watched="onWatched"
               />
             </div>
-            <button type="button" class="explore-text-link" @click="setTab('servers')">See all servers →</button>
+            <button type="button" class="explore-text-link" @click="setTab('servers')">
+              Browse &amp; join servers →
+            </button>
           </section>
         </template>
 
@@ -1044,6 +1046,64 @@ onUnmounted(() => {
                 @watched="onWatched"
               />
             </TransitionGroup>
+          </section>
+
+          <section class="explore-join" aria-labelledby="explore-join-h">
+            <div class="explore-join__intro">
+              <h2 id="explore-join-h" class="explore-join__title">Need a Mastodon home?</h2>
+              <p class="explore-join__lede">
+                Your account lives on one server. Open a server above to create an account there,
+                or pick how you’d like to get started.
+              </p>
+            </div>
+
+            <div class="explore-join__actions">
+              <a
+                href="https://joinmastodon.org/servers"
+                target="_blank"
+                rel="noopener"
+                class="neo-btn neo-btn--primary"
+              >
+                Find a server to join
+              </a>
+              <button
+                v-if="isSignedIn"
+                type="button"
+                class="neo-btn neo-btn--ghost"
+                @click="goAddAccount"
+              >
+                Add an account you already have
+              </button>
+              <NuxtLink v-else to="/login" class="neo-btn neo-btn--ghost">
+                I already have an account
+              </NuxtLink>
+            </div>
+
+            <div class="explore-join__host">
+              <p class="explore-join__host-label">Want to run the server instead?</p>
+              <ul class="explore-join__host-list">
+                <li>
+                  <a href="https://joinmastodon.org/hosting" target="_blank" rel="noopener">
+                    Official hosting
+                  </a>
+                  <span>Providers recommended by Mastodon</span>
+                </li>
+                <li>
+                  <a href="https://masto.host/" target="_blank" rel="noopener">Masto.host</a>
+                  <span>Managed hosting, no ops required</span>
+                </li>
+                <li>
+                  <a
+                    href="https://docs.joinmastodon.org/user/run-your-own/"
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    Self-host
+                  </a>
+                  <span>Install and run Mastodon yourself</span>
+                </li>
+              </ul>
+            </div>
           </section>
         </template>
       </template>
@@ -1243,29 +1303,6 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <section class="explore-help">
-        <h2 class="explore-section-title explore-help__heading">Get started</h2>
-        <div v-if="!isSignedIn" class="explore-help__card">
-          <h3>Sign in</h3>
-          <button type="button" class="explore-text-link" @click="goSignIn">Continue →</button>
-        </div>
-        <div v-if="isSignedIn" class="explore-help__card">
-          <h3>Link more</h3>
-          <button type="button" class="explore-text-link" @click="goAddAccount">Add server →</button>
-        </div>
-        <div class="explore-help__card">
-          <h3>Watch</h3>
-          <p>Public timelines, no account.</p>
-        </div>
-        <div class="explore-help__card explore-help__card--wide">
-          <h3>Host</h3>
-          <div class="explore-help__links">
-            <a href="https://joinmastodon.org/hosting" target="_blank" rel="noopener" class="explore-text-link">Official →</a>
-            <a href="https://masto.host/" target="_blank" rel="noopener" class="explore-text-link">Masto.host →</a>
-            <a href="https://docs.joinmastodon.org/user/run-your-own/" target="_blank" rel="noopener" class="explore-text-link">Self-host →</a>
-          </div>
-        </div>
-      </section>
     </div>
 
     <InstancePreview @watched="onWatched" />
@@ -1582,10 +1619,6 @@ onUnmounted(() => {
   color: var(--neo-text-tertiary);
 }
 
-.explore-help__heading {
-  margin-bottom: 0.75rem;
-}
-
 .explore-people,
 .explore-posts,
 .explore-tags,
@@ -1648,48 +1681,84 @@ onUnmounted(() => {
   }
 }
 
-.explore-help {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 0.75rem;
-  margin-top: 0.25rem;
-  padding-top: 1.5rem;
+.explore-join {
+  margin-top: 1.75rem;
+  padding-top: 1.35rem;
   border-top: 1px solid var(--neo-border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 36rem;
 }
 
-.explore-help__card {
-  padding: 1rem;
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-
-  h3 {
-    margin: 0 0 0.35rem;
-    font-size: 0.9375rem;
-    color: var(--neo-text-primary);
-  }
-
-  p {
-    margin: 0;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--neo-text-muted);
-  }
-
-  &--wide {
-    grid-column: 1 / -1;
-
-    @media (min-width: 720px) {
-      grid-column: span 2;
-    }
-  }
+.explore-join__title {
+  margin: 0 0 0.4rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--neo-text-primary);
+  text-transform: none;
 }
 
-.explore-help__links {
+.explore-join__lede {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--neo-text-secondary, var(--neo-text-muted));
+}
+
+.explore-join__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 1rem;
-  margin-top: 0.35rem;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+}
+
+.explore-join__host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.explore-join__host-label {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--neo-text-tertiary);
+}
+
+.explore-join__host-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+
+  li {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  a {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--neo-accent);
+    text-decoration: none;
+    width: fit-content;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  span {
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--neo-text-muted);
+  }
 }
 
 .explore-text-link {
@@ -1703,10 +1772,6 @@ onUnmounted(() => {
   color: var(--neo-accent);
   cursor: pointer;
   text-decoration: none;
-
-  .explore-help__links & {
-    margin-top: 0.5rem;
-  }
 
   &:hover {
     text-decoration: underline;
@@ -1877,7 +1942,6 @@ onUnmounted(() => {
     order: 1;
   }
 
-  > .explore-help,
   > .explore-empty {
     order: 2;
   }
