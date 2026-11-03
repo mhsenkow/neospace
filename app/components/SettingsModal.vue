@@ -1240,6 +1240,44 @@ watch(
     color: var(--neo-accent);
     text-transform: uppercase;
     letter-spacing: 0.03em;
+    align-self: flex-start;
+
+    &--main {
+      color: var(--neo-text-secondary);
+    }
+
+    &--expired {
+      color: var(--neo-warning);
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.55rem;
+    margin-top: 0.35rem;
+  }
+
+  &__action {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 650;
+    color: var(--neo-accent);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+
+    &:hover:not(:disabled) {
+      color: var(--neo-accent-hover, var(--neo-accent));
+    }
+
+    &:disabled {
+      opacity: 0.65;
+      cursor: progress;
+    }
   }
 }
 

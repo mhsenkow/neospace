@@ -285,6 +285,7 @@ const newPostsAnnounce = ref('')
 let newPostsAnnounceTimer: ReturnType<typeof setTimeout> | null = null
 
 const feedMenuOpen = ref(false)
+const serverFilterMenuOpen = ref(false)
 const algorithmsExpanded = ref(true)
 const groupsExpanded = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -359,6 +360,47 @@ const browsingHost = computed(() => {
   return hostnameOf(preferred) || 'this server'
 })
 
+/** Local / Federated can hop between connected + watched servers when you have more than one */
+const canSwitchPublicServer = computed(
+  () =>
+    (props.column.feedType === 'local' || props.column.feedType === 'federated') &&
+    instancesStore.instances.length > 1,
+)
+
+const publicServerChoices = computed(() =>
+  instancesStore.instances.map((instance) => {
+    const host = hostnameOf(instance.url)
+    const kind =
+      instance.accessToken && instance.user && !instance.sessionExpired
+        ? 'signed-in'
+        : instance.user
+          ? 'expired'
+          : 'watching'
+    return { id: instance.id, host, kind }
+  }),
+)
+
+const isPublicServerSelected = (instanceId: string) =>
+  (instancesStore.activeInstanceFilter || instancesStore.activeAccount?.id) === instanceId
+
+const pickPublicServer = (instanceId: string) => {
+  instancesStore.setFilter(instanceId)
+  serverFilterMenuOpen.value = false
+  toastStore.show({
+    message: `Browsing ${props.column.feedType === 'federated' ? 'Federated' : 'Local'} on ${hostnameOf(
+      instancesStore.instances.find((i) => i.id === instanceId)?.url || '',
+    ) || 'this server'}`,
+    duration: 2200,
+  })
+}
+
+const { open: openAccountsManager } = useAccountsManager()
+
+const openAddOrWatchServer = () => {
+  serverFilterMenuOpen.value = false
+  openAccountsManager()
+}
+
 const activeRecipe = computed(() =>
   props.column.feedType === 'algorithm'
     ? algorithmsStore.getRecipe(props.column.algorithmId)
@@ -381,7 +423,10 @@ const feedLabel = computed(() => {
     return activeRecipe.value?.name || 'Algorithm'
   }
   if (props.column.feedType === 'local') {
-    return `Local (${browsingHost.value})`
+    return canSwitchPublicServer.value ? 'Local' : `Local (${browsingHost.value})`
+  }
+  if (props.column.feedType === 'federated') {
+    return canSwitchPublicServer.value ? 'Federated' : `Federated (${browsingHost.value})`
   }
   if (props.column.feedType === 'home') {
     return homeFeedMode.value === 'following' ? 'Following' : 'For You'
@@ -1465,7 +1510,7 @@ onUnmounted(() => {
       'neo-chrome--recessed': recessed,
       'timeline-column--drop-target': dropTarget,
       'timeline-column--dragging': dragging,
-      'timeline-column--menu-open': feedMenuOpen,
+      'timeline-column--menu-open': feedMenuOpen || serverFilterMenuOpen,
       'timeline-column--focus-wide': isDesktop && focused,
     }"
     @dragover="onColumnDragOver"
@@ -1507,6 +1552,70 @@ onUnmounted(() => {
         >
           <span class="column-feed-label">{{ feedLabel }}</span>
         </button>
+        <NeoMenu
+          v-if="canSwitchPublicServer"
+          v-model:open="serverFilterMenuOpen"
+          class="column-server-menu"
+          align="start"
+          :label="`Browse ${feedLabel} on ${browsingHost}`"
+          @pointerdown.stop
+        >
+          <span class="column-server-pill">
+            <span class="column-server-pill__host">{{ browsingHost }}</span>
+            <svg
+              class="column-server-pill__chevron"
+              :class="{ 'column-server-pill__chevron--open': serverFilterMenuOpen }"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+          <template #items>
+            <button
+              v-for="server in publicServerChoices"
+              :key="server.id"
+              type="button"
+              role="menuitemradio"
+              class="feed-dropdown__item"
+              :class="{ 'feed-dropdown__item--on': isPublicServerSelected(server.id) }"
+              :aria-checked="isPublicServerSelected(server.id)"
+              @click="pickPublicServer(server.id)"
+            >
+              <span class="column-server-choice">
+                <span class="column-server-choice__host">{{ server.host }}</span>
+                <span
+                  v-if="server.kind === 'watching'"
+                  class="column-server-choice__tag"
+                >Watching</span>
+                <span
+                  v-else-if="server.kind === 'expired'"
+                  class="column-server-choice__tag column-server-choice__tag--warn"
+                >Expired</span>
+              </span>
+              <NeoIcon
+                v-if="isPublicServerSelected(server.id)"
+                name="check"
+                :size="16"
+                :stroke="2.5"
+              />
+            </button>
+            <div class="feed-dropdown__divider" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              class="feed-dropdown__item"
+              @click="openAddOrWatchServer"
+            >
+              Add / watch server…
+            </button>
+          </template>
+        </NeoMenu>
         <div
           v-if="column.feedType === 'home' && canShowHome"
           class="column-home-mode"
@@ -2254,6 +2363,65 @@ onUnmounted(() => {
     box-shadow: var(--neo-shadow-md);
     padding: 0.375rem;
     z-index: var(--neo-z-dropdown, 1000);
+  }
+}
+
+.column-server-menu {
+  flex-shrink: 0;
+  margin-left: 0.35rem;
+}
+
+.column-server-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 10rem;
+  padding: 0.15rem 0.45rem 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary);
+  color: var(--neo-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.column-server-pill__host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-server-pill__chevron {
+  flex-shrink: 0;
+  transition: transform var(--neo-dur-quick, 160ms) var(--neo-ease-out);
+
+  &--open {
+    transform: rotate(180deg);
+  }
+}
+
+.column-server-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.column-server-choice__host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-server-choice__tag {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--neo-text-muted);
+
+  &--warn {
+    color: var(--neo-warning);
   }
 }
 

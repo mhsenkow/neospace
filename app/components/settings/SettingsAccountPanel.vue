@@ -1,18 +1,26 @@
 <script setup lang="ts">
 import { useSettingsStore } from '~/stores/settings'
-import { useInstancesStore } from '~/stores/instances'
+import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { useOverlayStore } from '~/stores/overlay'
 import { useToastStore } from '~/stores/toast'
+import { useAccountsManager } from '~/composables/useAccountsManager'
+import { instanceHandle, switchActiveAccount } from '~/composables/useSwitchAccount'
+import { friendlyServerError } from '~/utils/instances'
+import { openOAuthAuthorize } from '~/utils/nativeAuth'
+import { sanitizeReturnTo } from '~/utils/oauthPkce'
 import type { SettingsTopic } from '~/utils/serverCapabilities'
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
 const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
+const { open: openAccounts } = useAccountsManager()
 const router = useRouter()
+const route = useRoute()
 
 const serverLink = (topic: SettingsTopic) => instancesStore.serverSettingsLink(topic)
-const linkedAccounts = computed(() => instancesStore.authenticatedInstances)
+/** Include expired sessions so Settings can offer Sign in again */
+const linkedAccounts = computed(() => instancesStore.signedInInstances)
 const {
   isAndroid,
   isIos,
@@ -20,6 +28,60 @@ const {
   canNativeInstall,
   installNative,
 } = useInstallApp()
+
+const handleOf = instanceHandle
+const isExpired = (acct: ConnectedInstance) =>
+  !!acct.sessionExpired || (!acct.accessToken && !!acct.user)
+const isPrimary = (acct: ConnectedInstance) =>
+  acct.id === (instancesStore.primaryAccount?.id ?? null)
+
+const useForPosting = (acct: ConnectedInstance) => {
+  if (isExpired(acct)) return
+  switchActiveAccount(acct.id)
+}
+
+const makeMain = (acct: ConnectedInstance) => {
+  if (isExpired(acct)) return
+  instancesStore.setPrimaryAccount(acct.id)
+  toastStore.show({
+    message: `${handleOf(acct)} is now your main account — NeoSpace opens as it`,
+  })
+}
+
+const reauthBusy = ref<Record<string, boolean>>({})
+
+const reauthAccount = async (acct: ConnectedInstance) => {
+  if (reauthBusy.value[acct.id]) return
+  reauthBusy.value = { ...reauthBusy.value, [acct.id]: true }
+  try {
+    const returnTo = sanitizeReturnTo(route.fullPath) || '/'
+    const authUrl = await instancesStore.startAuth(acct.id, {
+      addMode: true,
+      returnTo,
+    })
+    settingsStore.close()
+    await openOAuthAuthorize(authUrl)
+  } catch (e) {
+    toastStore.show({ message: friendlyServerError(e), kind: 'error' })
+    const row = instancesStore.instances.find((i) => i.id === acct.id)
+    if (row) row.isConnecting = false
+  } finally {
+    const next = { ...reauthBusy.value }
+    delete next[acct.id]
+    reauthBusy.value = next
+  }
+}
+
+const manageServers = () => {
+  settingsStore.close()
+  openAccounts()
+}
+
+const addAccount = () => {
+  settingsStore.close()
+  const returnTo = sanitizeReturnTo(route.fullPath) || '/'
+  router.push(`/login?add=1&returnTo=${encodeURIComponent(returnTo)}`)
+}
 
 const signOutAll = async () => {
   const ok = await overlayStore.openConfirm({
@@ -91,23 +153,67 @@ const clearDeviceData = async () => {
               {{ acct.user?.displayName || acct.user?.username || 'Account' }}
             </span>
             <span class="settings-linked-item__handle">
-              @{{ acct.user?.acct || acct.url.replace(/^https?:\/\//, '') }}
+              {{ handleOf(acct) }}
             </span>
+            <div class="settings-linked-item__actions">
+              <button
+                v-if="isExpired(acct)"
+                type="button"
+                class="settings-linked-item__action"
+                :disabled="reauthBusy[acct.id]"
+                @click="reauthAccount(acct)"
+              >
+                {{ reauthBusy[acct.id] ? 'Opening…' : 'Sign in again' }}
+              </button>
+              <template v-else>
+                <button
+                  v-if="acct.id !== instancesStore.activeAccountId"
+                  type="button"
+                  class="settings-linked-item__action"
+                  @click="useForPosting(acct)"
+                >
+                  Use for posting
+                </button>
+                <button
+                  v-if="!isPrimary(acct)"
+                  type="button"
+                  class="settings-linked-item__action"
+                  @click="makeMain(acct)"
+                >
+                  Make main
+                </button>
+              </template>
+              <button
+                type="button"
+                class="settings-linked-item__action"
+                @click="manageServers"
+              >
+                Manage servers
+              </button>
+            </div>
           </div>
           <span
-            v-if="acct.id === instancesStore.activeAccountId"
+            v-if="isExpired(acct)"
+            class="settings-linked-item__badge settings-linked-item__badge--expired"
+          >Expired</span>
+          <span
+            v-else-if="acct.id === instancesStore.activeAccountId"
             class="settings-linked-item__badge"
           >Active</span>
+          <span
+            v-else-if="isPrimary(acct)"
+            class="settings-linked-item__badge settings-linked-item__badge--main"
+          >Main</span>
         </li>
       </ul>
       <p v-else class="settings-hint">No signed-in accounts.</p>
-      <NuxtLink
-        to="/login"
+      <button
+        type="button"
         class="settings-btn settings-btn--ghost"
-        @click="settingsStore.close()"
+        @click="addAccount"
       >
         Add account
-      </NuxtLink>
+      </button>
 
       <div class="settings-divider" />
 

@@ -3,14 +3,18 @@
  * Login — pick a server you already use, approve NeoSpace, come back.
  */
 
-import { useInstancesStore } from '~/stores/instances'
+import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
+import { useToastStore } from '~/stores/toast'
 import { friendlyServerError } from '~/utils/instances'
 import { openOAuthAuthorize } from '~/utils/nativeAuth'
 import { sanitizeReturnTo } from '~/utils/oauthPkce'
+import { instanceHandle } from '~/composables/useSwitchAccount'
+import { plainDisplayName } from '~/utils/displayName'
 
 const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
+const toastStore = useToastStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -19,6 +23,7 @@ const redirecting = ref(false)
 const isConnecting = ref(false)
 const connectingTo = ref<string | null>(null)
 const pickerRef = ref<{ setError: (msg: string | null) => void } | null>(null)
+const reauthBusy = ref<Record<string, boolean>>({})
 
 /** Adding another account while already signed in */
 const isAddMode = computed(() => route.query.add === '1' || route.query.add === 'true')
@@ -30,10 +35,17 @@ const returnTo = computed(() =>
 const mainHandle = computed(() => {
   const main = instancesStore.primaryAccount || instancesStore.activeAccount
   if (!main?.user) return null
-  const acct = main.user.acct || main.user.username
-  const host = main.url.replace(/^https?:\/\//, '')
-  return acct.includes('@') ? `@${acct}` : `@${acct}@${host}`
+  return instanceHandle(main)
 })
+
+/** Accounts already on this device (signed in or expired) — shown in add mode */
+const linkedAccounts = computed(() =>
+  instancesStore.signedInInstances.filter((i) => !!i.user),
+)
+
+const expiredAccounts = computed(() =>
+  instancesStore.signedInInstances.filter((i) => i.sessionExpired || (!i.accessToken && i.user)),
+)
 
 /** Add mode returns to where it was opened from: returnTo, else the previous page, else Profile */
 const goBack = () => {
@@ -119,6 +131,41 @@ const startLogin = async (url: string) => {
   }
 }
 
+const reauthAccount = async (instance: ConnectedInstance) => {
+  if (reauthBusy.value[instance.id]) return
+  reauthBusy.value = { ...reauthBusy.value, [instance.id]: true }
+  try {
+    const authUrl = await instancesStore.startAuth(instance.id, {
+      addMode: isAddMode.value,
+      returnTo: returnTo.value,
+    })
+    await openOAuthAuthorize(authUrl)
+  } catch (e) {
+    pickerRef.value?.setError(friendlyServerError(e))
+    const row = instancesStore.instances.find((i) => i.id === instance.id)
+    if (row) row.isConnecting = false
+  } finally {
+    const next = { ...reauthBusy.value }
+    delete next[instance.id]
+    reauthBusy.value = next
+  }
+}
+
+const watchServer = async (url: string) => {
+  try {
+    const instance = await instancesStore.addInstance(url)
+    const host = instance.url.replace(/^https?:\/\//, '')
+    toastStore.show({ message: `Watching ${host} — browsing the public feed`, duration: 3200 })
+    await router.push(returnTo.value || '/')
+  } catch (e) {
+    pickerRef.value?.setError(friendlyServerError(e))
+  }
+}
+
+const handleOf = instanceHandle
+const displayOf = (account: ConnectedInstance) =>
+  plainDisplayName(account.user?.displayName, account.user?.username)
+
 useHead({
   title: computed(() => (isAddMode.value ? 'Add account | NeoSpace' : 'Sign in | NeoSpace')),
 })
@@ -152,6 +199,77 @@ definePageMeta({
         <a v-if="isAddMode" href="#" class="login__back" @click.prevent="goBack">{{ backLabel }}</a>
       </header>
 
+      <ol
+        v-if="!isConnecting && !isAddMode"
+        class="login__steps"
+        aria-label="How sign-in works"
+      >
+        <li class="login__step">
+          <span class="login__step-num" aria-hidden="true">1</span>
+          <span class="login__step-text">
+            <strong>Pick your server</strong>
+            <em>Where your account lives</em>
+          </span>
+        </li>
+        <li class="login__step">
+          <span class="login__step-num" aria-hidden="true">2</span>
+          <span class="login__step-text">
+            <strong>Approve on your server</strong>
+            <em>Your password stays with them</em>
+          </span>
+        </li>
+        <li class="login__step">
+          <span class="login__step-num" aria-hidden="true">3</span>
+          <span class="login__step-text">
+            <strong>Back in NeoSpace</strong>
+            <em>All your servers, one place</em>
+          </span>
+        </li>
+      </ol>
+
+      <div
+        v-if="!isConnecting && ((isAddMode && linkedAccounts.length) || expiredAccounts.length)"
+        class="login__linked"
+      >
+        <p class="login__linked-label">
+          {{ isAddMode ? 'Already on this device' : 'Welcome back — sign in again' }}
+        </p>
+        <ul class="login__linked-list">
+          <li
+            v-for="account in (isAddMode ? linkedAccounts : expiredAccounts)"
+            :key="account.id"
+            class="login__linked-item"
+          >
+            <img
+              v-if="account.user?.avatar"
+              :src="account.user.avatar"
+              alt=""
+              class="login__linked-avatar"
+            />
+            <span class="login__linked-meta">
+              <span class="login__linked-name">{{ displayOf(account) }}</span>
+              <span class="login__linked-handle">{{ handleOf(account) }}</span>
+            </span>
+            <span
+              v-if="account.sessionExpired || !account.accessToken"
+              class="login__linked-badge"
+            >Expired</span>
+            <button
+              v-if="account.sessionExpired || !account.accessToken"
+              type="button"
+              class="neo-btn neo-btn--primary neo-btn--sm"
+              :disabled="reauthBusy[account.id]"
+              @click="reauthAccount(account)"
+            >
+              {{ reauthBusy[account.id] ? 'Opening…' : 'Sign in again' }}
+            </button>
+          </li>
+        </ul>
+        <p v-if="isAddMode && expiredAccounts.length === 0" class="login__linked-hint">
+          Adding another account below — same or different server is fine.
+        </p>
+      </div>
+
       <div v-if="isConnecting" class="login__connecting" role="status" aria-live="polite">
         <div class="login__spinner" aria-hidden="true"></div>
         <p class="login__connecting-title">Taking you to {{ connectingTo }}</p>
@@ -165,7 +283,10 @@ definePageMeta({
         <ServerPicker
           ref="pickerRef"
           :submit-label="isAddMode ? 'Add account on this server' : 'Sign in on this server'"
+          show-known-servers
+          allow-watch
           @select="startLogin"
+          @watch="watchServer"
         />
 
         <footer class="login__footer">
@@ -217,7 +338,7 @@ definePageMeta({
 }
 
 .login__brand {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 }
 
 .login__mark {
@@ -262,6 +383,155 @@ definePageMeta({
   &:hover {
     text-decoration: underline;
   }
+}
+
+.login__steps {
+  list-style: none;
+  margin: 0 0 1.35rem;
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 6px;
+  background: var(--neo-bg-secondary);
+
+  @media (min-width: 420px) {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.35rem;
+    padding: 0.65rem;
+  }
+}
+
+.login__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  min-width: 0;
+
+  @media (min-width: 420px) {
+    flex: 1;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.35rem 0.4rem;
+  }
+}
+
+.login__step-num {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: var(--neo-accent-soft);
+  color: var(--neo-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.login__step-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+
+  strong {
+    font-size: 0.8125rem;
+    font-weight: 650;
+    color: var(--neo-text-primary);
+  }
+
+  em {
+    font-style: normal;
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+}
+
+.login__linked {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 6px;
+  background: var(--neo-bg-secondary);
+}
+
+.login__linked-label {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--neo-text-tertiary);
+  text-transform: uppercase;
+}
+
+.login__linked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login__linked-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.login__linked-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--neo-bg-tertiary);
+}
+
+.login__linked-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.login__linked-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login__linked-handle {
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login__linked-badge {
+  flex-shrink: 0;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  background: var(--neo-warning-soft, color-mix(in srgb, var(--neo-warning) 14%, transparent));
+  color: var(--neo-warning);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.login__linked-hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
 }
 
 .login__footer {

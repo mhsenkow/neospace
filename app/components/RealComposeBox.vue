@@ -607,13 +607,32 @@ const canSwitchPostingAccount = computed(
     !hasExtraSegmentDraft.value,
 )
 
+/** Why the account pill is locked — keep it tappable so the reason isn’t a mystery */
+const accountSwitchLockReason = computed(() => {
+  if (instancesStore.authenticatedInstances.length < 2) return null
+  if (props.inReplyToId) return 'Replies use the account viewing this thread'
+  if (hasMedia.value || isUploading.value) return 'Remove uploaded media to switch posting server'
+  if (hasExtraSegmentDraft.value) return 'Finish or clear extra thread parts to switch accounts'
+  return null
+})
+
 const cyclePostingAccount = () => {
-  if (!canSwitchPostingAccount.value) return
+  if (!canSwitchPostingAccount.value) {
+    if (accountSwitchLockReason.value) {
+      toastStore.show({ message: accountSwitchLockReason.value, duration: 3200 })
+    }
+    return
+  }
   cycleActiveAccountWithToast()
 }
 
 const openPostingAccountPicker = () => {
-  if (!canSwitchPostingAccount.value) return
+  if (!canSwitchPostingAccount.value) {
+    if (accountSwitchLockReason.value) {
+      toastStore.show({ message: accountSwitchLockReason.value, duration: 3200 })
+    }
+    return
+  }
   openAccountSwitcher()
 }
 
@@ -1347,9 +1366,9 @@ defineExpose({
               v-if="instancesStore.authenticatedInstances.length > 1"
               type="button"
               class="compose-title compose-title--btn"
-              title="Switch account"
-              aria-label="Switch posting account"
-              :disabled="!canSwitchPostingAccount"
+              :class="{ 'compose-title--locked': !!accountSwitchLockReason }"
+              :title="accountSwitchLockReason || 'Switch account'"
+              :aria-label="accountSwitchLockReason || 'Switch posting account'"
               @click="openPostingAccountPicker"
             >
               <span>{{ postingAs || instancesStore.userDisplayName || 'You' }}</span>
@@ -1553,9 +1572,9 @@ defineExpose({
               v-if="instancesStore.authenticatedInstances.length > 1"
               type="button"
               class="compose-title compose-title--btn"
-              title="Switch account"
-              aria-label="Switch posting account"
-              :disabled="!canSwitchPostingAccount"
+              :class="{ 'compose-title--locked': !!accountSwitchLockReason }"
+              :title="accountSwitchLockReason || 'Switch account'"
+              :aria-label="accountSwitchLockReason || 'Switch posting account'"
               @click="cyclePostingAccount"
             >
               {{ instancesStore.userDisplayName || postingAs || 'You' }}
@@ -3271,6 +3290,10 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
+}
+
+.compose-title--locked {
+  opacity: 0.72;
 }
 
 .compose-thread__tools {

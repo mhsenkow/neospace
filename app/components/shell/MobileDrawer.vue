@@ -11,6 +11,7 @@ import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
 import { useOverlayStore } from '~/stores/overlay'
 import { useAccountsManager } from '~/composables/useAccountsManager'
+import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
 import { categoryTint, useShellAppearance } from '~/composables/useShellAppearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { useSuiteGroups } from '~/composables/useSuiteGroups'
@@ -30,7 +31,9 @@ const settingsStore = useSettingsStore()
 const themeStore = useThemeStore()
 const overlayStore = useOverlayStore()
 const { open: openAccounts } = useAccountsManager()
+const { open: openAccountSwitcher } = useAccountSwitcher()
 const { boardPortal } = useBoardPortal()
+const linkedAccountCount = computed(() => instancesStore.signedInInstances.length)
 const { currentThemeLabel, cycleTheme } = useShellAppearance()
 const router = useRouter()
 
@@ -505,7 +508,16 @@ useFocusTrap(mobileSidebarRef, open, {
 
       <template v-if="instancesStore.isAuthenticated">
         <div class="mobile-sidebar__divider"></div>
-        <div class="mobile-sidebar__user">
+        <button
+          type="button"
+          class="mobile-sidebar__user mobile-sidebar__user--btn"
+          :aria-label="
+            linkedAccountCount > 1
+              ? `Switch account. Posting on ${instanceHost}. ${linkedAccountCount} accounts connected.`
+              : `Accounts. Posting on ${instanceHost}.`
+          "
+          @click="openAccountSwitcher(); closeMobileMenu()"
+        >
           <img v-if="instancesStore.userAvatar" :src="instancesStore.userAvatar" class="mobile-sidebar__avatar" alt="" />
           <div class="mobile-sidebar__user-info">
             <span class="mobile-sidebar__user-name">{{ instancesStore.userDisplayName }}</span>
@@ -513,7 +525,24 @@ useFocusTrap(mobileSidebarRef, open, {
               Posting on {{ instanceHost }}
             </span>
           </div>
-        </div>
+          <span
+            v-if="linkedAccountCount > 1"
+            class="mobile-sidebar__user-count"
+            aria-hidden="true"
+          >{{ linkedAccountCount }}</span>
+          <svg
+            class="mobile-sidebar__user-chevron"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.25"
+            aria-hidden="true"
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
         <button class="mobile-sidebar__action mobile-sidebar__action--danger" @click="handleLogout" type="button">
           Sign out
         </button>
@@ -952,6 +981,27 @@ useFocusTrap(mobileSidebarRef, open, {
     gap: 0.75rem;
     padding: 0.75rem 1rem;
     margin-bottom: 0.25rem;
+
+    &--btn {
+      width: 100%;
+      border: none;
+      border-radius: var(--neo-radius-sm, 4px);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      color: inherit;
+      -webkit-tap-highlight-color: transparent;
+
+      &:active {
+        background: var(--neo-bg-hover);
+      }
+
+      @media (hover: hover) {
+        &:hover {
+          background: var(--neo-bg-hover);
+        }
+      }
+    }
   }
 
   &__avatar {
@@ -959,6 +1009,7 @@ useFocusTrap(mobileSidebarRef, open, {
     height: 36px;
     border-radius: 50%;
     object-fit: cover;
+    flex-shrink: 0;
   }
 
   &__user-info {
@@ -980,6 +1031,26 @@ useFocusTrap(mobileSidebarRef, open, {
   &__user-instance {
     display: block;
     font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+
+  &__user-count {
+    flex-shrink: 0;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    padding: 0 0.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--neo-accent-soft);
+    color: var(--neo-accent);
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+
+  &__user-chevron {
+    flex-shrink: 0;
     color: var(--neo-text-muted);
   }
 

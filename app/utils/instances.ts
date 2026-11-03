@@ -122,6 +122,15 @@ export function resolvePublicInstanceUrl(
 /**
  * Accept pasted URLs, @user@host, or bare hostnames → https://host
  */
+/** `@user@host` / `user@host` → parts, or null when it isn't a full handle */
+export function parseFediverseHandle(raw: string): { user: string; host: string } | null {
+  const m = raw.trim().match(/^@?([^@\s]+)@([^@\s]+)$/i)
+  if (!m?.[1] || !m[2]) return null
+  const url = normalizeServer(m[2])
+  if (!url) return null
+  return { user: m[1], host: url.replace(/^https?:\/\//, '') }
+}
+
 export function normalizeServer(raw: string): string | null {
   let value = raw.trim().toLowerCase()
   if (!value) return null

@@ -58,7 +58,28 @@ const isOffline = ref(false)
 const composeSheet = useComposeSheetStore()
 const algorithmsStore = useAlgorithmsStore()
 const { openCompose } = useBoardNav()
-const { isOpen: accountsManagerOpen } = useAccountsManager()
+const { isOpen: accountsManagerOpen, open: openAccountsManager } = useAccountsManager()
+const router = useRouter()
+
+const authNoticeExpired = computed(() =>
+  instancesStore.signedInInstances.find((i) => i.sessionExpired || (!i.accessToken && i.user)) || null,
+)
+
+const manageAuthNotice = () => {
+  instancesStore.dismissAuthNotice()
+  openAccountsManager()
+}
+
+const reauthFromNotice = async () => {
+  const expired = authNoticeExpired.value
+  if (!expired) {
+    manageAuthNotice()
+    return
+  }
+  instancesStore.dismissAuthNotice()
+  const returnTo = route.fullPath || '/'
+  await router.push(`/login?add=1&returnTo=${encodeURIComponent(returnTo)}`)
+}
 const mounted = reactive({ compose: false, algorithm: false, accounts: false, settings: false })
 watchEffect(() => {
   if (composeSheet.open) mounted.compose = true
@@ -328,9 +349,22 @@ watch(
       </div>
       <div v-if="instancesStore.authNotice" class="neo-auth-notice">
         <p>{{ instancesStore.authNotice }}</p>
-        <button type="button" class="neo-auth-notice__dismiss" @click="instancesStore.dismissAuthNotice()">
-          Dismiss
-        </button>
+        <div class="neo-auth-notice__actions">
+          <button
+            v-if="authNoticeExpired"
+            type="button"
+            class="neo-auth-notice__action"
+            @click="reauthFromNotice"
+          >
+            Sign in again
+          </button>
+          <button type="button" class="neo-auth-notice__action" @click="manageAuthNotice">
+            Manage accounts
+          </button>
+          <button type="button" class="neo-auth-notice__dismiss" @click="instancesStore.dismissAuthNotice()">
+            Dismiss
+          </button>
+        </div>
       </div>
     </div>
 
@@ -419,6 +453,37 @@ watch(
 .neo-auth-notice--offline {
   background: var(--neo-bg-secondary, var(--neo-bg-primary));
   border-bottom-color: var(--neo-border-color);
+}
+
+.neo-auth-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.neo-auth-notice__action {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--neo-warning, #d97706) 40%, var(--neo-border-color));
+  border-radius: 999px;
+  background: var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+  padding: 0.25rem 0.65rem;
+  min-height: 24px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+
+  @media (max-width: 1023px) {
+    min-height: 44px;
+    padding-inline: 0.85rem;
+  }
+
+  &:hover {
+    background: var(--neo-bg-hover);
+  }
 }
 
 .neo-auth-notice__dismiss {

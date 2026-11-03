@@ -176,7 +176,8 @@ const useForPosting = (instance: ConnectedInstance) => {
 
 const addAccount = () => {
   closeAndReset()
-  router.push('/login?add=1')
+  const returnTo = encodeURIComponent(route.fullPath || '/')
+  router.push(`/login?add=1&returnTo=${returnTo}`)
 }
 
 const isActive = (instance: ConnectedInstance) =>

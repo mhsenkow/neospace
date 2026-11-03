@@ -119,6 +119,14 @@ onMounted(async () => {
       sanitizeReturnTo(pending?.returnTo) ||
       sanitizeReturnTo(typeof route.query.returnTo === 'string' ? route.query.returnTo : null)
     const defaultPath = wasAdd ? '/profile?linked=1' : '/'
+    if (fullHandle) {
+      useToastStore().show({
+        message: wasAdd
+          ? `Linked ${fullHandle} — now posting as ${fullHandle}`
+          : `Now posting as ${fullHandle}`,
+        duration: 3500,
+      })
+    }
     await router.replace(returnTo || defaultPath)
   } catch (e: any) {
     error.value = friendlyAuthError(e.message || 'Authentication failed')

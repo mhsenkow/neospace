@@ -7,7 +7,14 @@
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
 import { createRaceGuard } from '~/composables/useRace'
-import { normalizeServer, friendlyServerError, isAuthGatedPublicHost, formatMonthlyActive } from '~/utils/instances'
+import {
+  normalizeServer,
+  parseFediverseHandle,
+  friendlyServerError,
+  isAuthGatedPublicHost,
+  formatMonthlyActive,
+  hostnameOf,
+} from '~/utils/instances'
 
 const props = withDefaults(
   defineProps<{
@@ -16,15 +23,22 @@ const props = withDefaults(
     /** Prefill the custom field */
     initialQuery?: string
     submitLabel?: string
+    /** Show chips for servers already signed-in or watched on this device */
+    showKnownServers?: boolean
+    /** Offer “Watch public feed without signing in” on a successful peek */
+    allowWatch?: boolean
   }>(),
   {
     disabled: false,
     submitLabel: 'Continue',
+    showKnownServers: false,
+    allowWatch: false,
   },
 )
 
 const emit = defineEmits<{
   select: [url: string]
+  watch: [url: string]
 }>()
 
 const { featured, search } = useCuratedInstances()
@@ -36,6 +50,7 @@ const localError = ref<string | null>(null)
 
 const peekLoading = ref(false)
 const peekTitle = ref<string | null>(null)
+const peekThumb = ref<string | null>(null)
 const peekOpen = ref<boolean | null>(null)
 const peekApproval = ref(false)
 const peekUsers = ref<number | null>(null)
@@ -46,6 +61,29 @@ let peekTimer: ReturnType<typeof setTimeout> | null = null
 const peekRace = createRaceGuard()
 
 const inputErrorId = 'server-picker-input-error'
+
+/** Full `@user@host` typed into the field — reassure before OAuth */
+const detectedHandle = computed(() => parseFediverseHandle(query.value))
+
+/** Servers already on this device (signed-in, expired, or watching) */
+const knownServers = computed(() => {
+  if (!props.showKnownServers) return []
+  const seen = new Set<string>()
+  const rows: { host: string; url: string; kind: 'signed-in' | 'expired' | 'watching' }[] = []
+  for (const instance of instancesStore.instances) {
+    const host = hostnameOf(instance.url)
+    if (!host || seen.has(host.toLowerCase())) continue
+    seen.add(host.toLowerCase())
+    const kind =
+      instance.accessToken && instance.user && !instance.sessionExpired
+        ? 'signed-in'
+        : instance.user
+          ? 'expired'
+          : 'watching'
+    rows.push({ host, url: instance.url, kind })
+  }
+  return rows.slice(0, 8)
+})
 
 const catalogHits = computed(() => {
   const raw = query.value.trim()
@@ -61,6 +99,7 @@ const catalogHits = computed(() => {
 
 const clearPeek = () => {
   peekTitle.value = null
+  peekThumb.value = null
   peekOpen.value = null
   peekApproval.value = false
   peekUsers.value = null
@@ -98,6 +137,7 @@ const runPeek = async () => {
     if (!ticket.isCurrent() || peekHost.value !== host) return
     if (info) {
       peekTitle.value = info.title || host
+      peekThumb.value = info.thumbnail || null
       peekOpen.value = info.registrations ?? null
       peekApproval.value = !!info.approvalRequired
       peekUsers.value = info.stats?.userCount ?? null
@@ -105,6 +145,7 @@ const runPeek = async () => {
       localError.value = null
     } else {
       peekTitle.value = null
+      peekThumb.value = null
       peekOpen.value = null
       peekUsers.value = null
       peekFailed.value = true
@@ -151,10 +192,26 @@ const submitCustom = () => {
   emit('select', url)
 }
 
+const watchPeeked = () => {
+  if (props.disabled || !props.allowWatch) return
+  const url = normalizeServer(query.value)
+  if (!url) {
+    localError.value = 'Enter a server name like mastodon.social'
+    return
+  }
+  emit('watch', url)
+}
+
 const onCatalogHit = (domain: string) => {
   query.value = domain
   localError.value = null
   pick(domain)
+}
+
+const onKnownServer = (url: string) => {
+  query.value = hostnameOf(url)
+  localError.value = null
+  pick(url)
 }
 
 defineExpose({
@@ -182,6 +239,38 @@ onUnmounted(() => {
   <div class="server-picker" :class="{ 'server-picker--disabled': disabled }">
     <div v-if="localError" :id="inputErrorId" class="server-picker__error" role="alert">{{ localError }}</div>
 
+    <div v-if="knownServers.length" class="server-picker__known">
+      <p class="server-picker__known-label">Your servers</p>
+      <div class="server-picker__known-chips" role="list">
+        <button
+          v-for="server in knownServers"
+          :key="server.host"
+          type="button"
+          class="server-picker__known-chip"
+          role="listitem"
+          :disabled="disabled"
+          :title="
+            server.kind === 'expired'
+              ? `Sign in again on ${server.host}`
+              : server.kind === 'watching'
+                ? `Open ${server.host}`
+                : `Sign in on ${server.host}`
+          "
+          @click="onKnownServer(server.url)"
+        >
+          <span>{{ server.host }}</span>
+          <span
+            v-if="server.kind === 'expired'"
+            class="server-picker__known-tag server-picker__known-tag--warn"
+          >Expired</span>
+          <span
+            v-else-if="server.kind === 'watching'"
+            class="server-picker__known-tag"
+          >Watching</span>
+        </button>
+      </div>
+    </div>
+
     <div class="server-picker__custom">
       <form class="server-picker__form" @submit.prevent="submitCustom">
         <label class="server-picker__label" for="server-picker-input">Your handle or server</label>
@@ -208,6 +297,19 @@ onUnmounted(() => {
           Enter <strong>@you@server</strong> or just the server name (e.g.
           <strong>mastodon.social</strong>).
         </p>
+
+        <p
+          v-if="detectedHandle"
+          class="server-picker__handle-pill"
+          role="status"
+        >
+          Detected account
+          <strong>@{{ detectedHandle.user }}</strong>
+          on
+          <strong>{{ detectedHandle.host }}</strong>
+          → Sign in on {{ detectedHandle.host }}
+        </p>
+
         <!-- Live peek -->
         <p class="sr-only" role="status">{{ peekAnnouncement }}</p>
         <div v-if="peekHost && (peekLoading || peekTitle || peekFailed)" class="server-picker__peek">
@@ -216,16 +318,35 @@ onUnmounted(() => {
             Couldn’t reach {{ peekHost }}
           </div>
           <template v-else-if="peekTitle">
-            <div class="server-picker__peek-title">{{ peekTitle }}</div>
-            <div class="server-picker__peek-meta">
-              <span v-if="peekUsers != null">{{ formatMonthlyActive(peekUsers) }}</span>
-              <span v-if="peekOpen === true">Sign-ups open</span>
-              <span v-else-if="peekOpen === false">Sign-ups closed</span>
-              <span v-if="peekOpen === true && peekApproval">Approval required</span>
-              <span v-if="peekGated" class="server-picker__peek-note">
-                Public feed often needs sign-in on this server
-              </span>
+            <div class="server-picker__peek-head">
+              <img
+                v-if="peekThumb"
+                :src="peekThumb"
+                alt=""
+                class="server-picker__peek-thumb"
+              />
+              <div class="server-picker__peek-copy">
+                <div class="server-picker__peek-title">{{ peekTitle }}</div>
+                <div class="server-picker__peek-meta">
+                  <span v-if="peekUsers != null">{{ formatMonthlyActive(peekUsers) }}</span>
+                  <span v-if="peekOpen === true">Sign-ups open</span>
+                  <span v-else-if="peekOpen === false">Sign-ups closed</span>
+                  <span v-if="peekOpen === true && peekApproval">Approval required</span>
+                  <span v-if="peekGated" class="server-picker__peek-note">
+                    Public feed often needs sign-in on this server
+                  </span>
+                </div>
+              </div>
             </div>
+            <button
+              v-if="allowWatch && !peekGated"
+              type="button"
+              class="server-picker__watch"
+              :disabled="disabled"
+              @click="watchPeeked"
+            >
+              Watch public feed without signing in
+            </button>
           </template>
         </div>
 
@@ -279,12 +400,60 @@ onUnmounted(() => {
   }
 }
 
+.server-picker__known {
+  margin-bottom: 1rem;
+}
+
+.server-picker__known-label,
 .server-picker__featured-label {
-  margin: 1.25rem 0 0.5rem;
+  margin: 0 0 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--neo-text-tertiary);
+}
+
+.server-picker__featured-label {
+  margin-top: 1.25rem;
+}
+
+.server-picker__known-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.server-picker__known-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--neo-border-color-dark);
+  border-radius: 999px;
+  background: var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+}
+
+.server-picker__known-tag {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--neo-text-muted);
+
+  &--warn {
+    color: var(--neo-warning);
+  }
 }
 
 .server-picker__list {
@@ -359,7 +528,7 @@ onUnmounted(() => {
 }
 
 .server-picker__custom {
-  margin-top: 1.25rem;
+  margin-top: 0.25rem;
 }
 
 .server-picker__form {
@@ -407,6 +576,22 @@ onUnmounted(() => {
   }
 }
 
+.server-picker__handle-pill {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
+  background: var(--neo-accent-soft);
+  color: var(--neo-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+
+  strong {
+    color: var(--neo-text-primary);
+    font-weight: 650;
+  }
+}
+
 .server-picker__peek {
   padding: 0.65rem 0.75rem;
   background: var(--neo-bg-secondary);
@@ -422,6 +607,26 @@ onUnmounted(() => {
 .server-picker__peek-error {
   color: var(--neo-danger);
   font-size: 0.875rem;
+}
+
+.server-picker__peek-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.server-picker__peek-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--neo-bg-tertiary);
+}
+
+.server-picker__peek-copy {
+  min-width: 0;
+  flex: 1;
 }
 
 .server-picker__peek-title {
@@ -440,6 +645,25 @@ onUnmounted(() => {
 .server-picker__peek-note {
   color: var(--neo-accent);
   font-weight: 500;
+}
+
+.server-picker__watch {
+  margin-top: 0.65rem;
+  width: 100%;
+  min-height: 40px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--neo-border-color-dark);
+  border-radius: 4px;
+  background: var(--neo-bg-primary);
+  color: var(--neo-text-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
 }
 
 .server-picker__hits {

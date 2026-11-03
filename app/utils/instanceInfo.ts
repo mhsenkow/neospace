@@ -40,6 +40,8 @@ export interface ConnectedInstanceInfo {
 export interface InstanceApiInfo {
   title: string
   description: string
+  /** Server branding image when the v2 instance document provides one */
+  thumbnail?: string
   stats?: {
     userCount?: number
     statusCount?: number
@@ -56,14 +58,20 @@ export interface InstanceApiInfo {
 export function mapV2InstanceInfo(info: {
   title: string
   description?: string | null
+  thumbnail?: { url?: string | null } | string | null
   usage?: { users?: { activeMonth?: number } | null } | null
   registrations?: { enabled?: boolean; approvalRequired?: boolean; url?: string | null } | null
   languages?: string[]
   rules?: Array<{ id: string; text: string }> | null
 }): InstanceApiInfo {
+  const thumb =
+    typeof info.thumbnail === 'string'
+      ? info.thumbnail
+      : info.thumbnail?.url || undefined
   return {
     title: info.title,
     description: info.description || '',
+    thumbnail: thumb || undefined,
     stats: {
       userCount: info.usage?.users?.activeMonth,
     },

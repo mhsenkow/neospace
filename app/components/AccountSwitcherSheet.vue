@@ -9,6 +9,9 @@ import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
 import { instanceHandle, switchActiveAccount } from '~/composables/useSwitchAccount'
 import { useToastStore } from '~/stores/toast'
 import { plainDisplayName } from '~/utils/displayName'
+import { friendlyServerError } from '~/utils/instances'
+import { openOAuthAuthorize } from '~/utils/nativeAuth'
+import { sanitizeReturnTo } from '~/utils/oauthPkce'
 
 const instancesStore = useInstancesStore()
 const { open: openAccounts } = useAccountsManager()
@@ -22,8 +25,12 @@ useFocusTrap(sheetRef, menuOpen, {
   initialFocus: '.acct-sheet__avatar-btn--active, .acct-sheet__row--active, .acct-sheet__avatar-btn, .acct-sheet__row',
 })
 
-const accounts = computed(() => instancesStore.authenticatedInstances)
-const multi = computed(() => accounts.value.length > 1)
+/** Keep expired sessions visible — they used to vanish from authenticatedInstances */
+const accounts = computed(() => instancesStore.signedInInstances)
+const liveAccounts = computed(() =>
+  accounts.value.filter((a) => a.accessToken && !a.sessionExpired),
+)
+const multi = computed(() => liveAccounts.value.length > 1)
 const primary = computed(() => instancesStore.primaryAccount)
 
 const handleOf = instanceHandle
@@ -34,7 +41,15 @@ const hostOf = (instance: ConnectedInstance) =>
 const isPrimary = (instance: ConnectedInstance) =>
   instance.id === (primary.value?.id ?? null)
 
+const isActive = (instance: ConnectedInstance) =>
+  instance.id === instancesStore.activeAccount?.id
+
+const isExpired = (instance: ConnectedInstance) =>
+  !!instance.sessionExpired || (!instance.accessToken && !!instance.user)
+
 const selectAccount = async (id: string) => {
+  const account = accounts.value.find((a) => a.id === id)
+  if (!account || isExpired(account)) return
   if (id === instancesStore.activeAccount?.id) {
     closeMenu()
     return
@@ -61,15 +76,44 @@ const manage = () => {
 
 const addAccount = () => {
   closeMenu()
-  router.push('/login?add=1')
+  const returnTo = sanitizeReturnTo(route.fullPath) || '/'
+  router.push(`/login?add=1&returnTo=${encodeURIComponent(returnTo)}`)
 }
 
-const makeMain = (id: string) => {
+const makeMain = (id: string, event?: Event) => {
+  event?.stopPropagation()
+  if (!liveAccounts.value.some((a) => a.id === id)) return
   instancesStore.setPrimaryAccount(id)
-  closeMenu()
   const account = accounts.value.find((a) => a.id === id)
   if (account) {
-    useToastStore().show({ message: `${handleOf(account)} is now your main account — NeoSpace opens as it` })
+    useToastStore().show({
+      message: `${handleOf(account)} is now your main account — NeoSpace opens as it`,
+    })
+  }
+}
+
+const reauthBusy = ref<Record<string, boolean>>({})
+
+const reauthAccount = async (instance: ConnectedInstance, event?: Event) => {
+  event?.stopPropagation()
+  if (reauthBusy.value[instance.id]) return
+  reauthBusy.value = { ...reauthBusy.value, [instance.id]: true }
+  try {
+    const returnTo = sanitizeReturnTo(route.fullPath) || '/'
+    const authUrl = await instancesStore.startAuth(instance.id, {
+      addMode: true,
+      returnTo,
+    })
+    closeMenu()
+    await openOAuthAuthorize(authUrl)
+  } catch (e) {
+    useToastStore().show({ message: friendlyServerError(e), kind: 'error' })
+    const row = instancesStore.instances.find((i) => i.id === instance.id)
+    if (row) row.isConnecting = false
+  } finally {
+    const next = { ...reauthBusy.value }
+    delete next[instance.id]
+    reauthBusy.value = next
   }
 }
 
@@ -126,7 +170,8 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
           <header class="acct-sheet__header">
             <h2 id="acct-sheet-title" class="acct-sheet__title">Accounts</h2>
             <p class="acct-sheet__subtitle">
-              Switch which account you post and read as.
+              <strong>Active</strong> posts &amp; reads.
+              <strong>Main</strong> opens NeoSpace.
             </p>
           </header>
 
@@ -135,8 +180,12 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
               <button
                 type="button"
                 class="acct-sheet__avatar-btn"
-                :class="{ 'acct-sheet__avatar-btn--active': account.id === instancesStore.activeAccount?.id }"
-                :aria-current="account.id === instancesStore.activeAccount?.id ? 'true' : undefined"
+                :class="{
+                  'acct-sheet__avatar-btn--active': isActive(account) && !isExpired(account),
+                  'acct-sheet__avatar-btn--expired': isExpired(account),
+                }"
+                :aria-current="isActive(account) && !isExpired(account) ? 'true' : undefined"
+                :disabled="isExpired(account)"
                 @click="selectAccount(account.id)"
               >
                 <span class="acct-sheet__avatar-ring">
@@ -150,7 +199,7 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
                     {{ initialOf(account) }}
                   </span>
                   <span
-                    v-if="account.id === instancesStore.activeAccount?.id"
+                    v-if="isActive(account) && !isExpired(account)"
                     class="acct-sheet__avatar-check"
                     aria-hidden="true"
                   >
@@ -159,9 +208,32 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
                 </span>
                 <span class="acct-sheet__avatar-name">
                   {{ plainDisplayName(account.user?.displayName, account.user?.username) }}
-                  <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
+                </span>
+                <span class="acct-sheet__pill-row">
+                  <span v-if="isActive(account) && !isExpired(account)" class="acct-sheet__pill">Active</span>
+                  <span v-if="isPrimary(account) && !isExpired(account)" class="acct-sheet__pill acct-sheet__pill--main">Main</span>
+                  <span v-if="isExpired(account)" class="acct-sheet__pill acct-sheet__pill--expired">Expired</span>
                 </span>
                 <span class="acct-sheet__avatar-host" :title="handleOf(account)">{{ hostOf(account) }}</span>
+              </button>
+              <button
+                v-if="isExpired(account)"
+                type="button"
+                class="acct-sheet__reauth"
+                :disabled="reauthBusy[account.id]"
+                @click="reauthAccount(account, $event)"
+              >
+                {{ reauthBusy[account.id] ? 'Opening…' : 'Sign in again' }}
+              </button>
+              <button
+                v-else-if="!isPrimary(account)"
+                type="button"
+                class="acct-sheet__pin"
+                :aria-label="`Make ${handleOf(account)} your main account`"
+                title="Make main — NeoSpace opens as this account"
+                @click="makeMain(account.id, $event)"
+              >
+                Make main
               </button>
               <button
                 type="button"
@@ -193,8 +265,12 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
               <button
                 type="button"
                 class="acct-sheet__row"
-                :class="{ 'acct-sheet__row--active': account.id === instancesStore.activeAccount?.id }"
-                :aria-current="account.id === instancesStore.activeAccount?.id ? 'true' : undefined"
+                :class="{
+                  'acct-sheet__row--active': isActive(account) && !isExpired(account),
+                  'acct-sheet__row--expired': isExpired(account),
+                }"
+                :aria-current="isActive(account) && !isExpired(account) ? 'true' : undefined"
+                :disabled="isExpired(account)"
                 @click="selectAccount(account.id)"
               >
                 <img
@@ -209,17 +285,38 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
                 <span class="acct-sheet__row-text">
                   <span class="acct-sheet__row-name">
                     {{ plainDisplayName(account.user?.displayName, account.user?.username) }}
-                    <span v-if="isPrimary(account)" class="acct-sheet__pill">Main</span>
+                    <span v-if="isActive(account) && !isExpired(account)" class="acct-sheet__pill">Active</span>
+                    <span v-if="isPrimary(account) && !isExpired(account)" class="acct-sheet__pill acct-sheet__pill--main">Main</span>
+                    <span v-if="isExpired(account)" class="acct-sheet__pill acct-sheet__pill--expired">Expired</span>
                   </span>
                   <span class="acct-sheet__row-handle">{{ handleOf(account) }}</span>
                 </span>
                 <span
-                  v-if="account.id === instancesStore.activeAccount?.id"
+                  v-if="isActive(account) && !isExpired(account)"
                   class="acct-sheet__row-check"
                   aria-hidden="true"
                 >
                   <NeoIcon name="check" :size="18" :stroke="2.5" />
                 </span>
+              </button>
+              <button
+                v-if="isExpired(account)"
+                type="button"
+                class="acct-sheet__reauth acct-sheet__reauth--row"
+                :disabled="reauthBusy[account.id]"
+                @click="reauthAccount(account, $event)"
+              >
+                {{ reauthBusy[account.id] ? 'Opening…' : 'Sign in again' }}
+              </button>
+              <button
+                v-else-if="!isPrimary(account)"
+                type="button"
+                class="acct-sheet__pin acct-sheet__pin--row"
+                :aria-label="`Make ${handleOf(account)} your main account`"
+                title="Make main"
+                @click="makeMain(account.id, $event)"
+              >
+                Main
               </button>
               <button
                 type="button"
@@ -334,10 +431,15 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
 
 .acct-sheet__subtitle {
   margin: 0.35rem auto 0;
-  max-width: 20rem;
+  max-width: 22rem;
   font-size: 0.8125rem;
   line-height: 1.4;
   color: var(--neo-text-muted);
+
+  strong {
+    color: var(--neo-text-secondary);
+    font-weight: 650;
+  }
 }
 
 .acct-sheet__avatars {
@@ -368,8 +470,16 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   color: inherit;
   -webkit-tap-highlight-color: transparent;
 
-  &:active .acct-sheet__avatar-ring {
+  &:active:not(:disabled) .acct-sheet__avatar-ring {
     transform: scale(0.96);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &--expired {
+    opacity: 0.85;
   }
 }
 
@@ -384,6 +494,10 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
 
   .acct-sheet__avatar-btn--active & {
     border-color: var(--neo-text-primary);
+  }
+
+  .acct-sheet__avatar-btn--expired & {
+    border-color: var(--neo-warning);
   }
 
   &--add {
@@ -461,6 +575,14 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   text-align: center;
 }
 
+.acct-sheet__pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.2rem;
+  min-height: 1rem;
+}
+
 .acct-sheet__signout {
   border: none;
   background: transparent;
@@ -481,6 +603,33 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   &:disabled {
     cursor: progress;
     opacity: 0.7;
+  }
+}
+
+.acct-sheet__reauth,
+.acct-sheet__pin {
+  border: none;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--neo-accent);
+  cursor: pointer;
+  min-height: 24px;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+
+  &:hover:not(:disabled) {
+    background: var(--neo-accent-soft);
+  }
+
+  &:disabled {
+    cursor: progress;
+    opacity: 0.7;
+  }
+
+  &--row {
+    flex-shrink: 0;
+    padding: 0.35rem 0.5rem;
   }
 }
 
@@ -527,9 +676,14 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   cursor: pointer;
   color: inherit;
 
-  &:hover,
+  &:hover:not(:disabled),
   &--active {
     background: var(--neo-bg-hover);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.9;
   }
 }
 
@@ -552,6 +706,7 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
 .acct-sheet__row-name {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
   font-size: 0.9375rem;
   font-weight: 600;
@@ -581,6 +736,16 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+
+  &--main {
+    background: color-mix(in srgb, var(--neo-text-primary) 12%, transparent);
+    color: var(--neo-text-secondary);
+  }
+
+  &--expired {
+    background: color-mix(in srgb, var(--neo-warning) 16%, transparent);
+    color: var(--neo-warning);
+  }
 }
 
 .acct-sheet__actions {
