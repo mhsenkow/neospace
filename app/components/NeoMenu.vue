@@ -348,24 +348,29 @@ defineExpose({ open, close, toggle })
         </div>
       </div>
       </Transition>
-      <div
-        v-if="!sheet"
-        v-show="open"
-        :id="menuId"
-        ref="menuRef"
-        class="neo-menu__panel"
-        :class="[{ 'neo-menu__panel--portal': usePortal }, panelClass]"
-        role="menu"
-        :aria-label="label"
-        :style="usePortal ? panelStyle : undefined"
-        @keydown="onMenuKeydown"
-        @focusout="onMenuFocusOut"
-        @click="onPanelClick"
-      >
-        <!-- Panel stays mounted (aria-controls stays valid); items render only while
-             open so a feed of ⋯ menus doesn't hold thousands of hidden buttons -->
-        <slot v-if="open" name="items" />
-      </div>
+      <Transition name="neo-menu-pop">
+        <div
+          v-if="!sheet && open"
+          :id="menuId"
+          ref="menuRef"
+          class="neo-menu__panel"
+          :class="[
+            {
+              'neo-menu__panel--portal': usePortal,
+              'neo-menu__panel--origin-end': align === 'end',
+            },
+            panelClass,
+          ]"
+          role="menu"
+          :aria-label="label"
+          :style="usePortal ? panelStyle : undefined"
+          @keydown="onMenuKeydown"
+          @focusout="onMenuFocusOut"
+          @click="onPanelClick"
+        >
+          <slot name="items" />
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
@@ -433,17 +438,20 @@ defineExpose({ open, close, toggle })
 }
 
 // Sheet slides up on enter and back down on leave (matches NeoSheet), instead of an abrupt cut
-.neo-menu-sheet-enter-active,
-.neo-menu-sheet-leave-active {
-  transition: opacity 160ms ease-out;
+.neo-menu-sheet-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .neo-menu__panel--sheet {
-    transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
   }
 }
 
 .neo-menu-sheet-leave-active {
-  transition-timing-function: ease-in;
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .neo-menu__panel--sheet {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+  }
 }
 
 .neo-menu-sheet-enter-from,
@@ -453,6 +461,32 @@ defineExpose({ open, close, toggle })
   .neo-menu__panel--sheet {
     transform: translateY(24px);
   }
+}
+
+.neo-menu-pop-enter-active {
+  transition:
+    opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+}
+
+.neo-menu-pop-leave-active {
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-in);
+}
+
+.neo-menu-pop-enter-from,
+.neo-menu-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.95);
+}
+
+.neo-menu__panel {
+  transform-origin: top left;
+}
+
+.neo-menu__panel--origin-end {
+  transform-origin: top right;
 }
 
 .neo-menu__sheet-backdrop {
@@ -497,7 +531,9 @@ defineExpose({ open, close, toggle })
   .neo-menu-sheet-enter-active,
   .neo-menu-sheet-leave-active,
   .neo-menu-sheet-enter-active .neo-menu__panel--sheet,
-  .neo-menu-sheet-leave-active .neo-menu__panel--sheet {
+  .neo-menu-sheet-leave-active .neo-menu__panel--sheet,
+  .neo-menu-pop-enter-active,
+  .neo-menu-pop-leave-active {
     transition: none;
   }
 }

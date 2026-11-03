@@ -1482,41 +1482,43 @@ defineExpose({
             </span>
           </div>
 
-          <div
-            v-for="(seg, segIdx) in extraSegments"
-            :key="seg.id"
-            class="compose-thread__segment"
-          >
-            <div class="compose-thread__segment-head">
-              <img
-                v-if="instancesStore.userAvatar"
-                :src="instancesStore.userAvatar"
-                alt=""
-                class="compose-avatar compose-avatar--sm neo-avatar"
-              />
-              <span class="compose-thread__segment-label">Part {{ segIdx + 2 }}</span>
-              <button
-                type="button"
-                class="compose-thread__remove"
-                :disabled="isPosting"
-                :aria-label="`Remove thread part ${segIdx + 2}`"
-                @click="removeThreadSegment(seg.id)"
-              >
-                Remove
-              </button>
+          <TransitionGroup name="compose-segment" tag="div" class="compose-thread__segments">
+            <div
+              v-for="(seg, segIdx) in extraSegments"
+              :key="seg.id"
+              class="compose-thread__segment"
+            >
+              <div class="compose-thread__segment-head">
+                <img
+                  v-if="instancesStore.userAvatar"
+                  :src="instancesStore.userAvatar"
+                  alt=""
+                  class="compose-avatar compose-avatar--sm neo-avatar"
+                />
+                <span class="compose-thread__segment-label">Part {{ segIdx + 2 }}</span>
+                <button
+                  type="button"
+                  class="compose-thread__remove"
+                  :disabled="isPosting"
+                  :aria-label="`Remove thread part ${segIdx + 2}`"
+                  @click="removeThreadSegment(seg.id)"
+                >
+                  Remove
+                </button>
+              </div>
+              <div class="compose-input-wrap compose-input-wrap--segment">
+                <textarea
+                  v-model="seg.text"
+                  class="compose-input neo-input"
+                  placeholder="Say more…"
+                  :rows="2"
+                  :readonly="inputLocked"
+                  :aria-label="`Thread part ${segIdx + 2}`"
+                  @keydown="onKeydown"
+                />
+              </div>
             </div>
-            <div class="compose-input-wrap compose-input-wrap--segment">
-              <textarea
-                v-model="seg.text"
-                class="compose-input neo-input"
-                placeholder="Say more…"
-                :rows="2"
-                :readonly="inputLocked"
-                :aria-label="`Thread part ${segIdx + 2}`"
-                @keydown="onKeydown"
-              />
-            </div>
-          </div>
+          </TransitionGroup>
 
           <button
             v-if="canAddSegment"
@@ -3227,6 +3229,19 @@ defineExpose({
   margin-top: 0.35rem;
   border-radius: 1px;
   background: var(--neo-border-color);
+  transform-origin: top center;
+  animation: compose-thread-line-grow var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out) both;
+}
+
+@keyframes compose-thread-line-grow {
+  from {
+    transform: scaleY(0);
+    opacity: 0.35;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
 }
 
 .compose-thread__main {
@@ -3305,6 +3320,12 @@ defineExpose({
   }
 }
 
+.compose-thread__segments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
 .compose-thread__segment {
   display: flex;
   flex-direction: column;
@@ -3313,6 +3334,42 @@ defineExpose({
   border-radius: 12px;
   border: 1px solid var(--neo-border-color);
   background: var(--neo-bg-secondary);
+}
+
+.compose-segment-enter-active {
+  transition:
+    opacity var(--neo-dur-normal, 240ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+  overflow: hidden;
+}
+
+.compose-segment-leave-active {
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-in),
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-in);
+  overflow: hidden;
+}
+
+.compose-segment-enter-from,
+.compose-segment-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.compose-segment-move {
+  transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compose-thread__line {
+    animation: none;
+  }
+
+  .compose-segment-enter-active,
+  .compose-segment-leave-active,
+  .compose-segment-move {
+    transition: none;
+  }
 }
 
 .compose-thread__segment-head {

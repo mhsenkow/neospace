@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
  * APG tabs: tablist / tab / tabpanel with arrow-key navigation.
+ * Gliding underline indicator driven by measured active tab bounds.
  */
 
-import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 
 export type NeoTab = { id: string; label: string }
 
@@ -22,8 +23,10 @@ const props = withDefaults(
      * `aria-labelledby` at `${idPrefix}-tab-${activeId}`.
      */
     idPrefix?: string
+    /** Sliding underline under the active tab (off for pill/chip strips). */
+    indicator?: boolean
   }>(),
-  { panels: true },
+  { panels: true, indicator: true },
 )
 
 const emit = defineEmits<{
@@ -32,11 +35,18 @@ const emit = defineEmits<{
 
 const listRef = ref<HTMLElement | null>(null)
 const uid = props.idPrefix || `neo-tabs-${useId()}`
+const indicator = ref({ left: 0, width: 0, ready: false })
 
 const activeId = computed(() => {
   if (props.tabs.some((t) => t.id === props.modelValue)) return props.modelValue
   return props.tabs[0]?.id ?? ''
 })
+
+const indicatorStyle = computed(() => ({
+  transform: `translateX(${indicator.value.left}px)`,
+  width: `${indicator.value.width}px`,
+  opacity: indicator.value.ready ? 1 : 0,
+}))
 
 function select(id: string) {
   // Always emit — parents may need to re-scroll / re-park even when the
@@ -50,6 +60,22 @@ function tabId(id: string) {
 
 function panelId(id: string) {
   return `${uid}-panel-${id}`
+}
+
+function measureIndicator() {
+  const list = listRef.value
+  if (!list) return
+  const el = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+  if (!el) {
+    indicator.value = { left: 0, width: 0, ready: false }
+    return
+  }
+  // offsetLeft is relative to the list; abspos children scroll with the strip
+  indicator.value = {
+    left: el.offsetLeft,
+    width: el.offsetWidth,
+    ready: true,
+  }
 }
 
 function onTabKeydown(e: KeyboardEvent, index: number) {
@@ -94,8 +120,28 @@ function revealActive() {
     list.scrollLeft = left + el.offsetWidth - list.clientWidth
   }
 }
-onMounted(revealActive)
-watch(activeId, () => nextTick(revealActive))
+
+function syncChrome() {
+  revealActive()
+  measureIndicator()
+}
+
+onMounted(() => {
+  syncChrome()
+  listRef.value?.addEventListener('scroll', measureIndicator, { passive: true })
+  window.addEventListener('resize', measureIndicator)
+})
+
+onUnmounted(() => {
+  listRef.value?.removeEventListener('scroll', measureIndicator)
+  window.removeEventListener('resize', measureIndicator)
+})
+
+watch(activeId, () => nextTick(syncChrome))
+watch(
+  () => props.tabs.map((t) => `${t.id}:${t.label}`).join('|'),
+  () => nextTick(syncChrome),
+)
 
 watch(
   () => props.tabs,
@@ -126,6 +172,12 @@ watch(
       >
         {{ tab.label }}
       </button>
+      <span
+        v-if="indicator"
+        class="neo-tabs__indicator"
+        aria-hidden="true"
+        :style="indicatorStyle"
+      />
     </div>
     <template v-if="panels">
       <div
@@ -146,6 +198,7 @@ watch(
 
 <style scoped lang="scss">
 .neo-tabs__list {
+  position: relative;
   display: flex;
   gap: 2px;
   border-bottom: 1px solid var(--neo-border-color);
@@ -156,6 +209,20 @@ watch(
   &::-webkit-scrollbar {
     display: none;
   }
+}
+
+.neo-tabs__indicator {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px 1px 0 0;
+  background: var(--neo-accent);
+  pointer-events: none;
+  transition:
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-in-out),
+    width var(--neo-dur-normal, 240ms) var(--neo-ease-in-out),
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 }
 
 .neo-tabs__tab {
@@ -172,11 +239,15 @@ watch(
     var(--neo-radius-chrome, var(--neo-radius-sm)) 0 0;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: color var(--neo-transition-fast, 100ms), background-color var(--neo-transition-fast, 100ms);
+  transition:
+    color var(--neo-transition-fast, 100ms),
+    background-color var(--neo-transition-fast, 100ms),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
 
   &[aria-selected='true'] {
     color: var(--neo-text-primary);
-    box-shadow: inset 0 -2px 0 var(--neo-accent);
+    // Sliding indicator owns the underline
+    box-shadow: none;
   }
 
   &:hover {
@@ -184,16 +255,42 @@ watch(
     color: var(--neo-text-primary);
     background: var(--neo-bg-hover, var(--neo-bg-tertiary));
   }
+
+  &:active {
+    transform: scale(0.97);
+  }
 }
 
 .neo-tabs__panel {
   padding-top: var(--neo-spacing-4, 0.75rem);
   outline: none;
+  animation: neo-tab-panel-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
 
   // Panels are a Tab stop — keep keyboard focus visible
   &:focus-visible {
     outline: 2px solid var(--neo-focus, var(--neo-accent));
     outline-offset: 2px;
+  }
+}
+
+@keyframes neo-tab-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neo-tabs__indicator {
+    transition: none;
+  }
+
+  .neo-tabs__panel {
+    animation: none;
   }
 }
 </style>

@@ -41,9 +41,25 @@ export function usePostActions(options: {
   const isBoosting = ref(false)
   const isBookmarking = ref(false)
   const likePop = ref(false)
-  let likePopTimer: ReturnType<typeof setTimeout> | null = null
+  const boostPop = ref(false)
+  const bookmarkPop = ref(false)
+  const popTimers: Record<'like' | 'boost' | 'bookmark', ReturnType<typeof setTimeout> | null> = {
+    like: null,
+    boost: null,
+    bookmark: null,
+  }
+  const flash = (kind: 'like' | 'boost' | 'bookmark', flag: Ref<boolean>, ms = 420) => {
+    flag.value = true
+    if (popTimers[kind]) clearTimeout(popTimers[kind]!)
+    popTimers[kind] = setTimeout(() => {
+      popTimers[kind] = null
+      flag.value = false
+    }, ms)
+  }
   onUnmounted(() => {
-    if (likePopTimer) clearTimeout(likePopTimer)
+    for (const k of Object.keys(popTimers) as Array<keyof typeof popTimers>) {
+      if (popTimers[k]) clearTimeout(popTimers[k]!)
+    }
   })
 
   let resolvedIdCache: string | null = null
@@ -208,12 +224,7 @@ export function usePostActions(options: {
     s.favourited = want
     s.favouritesCount = Math.max(0, (s.favouritesCount || 0) + (want ? 1 : -1))
     if (want) {
-      likePop.value = true
-      if (likePopTimer) clearTimeout(likePopTimer)
-      likePopTimer = setTimeout(() => {
-        likePopTimer = null
-        likePop.value = false
-      }, 320)
+      flash('like', likePop, 420)
     }
 
     try {
@@ -256,6 +267,7 @@ export function usePostActions(options: {
     isBoosting.value = true
     s.reblogged = wantBoost
     s.reblogsCount = Math.max(0, (s.reblogsCount || 0) + (wantBoost ? 1 : -1))
+    if (wantBoost) flash('boost', boostPop, 320)
 
     try {
       const ctx = await getActionContext()
@@ -286,6 +298,7 @@ export function usePostActions(options: {
     const s = options.displayStatus.value
     const want = !s.bookmarked
     s.bookmarked = want
+    if (want) flash('bookmark', bookmarkPop, 280)
 
     try {
       const ctx = await getActionContext()
@@ -311,6 +324,8 @@ export function usePostActions(options: {
     isBoosting,
     isBookmarking,
     likePop,
+    boostPop,
+    bookmarkPop,
     handleFavourite,
     toggleBoost,
     handleBookmark,

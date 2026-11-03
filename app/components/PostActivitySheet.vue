@@ -154,8 +154,11 @@ const onFollow = async (account: mastodon.v1.Account) => {
               <button
                 v-if="account.id !== instances.currentUser?.id"
                 type="button"
-                class="neo-btn neo-btn--sm"
-                :class="relFor(account.id)?.following || relFor(account.id)?.requested ? 'neo-btn--secondary' : 'neo-btn--primary'"
+                class="neo-btn neo-btn--sm post-activity__follow"
+                :class="[
+                  relFor(account.id)?.following || relFor(account.id)?.requested ? 'neo-btn--secondary' : 'neo-btn--primary',
+                  { 'post-activity__follow--on': relFor(account.id)?.following || relFor(account.id)?.requested },
+                ]"
                 :disabled="followBusy.has(account.id)"
                 @click="onFollow(account)"
               >
@@ -255,12 +258,28 @@ const onFollow = async (account: mastodon.v1.Account) => {
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    border-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
+
+  &:active {
+    transform: scale(0.95);
+  }
 
   &--on {
     background: var(--neo-bg-tertiary);
     color: var(--neo-text-primary);
     border-color: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
+    animation: post-activity-pill-settle var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
   }
+}
+
+@keyframes post-activity-pill-settle {
+  0% { transform: scale(0.94); }
+  55% { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
 .post-activity__empty {
@@ -304,6 +323,24 @@ const onFollow = async (account: mastodon.v1.Account) => {
   flex-shrink: 0;
 }
 
+.post-activity__follow {
+  transition:
+    background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    border-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
+
+  &--on {
+    animation: post-activity-follow-pop var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
+  }
+}
+
+@keyframes post-activity-follow-pop {
+  0% { transform: scale(0.92); }
+  55% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
 .post-activity__meta {
   min-width: 0;
   display: flex;
@@ -327,12 +364,27 @@ const onFollow = async (account: mastodon.v1.Account) => {
   }
 }
 
-.action-sheet-enter-active,
-.action-sheet-leave-active {
-  transition: opacity 0.18s ease;
+.action-sheet-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .action-sheet__panel {
-    transition: transform 0.22s ease;
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
+  }
+
+  .post-activity__tabs,
+  .post-activity__list,
+  .post-activity__empty,
+  .action-sheet__cancel {
+    animation: post-activity-body-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
+    animation-delay: 40ms;
+  }
+}
+
+.action-sheet-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .action-sheet__panel {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -342,6 +394,26 @@ const onFollow = async (account: mastodon.v1.Account) => {
 
   .action-sheet__panel {
     transform: translateY(12px);
+  }
+}
+
+@keyframes post-activity-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-sheet-enter-active .post-activity__tabs,
+  .action-sheet-enter-active .post-activity__list,
+  .action-sheet-enter-active .post-activity__empty,
+  .action-sheet-enter-active .action-sheet__cancel {
+    animation: none;
   }
 }
 </style>

@@ -522,6 +522,7 @@ const chromeTitle = computed(() => {
           class="notif-filters"
           :tabs="filterTabs"
           :panels="false"
+          :indicator="false"
           controls-id="notif-list"
           id-prefix="notif-tabs"
           aria-label="Filter activity"
@@ -731,12 +732,16 @@ const chromeTitle = computed(() => {
                 >
                   <button
                     type="button"
-                    class="neo-btn neo-btn--sm"
-                    :class="
+                    class="neo-btn neo-btn--sm notif-item__follow-back"
+                    :class="[
                       relFor(notif.account.id)?.following || relFor(notif.account.id)?.requested
                         ? 'neo-btn--secondary'
-                        : 'neo-btn--primary'
-                    "
+                        : 'neo-btn--primary',
+                      {
+                        'notif-item__follow-back--on':
+                          relFor(notif.account.id)?.following || relFor(notif.account.id)?.requested,
+                      },
+                    ]"
                     :disabled="followBackBusy.has(notif.account.id)"
                     @click="handleFollowBack(notif, $event)"
                   >
@@ -982,6 +987,11 @@ const chromeTitle = computed(() => {
     white-space: nowrap;
     flex: 0 0 auto;
     box-shadow: none;
+    transition:
+      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      border-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
 
     &:hover {
       border-color: var(--neo-border-color-dark);
@@ -989,13 +999,24 @@ const chromeTitle = computed(() => {
       color: var(--neo-text-primary);
     }
 
+    &:active {
+      transform: scale(0.95);
+    }
+
     &[aria-selected='true'] {
       background: var(--neo-accent);
       border-color: var(--neo-accent);
       color: var(--neo-text-on-accent);
       box-shadow: none;
+      animation: notif-chip-pop var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
     }
   }
+}
+
+@keyframes notif-chip-pop {
+  0% { transform: scale(0.94); }
+  60% { transform: scale(1.04); }
+  100% { transform: scale(1); }
 }
 
 // ====== Skeleton loading ======
@@ -1287,6 +1308,18 @@ const chromeTitle = computed(() => {
     margin-top: 0.5rem;
   }
 
+  &__follow-back {
+    transition:
+      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      border-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
+
+    &--on {
+      animation: notif-follow-back-pop var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
+    }
+  }
+
   &__body {
     position: relative;
     z-index: 1;
@@ -1492,6 +1525,12 @@ const chromeTitle = computed(() => {
   &:hover &__dismiss {
     opacity: 1;
   }
+}
+
+@keyframes notif-follow-back-pop {
+  0% { transform: scale(0.92); }
+  55% { transform: scale(1.06); }
+  100% { transform: scale(1); }
 }
 
 // Type-specific accent strips

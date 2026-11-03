@@ -2247,17 +2247,6 @@ useHead({
     &[aria-selected='true'] {
       color: var(--neo-text-primary);
       box-shadow: none;
-
-      &::after {
-        content: '';
-        position: absolute;
-        left: 20%;
-        right: 20%;
-        bottom: 0;
-        height: 2px;
-        border-radius: 2px 2px 0 0;
-        background: var(--neo-text-primary);
-      }
     }
 
     &:hover:not([aria-selected='true']) {

@@ -436,7 +436,7 @@ const onFollowBadge = async (e: Event) => {
     if (typeof navigator !== 'undefined') navigator.vibrate?.(10)
     window.setTimeout(() => {
       followBadgeFlash.value = false
-    }, 900)
+    }, 1100)
   } catch {
     toastStore.show({ message: 'Couldn’t follow that account', duration: 3500 })
   } finally {
@@ -457,7 +457,7 @@ const triggerHeartBurst = () => {
   heartBurstTimer = setTimeout(() => {
     heartBurst.value = false
     heartBurstTimer = null
-  }, 700)
+  }, 780)
 }
 
 const likeFromDoubleTap = async () => {
@@ -611,6 +611,8 @@ const {
   isBoosting,
   isBookmarking,
   likePop,
+  boostPop,
+  bookmarkPop,
   handleFavourite,
   toggleBoost,
   handleBookmark: bookmarkAction,
@@ -1367,21 +1369,27 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               decoding="async"
             />
           </a>
-          <button
-            v-if="showFollowBadge || followBadgeFlash"
-            type="button"
-            class="status-follow-badge"
-            :class="{ 'status-follow-badge--done': followBadgeFlash || authorRelationship?.following || authorRelationship?.requested }"
-            :disabled="followBadgeBusy || followBadgeFlash || !!authorRelationship?.following || !!authorRelationship?.requested"
-            :aria-label="followBadgeFlash || authorRelationship?.following || authorRelationship?.requested ? `Following ${displayStatus.account.displayName || displayStatus.account.username}` : `Follow ${displayStatus.account.displayName || displayStatus.account.username}`"
-            @click="onFollowBadge"
-          >
-            <NeoIcon
-              :name="followBadgeFlash || authorRelationship?.following || authorRelationship?.requested ? 'check' : 'plus'"
-              :size="12"
-              :stroke="2.5"
-            />
-          </button>
+          <Transition name="follow-badge">
+            <button
+              v-if="showFollowBadge || followBadgeFlash"
+              type="button"
+              class="status-follow-badge"
+              :class="{ 'status-follow-badge--done': followBadgeFlash || authorRelationship?.following || authorRelationship?.requested }"
+              :disabled="followBadgeBusy || followBadgeFlash || !!authorRelationship?.following || !!authorRelationship?.requested"
+              :aria-label="followBadgeFlash || authorRelationship?.following || authorRelationship?.requested ? `Following ${displayStatus.account.displayName || displayStatus.account.username}` : `Follow ${displayStatus.account.displayName || displayStatus.account.username}`"
+              @click="onFollowBadge"
+            >
+              <span class="status-follow-badge__glyphs" aria-hidden="true">
+                <svg class="status-follow-badge__plus" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                <svg class="status-follow-badge__check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </span>
+            </button>
+          </Transition>
         </div>
         <div v-if="showThreadLineBottom" class="status-thread-line" aria-hidden="true" />
       </div>
@@ -1774,7 +1782,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
           <button
             class="status-action status-action--boost"
-            :class="{ 'status-action--boosted': displayStatus.reblogged }"
+            :class="{
+              'status-action--boosted': displayStatus.reblogged,
+              'status-action--boost-pop': boostPop,
+            }"
             :aria-disabled="isBoosting || undefined"
             :aria-label="(displayStatus.reblogsCount ?? 0) > 0 ? `Repost, ${formatNumber(displayStatus.reblogsCount)}` : 'Repost'"
             :aria-haspopup="canInteract && !displayStatus.reblogged ? 'dialog' : undefined"
@@ -1796,7 +1807,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
           <button
             class="status-action status-action--bookmark"
-            :class="{ 'status-action--bookmarked': displayStatus.bookmarked }"
+            :class="{
+              'status-action--bookmarked': displayStatus.bookmarked,
+              'status-action--bookmark-pop': bookmarkPop,
+            }"
             :aria-disabled="isBookmarking || undefined"
             aria-label="Bookmark"
             :aria-pressed="!!displayStatus.bookmarked"
@@ -2318,9 +2332,44 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   color: #fff;
   cursor: pointer;
   touch-action: manipulation;
+  overflow: visible;
+  transition:
+    background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    border: 2px solid var(--neo-success, #2f9e44);
+    opacity: 0;
+    transform: scale(0.8);
+    pointer-events: none;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.84);
+  }
 
   &--done {
     background: var(--neo-success, #2f9e44);
+    animation: follow-badge-pop var(--neo-dur-celebrate, 420ms) var(--neo-ease-bounce) both;
+
+    &::after {
+      animation: follow-badge-halo var(--neo-dur-celebrate, 420ms) var(--neo-ease-out) both;
+    }
+
+    .status-follow-badge__plus {
+      opacity: 0;
+      transform: rotate(45deg) scale(0.35);
+    }
+
+    .status-follow-badge__check {
+      opacity: 1;
+      stroke-dashoffset: 0;
+      transition-delay: 55ms;
+    }
   }
 
   &:disabled {
@@ -2331,6 +2380,62 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     outline: 2px solid var(--neo-accent);
     outline-offset: 2px;
   }
+
+  &__glyphs {
+    position: relative;
+    width: 12px;
+    height: 12px;
+    display: grid;
+    place-items: center;
+  }
+
+  &__plus,
+  &__check {
+    grid-area: 1 / 1;
+    display: block;
+    transition:
+      opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+  }
+
+  &__plus {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+
+  &__check {
+    opacity: 0;
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+    transition:
+      opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      stroke-dashoffset var(--neo-dur-normal, 240ms) var(--neo-ease-out);
+  }
+}
+
+.follow-badge-enter-active,
+.follow-badge-leave-active {
+  transition:
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+}
+
+.follow-badge-enter-from,
+.follow-badge-leave-to {
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+@keyframes follow-badge-pop {
+  0% { transform: scale(0.82); }
+  35% { transform: scale(1.26, 1.18); }
+  62% { transform: scale(0.94, 1.04); }
+  100% { transform: scale(1); }
+}
+
+@keyframes follow-badge-halo {
+  0% { opacity: 0.85; transform: scale(0.8); }
+  100% { opacity: 0; transform: scale(1.75); }
 }
 
 .status-thread-line {
@@ -2728,7 +2833,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   place-items: center;
   pointer-events: none;
   color: var(--neo-like, #ff3040);
-  animation: heart-burst 0.7s ease forwards;
+  animation: heart-burst var(--neo-dur-celebrate, 420ms) var(--neo-ease-out) forwards;
+  animation-duration: 0.78s;
 
   .neo-icon {
     filter: drop-shadow(0 8px 18px color-mix(in srgb, var(--neo-like, #ff3040) 45%, transparent));
@@ -2736,9 +2842,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 }
 
 @keyframes heart-burst {
-  0% { opacity: 0; transform: scale(0.4); }
-  35% { opacity: 1; transform: scale(1.15); }
-  100% { opacity: 0; transform: scale(1.35); }
+  0% { opacity: 0; transform: scale(0.35) rotate(-10deg); }
+  22% { opacity: 1; transform: scale(1.25) rotate(5deg); }
+  48% { opacity: 1; transform: scale(1.08) rotate(0deg); }
+  100% { opacity: 0; transform: translateY(-16px) scale(1.12); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2767,14 +2874,33 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
 @keyframes like-pop {
   0% { transform: scale(1); }
-  40% { transform: scale(1.28); }
-  100% { transform: scale(1); }
+  15% { transform: scale(0.82); }
+  50% { transform: scale(1.32) translateY(-2px) rotate(-6deg); }
+  100% { transform: scale(1) translateY(0) rotate(0deg); }
+}
+
+@keyframes repost-spin {
+  0% { transform: rotate(0deg) scale(1); }
+  45% { transform: rotate(180deg) scale(1.18); }
+  100% { transform: rotate(180deg) scale(1); }
+}
+
+@keyframes bookmark-snap {
+  0% { transform: scaleY(1) translateY(0); }
+  40% { transform: scaleY(1.24) translateY(2px); }
+  70% { transform: scaleY(0.94) translateY(0); }
+  100% { transform: scaleY(1) translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .status-action--pop .neo-icon,
-  .status-action--pop svg {
-    animation: none;
+  .status-action--pop svg,
+  .status-action--boost-pop .neo-icon,
+  .status-action--boost-pop svg,
+  .status-action--bookmark-pop svg,
+  .status-follow-badge--done,
+  .status-follow-badge--done::after {
+    animation: none !important;
   }
 }
 
@@ -2876,7 +3002,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color var(--neo-dur-instant, 90ms) var(--neo-ease-out),
+    color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
 
@@ -2885,6 +3014,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     width: 20px;
     height: 20px;
     flex-shrink: 0;
+    transform-origin: center;
+    transition: transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
   }
 
   @include hover(':not(:disabled)') {
@@ -2916,8 +3047,29 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     }
   }
 
+  &--pop .neo-icon,
   &--pop svg {
-    animation: like-pop 0.32s ease;
+    animation: like-pop var(--neo-dur-celebrate, 420ms) var(--neo-ease-bounce) both;
+  }
+
+  &--share {
+    @include hover(':not(:disabled)') {
+      .neo-icon {
+        transform: translate(1.5px, -1.5px);
+      }
+    }
+
+    &:active:not(:disabled) .neo-icon {
+      transform: translate(1px, -1px) scale(0.94);
+    }
+  }
+
+  &--reply {
+    @include hover(':not(:disabled)') {
+      .neo-icon {
+        transform: rotate(-8deg) translateY(-1px);
+      }
+    }
   }
 
   @media (max-width: 1023px) {
@@ -2953,10 +3105,15 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     }
   }
 
+  &--bookmark-pop svg {
+    animation: bookmark-snap var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
+  }
+
   &--boosted {
     color: var(--neo-boost, var(--neo-success));
 
-    svg {
+    svg,
+    .neo-icon {
       stroke: var(--neo-boost, var(--neo-success));
     }
 
@@ -2964,6 +3121,11 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       background: color-mix(in srgb, var(--neo-boost, var(--neo-success)) 12%, transparent);
       color: var(--neo-boost, var(--neo-success));
     }
+  }
+
+  &--boost-pop svg,
+  &--boost-pop .neo-icon {
+    animation: repost-spin var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
   }
 
   // Reply active = accent blue

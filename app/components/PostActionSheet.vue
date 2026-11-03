@@ -165,12 +165,26 @@ useFocusTrap(sheetRef, isOpen, {
   color: var(--neo-text-secondary);
 }
 
-.action-sheet-enter-active,
-.action-sheet-leave-active {
-  transition: opacity 0.18s ease;
+.action-sheet-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .action-sheet__panel {
-    transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
+  }
+
+  .action-sheet__item,
+  .action-sheet__cancel,
+  .action-sheet__title {
+    animation: action-sheet-row-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
+    animation-delay: 40ms;
+  }
+}
+
+.action-sheet-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .action-sheet__panel {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -180,6 +194,25 @@ useFocusTrap(sheetRef, isOpen, {
 
   .action-sheet__panel {
     transform: translateY(18px);
+  }
+}
+
+@keyframes action-sheet-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-sheet-enter-active .action-sheet__item,
+  .action-sheet-enter-active .action-sheet__cancel,
+  .action-sheet-enter-active .action-sheet__title {
+    animation: none;
   }
 }
 </style>

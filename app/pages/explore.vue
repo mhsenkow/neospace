@@ -666,6 +666,7 @@ onUnmounted(() => {
           class="explore-modes"
           :tabs="TABS"
           :panels="false"
+          :indicator="false"
           controls-id="explore-results"
           id-prefix="explore-tabs"
           aria-label="Search in"

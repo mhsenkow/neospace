@@ -495,13 +495,23 @@ watch(
     0 10px 28px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
   cursor: pointer;
   pointer-events: auto;
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring),
+    box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
+
+  :deep(.neo-icon) {
+    transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
+  }
 
   &:hover {
     transform: translateY(-1px);
     box-shadow:
       0 4px 12px color-mix(in srgb, var(--neo-text-primary) 26%, transparent),
       0 14px 32px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
+
+    :deep(.neo-icon) {
+      transform: rotate(90deg);
+    }
   }
 
   &:focus-visible {
@@ -510,7 +520,7 @@ watch(
   }
 
   &:active {
-    transform: scale(0.96);
+    transform: scale(0.91);
   }
 }
 

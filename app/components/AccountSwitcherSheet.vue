@@ -608,12 +608,24 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   }
 }
 
-.acct-sheet-enter-active,
-.acct-sheet-leave-active {
-  transition: opacity 0.2s ease;
+.acct-sheet-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .acct-sheet__panel {
-    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
+  }
+
+  .acct-sheet__panel > * {
+    animation: acct-sheet-body-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
+    animation-delay: 40ms;
+  }
+}
+
+.acct-sheet-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .acct-sheet__panel {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -627,6 +639,23 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
     @media (min-width: 1024px) {
       transform: translateY(8px) scale(0.98);
     }
+  }
+}
+
+@keyframes acct-sheet-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acct-sheet-enter-active .acct-sheet__panel > * {
+    animation: none;
   }
 }
 </style>

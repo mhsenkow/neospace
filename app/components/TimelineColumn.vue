@@ -2037,6 +2037,11 @@ onUnmounted(() => {
     font-size: 0.75rem;
     font-weight: 600;
     cursor: pointer;
+    transition:
+      color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring),
+      box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
     &:hover {
       color: var(--neo-text-primary);
@@ -2047,10 +2052,15 @@ onUnmounted(() => {
       outline-offset: 1px;
     }
 
+    &:active {
+      transform: scale(0.95);
+    }
+
     &.is-on {
       background: var(--neo-bg-card, var(--neo-bg-primary));
       color: var(--neo-text-primary);
       box-shadow: 0 1px 2px color-mix(in srgb, var(--neo-text-primary) 14%, transparent);
+      animation: column-pill-settle var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
     }
   }
 }
@@ -2085,6 +2095,11 @@ onUnmounted(() => {
     font-size: 0.75rem;
     font-weight: 600;
     cursor: pointer;
+    transition:
+      color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring),
+      box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
     &:hover {
       color: var(--neo-text-primary);
@@ -2095,12 +2110,23 @@ onUnmounted(() => {
       outline-offset: 1px;
     }
 
+    &:active {
+      transform: scale(0.95);
+    }
+
     &.is-on {
       background: var(--neo-bg-card, var(--neo-bg-primary));
       color: var(--neo-text-primary);
       box-shadow: 0 1px 2px color-mix(in srgb, var(--neo-text-primary) 14%, transparent);
+      animation: column-pill-settle var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
     }
   }
+}
+
+@keyframes column-pill-settle {
+  0% { transform: scale(0.94); }
+  55% { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
 /* Desktop flick (board / multi-column): keep a centred readable stage.

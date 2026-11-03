@@ -199,7 +199,15 @@ ul, ol {
   letter-spacing: var(--neo-chrome-btn-tracking, 0.01em);
   text-transform: var(--neo-chrome-label-transform, none);
   border-radius: var(--neo-radius-chrome, var(--neo-radius-sm));
-  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast), border-color var(--neo-transition-fast);
+  transition:
+    background-color var(--neo-transition-fast),
+    color var(--neo-transition-fast),
+    border-color var(--neo-transition-fast),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring, var(--neo-ease-out));
+
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
   
   &--primary {
     background-color: var(--neo-accent);
@@ -316,7 +324,10 @@ ul, ol {
   border-radius: var(--neo-radius-chrome, var(--neo-radius-sm));
   background: transparent;
   color: var(--neo-chrome-fg);
-  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
+  transition:
+    background-color var(--neo-transition-fast),
+    color var(--neo-transition-fast),
+    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring, var(--neo-ease-out));
 
   @media (hover: none), (pointer: coarse) {
     width: 44px;
@@ -338,6 +349,7 @@ ul, ol {
   &:active:not(:disabled) {
     background: var(--neo-bg-tertiary);
     color: var(--neo-chrome-fg-strong);
+    transform: scale(0.97);
   }
 
   &:disabled {

@@ -115,13 +115,31 @@
   // Base spacing unit (for calculations)
   --neo-spacing-unit: #{vars.$spacing-unit};
   
-  // === Transitions ===
+  // === Motion (Twelve Principles) ===
+  // Directional easing: Slow Out / Slow In / on-screen / follow-through
+  --neo-ease-out: #{vars.$ease-out};
+  --neo-ease-in: #{vars.$ease-in};
+  --neo-ease-in-out: #{vars.$ease-io};
+  --neo-ease-spring: #{vars.$ease-spring};
+  --neo-ease-bounce: #{vars.$ease-bounce};
+
+  // Weight & enter/exit asymmetry (entrances ~35% longer than exits)
+  --neo-dur-instant: #{vars.$dur-instant};
+  --neo-dur-quick: #{vars.$dur-quick};
+  --neo-dur-normal: #{vars.$dur-normal};
+  --neo-dur-sheet-enter: #{vars.$dur-sheet-enter};
+  --neo-dur-sheet-leave: #{vars.$dur-sheet-leave};
+  --neo-dur-celebrate: #{vars.$dur-celebrate};
+  --neo-dur-slow: #{vars.$dur-slow};
+  --neo-dur-slower: #{vars.$dur-slower};
+
+  // Composite transitions (duration + default Slow Out)
   --neo-transition-fast: #{vars.$transition-fast};
   --neo-transition-normal: #{vars.$transition-normal};
   --neo-transition-slow: #{vars.$transition-slow};
   --neo-transition-slower: #{vars.$transition-slower};
   --neo-transition: var(--neo-transition-normal);
-  
+
   --neo-transition-timing-ease: #{vars.$transition-timing-ease};
   --neo-transition-timing-ease-in: #{vars.$transition-timing-ease-in};
   --neo-transition-timing-ease-out: #{vars.$transition-timing-ease-out};
@@ -240,10 +258,36 @@ html[data-rail] {
   }
 }
 
+// Reduced motion: flatten springs/bounces and kill spatial travel for token consumers
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --neo-ease-spring: var(--neo-ease-out);
+    --neo-ease-bounce: var(--neo-ease-out);
+    --neo-dur-celebrate: var(--neo-dur-quick);
+    --neo-dur-sheet-enter: var(--neo-dur-quick);
+    --neo-dur-sheet-leave: var(--neo-dur-instant);
+  }
+
   .notes-fab,
   .neo-bottom-dock {
     transition-duration: 0s !important;
+  }
+}
+
+html.reduce-motion {
+  --neo-ease-spring: var(--neo-ease-out);
+  --neo-ease-bounce: var(--neo-ease-out);
+  --neo-dur-celebrate: var(--neo-dur-quick);
+  --neo-dur-sheet-enter: var(--neo-dur-quick);
+  --neo-dur-sheet-leave: var(--neo-dur-instant);
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

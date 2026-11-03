@@ -155,12 +155,24 @@ const rootStyle = computed(() => ({
   }
 }
 
-.neo-sheet-enter-active,
-.neo-sheet-leave-active {
-  transition: opacity 0.2s ease;
+.neo-sheet-enter-active {
+  transition: opacity var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
 
   .neo-sheet__panel {
-    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--neo-dur-sheet-enter, 300ms) var(--neo-ease-out);
+  }
+
+  .neo-sheet__panel > * {
+    animation: neo-sheet-body-in var(--neo-dur-normal, 240ms) var(--neo-ease-out) both;
+    animation-delay: 40ms;
+  }
+}
+
+.neo-sheet-leave-active {
+  transition: opacity var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
+
+  .neo-sheet__panel {
+    transition: transform var(--neo-dur-sheet-leave, 190ms) var(--neo-ease-in);
   }
 }
 
@@ -174,6 +186,23 @@ const rootStyle = computed(() => ({
     @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
       transform: translateY(8px) scale(0.98);
     }
+  }
+}
+
+@keyframes neo-sheet-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neo-sheet-enter-active .neo-sheet__panel > * {
+    animation: none;
   }
 }
 </style>
