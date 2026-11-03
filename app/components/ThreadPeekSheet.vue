@@ -389,6 +389,7 @@ const onInputKeydown = (e: KeyboardEvent) => {
             class="thread-peek__input"
             rows="1"
             :placeholder="placeholder"
+            :aria-label="placeholder"
             enterkeyhint="send"
             @focus="onFocusField"
             @keydown="onInputKeydown"
