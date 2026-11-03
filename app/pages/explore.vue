@@ -26,15 +26,19 @@ import {
   emptyPostFilters,
   formatCount,
   highlightTerms,
+  hostSearchText,
   postOperatorTips,
   rankServers,
+  suggestTwinHost,
   type PostSince,
 } from '~/utils/searchQuery'
+import { useBoardNav } from '~/composables/useBoardNav'
 import { useToastStore } from '~/stores/toast'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { getMainScroller } from '~/utils/pageScroll'
 import SearchPersonRow from '~/components/search/SearchPersonRow.vue'
 import SearchTagRow from '~/components/search/SearchTagRow.vue'
+import ExploreTypeahead, { type TypeaheadAction } from '~/components/search/ExploreTypeahead.vue'
 
 type ExploreTab = ExploreSearchTab
 
@@ -63,8 +67,12 @@ const { categories, getByCategory, instances: curatedInstances, featured } = use
 const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
 const toastStore = useToastStore()
+const { openServerOnBoard } = useBoardNav()
 const router = useRouter()
 const route = useRoute()
+
+/** Search scope: everywhere (fan-out) or a specific host / signed-in account id */
+const searchScope = ref<'everywhere' | string>('everywhere')
 
 const selectedCategory = ref('all')
 const query = ref('')
@@ -72,6 +80,8 @@ const tab = ref<ExploreTab>('all')
 const customError = ref<string | null>(null)
 const customBusy = ref(false)
 const searchInputRef = ref<HTMLInputElement | null>(null)
+const typeaheadRef = ref<InstanceType<typeof ExploreTypeahead> | null>(null)
+const typeaheadOpen = ref(true)
 const postFilters = ref(emptyPostFilters())
 const peopleFollowingOnly = ref(false)
 
@@ -105,9 +115,9 @@ const {
   toggleFollowAccount,
   toggleFollowTag,
   ensureRelationships,
-} = useFediverseSearch({ query, tab, isSignedIn, postFilters, peopleFollowingOnly })
+} = useFediverseSearch({ query, tab, isSignedIn, postFilters, peopleFollowingOnly, searchScope })
 
-const discovery = useSearchDiscovery({ isSignedIn })
+const discovery = useSearchDiscovery({ isSignedIn, searchScope })
 const recents = useRecentSearches()
 
 const trimmedQuery = computed(() => query.value.trim())
@@ -155,6 +165,71 @@ const liveServerJoinUrl = computed(() => {
   if (!s?.info?.registrations) return null
   return s.info.registrationsUrl || `https://${s.host}/auth/sign_up`
 })
+
+/** Typed host unreachable / unknown — suggest swapped curated twin (lgbt.tech → tech.lgbt) */
+const twinSuggestion = computed(() => {
+  const host = liveHostCandidate.value
+  if (!host) return null
+  if (liveServer.value?.busy) return null
+  if (liveServer.value?.info) return null
+  return suggestTwinHost(curatedInstances, host)
+})
+
+const scopeChoices = computed(() => {
+  const rows: { id: string; label: string }[] = [{ id: 'everywhere', label: 'All my servers' }]
+  for (const inst of instancesStore.authenticatedInstances) {
+    const host = inst.url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    const acct = inst.user?.acct || inst.user?.username || host
+    rows.push({
+      id: inst.id,
+      label: acct.includes('@') ? `@${acct}` : `@${acct}@${host}`,
+    })
+  }
+  for (const inst of instancesStore.watchingInstances) {
+    const host = inst.url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    if (!rows.some((r) => r.label === host || r.id === `host:${host}`)) {
+      rows.push({ id: `host:${host}`, label: host })
+    }
+  }
+  return rows
+})
+
+const setSearchScope = (id: string) => {
+  searchScope.value = id
+}
+
+const addHostToBoard = async (host: string) => {
+  try {
+    if (!instancesStore.instances.some((i) => i.url.includes(host))) {
+      try {
+        await instancesStore.addInstance(`https://${host}`)
+        showToast(`Watching ${host} — browse public posts anytime`)
+      } catch {
+        /* still open the column */
+      }
+    }
+    await openServerOnBoard(host, 'local')
+    showToast(`Opened Local · ${host} on your board`)
+  } catch {
+    toastStore.show({ message: 'Couldn’t open that server on the board' })
+  }
+}
+
+const searchOnHost = (host: string) => {
+  searchScope.value = `host:${host}`
+  setTab('all')
+  if (!trimmedQuery.value || detectIntent(trimmedQuery.value).kind === 'host') {
+    // Keep domain tokens searchable as people/tags text
+    const text = hostSearchText(host)
+    if (text && text !== trimmedQuery.value) applyQuery(text)
+  }
+}
+
+const browsePeopleOnHost = (host: string) => {
+  searchScope.value = `host:${host}`
+  setTab('people')
+  if (!hasQuery.value) applyQuery(host.split('.')[0] || host, 'people')
+}
 
 // ── Topics / discovery ─────────────────────────────────────────────────────
 
@@ -461,6 +536,15 @@ const clearQuery = () => {
 }
 
 const onSearchKeydown = (e: KeyboardEvent) => {
+  if (typeaheadOpen.value && typeaheadRef.value?.onKeydown(e)) {
+    if (e.key === 'Escape') typeaheadOpen.value = false
+    return
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    void onSearchEnter()
+    return
+  }
   if (e.key !== 'Escape') return
   if (query.value) {
     e.preventDefault()
@@ -469,6 +553,26 @@ const onSearchKeydown = (e: KeyboardEvent) => {
     searchInputRef.value?.blur()
   }
 }
+
+const onTypeaheadSelect = (action: TypeaheadAction) => {
+  typeaheadOpen.value = false
+  if (action.kind === 'query') {
+    applyQuery(action.q, action.tab)
+  } else if (action.kind === 'profile') {
+    router.push({ path: '/profile', query: { user: action.acct } })
+  } else if (action.kind === 'tag') {
+    applyQuery(`#${action.tag}`, 'tags')
+  } else if (action.kind === 'server') {
+    searchScope.value = `host:${action.host}`
+    handleVisit(action.host)
+  } else if (action.kind === 'operator') {
+    insertOperator(action.insert)
+  }
+}
+
+watch(query, () => {
+  typeaheadOpen.value = true
+})
 
 /** Opening a result counts as a search worth remembering */
 const onResultsClick = (e: MouseEvent) => {
@@ -629,6 +733,7 @@ onUnmounted(() => {
               ref="searchInputRef"
               v-model="query"
               type="search"
+              role="combobox"
               :placeholder="searchPlaceholder"
               autocapitalize="none"
               autocorrect="off"
@@ -636,9 +741,11 @@ onUnmounted(() => {
               autocomplete="off"
               enterkeyhint="search"
               aria-keyshortcuts="/"
-              aria-controls="explore-results"
-              @keydown.enter.prevent="onSearchEnter"
+              aria-controls="explore-typeahead"
+              aria-autocomplete="list"
+              :aria-expanded="typeaheadOpen && !!trimmedQuery"
               @keydown="onSearchKeydown"
+              @focus="typeaheadOpen = true"
             />
           </label>
           <button
@@ -660,6 +767,15 @@ onUnmounted(() => {
             {{ customBusy ? '…' : 'Look up' }}
           </button>
         </div>
+        <ExploreTypeahead
+          ref="typeaheadRef"
+          :query="query"
+          :open="typeaheadOpen && hasQuery"
+          :recent="recents.items"
+          list-id="explore-typeahead"
+          @select="onTypeaheadSelect"
+          @close="typeaheadOpen = false"
+        />
 
         <NeoTabs
           :model-value="tab"
@@ -672,6 +788,24 @@ onUnmounted(() => {
           aria-label="Search in"
           @update:model-value="setTab($event as ExploreTab)"
         />
+      </div>
+
+      <div
+        v-if="isSignedIn && scopeChoices.length > 1 && tab !== 'servers'"
+        class="explore-scope"
+        role="group"
+        aria-label="Search servers"
+      >
+        <button
+          v-for="s in scopeChoices"
+          :key="s.id"
+          type="button"
+          class="explore-scope__pill"
+          :aria-pressed="searchScope === s.id"
+          @click="setSearchScope(s.id)"
+        >
+          {{ s.label }}
+        </button>
       </div>
 
       <!-- Per-tab refinements ride in the sticky bar so they stay reachable -->
@@ -961,11 +1095,28 @@ onUnmounted(() => {
               </p>
               <div class="explore-live-server__actions">
                 <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="handleVisit(liveServer.host)">Preview</button>
+                <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="addHostToBoard(liveServer.host)">Add to board</button>
+                <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="browsePeopleOnHost(liveServer.host)">Browse people</button>
+                <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="searchOnHost(liveServer.host)">Search here</button>
                 <a v-if="liveServerJoinUrl" :href="liveServerJoinUrl" target="_blank" rel="noopener" class="neo-btn neo-btn--ghost neo-btn--sm">Join</a>
               </div>
             </template>
             <template v-else>
               <p class="explore-hint">Couldn’t reach {{ liveServer.host }} — check the spelling, or it may not be a Mastodon-compatible server.</p>
+              <div v-if="twinSuggestion" class="explore-live-server__twin">
+                <p class="explore-hint">
+                  Did you mean
+                  <button type="button" class="explore-text-link" @click="applyQuery(twinSuggestion.domain)">
+                    {{ twinSuggestion.domain }}
+                  </button>
+                  ({{ twinSuggestion.name }})?
+                </p>
+                <div class="explore-live-server__actions">
+                  <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="handleVisit(twinSuggestion.domain)">Preview {{ twinSuggestion.domain }}</button>
+                  <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="addHostToBoard(twinSuggestion.domain)">Add to board</button>
+                  <button type="button" class="neo-btn neo-btn--ghost neo-btn--sm" @click="browsePeopleOnHost(twinSuggestion.domain)">Browse people</button>
+                </div>
+              </div>
             </template>
           </div>
         </section>
@@ -1987,6 +2138,37 @@ onUnmounted(() => {
   margin: 0.45rem 0 0;
   font-size: 0.75rem;
   color: var(--neo-text-tertiary);
+}
+
+.explore-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.35rem 0 0;
+}
+
+.explore-scope__pill {
+  appearance: none;
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-elevated, var(--neo-bg-card));
+  color: var(--neo-text-secondary);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+
+  &[aria-pressed='true'] {
+    border-color: var(--neo-accent);
+    color: var(--neo-accent);
+    background: color-mix(in srgb, var(--neo-accent) 12%, transparent);
+  }
+}
+
+.explore-live-server__twin {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .explore-live-server__actions {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { CuratedInstance } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
+import { useBoardNav } from '~/composables/useBoardNav'
+import { useToastStore } from '~/stores/toast'
 import { formatMonthlyActive, friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
 import { openOAuthAuthorize } from '~/utils/nativeAuth'
 import { getMainScroller } from '~/utils/pageScroll'
@@ -15,7 +17,10 @@ const emit = defineEmits<{
 }>()
 
 const instancesStore = useInstancesStore()
+const toastStore = useToastStore()
+const { openServerOnBoard } = useBoardNav()
 const cardRef = ref<HTMLElement | null>(null)
+const isBoarding = ref(false)
 
 const liveData = ref<Awaited<ReturnType<typeof instancesStore.fetchInstanceInfo>>>(null)
 const loading = ref(false)
@@ -111,6 +116,31 @@ const handleSignIn = async () => {
     isSigningIn.value = false
   }
 }
+
+const handleAddToBoard = async () => {
+  if (isBoarding.value) return
+  isBoarding.value = true
+  actionError.value = null
+  try {
+    if (!isWatching.value) {
+      try {
+        await instancesStore.addInstance(`https://${props.instance.domain}`)
+        emit('watched', props.instance.domain)
+      } catch {
+        /* host-pinned column still works without a watch row */
+      }
+    }
+    await openServerOnBoard(props.instance.domain, 'local')
+    toastStore.show({
+      message: `Opened Local · ${props.instance.domain} on your board`,
+      duration: 2800,
+    })
+  } catch (e) {
+    actionError.value = friendlyServerError(e)
+  } finally {
+    isBoarding.value = false
+  }
+}
 </script>
 
 <template>
@@ -188,6 +218,16 @@ const handleSignIn = async () => {
         @click="handleVisit"
       >
         Preview
+      </button>
+      <button
+        type="button"
+        class="instance-card__btn"
+        :disabled="isBoarding"
+        :aria-busy="isBoarding"
+        :aria-label="`Add ${instance.domain} Local feed to your board`"
+        @click="handleAddToBoard"
+      >
+        {{ isBoarding ? 'Opening…' : 'Add to board' }}
       </button>
     </footer>
   </article>

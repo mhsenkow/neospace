@@ -1,18 +1,28 @@
 <script setup lang="ts">
+import type { mastodon } from 'masto'
 import { useInstancesStore } from '~/stores/instances'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
+import { useCrossAccountAction } from '~/composables/useCrossAccountAction'
+import { useBoardNav } from '~/composables/useBoardNav'
 import { friendlyServerError, hostnameMatches, isAuthGatedPublicHost } from '~/utils/instances'
 import { openOAuthAuthorize } from '~/utils/nativeAuth'
-import { stripHtml } from '~/utils/stripHtml'
-import { plainDisplayName } from '~/utils/displayName'
+import { createRestClient, publicClient } from '~/composables/useMasto'
+import { useToastStore } from '~/stores/toast'
+import SearchPersonRow from '~/components/search/SearchPersonRow.vue'
+import SearchTagRow from '~/components/search/SearchTagRow.vue'
+
+type PreviewTab = 'posts' | 'people' | 'tags' | 'about'
 
 const emit = defineEmits<{
   watched: [domain: string]
 }>()
 
 const instancesStore = useInstancesStore()
+const toastStore = useToastStore()
 const route = useRoute()
 const { getByDomain } = useCuratedInstances()
+const { openServerOnBoard } = useBoardNav()
+const { toggleFollow } = useCrossAccountAction()
 
 const modalRef = ref<HTMLElement | null>(null)
 const isOpen = computed(() => !!instancesStore.previewingInstance)
@@ -25,7 +35,6 @@ const isWatching = computed(() => {
   return instancesStore.instances.some((i) => hostnameMatches(i.url, domain.value!))
 })
 
-// Any signed-in slot on this host counts, not just the first row
 const isLoggedIn = computed(() => {
   if (!domain.value) return false
   return instancesStore.instances.some(
@@ -34,10 +43,30 @@ const isLoggedIn = computed(() => {
 })
 
 const isGated = computed(() => !!domain.value && isAuthGatedPublicHost(domain.value))
+const isSignedInAnywhere = computed(() => instancesStore.hasAuthenticatedInstance)
 
 const isAdding = ref(false)
 const isSigningIn = ref(false)
 const addError = ref<string | null>(null)
+const tab = ref<PreviewTab>('posts')
+
+const previewStatuses = computed(() => {
+  const host = domain.value
+  if (!host) return [] as mastodon.v1.Status[]
+  const url = `https://${host}`
+  return instancesStore.previewTimeline.map(
+    (s) => ({ ...s, _instanceUrl: url, _instanceId: `host:${host}` }) as mastodon.v1.Status,
+  )
+})
+
+const directory = ref<mastodon.v1.Account[]>([])
+const directoryBusy = ref(false)
+const directoryError = ref<string | null>(null)
+const trendingTags = ref<mastodon.v1.Tag[]>([])
+const tagsBusy = ref(false)
+const followBusy = ref<Record<string, boolean>>({})
+const relationships = ref<Record<string, mastodon.v1.Relationship>>({})
+const followedTags = ref<Set<string>>(new Set())
 
 const registrationState = computed(() => {
   const reg = instanceInfo.value?.registrations
@@ -46,7 +75,6 @@ const registrationState = computed(() => {
   return 'unknown' as const
 })
 
-/** `registrations.url` comes from the remote server — only follow http(s) */
 const safeRemoteUrl = (raw: string | null | undefined): string | null => {
   if (!raw) return null
   try {
@@ -60,7 +88,6 @@ const safeRemoteUrl = (raw: string | null | undefined): string | null => {
 const signupUrl = computed(() => {
   const d = domain.value
   if (!d) return '#'
-  // Not every server software has Mastodon's /auth/sign_up — the landing page always works
   return safeRemoteUrl(instanceInfo.value?.registrationsUrl) || `https://${d}`
 })
 
@@ -73,12 +100,65 @@ useFocusTrap(modalRef, isOpen, {
   initialFocus: '.close-btn',
 })
 
+watch(isOpen, (open) => {
+  if (!open) {
+    tab.value = 'posts'
+    directory.value = []
+    trendingTags.value = []
+    relationships.value = {}
+    directoryError.value = null
+    addError.value = null
+  }
+})
+
+const hostClient = () => {
+  const d = domain.value
+  if (!d) throw new Error('No server')
+  return publicClient(`https://${d}`)
+}
+
+const loadDirectory = async () => {
+  if (!domain.value || directory.value.length || directoryBusy.value) return
+  directoryBusy.value = true
+  directoryError.value = null
+  try {
+    const people = await hostClient().v1.directory.list({
+      order: 'active',
+      local: true,
+      limit: 20,
+    })
+    directory.value = people.map((a) => ({
+      ...a,
+      _sourceUrl: `https://${domain.value}`,
+    })) as mastodon.v1.Account[]
+  } catch (e) {
+    directoryError.value = friendlyServerError(e)
+  } finally {
+    directoryBusy.value = false
+  }
+}
+
+const loadTags = async () => {
+  if (!domain.value || trendingTags.value.length || tagsBusy.value) return
+  tagsBusy.value = true
+  try {
+    trendingTags.value = await hostClient().v1.trends.tags.list({ limit: 12 })
+  } catch {
+    trendingTags.value = []
+  } finally {
+    tagsBusy.value = false
+  }
+}
+
+watch(tab, (t) => {
+  if (t === 'people') void loadDirectory()
+  if (t === 'tags') void loadTags()
+})
+
 const handleWatch = async () => {
   if (!domain.value || isWatching.value) return
-
   isAdding.value = true
   addError.value = null
-
   try {
     await instancesStore.addInstance(`https://${domain.value}`)
     emit('watched', domain.value)
@@ -93,9 +173,10 @@ const handleLogin = async () => {
   if (!domain.value || isSigningIn.value) return
   isSigningIn.value = true
   addError.value = null
-
   try {
-    const authUrl = await instancesStore.loginWithInstance(`https://${domain.value}`, { returnTo: route.fullPath })
+    const authUrl = await instancesStore.loginWithInstance(`https://${domain.value}`, {
+      returnTo: route.fullPath,
+    })
     await openOAuthAuthorize(authUrl)
   } catch (e: any) {
     addError.value = friendlyServerError(e)
@@ -103,14 +184,84 @@ const handleLogin = async () => {
   }
 }
 
-/** ISO codes → readable names in the user's language ("English, German, Japanese") */
+const handleAddToBoard = async () => {
+  if (!domain.value) return
+  const host = domain.value
+  // Keep a watch row so Local can reuse an authenticated reader when available
+  if (!isWatching.value) {
+    try {
+      await instancesStore.addInstance(`https://${host}`)
+      emit('watched', host)
+    } catch {
+      /* still open the host-pinned column */
+    }
+  }
+  close()
+  await openServerOnBoard(host, 'local')
+  toastStore.show({ message: `Opened Local · ${host} on your board`, duration: 2800 })
+}
+
+const handleFollowPerson = async (account: mastodon.v1.Account, e: Event) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!isSignedInAnywhere.value) {
+    toastStore.show({ message: 'Sign in to follow people' })
+    return
+  }
+  const key = account.id
+  if (followBusy.value[key]) return
+  followBusy.value = { ...followBusy.value, [key]: true }
+  try {
+    const rel = await toggleFollow(
+      { ...account, _sourceUrl: domain.value ? `https://${domain.value}` : null },
+      domain.value,
+    )
+    if (rel) relationships.value = { ...relationships.value, [account.id]: rel }
+  } catch (err: any) {
+    toastStore.show({ message: err?.message || 'Couldn’t update follow' })
+  } finally {
+    const next = { ...followBusy.value }
+    delete next[key]
+    followBusy.value = next
+  }
+}
+
+const handleFollowTag = async (tag: mastodon.v1.Tag, e: Event) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!instancesStore.activeAccount?.accessToken) {
+    toastStore.show({ message: 'Sign in to follow tags' })
+    return
+  }
+  const key = tag.name.toLowerCase()
+  try {
+    const client = createRestClient({
+      url: instancesStore.activeAccount.url,
+      accessToken: instancesStore.activeAccount.accessToken,
+      timeout: 15_000,
+    })
+    const sel = client.v1.tags.$select(encodeURIComponent(tag.name))
+    if (followedTags.value.has(key)) {
+      await sel.unfollow()
+      const next = new Set(followedTags.value)
+      next.delete(key)
+      followedTags.value = next
+    } else {
+      await sel.follow()
+      followedTags.value = new Set([...followedTags.value, key])
+    }
+  } catch {
+    toastStore.show({ message: 'Couldn’t update tag follow' })
+  }
+}
+
 const languageList = computed(() => {
   const codes = (instanceInfo.value?.languages ?? []).slice(0, 3)
   let names: Intl.DisplayNames | null = null
   try {
     names = new Intl.DisplayNames([], { type: 'language' })
   } catch {
-    /* unsupported runtime — fall back to codes */
+    /* unsupported runtime */
   }
   return codes
     .map((code) => {
@@ -126,16 +277,12 @@ const languageList = computed(() => {
 const RULES_SHOWN = 5
 const extraRules = computed(() => Math.max(0, (instanceInfo.value?.rules?.length ?? 0) - RULES_SHOWN))
 
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr)
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
+const TABS: { id: PreviewTab; label: string }[] = [
+  { id: 'posts', label: 'Local posts' },
+  { id: 'people', label: 'People' },
+  { id: 'tags', label: 'Tags' },
+  { id: 'about', label: 'About' },
+]
 </script>
 
 <template>
@@ -150,7 +297,6 @@ const formatDate = (dateStr: string) => {
           aria-labelledby="instance-preview-title"
           :style="{ '--neo-preview-accent': curatedInfo?.color || 'var(--neo-accent)' }"
         >
-          <!-- Header -->
           <header class="preview-header">
             <div class="header-content">
               <span class="emoji" aria-hidden="true">{{ curatedInfo?.emoji || '🌐' }}</span>
@@ -182,124 +328,131 @@ const formatDate = (dateStr: string) => {
             </button>
           </header>
 
-          <!-- Instance Info -->
-          <div class="instance-info" v-if="instanceInfo">
-            <p class="description">{{ curatedInfo?.description || instanceInfo.description }}</p>
-            
-            <div class="info-grid" v-if="instanceInfo.stats">
-              <div v-if="instanceInfo.stats.userCount != null" class="info-item">
-                <span class="label">Active this month</span>
-                <span class="value">{{ instanceInfo.stats.userCount.toLocaleString() }}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">Registration</span>
-                <span class="value">
-                  {{
-                    registrationState === 'open'
-                      ? 'Open'
-                      : registrationState === 'closed'
-                        ? 'Closed'
-                        : 'Unknown'
-                  }}
-                </span>
-              </div>
-              <div class="info-item" v-if="instanceInfo.languages?.length">
-                <span class="label">Languages</span>
-                <span class="value">{{ languageList }}</span>
-              </div>
-            </div>
-
-            <!-- Rules -->
-            <div class="rules" v-if="instanceInfo.rules?.length">
-              <h3>Community Rules</h3>
-              <ol>
-                <li v-for="rule in instanceInfo.rules.slice(0, RULES_SHOWN)" :key="rule.id">
-                  {{ rule.text }}
-                </li>
-              </ol>
-              <a
-                v-if="extraRules"
-                :href="`https://${domain}/about`"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="rules-more"
-              >+{{ extraRules }} more {{ extraRules === 1 ? 'rule' : 'rules' }}</a>
-            </div>
+          <div class="preview-tabs" role="tablist" aria-label="Server preview">
+            <button
+              v-for="t in TABS"
+              :key="t.id"
+              type="button"
+              role="tab"
+              class="preview-tab"
+              :aria-selected="tab === t.id"
+              @click="tab = t.id"
+            >
+              {{ t.label }}
+            </button>
           </div>
 
-          <!-- Timeline Preview -->
-          <div class="timeline-section">
-            <h3>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 6v6l4 2"/>
-              </svg>
-              Local Timeline
-            </h3>
-
-            <div v-if="instancesStore.previewLoading" class="loading" role="status">
-              <div class="spinner"></div>
-              <span>Loading timeline…</span>
-            </div>
-
-            <div v-else-if="instancesStore.previewError" class="error" role="alert">
-              {{ instancesStore.previewError }}
-            </div>
-
-            <div v-else class="timeline-posts">
-              <article 
-                v-for="status in instancesStore.previewTimeline.slice(0, 10)" 
-                :key="status.id"
-                class="preview-post"
-              >
-                <!-- Name is printed beside it — alt would just repeat it -->
-                <img
-                  :src="status.account.avatar"
-                  alt=""
-                  class="avatar"
-                  width="40"
-                  height="40"
-                  loading="lazy"
+          <div class="preview-body">
+            <!-- Local posts -->
+            <div v-if="tab === 'posts'" class="timeline-section">
+              <div v-if="instancesStore.previewLoading" class="loading" role="status">
+                <div class="spinner" />
+                <span>Loading timeline…</span>
+              </div>
+              <div v-else-if="instancesStore.previewError" class="error" role="alert">
+                {{ instancesStore.previewError }}
+              </div>
+              <div v-else-if="previewStatuses.length" class="timeline-posts">
+                <RealPostCard
+                  v-for="status in previewStatuses.slice(0, 10)"
+                  :key="status.id"
+                  :status="status"
                 />
-                <div class="post-content">
-                  <div class="post-header">
-                    <strong>{{ plainDisplayName(status.account.displayName, status.account.username) }}</strong>
-                    <span class="handle">@{{ status.account.acct }}</span>
-                    <span class="time">{{ formatDate(status.createdAt) }}</span>
-                  </div>
-                  <!-- A content warning keeps the body (and its media) collapsed before sign-up -->
-                  <p v-if="status.spoilerText?.trim()" class="post-text post-text--cw">
-                    <span class="sr-only">Content warning: </span>CW: {{ status.spoilerText }}
-                  </p>
-                  <p v-else class="post-text">{{ stripHtml(status.content) }}</p>
-
-                  <!-- Media preview (sensitive thumbnails stay blurred) -->
-                  <div
-                    v-if="status.mediaAttachments?.length && !status.spoilerText?.trim()"
-                    class="media-preview"
-                    :class="{ 'media-preview--sensitive': status.sensitive }"
-                  >
-                    <img 
-                      v-for="media in status.mediaAttachments.slice(0, 2)" 
-                      :key="media.id"
-                      :src="media.previewUrl"
-                      :alt="media.description || 'Media'"
-                      width="80"
-                      height="80"
-                      loading="lazy"
-                    />
-                  </div>
-                </div>
-              </article>
-
-              <p v-if="!instancesStore.previewTimeline.length" class="no-posts">
+              </div>
+              <p v-else class="no-posts">
                 <template v-if="isGated">
-                  This server hides its public feed until you sign in. You can still sign in or create an account.
+                  This server hides its public feed until you sign in. You can still sign in, browse people, or add it to your board.
                 </template>
                 <template v-else>
                   No recent public posts to show right now.
                 </template>
               </p>
+            </div>
+
+            <!-- People directory -->
+            <div v-else-if="tab === 'people'" class="people-section">
+              <p v-if="!isSignedInAnywhere" class="hint">
+                Sign in to follow people on {{ domain }} from your account without switching servers.
+              </p>
+              <div v-if="directoryBusy && !directory.length" class="loading" role="status">
+                <div class="spinner" />
+                <span>Loading people…</span>
+              </div>
+              <p v-else-if="directoryError" class="error" role="alert">{{ directoryError }}</p>
+              <template v-else-if="directory.length">
+                <SearchPersonRow
+                  v-for="acct in directory"
+                  :key="acct.id"
+                  :account="acct"
+                  :relationship="relationships[acct.id]"
+                  :can-follow="isSignedInAnywhere"
+                  @follow="handleFollowPerson"
+                />
+              </template>
+              <p v-else class="no-posts">No public directory entries right now.</p>
+            </div>
+
+            <!-- Tags -->
+            <div v-else-if="tab === 'tags'" class="tags-section">
+              <div v-if="tagsBusy && !trendingTags.length" class="loading" role="status">
+                <div class="spinner" />
+                <span>Loading tags…</span>
+              </div>
+              <template v-else-if="trendingTags.length">
+                <SearchTagRow
+                  v-for="t in trendingTags"
+                  :key="t.name"
+                  :tag="t"
+                  :following="followedTags.has(t.name.toLowerCase())"
+                  :can-follow="isSignedInAnywhere"
+                  @follow="handleFollowTag"
+                />
+              </template>
+              <p v-else class="no-posts">No trending tags available.</p>
+            </div>
+
+            <!-- About -->
+            <div v-else class="instance-info">
+              <p v-if="instanceInfo || curatedInfo" class="description">
+                {{ curatedInfo?.description || instanceInfo?.description }}
+              </p>
+              <div v-if="instanceInfo?.stats" class="info-grid">
+                <div v-if="instanceInfo.stats.userCount != null" class="info-item">
+                  <span class="label">Active this month</span>
+                  <span class="value">{{ instanceInfo.stats.userCount.toLocaleString() }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">Registration</span>
+                  <span class="value">
+                    {{
+                      registrationState === 'open'
+                        ? 'Open'
+                        : registrationState === 'closed'
+                          ? 'Closed'
+                          : 'Unknown'
+                    }}
+                  </span>
+                </div>
+                <div v-if="instanceInfo.languages?.length" class="info-item">
+                  <span class="label">Languages</span>
+                  <span class="value">{{ languageList }}</span>
+                </div>
+              </div>
+              <div v-if="instanceInfo?.rules?.length" class="rules">
+                <h3>Community Rules</h3>
+                <ol>
+                  <li v-for="rule in instanceInfo.rules.slice(0, RULES_SHOWN)" :key="rule.id">
+                    {{ rule.text }}
+                  </li>
+                </ol>
+                <a
+                  v-if="extraRules"
+                  :href="`https://${domain}/about`"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="rules-more"
+                >+{{ extraRules }} more {{ extraRules === 1 ? 'rule' : 'rules' }}</a>
+              </div>
             </div>
           </div>
 
@@ -308,6 +461,13 @@ const formatDate = (dateStr: string) => {
           </div>
 
           <footer class="preview-footer">
+            <button
+              type="button"
+              class="action-btn action-btn--board"
+              @click="handleAddToBoard"
+            >
+              Add to board
+            </button>
             <button
               v-if="!isLoggedIn"
               type="button"
@@ -362,7 +522,6 @@ const formatDate = (dateStr: string) => {
 
 .preview-modal {
   --neo-preview-accent: var(--neo-accent);
-
   background: var(--neo-bg-card);
   border-radius: 24px;
   width: 100%;
@@ -382,7 +541,6 @@ const formatDate = (dateStr: string) => {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 1.5rem 2rem;
-  // Theme accent keeps text contrast known; the server's own colour is a thin identifying stripe
   background: var(--neo-accent);
   border-bottom: 4px solid var(--neo-preview-accent);
   color: var(--neo-text-on-accent);
@@ -394,7 +552,6 @@ const formatDate = (dateStr: string) => {
   gap: 1rem;
   min-width: 0;
 
-  // Remote-supplied title / long hostnames
   > div {
     min-width: 0;
     overflow-wrap: anywhere;
@@ -436,17 +593,52 @@ const formatDate = (dateStr: string) => {
   justify-content: center;
   cursor: pointer;
   color: var(--neo-text-on-accent);
-  transition: background 0.15s ease;
 
   &:hover {
     background: color-mix(in srgb, var(--neo-text-on-accent) 30%, transparent);
   }
 }
 
+.preview-tabs {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.45rem 1rem 0;
+  border-bottom: 1px solid var(--neo-border-color);
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.preview-tab {
+  flex-shrink: 0;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--neo-text-secondary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  cursor: pointer;
+
+  &[aria-selected='true'] {
+    color: var(--neo-text-primary);
+    border-bottom-color: var(--neo-accent);
+  }
+}
+
+.preview-body {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--neo-bg-primary);
+}
+
 .instance-info {
   padding: 1.5rem 2rem;
-  border-bottom: 1px solid var(--neo-border-color);
-  background: var(--neo-bg-card);
 
   .description {
     color: var(--neo-text-secondary);
@@ -457,7 +649,6 @@ const formatDate = (dateStr: string) => {
 
 .info-grid {
   display: grid;
-  // Three fixed columns squeezed "REGISTRATION" into its neighbour at 320px
   grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
   gap: 1rem;
   margin-bottom: 1.25rem;
@@ -475,7 +666,6 @@ const formatDate = (dateStr: string) => {
 
   .value {
     font-weight: 600;
-    // Was #111827 — invisible on dark themes
     color: var(--neo-text-primary);
     font-size: 1.1rem;
   }
@@ -506,7 +696,7 @@ const formatDate = (dateStr: string) => {
   ol {
     margin: 0;
     padding-left: 1.25rem;
-    
+
     li {
       font-size: 0.9rem;
       color: var(--neo-text-secondary);
@@ -520,24 +710,25 @@ const formatDate = (dateStr: string) => {
   }
 }
 
-.timeline-section {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1.5rem 2rem;
-  background: var(--neo-bg-primary);
+.timeline-section,
+.people-section,
+.tags-section {
+  padding: 1rem 1.25rem 1.5rem;
+}
 
-  h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0 0 1rem;
-    font-size: 1rem;
-    color: var(--neo-text-primary);
-    font-weight: 600;
+.timeline-posts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+
+  :deep(.status-card) {
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-md, 8px);
   }
 }
 
-.loading, .error {
+.loading,
+.error {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -557,102 +748,23 @@ const formatDate = (dateStr: string) => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.timeline-posts {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.preview-post {
-  display: flex;
-  gap: 0.75rem;
-  padding: 1rem;
-  background: var(--neo-bg-card);
-  border-radius: 12px;
-  border: 1px solid var(--neo-border-color);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--neo-text-primary) 6%, transparent);
-}
-
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.post-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.post-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-  overflow-wrap: anywhere;
-
-  strong {
-    color: var(--neo-text-primary);
-    font-size: 0.9rem;
-  }
-
-  .handle {
-    color: var(--neo-text-muted);
-    font-size: 0.85rem;
-  }
-
-  .time {
-    color: var(--neo-text-muted);
-    font-size: 0.8rem;
-    margin-left: auto;
+  to {
+    transform: rotate(360deg);
   }
 }
 
-.post-text {
-  margin: 0;
-  color: var(--neo-text-secondary);
-  font-size: 0.9rem;
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-}
-
-.media-preview {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-
-  img {
-    width: 80px;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 8px;
-  }
-
-  &--sensitive img {
-    filter: blur(14px);
-    // Keep the blur from bleeding past the thumbnail edge
-    clip-path: inset(0 round 8px);
-  }
-}
-
-.post-text--cw {
-  font-style: italic;
-  color: var(--neo-text-secondary);
-}
-
-.no-posts {
+.no-posts,
+.hint {
   text-align: center;
   color: var(--neo-text-muted);
-  padding: 2rem;
+  padding: 1.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.hint {
+  text-align: left;
+  padding: 0 0 0.75rem;
 }
 
 .preview-error {
@@ -682,47 +794,34 @@ const formatDate = (dateStr: string) => {
   font-weight: 600;
   font-size: 0.9rem;
   text-decoration: none;
-  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
   border: none;
   cursor: pointer;
-
-  &:hover {
-    transform: scale(1.02);
-  }
 
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-    transform: none;
   }
+}
+
+.action-btn--board {
+  background: var(--neo-text-primary);
+  color: var(--neo-bg-primary);
 }
 
 .action-btn--watch {
   background: var(--neo-accent);
   color: var(--neo-text-on-accent);
-
-  &:hover:not(:disabled) {
-    opacity: 0.9;
-  }
 }
 
 .action-btn--login {
   background: var(--neo-success);
   color: var(--neo-text-on-accent, #fff);
-
-  &:hover {
-    background: var(--neo-success-dark, var(--neo-success));
-  }
 }
 
 .action-btn--join {
   background: transparent;
   border: 2px solid var(--neo-accent);
   color: var(--neo-accent);
-
-  &:hover {
-    background: color-mix(in srgb, var(--neo-accent) 10%, transparent);
-  }
 }
 
 .watching-badge,
@@ -748,7 +847,6 @@ const formatDate = (dateStr: string) => {
   border: 1px solid color-mix(in srgb, var(--neo-info) 40%, transparent);
 }
 
-// Transition
 .modal-enter-active,
 .modal-leave-active {
   transition: opacity 0.2s ease;
@@ -767,9 +865,6 @@ const formatDate = (dateStr: string) => {
   }
 }
 
-// Phones: full-bleed sheet — 2rem gutters left ~230px for posts at 360px wide.
-// Short viewports (landscape phones, 200% zoom) too: the fixed-height card
-// clipped the footer actions off the bottom with no way to scroll to them.
 @media (max-width: 600px), (max-height: 560px) {
   .preview-overlay {
     padding: 0;
@@ -782,7 +877,6 @@ const formatDate = (dateStr: string) => {
     height: 100%;
     border-radius: 0;
     border: none;
-    // One scroller for the whole sheet instead of a squeezed timeline slot
     overflow-y: auto;
     overscroll-behavior: contain;
   }
@@ -797,20 +891,5 @@ const formatDate = (dateStr: string) => {
   .preview-header {
     padding: max(0.85rem, env(safe-area-inset-top, 0px)) 1rem 0.85rem;
   }
-
-  .instance-info {
-    padding: 1rem;
-  }
-
-  .info-grid {
-    gap: 0.5rem;
-  }
-
-  .timeline-section {
-    flex: none;
-    overflow: visible;
-    padding: 1rem;
-  }
 }
 </style>
-

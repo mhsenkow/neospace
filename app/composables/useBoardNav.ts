@@ -141,6 +141,13 @@ export function useBoardNav() {
     return used
   }
 
+  /** Pin a server's Local feed on the board (Explore / InstancePreview). */
+  const openServerOnBoard = async (host: string, feedType: 'local' | 'federated' = 'local') => {
+    const clean = host.replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase()
+    if (!clean) return
+    await openBoardFeed(feedType, `host:${clean}`)
+  }
+
   return {
     pendingColumnJump,
     activeBoardColumnId,
@@ -150,6 +157,7 @@ export function useBoardNav() {
     openFeedOrRoute,
     openBoardFeed,
     openGroup,
+    openServerOnBoard,
     openCompose,
     goHome,
   }

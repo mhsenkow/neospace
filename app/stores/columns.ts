@@ -94,6 +94,17 @@ export interface ColumnConfig {
   profileAcct?: string
   /** Restore this feed when leaving a profile peek */
   returnFeed?: { feedType: ColumnFeedType; groupTag?: string; algorithmId?: string }
+  /**
+   * Pin this column to a connected instance id, or `'all'` for unified
+   * multi-account Home. When unset, the column follows the global active account
+   * (and `activeInstanceFilter` for Local/Federated).
+   */
+  instanceId?: string
+  /**
+   * Pin Local/Federated to any public hostname (e.g. `tech.lgbt`) even when the
+   * server isn't a persisted watch/login row yet.
+   */
+  serverHost?: string
 }
 
 type StoredLayoutMeta = {
@@ -186,6 +197,19 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       columns.push({ id: generateId(), feedType: 'algorithm', algorithmId })
       continue
     }
+    // local@host:tech.lgbt / home@all / federated@<instanceId>
+    const pinned = part.match(/^(local|federated|home)@(host:)?(.+)$/i)
+    if (pinned) {
+      const feedType = pinned[1]!.toLowerCase() as ColumnFeedType
+      const hostPin = !!pinned[2]
+      const value = pinned[3]!.trim()
+      if (!value) continue
+      const col: ColumnConfig = { id: generateId(), feedType }
+      if (hostPin) col.serverHost = value.toLowerCase()
+      else col.instanceId = value
+      columns.push(col)
+      continue
+    }
     if ((FEED_TYPES as string[]).includes(part) && part !== 'group' && part !== 'algorithm') {
       columns.push({ id: generateId(), feedType: part as ColumnFeedType })
       continue
@@ -210,11 +234,17 @@ function defaultColumns(preferHome: boolean): ColumnConfig[] {
   return [{ id: generateId(), feedType: preferHome ? 'home' : 'local', viewMode: 'flow' }]
 }
 
-function feedKey(c: Pick<ColumnConfig, 'feedType' | 'groupTag' | 'algorithmId'>) {
+function feedKey(
+  c: Pick<ColumnConfig, 'feedType' | 'groupTag' | 'algorithmId' | 'instanceId' | 'serverHost'>,
+) {
   if (c.feedType === 'group' && c.groupTag) return `group:${c.groupTag}`
   if (c.feedType === 'algorithm' && c.algorithmId) return `algo:${c.algorithmId}`
-  return c.feedType
+  const pin = c.instanceId || (c.serverHost ? `host:${c.serverHost.toLowerCase()}` : '')
+  return pin ? `${c.feedType}@${pin}` : c.feedType
 }
+
+/** Sentinel instanceId: Home column merges every signed-in account */
+export const ALL_ACCOUNTS_INSTANCE = 'all'
 
 /** Keep Flow/Flip choice when profile sync regenerates column ids */
 function mergeViewModes(incoming: ColumnConfig[], previous: ColumnConfig[]): ColumnConfig[] {
@@ -256,6 +286,12 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
     if (feedType === 'algorithm') col.algorithmId = algorithmId
     const profileAcct = optionalString(c.profileAcct)
     if (feedType === 'profile' && profileAcct) col.profileAcct = profileAcct
+    const instanceId = optionalString(c.instanceId)
+    if (instanceId) col.instanceId = instanceId
+    const serverHost = optionalString(c.serverHost)?.toLowerCase()
+    if (serverHost && (feedType === 'local' || feedType === 'federated' || feedType === 'group')) {
+      col.serverHost = serverHost
+    }
     const back = c.returnFeed as Record<string, unknown> | undefined
     if (back && typeof back === 'object' && FEED_TYPES.includes(back.feedType as ColumnFeedType)) {
       col.returnFeed = {
@@ -435,6 +471,8 @@ export const useColumnsStore = defineStore('columns', {
     /**
      * Locate an existing board column. Profile matches the own-profile
      * singleton only (peeks with profileAcct are ignored).
+     * `feedParam` is groupTag / algorithmId, or `host:<domain>` / instance id
+     * for local/federated/home pins.
      */
     findColumn(feedType: ColumnFeedType, feedParam?: string): ColumnConfig | undefined {
       return this.columns.find((c) => {
@@ -443,6 +481,22 @@ export const useColumnsStore = defineStore('columns', {
           return c.feedType === 'algorithm' && c.algorithmId === feedParam
         }
         if (feedType === 'profile') return c.feedType === 'profile' && !c.profileAcct
+        if (
+          (feedType === 'local' || feedType === 'federated' || feedType === 'home') &&
+          feedParam
+        ) {
+          if (feedParam.startsWith('host:')) {
+            return (
+              c.feedType === feedType &&
+              (c.serverHost || '').toLowerCase() === feedParam.slice(5).toLowerCase()
+            )
+          }
+          return c.feedType === feedType && c.instanceId === feedParam
+        }
+        // Unpinned singleton: no instanceId / serverHost
+        if (feedType === 'local' || feedType === 'federated' || feedType === 'home') {
+          return c.feedType === feedType && !c.instanceId && !c.serverHost
+        }
         return c.feedType === feedType
       })
     },
@@ -487,13 +541,20 @@ export const useColumnsStore = defineStore('columns', {
 
     /**
      * Add a column, or return the existing one for singleton views.
-     * `feedParam` is groupTag for groups, algorithmId for algorithms.
+     * `feedParam` is groupTag for groups, algorithmId for algorithms, or
+     * `host:<domain>` / instance id / `all` for local/federated/home pins.
      */
     addColumn(feedType: ColumnFeedType = 'local', feedParam?: string) {
-      // Own-profile / search / inbox / liked / saved are singletons; profile peeks are not
-      if (isPanelFeed(feedType) || feedType === 'favourites' || feedType === 'bookmarks') {
+      // Own-profile / search / inbox are singletons; liked/saved stay per-account-pinable
+      if (isPanelFeed(feedType)) {
         const existing = this.columns.find(
           (c) => c.feedType === feedType && !c.profileAcct,
+        )
+        if (existing) return existing.id
+      }
+      if ((feedType === 'favourites' || feedType === 'bookmarks') && !feedParam) {
+        const existing = this.columns.find(
+          (c) => c.feedType === feedType && !c.instanceId,
         )
         if (existing) return existing.id
       }
@@ -501,6 +562,13 @@ export const useColumnsStore = defineStore('columns', {
         const existing = this.columns.find(
           (c) => c.feedType === 'algorithm' && c.algorithmId === feedParam,
         )
+        if (existing) return existing.id
+      }
+      if (
+        (feedType === 'local' || feedType === 'federated' || feedType === 'home') &&
+        feedParam
+      ) {
+        const existing = this.findColumn(feedType, feedParam)
         if (existing) return existing.id
       }
       if (this.columns.length >= MAX_COLUMNS) return
@@ -513,9 +581,44 @@ export const useColumnsStore = defineStore('columns', {
       }
       if (feedType === 'group' && feedParam) col.groupTag = feedParam
       if (feedType === 'algorithm' && feedParam) col.algorithmId = feedParam
+      if (
+        (feedType === 'local' || feedType === 'federated' || feedType === 'home' ||
+          feedType === 'favourites' ||
+          feedType === 'bookmarks') &&
+        feedParam
+      ) {
+        if (feedParam.startsWith('host:')) col.serverHost = feedParam.slice(5).toLowerCase()
+        else col.instanceId = feedParam
+      }
       this.columns.push(col)
       this.persist()
       return col.id
+    },
+
+    /**
+     * Open (or focus) a Local column pinned to a public hostname — used by
+     * Explore / InstancePreview "Add to board".
+     */
+    ensureServerColumn(host: string, feedType: 'local' | 'federated' = 'local'): string | null {
+      const clean = host.replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase()
+      if (!clean) return null
+      return this.ensureFocusedView(feedType, `host:${clean}`)
+    },
+
+    /** Pin / unpin which account or host a timeline column reads from. */
+    setColumnPin(
+      columnId: string,
+      pin: { instanceId?: string | null; serverHost?: string | null },
+    ) {
+      const column = this.columns.find((c) => c.id === columnId)
+      if (!column) return
+      if (pin.instanceId === null) delete column.instanceId
+      else if (typeof pin.instanceId === 'string' && pin.instanceId) column.instanceId = pin.instanceId
+      if (pin.serverHost === null) delete column.serverHost
+      else if (typeof pin.serverHost === 'string' && pin.serverHost) {
+        column.serverHost = pin.serverHost.toLowerCase()
+      }
+      this.persist()
     },
 
     /**

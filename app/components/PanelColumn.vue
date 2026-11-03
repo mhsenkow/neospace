@@ -23,6 +23,8 @@ import { searchQueryTooShort } from '~/utils/searchQuery'
 import { participantLabel } from '~/utils/dmHelpers'
 import { richDisplayName } from '~/utils/displayName'
 import { useColumnDnd } from '~/composables/useColumnDnd'
+import ExploreTypeahead, { type TypeaheadAction } from '~/components/search/ExploreTypeahead.vue'
+import { useBoardNav } from '~/composables/useBoardNav'
 
 interface Props {
   column: ColumnConfig
@@ -291,6 +293,9 @@ const searchHashtags = ref<mastodon.v1.Tag[]>([])
 const searchStatuses = ref<mastodon.v1.Status[]>([])
 const searchRace = createRaceGuard()
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+const typeaheadRef = ref<InstanceType<typeof ExploreTypeahead> | null>(null)
+const typeaheadOpen = ref(true)
+const { openServerOnBoard } = useBoardNav()
 
 const searchResultCount = computed(
   () => searchAccounts.value.length + searchHashtags.value.length + searchStatuses.value.length,
@@ -330,11 +335,36 @@ const runSearch = async (q: string) => {
 }
 
 watch(searchQuery, (q) => {
+  typeaheadOpen.value = true
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     void runSearch(q)
   }, 280)
 })
+
+const onPanelSearchKeydown = (e: KeyboardEvent) => {
+  if (typeaheadOpen.value && typeaheadRef.value?.onKeydown(e)) {
+    if (e.key === 'Escape') typeaheadOpen.value = false
+    return
+  }
+}
+
+const onTypeaheadSelect = async (action: TypeaheadAction) => {
+  typeaheadOpen.value = false
+  if (action.kind === 'query') {
+    searchQuery.value = action.q
+    void runSearch(action.q)
+  } else if (action.kind === 'profile') {
+    openAccount(action.acct)
+  } else if (action.kind === 'tag') {
+    openHashtag(action.tag)
+  } else if (action.kind === 'server') {
+    await openServerOnBoard(action.host, 'local')
+  } else if (action.kind === 'operator') {
+    const base = searchQuery.value.trim()
+    searchQuery.value = base.includes(action.insert) ? base : `${base} ${action.insert}`.trim()
+  }
+}
 
 const openAccount = (acct: string) => {
   router.push({ path: '/profile', query: { user: acct } })
@@ -724,6 +754,7 @@ onUnmounted(() => {
           <input
             v-model="searchQuery"
             type="search"
+            role="combobox"
             placeholder="People, tags, posts…"
             autocapitalize="none"
             autocorrect="off"
@@ -731,9 +762,22 @@ onUnmounted(() => {
             enterkeyhint="search"
             autocomplete="off"
             aria-label="Search people, tags, and posts"
+            aria-controls="panel-typeahead"
+            aria-autocomplete="list"
+            :aria-expanded="typeaheadOpen && !!searchQuery.trim()"
             :aria-busy="searchBusy || undefined"
+            @keydown="onPanelSearchKeydown"
+            @focus="typeaheadOpen = true"
           />
         </label>
+        <ExploreTypeahead
+          ref="typeaheadRef"
+          :query="searchQuery"
+          :open="typeaheadOpen && searchQuery.trim().length >= 1"
+          list-id="panel-typeahead"
+          @select="onTypeaheadSelect"
+          @close="typeaheadOpen = false"
+        />
         <p class="panel-hint sr-only" aria-live="polite">
           <template v-if="searchBusy">Searching…</template>
           <template v-else-if="searchQuery.trim() && !searchQueryTooShort(searchQuery) && !searchError">

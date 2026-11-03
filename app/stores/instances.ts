@@ -60,7 +60,13 @@ import {
   type ServerCapabilities,
   type SettingsTopic,
 } from '~/utils/serverCapabilities'
-import { clearClientCache, clientFor, createRestClient, publicClient } from '~/composables/useMasto'
+import {
+  clearClientCache,
+  clientFor,
+  createRestClient,
+  publicClient,
+  readerForUrl,
+} from '~/composables/useMasto'
 
 export interface ConnectedInstance {
   id: string
@@ -1174,8 +1180,15 @@ export const useInstancesStore = defineStore('instances', {
       return clientFor(instanceId)
     },
 
-    /** Local/Federated follow the active profile’s server (not a merge of every watch). */
-    publicTimelineTargets(): ConnectedInstance[] {
+    /**
+     * Local/Federated follow a pinned instance when given, else the active
+     * profile’s server / activeInstanceFilter (not a merge of every watch).
+     */
+    publicTimelineTargets(instanceId?: string | null): ConnectedInstance[] {
+      if (instanceId && instanceId !== 'all') {
+        const pinned = this.instances.filter((i) => i.id === instanceId)
+        if (pinned.length) return pinned
+      }
       if (this.activeInstanceFilter) {
         const filtered = this.instances.filter((i) => i.id === this.activeInstanceFilter)
         if (filtered.length) return filtered
@@ -1218,12 +1231,12 @@ export const useInstancesStore = defineStore('instances', {
       type: 'local' | 'federated' = 'local',
       limit: number = 20,
       maxIdOrCursors?: string | Record<string, string>,
-      opts?: { since?: boolean },
+      opts?: { since?: boolean; instanceId?: string | null },
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
       const errors: string[] = []
 
-      const targets = this.publicTimelineTargets()
+      const targets = this.publicTimelineTargets(opts?.instanceId)
       const cursors =
         maxIdOrCursors && typeof maxIdOrCursors === 'object' ? maxIdOrCursors : null
       const legacyMaxId = typeof maxIdOrCursors === 'string' ? maxIdOrCursors : undefined
@@ -1290,17 +1303,25 @@ export const useInstancesStore = defineStore('instances', {
       return dedupeStatusesByIdentity(allStatuses).slice(0, limit)
     },
 
+    /**
+     * Home timeline(s). By default the active account only; pass `accountIds: 'all'`
+     * (or an explicit id list) for a unified multi-account Home column.
+     */
     async fetchMergedHomeTimeline(
       limit: number = 20,
       cursors?: Record<string, string>,
-      opts?: { since?: boolean },
+      opts?: { since?: boolean; accountIds?: string[] | 'all' },
     ): Promise<ExtendedStatus[]> {
       const allStatuses: ExtendedStatus[] = []
-      // Active profile’s home only — multi-account merge made feeds feel identical.
-      const active = this.activeAccount
-      const authInstances = active?.accessToken
-        ? [active]
-        : this.instances.filter((i) => i.accessToken)
+      const authInstances = (() => {
+        if (opts?.accountIds === 'all') return this.authenticatedInstances
+        if (Array.isArray(opts?.accountIds) && opts.accountIds.length) {
+          const want = new Set(opts.accountIds)
+          return this.authenticatedInstances.filter((i) => want.has(i.id))
+        }
+        const active = this.activeAccount
+        return active?.accessToken ? [active] : this.instances.filter((i) => i.accessToken)
+      })()
 
       const failures: unknown[] = []
       const fetchPromises = authInstances.map(async (instance) => {
@@ -1337,6 +1358,42 @@ export const useInstancesStore = defineStore('instances', {
       )
 
       return dedupeStatusesByIdentity(allStatuses).slice(0, Math.max(limit, limit * Math.max(1, authInstances.length)))
+    },
+
+    /**
+     * Public local/federated page for an explicit host (Explore "Add to board"),
+     * falling back to authenticated reader when we have a token on that host.
+     */
+    async fetchHostPublicTimeline(
+      host: string,
+      type: 'local' | 'federated',
+      limit: number = 20,
+      maxId?: string,
+    ): Promise<ExtendedStatus[]> {
+      const clean = host.replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase()
+      if (!clean) return []
+      const url = `https://${clean}`
+      if (!this.instances.some((i) => i.accessToken) && isAuthGatedPublicHost(url)) {
+        throw new Error('This instance requires login to view timelines. Connect an account or add a different instance.')
+      }
+      try {
+        const client = publicClient(url)
+        const statuses = await client.v1.timelines.public.list({
+          local: type === 'local',
+          limit,
+          ...(maxId ? { maxId } : {}),
+        })
+        return statuses.map((s) => ({
+          ...s,
+          _instanceId: `host:${clean}`,
+          _instanceUrl: url,
+        }))
+      } catch (e) {
+        notePublicTimelineAuthFailure(url, e, {
+          authenticated: !!readerForUrl(url)?.accessToken,
+        })
+        throw e
+      }
     },
 
     /** Insert into the reactive preview map, evicting the oldest hosts past the cap */

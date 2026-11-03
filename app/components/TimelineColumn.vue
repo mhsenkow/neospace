@@ -9,7 +9,13 @@ import type { mastodon } from 'masto'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
-import { useColumnsStore, FEED_LABELS, type ColumnConfig, type ColumnFeedType } from '~/stores/columns'
+import {
+  useColumnsStore,
+  ALL_ACCOUNTS_INSTANCE,
+  FEED_LABELS,
+  type ColumnConfig,
+  type ColumnFeedType,
+} from '~/stores/columns'
 import { publicClient } from '~/composables/useMasto'
 import { hostnameOf, isAuthGatedPublicHost, resolvePublicInstanceUrl } from '~/utils/instances'
 import {
@@ -78,8 +84,16 @@ const fetchGroupPage = async (tag: string, maxId?: string) => {
  * favourite/bookmark row id from the Link header — a status id is NOT a valid
  * max_id there (it would just return the first page again).
  */
+const savedAccount = () => {
+  const pin = props.column.instanceId
+  if (pin && pin !== ALL_ACCOUNTS_INSTANCE) {
+    return instancesStore.instances.find((i) => i.id === pin && i.accessToken) || null
+  }
+  return instancesStore.activeAccount
+}
+
 const fetchSavedPage = async (kind: 'favourites' | 'bookmarks', maxId?: string | null) => {
-  const active = instancesStore.activeAccount
+  const active = savedAccount()
   if (!active?.accessToken) {
     throw new Error(kind === 'favourites' ? 'Sign in to view liked posts' : 'Sign in to view saved posts')
   }
@@ -101,16 +115,31 @@ const fetchSavedPage = async (kind: 'favourites' | 'bookmarks', maxId?: string |
 const isSavedFeed = (type: ColumnFeedType): type is 'favourites' | 'bookmarks' =>
   type === 'favourites' || type === 'bookmarks'
 
+const homeAccountOpts = (): { accountIds?: string[] | 'all' } => {
+  const pin = props.column.instanceId
+  if (pin === ALL_ACCOUNTS_INSTANCE) return { accountIds: 'all' }
+  if (pin) return { accountIds: [pin] }
+  return {}
+}
+
 const fetchAlgorithmSourcePage = async (source: AlgorithmSource, cursor?: string) => {
   if (source === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return [] as ExtendedStatus[]
-    const active = instancesStore.activeAccount
-    if (cursor && active) {
-      return await instancesStore.fetchMergedHomeTimeline(20, { [active.id]: cursor })
+    const opts = homeAccountOpts()
+    if (cursor) {
+      const id =
+        opts.accountIds === 'all'
+          ? Object.keys(feedCursors.value)[0]
+          : Array.isArray(opts.accountIds)
+            ? opts.accountIds[0]
+            : instancesStore.activeAccount?.id
+      if (id) return await instancesStore.fetchMergedHomeTimeline(20, { [id]: cursor }, opts)
     }
-    return await instancesStore.fetchMergedHomeTimeline(20)
+    return await instancesStore.fetchMergedHomeTimeline(20, undefined, opts)
   }
-  return await instancesStore.fetchMergedTimeline(source, 20, cursor)
+  return await instancesStore.fetchMergedTimeline(source, 20, cursor, {
+    instanceId: props.column.instanceId || null,
+  })
 }
 
 /** Walk the source timeline until we have `limit` matches or the source is exhausted. */
@@ -347,7 +376,25 @@ const canShowHome = computed(() => instancesStore.hasAuthenticatedInstance)
 
 const joinedGroups = computed(() => groupsStore.joinedGroups)
 
+/** This column follows a specific account/server, or the global active one when unpinned */
+const columnPinnedInstanceId = computed(() => props.column.instanceId || null)
+const columnPinnedHost = computed(() =>
+  props.column.serverHost?.replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase() || null,
+)
+const isUnifiedHome = computed(
+  () => props.column.feedType === 'home' && columnPinnedInstanceId.value === ALL_ACCOUNTS_INSTANCE,
+)
+/** Unpinned columns re-bind when the global active account changes; pinned ones stay put */
+const followsActiveAccount = computed(
+  () => !columnPinnedInstanceId.value && !columnPinnedHost.value,
+)
+
 const browsingHost = computed(() => {
+  if (columnPinnedHost.value) return columnPinnedHost.value
+  if (columnPinnedInstanceId.value && columnPinnedInstanceId.value !== ALL_ACCOUNTS_INSTANCE) {
+    const pinned = instancesStore.instances.find((i) => i.id === columnPinnedInstanceId.value)
+    if (pinned) return hostnameOf(pinned.url) || 'this server'
+  }
   const filteredId = instancesStore.activeInstanceFilter
   const filtered = filteredId
     ? instancesStore.instances.find((i) => i.id === filteredId)
@@ -360,15 +407,19 @@ const browsingHost = computed(() => {
   return hostnameOf(preferred) || 'this server'
 })
 
-/** Local / Federated can hop between connected + watched servers when you have more than one */
+/** Local / Federated / Home can hop between connected + watched servers when you have more than one */
 const canSwitchPublicServer = computed(
   () =>
-    (props.column.feedType === 'local' || props.column.feedType === 'federated') &&
-    instancesStore.instances.length > 1,
+    (props.column.feedType === 'local' ||
+      props.column.feedType === 'federated' ||
+      props.column.feedType === 'home') &&
+    (instancesStore.instances.length > 1 ||
+      instancesStore.authenticatedInstances.length > 1 ||
+      !!columnPinnedHost.value),
 )
 
-const publicServerChoices = computed(() =>
-  instancesStore.instances.map((instance) => {
+const publicServerChoices = computed(() => {
+  const rows = instancesStore.instances.map((instance) => {
     const host = hostnameOf(instance.url)
     const kind =
       instance.accessToken && instance.user && !instance.sessionExpired
@@ -376,22 +427,57 @@ const publicServerChoices = computed(() =>
         : instance.user
           ? 'expired'
           : 'watching'
-    return { id: instance.id, host, kind }
-  }),
-)
+    return { id: instance.id, host, kind, label: host }
+  })
+  if (props.column.feedType === 'home' && instancesStore.authenticatedInstances.length > 1) {
+    return [
+      { id: ALL_ACCOUNTS_INSTANCE, host: 'all accounts', kind: 'signed-in' as const, label: 'All accounts' },
+      ...rows.filter((r) => r.kind === 'signed-in' || r.kind === 'expired'),
+    ]
+  }
+  if (columnPinnedHost.value && !rows.some((r) => r.host === columnPinnedHost.value)) {
+    return [
+      { id: `host:${columnPinnedHost.value}`, host: columnPinnedHost.value, kind: 'watching' as const, label: columnPinnedHost.value },
+      ...rows,
+    ]
+  }
+  return rows
+})
 
-const isPublicServerSelected = (instanceId: string) =>
-  (instancesStore.activeInstanceFilter || instancesStore.activeAccount?.id) === instanceId
+const isPublicServerSelected = (instanceId: string) => {
+  if (columnPinnedHost.value && instanceId === `host:${columnPinnedHost.value}`) return true
+  if (columnPinnedInstanceId.value) return columnPinnedInstanceId.value === instanceId
+  return (instancesStore.activeInstanceFilter || instancesStore.activeAccount?.id) === instanceId
+}
 
 const pickPublicServer = (instanceId: string) => {
-  instancesStore.setFilter(instanceId)
   serverFilterMenuOpen.value = false
+  if (instanceId.startsWith('host:')) {
+    columnsStore.setColumnPin(props.column.id, {
+      instanceId: null,
+      serverHost: instanceId.slice(5),
+    })
+  } else {
+    columnsStore.setColumnPin(props.column.id, {
+      instanceId,
+      serverHost: null,
+    })
+  }
+  const label =
+    instanceId === ALL_ACCOUNTS_INSTANCE
+      ? 'all accounts'
+      : instanceId.startsWith('host:')
+        ? instanceId.slice(5)
+        : hostnameOf(instancesStore.instances.find((i) => i.id === instanceId)?.url || '') ||
+          'this server'
   toastStore.show({
-    message: `Browsing ${props.column.feedType === 'federated' ? 'Federated' : 'Local'} on ${hostnameOf(
-      instancesStore.instances.find((i) => i.id === instanceId)?.url || '',
-    ) || 'this server'}`,
+    message:
+      props.column.feedType === 'home'
+        ? `Home · ${label}`
+        : `Browsing ${props.column.feedType === 'federated' ? 'Federated' : 'Local'} on ${label}`,
     duration: 2200,
   })
+  void fetchTimeline(true)
 }
 
 const { open: openAccountsManager } = useAccountsManager()
@@ -423,12 +509,26 @@ const feedLabel = computed(() => {
     return activeRecipe.value?.name || 'Algorithm'
   }
   if (props.column.feedType === 'local') {
-    return canSwitchPublicServer.value ? 'Local' : `Local (${browsingHost.value})`
+    return columnPinnedHost.value || columnPinnedInstanceId.value
+      ? `Local (${browsingHost.value})`
+      : canSwitchPublicServer.value
+        ? 'Local'
+        : `Local (${browsingHost.value})`
   }
   if (props.column.feedType === 'federated') {
-    return canSwitchPublicServer.value ? 'Federated' : `Federated (${browsingHost.value})`
+    return columnPinnedHost.value || columnPinnedInstanceId.value
+      ? `Federated (${browsingHost.value})`
+      : canSwitchPublicServer.value
+        ? 'Federated'
+        : `Federated (${browsingHost.value})`
   }
   if (props.column.feedType === 'home') {
+    if (isUnifiedHome.value) return 'Home · All'
+    if (columnPinnedInstanceId.value) {
+      const pinned = instancesStore.instances.find((i) => i.id === columnPinnedInstanceId.value)
+      const who = pinned?.user?.username || hostnameOf(pinned?.url || '') || 'account'
+      return homeFeedMode.value === 'following' ? `Following · ${who}` : `For You · ${who}`
+    }
     return homeFeedMode.value === 'following' ? 'Following' : 'For You'
   }
   return FEED_LABELS[props.column.feedType] ?? props.column.feedType
@@ -836,13 +936,22 @@ const loadTimelinePage = async (
   }
   if (props.column.feedType === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return []
-    return await instancesStore.fetchMergedHomeTimeline(20)
+    return await instancesStore.fetchMergedHomeTimeline(20, undefined, homeAccountOpts())
   }
   if (props.column.feedType !== 'local' && props.column.feedType !== 'federated') {
     return []
   }
+  if (columnPinnedHost.value) {
+    return await instancesStore.fetchHostPublicTimeline(
+      columnPinnedHost.value,
+      props.column.feedType,
+      20,
+    )
+  }
   if (instancesStore.instances.length > 0) {
-    return await instancesStore.fetchMergedTimeline(props.column.feedType, 20)
+    return await instancesStore.fetchMergedTimeline(props.column.feedType, 20, undefined, {
+      instanceId: columnPinnedInstanceId.value,
+    })
   }
   const client = publicClient()
   return withBrowseOrigin(
@@ -933,23 +1042,53 @@ const buildCatchUpSources = (
 
   if (props.column.feedType === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return []
-    const active = instancesStore.activeAccount
-    if (!active?.accessToken) return []
-    const cursor = cursorFor(active.id)
-    if (!cursor) return []
-    return [
-      {
-        key: active.id,
-        cursor,
-        fetchPage: async (minId, limit) =>
-          tagged(await instancesStore.getClient(active.id).v1.timelines.home.list({ limit, minId }), active),
-      },
-    ]
+    const opts = homeAccountOpts()
+    const accounts =
+      opts.accountIds === 'all'
+        ? instancesStore.authenticatedInstances
+        : Array.isArray(opts.accountIds)
+          ? instancesStore.authenticatedInstances.filter((i) => opts.accountIds!.includes(i.id))
+          : instancesStore.activeAccount?.accessToken
+            ? [instancesStore.activeAccount]
+            : []
+    return accounts.flatMap((active) => {
+      if (!active?.accessToken) return []
+      const cursor = cursorFor(active.id)
+      if (!cursor) return []
+      return [
+        {
+          key: active.id,
+          cursor,
+          fetchPage: async (minId: string, limit: number) =>
+            tagged(
+              await instancesStore.getClient(active.id).v1.timelines.home.list({ limit, minId }),
+              active,
+            ),
+        },
+      ]
+    })
   }
 
   if (props.column.feedType === 'local' || props.column.feedType === 'federated') {
     const local = props.column.feedType === 'local'
-    const targets = instancesStore.publicTimelineTargets()
+    if (columnPinnedHost.value) {
+      const host = columnPinnedHost.value
+      const origin = { id: `host:${host}`, url: `https://${host}` }
+      const cursor = cursorFor(origin.id) || Object.values(cursors)[0] || ''
+      if (!cursor) return []
+      return [
+        {
+          key: origin.id,
+          cursor,
+          fetchPage: async (minId: string, limit: number) =>
+            tagged(
+              await publicClient(origin.url).v1.timelines.public.list({ local, limit, minId }),
+              origin,
+            ),
+        },
+      ]
+    }
+    const targets = instancesStore.publicTimelineTargets(columnPinnedInstanceId.value)
     if (instancesStore.instances.length > 0 && targets.length > 0) {
       return targets.flatMap((inst) => {
         const cursor = cursorFor(inst.id)
@@ -1276,17 +1415,31 @@ const loadMore = async () => {
     switch (props.column.feedType) {
       case 'home': {
         if (!instancesStore.hasAuthenticatedInstance) break
-        newStatuses = await instancesStore.fetchMergedHomeTimeline(20, { ...feedCursors.value })
+        newStatuses = await instancesStore.fetchMergedHomeTimeline(
+          20,
+          { ...feedCursors.value },
+          homeAccountOpts(),
+        )
         if (gen === fetchGen) advanceFeedCursors(newStatuses)
         break
       }
       case 'local':
       case 'federated': {
-        newStatuses = await instancesStore.fetchMergedTimeline(
-          props.column.feedType,
-          20,
-          Object.keys(feedCursors.value).length ? { ...feedCursors.value } : maxId.value!,
-        )
+        if (columnPinnedHost.value) {
+          newStatuses = await instancesStore.fetchHostPublicTimeline(
+            columnPinnedHost.value,
+            props.column.feedType,
+            20,
+            maxId.value || undefined,
+          )
+        } else {
+          newStatuses = await instancesStore.fetchMergedTimeline(
+            props.column.feedType,
+            20,
+            Object.keys(feedCursors.value).length ? { ...feedCursors.value } : maxId.value!,
+            { instanceId: columnPinnedInstanceId.value },
+          )
+        }
         if (gen === fetchGen) advanceFeedCursors(newStatuses)
         break
       }
@@ -1377,7 +1530,7 @@ const setupInfiniteScroll = () => {
 
 watch(
   () =>
-    `${props.column.feedType}:${props.column.groupTag ?? ''}:${props.column.algorithmId ?? ''}`,
+    `${props.column.feedType}:${props.column.groupTag ?? ''}:${props.column.algorithmId ?? ''}:${props.column.instanceId ?? ''}:${props.column.serverHost ?? ''}`,
   () => {
     if (!instancesStore.isInitialized) return
     // Hard clear on feed identity change — soft refresh would leave the old
@@ -1408,13 +1561,14 @@ watch(
       return
     }
     if (accountId !== prevAccountId) {
-      // Every feed here is fetched / tagged as the active account (Liked, Saved,
-      // home-sourced algorithms, likes from group posts). Drop the old account's
-      // posts now — a soft refresh would leave them up if the new fetch fails.
+      // Pinned columns keep their own account/server — only unpinned ones rebind
+      if (!followsActiveAccount.value) return
       statuses.value = []
       void fetchTimeline(true)
       return
     }
+    // Global server filter only affects unpinned Local/Federated columns
+    if (!followsActiveAccount.value) return
     if (
       props.column.feedType === 'local' ||
       props.column.feedType === 'federated' ||

@@ -1,22 +1,24 @@
 /**
  * What Explore shows before you type — per tab, from the server that answers
- * searches (active account, or the public browsing host for guests).
+ * searches (active account, scoped host, or the public browsing host for guests).
  *
  * - All:    trending tags + trending links (news)
  * - People: follow suggestions (signed in) or the server's active directory
  * - Posts:  trending posts
  * - Tags:   trending tags + tags you follow
  *
+ * When scope is `everywhere`, tags/people can lightly merge from watched servers.
  * Each slice loads lazily the first time its tab needs it and is cached per
  * server for a few minutes.
  */
 
 import type { mastodon } from 'masto'
 import { ref, type Ref } from 'vue'
-import { activeClient, activeCredentials, publicClient } from '~/composables/useMasto'
+import { activeClient, activeCredentials, clientFor, publicClient } from '~/composables/useMasto'
 import { resolvePublicInstanceUrl } from '~/utils/instances'
 import { useInstancesStore } from '~/stores/instances'
-import type { ExploreSearchTab } from '~/composables/useFediverseSearch'
+import { mergeAccountsByCanonical, mergeHashtagsByName, type SourcedAccount } from '~/utils/searchMerge'
+import type { ExploreSearchTab, SearchScope } from '~/composables/useFediverseSearch'
 
 const TTL_MS = 5 * 60_000
 
@@ -25,8 +27,12 @@ type Slice = 'tags' | 'links' | 'posts' | 'people' | 'followedTags'
 const memo = new Map<string, { at: number; value: unknown; failed?: boolean }>()
 const FAIL_TTL_MS = 60_000
 
-export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
+export function useSearchDiscovery(opts: {
+  isSignedIn: Ref<boolean>
+  searchScope?: Ref<SearchScope>
+}) {
   const instancesStore = useInstancesStore()
+  const scopeValue = () => opts.searchScope?.value || 'everywhere'
 
   const trendingTags = ref<mastodon.v1.Tag[]>([])
   const trendingLinks = ref<mastodon.v1.TrendLink[]>([])
@@ -40,6 +46,18 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
   let fetchGen = 0
 
   const source = () => {
+    const scope = scopeValue()
+    if (scope.startsWith('host:')) {
+      const host = scope.slice(5)
+      const url = `https://${host}`
+      return { client: publicClient(url), url, guest: true }
+    }
+    if (scope !== 'everywhere') {
+      const inst = instancesStore.instances.find((i) => i.id === scope)
+      if (inst?.accessToken) {
+        return { client: clientFor(inst.id), url: inst.url, guest: false }
+      }
+    }
     if (opts.isSignedIn.value) {
       try {
         const { url } = activeCredentials()
@@ -61,7 +79,7 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
       return
     }
     sourceHost.value = new URL(src.url).hostname
-    const key = `${src.url}|${src.guest ? 'g' : 'u'}|${slice}`
+    const key = `${src.url}|${src.guest ? 'g' : 'u'}|${scopeValue()}|${slice}`
     const hit = memo.get(key)
     const ttl = hit?.failed ? FAIL_TTL_MS : TTL_MS
     if (hit && Date.now() - hit.at < ttl) {
@@ -88,7 +106,24 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
     list.map((s) => ({ ...s, _instanceUrl: url }) as mastodon.v1.Status)
 
   const loadTags = () =>
-    fetchSlice('tags', async ({ client }) => await client.v1.trends.tags.list({ limit: 12 }), (v) => (trendingTags.value = v))
+    fetchSlice(
+      'tags',
+      async (src) => {
+        const primary = await src.client.v1.trends.tags.list({ limit: 12 })
+        if (scopeValue() !== 'everywhere' || !opts.isSignedIn.value) return primary
+        const extras = await Promise.all(
+          instancesStore.watchingInstances.slice(0, 3).map(async (inst) => {
+            try {
+              return await publicClient(inst.url).v1.trends.tags.list({ limit: 8 })
+            } catch {
+              return [] as mastodon.v1.Tag[]
+            }
+          }),
+        )
+        return mergeHashtagsByName([primary, ...extras]).slice(0, 16)
+      },
+      (v) => (trendingTags.value = v),
+    )
 
   const loadLinks = () =>
     fetchSlice('links', async ({ client }) => await client.v1.trends.links.list({ limit: 6 }), (v) => (trendingLinks.value = v))
@@ -103,16 +138,49 @@ export function useSearchDiscovery(opts: { isSignedIn: Ref<boolean> }) {
   const loadPeople = () =>
     fetchSlice(
       'people',
-      async ({ client, guest }) => {
+      async ({ client, guest, url }) => {
         if (!guest) {
           try {
             const list = await client.v2.suggestions.list({ limit: 12 })
-            if (list.length) return { from: 'suggestions' as const, people: list.map((s) => s.account) }
+            if (list.length) {
+              return {
+                from: 'suggestions' as const,
+                people: list.map((s) => ({ ...s.account, _sourceUrl: url }) as SourcedAccount),
+              }
+            }
           } catch {
             // fall through to the directory
           }
         }
-        const people = await client.v1.directory.list({ order: 'active', local: true, limit: 12 })
+        const people = (await client.v1.directory.list({ order: 'active', local: true, limit: 12 })).map(
+          (a) => ({ ...a, _sourceUrl: url }) as SourcedAccount,
+        )
+        if (scopeValue() === 'everywhere' && opts.isSignedIn.value) {
+          const extras = await Promise.all(
+            instancesStore.watchingInstances.slice(0, 2).map(async (inst) => {
+              try {
+                const rows = await publicClient(inst.url).v1.directory.list({
+                  order: 'active',
+                  local: true,
+                  limit: 6,
+                })
+                return rows.map((a) => ({ ...a, _sourceUrl: inst.url }) as SourcedAccount)
+              } catch {
+                return [] as SourcedAccount[]
+              }
+            }),
+          )
+          return {
+            from: 'directory' as const,
+            people: mergeAccountsByCanonical(
+              [{ accounts: people, sourceUrl: url, prefer: true }, ...extras.map((accounts, i) => ({
+                accounts,
+                sourceUrl: instancesStore.watchingInstances[i]?.url || url,
+                prefer: false,
+              }))],
+            ).slice(0, 16),
+          }
+        }
         return { from: 'directory' as const, people }
       },
       (v) => {

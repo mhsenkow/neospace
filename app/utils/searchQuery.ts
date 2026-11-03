@@ -168,25 +168,113 @@ export function splitHighlight(text: string, terms: string[]): HighlightPart[] {
 
 // ── Curated servers ────────────────────────────────────────────────────────
 
+/** Split on whitespace and domain punctuation so "lgbt.tech" → ["lgbt","tech"] */
+export function searchTokens(raw: string): string[] {
+  return raw
+    .trim()
+    .toLowerCase()
+    .split(/[\s./_-]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2)
+}
+
+/** Domain labels without the public suffix when possible ("tech.lgbt" → ["tech","lgbt"]) */
+export function domainTokens(domain: string): string[] {
+  return domain
+    .toLowerCase()
+    .split('.')
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2)
+}
+
 /**
- * Rank curated servers: every word must match somewhere; domain/name hits beat
- * tag hits beat description hits.
+ * When the typed host isn't in the catalog (or is unreachable), suggest the
+ * closest curated twin — swapped labels (`lgbt.tech` → `tech.lgbt`) first.
+ */
+export function suggestTwinHost(
+  list: CuratedInstance[],
+  typedHost: string,
+): CuratedInstance | null {
+  const want = typedHost.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+  if (!want || !HOST_RE.test(want) || NOT_A_TLD.test(want)) return null
+  if (list.some((i) => i.domain.toLowerCase() === want)) return null
+
+  const wantTokens = domainTokens(want)
+  if (wantTokens.length < 2) return null
+
+  const wantSorted = [...wantTokens].sort().join('.')
+  let best: { inst: CuratedInstance; score: number } | null = null
+
+  for (const inst of list) {
+    const domain = inst.domain.toLowerCase()
+    if (domain === want) continue
+    const tokens = domainTokens(domain)
+    if (tokens.length < 2) continue
+
+    let score = 0
+    // Exact label swap: lgbt.tech ↔ tech.lgbt
+    if ([...tokens].sort().join('.') === wantSorted) score = 100
+    else if (wantTokens.every((t) => tokens.includes(t)) && tokens.every((t) => wantTokens.includes(t))) {
+      score = 90
+    } else {
+      const overlap = wantTokens.filter((t) => tokens.includes(t)).length
+      if (overlap >= 2 && overlap === wantTokens.length) score = 70
+      else if (overlap >= 2) score = 40
+    }
+    if (!score) continue
+    if (!best || score > best.score) best = { inst, score }
+  }
+  return best?.inst ?? null
+}
+
+/**
+ * Free-text query to send alongside a host lookup — domain tokens so
+ * "lgbt.tech" still finds people/tags mentioning lgbt + tech.
+ */
+export function hostSearchText(raw: string): string {
+  const intent = detectIntent(raw)
+  if (intent.kind !== 'host') return raw.trim()
+  return searchTokens(intent.host).join(' ') || intent.host
+}
+
+/**
+ * Rank curated servers: every token must match somewhere; exact/swapped domain
+ * hits beat name hits beat tag hits beat description hits.
  */
 export function rankServers(list: CuratedInstance[], raw: string): CuratedInstance[] {
-  const words = raw.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  if (!words.length) return list
+  const q = raw.trim().toLowerCase()
+  const words = searchTokens(q)
+  // Keep the whole hostname as an extra candidate so exact domain still wins
+  const needles = words.length ? words : q ? [q] : []
+  if (!needles.length) return list
+
   const scored: { inst: CuratedInstance; score: number }[] = []
   for (const inst of list) {
     const domain = inst.domain.toLowerCase()
     const name = inst.name.toLowerCase()
+    const dTokens = domainTokens(domain)
     const tags = (inst.tags || []).map((t) => t.toLowerCase())
     const blurb = `${inst.vibe} ${inst.blurb} ${inst.category}`.toLowerCase()
     const desc = inst.description.toLowerCase()
     let score = 0
     let all = true
-    for (const w of words) {
+
+    // Whole-query hostname / swapped-domain bonus (on top of per-token scores)
+    if (q === domain || q === name) score += 120
+    else if (HOST_RE.test(q) && !NOT_A_TLD.test(q)) {
+      const wantTokens = domainTokens(q)
+      if (
+        wantTokens.length >= 2 &&
+        [...wantTokens].sort().join('.') === [...dTokens].sort().join('.')
+      ) {
+        score += 110
+      }
+    }
+
+    for (const w of needles) {
       let s = 0
       if (domain === w || name === w) s = 100
+      else if (dTokens.includes(w) && dTokens.length <= 3) s = 85
       else if (domain.startsWith(w) || name.startsWith(w)) s = 60
       else if (domain.includes(w) || name.includes(w)) s = 40
       else if (tags.includes(w)) s = 35

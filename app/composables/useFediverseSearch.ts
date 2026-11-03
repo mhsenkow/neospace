@@ -1,11 +1,13 @@
 /**
  * Fediverse search for Explore — one engine, tuned per tab.
  *
- * - Signed in: the active account's server (resolve, paging, relationships).
+ * - Signed in: fan-out across the active account, linked accounts, watched
+ *   servers, and (when the query targets a host) that remote public API.
+ * - Scope pill can pin the search to one account or `host:domain`.
  * - Guest: the watched/public server — people + tags only (Mastodon refuses
  *   `offset`/`resolve` without auth), with #tag timelines standing in for posts.
  * - All: a capped preview of each type plus a "top hit"; type tabs page by
- *   their own offset.
+ *   their own offset on the primary (preferred) target.
  * - Results are cached briefly so tab flips and Back are instant.
  */
 
@@ -13,15 +15,24 @@ import type { mastodon } from 'masto'
 import { ref, watch, onUnmounted, type Ref } from 'vue'
 import { onDeletedStatus } from '~/composables/useDeletedStatus'
 import { dropDeletedStatus } from '~/utils/deletedStatus'
-import { activeClient, activeCredentials, publicClient } from '~/composables/useMasto'
+import { activeClient, activeCredentials, clientFor, publicClient } from '~/composables/useMasto'
 import { createRaceGuard } from '~/composables/useRace'
+import { useCrossAccountAction } from '~/composables/useCrossAccountAction'
 import { mapErrorToMessage } from '~/utils/friendlyError'
 import { resolvePublicInstanceUrl } from '~/utils/instances'
 import { useInstancesStore } from '~/stores/instances'
 import {
+  mergeAccountsByCanonical,
+  mergeHashtagsByName,
+  mergeStatusesByIdentity,
+  type SourcedAccount,
+  type SourcedStatus,
+} from '~/utils/searchMerge'
+import {
   buildPostQuery,
   detectIntent,
   hasPostOperators,
+  hostSearchText,
   resolvableQuery,
   tagFromQuery,
   type PostFilters,
@@ -124,14 +135,28 @@ async function tagTimelineOf(client: mastodon.rest.Client, tag: string, limit: n
   }
 }
 
+export type SearchScope = 'everywhere' | string
+
+type FanTarget = {
+  id: string
+  url: string
+  client: mastodon.rest.Client
+  guest: boolean
+  prefer: boolean
+}
+
 export function useFediverseSearch(opts: {
   query: Ref<string>
   tab: Ref<ExploreSearchTab>
   isSignedIn: Ref<boolean>
   postFilters: Ref<PostFilters>
   peopleFollowingOnly: Ref<boolean>
+  /** `everywhere` | signed-in instance id | `host:domain` */
+  searchScope?: Ref<SearchScope>
 }) {
   const instancesStore = useInstancesStore()
+  const cross = useCrossAccountAction()
+  const scopeRef = opts.searchScope
 
   const searchBusy = ref(false)
   const searchError = ref<string | null>(null)
@@ -159,7 +184,7 @@ export function useFediverseSearch(opts: {
   const searchRace = createRaceGuard()
   /** Enrichment outside a search (cache hits, suggestions) — never stale-gated */
   const always = { isCurrent: () => true }
-  type Ticket = { isCurrent: () => boolean }
+  type Ticket = { isCurrent: () => boolean; signal?: AbortSignal }
   /**
    * Bumps when the result set is replaced. Enrichment checks this rather than
    * its request ticket: a load-more (new ticket) must not discard page 1's
@@ -168,31 +193,130 @@ export function useFediverseSearch(opts: {
   let resultsGen = 0
   const genTicket = (gen = resultsGen): Ticket => ({ isCurrent: () => gen === resultsGen })
 
-  /** Which server answers: the active account, or the public browsing host */
-  const source = () => {
+  const scopeValue = () => scopeRef?.value || 'everywhere'
+
+  /** Primary answering server (paging / top-hit / guest fallback) */
+  const primarySource = (): FanTarget => {
     if (opts.isSignedIn.value) {
       try {
         const { url } = activeCredentials()
-        return { client: activeClient(), url, guest: false }
+        return { id: instancesStore.activeAccountId || 'active', client: activeClient(), url, guest: false, prefer: true }
       } catch {
         // Signed in elsewhere, but the active account is watch-only — search as a guest
       }
     }
     const url = resolvePublicInstanceUrl(instancesStore.activeAccount?.url)
-    return { client: publicClient(url), url, guest: true }
+    return { id: 'public', client: publicClient(url), url, guest: true, prefer: true }
+  }
+
+  /** Fan-out targets for the current scope + query intent */
+  const fanTargets = (q: string): FanTarget[] => {
+    const scope = scopeValue()
+    const intent = detectIntent(q)
+    const seen = new Set<string>()
+    const out: FanTarget[] = []
+
+    const push = (t: FanTarget) => {
+      const key = `${t.url}|${t.guest ? 'g' : 'u'}|${t.id}`
+      if (seen.has(key)) return
+      seen.add(key)
+      out.push(t)
+    }
+
+    if (scope !== 'everywhere') {
+      if (scope.startsWith('host:')) {
+        const host = scope.slice(5).toLowerCase()
+        const url = `https://${host}`
+        push({ id: `host:${host}`, url, client: publicClient(url), guest: true, prefer: true })
+        // Also search the active account with resolve so remote handles land as local IDs
+        if (opts.isSignedIn.value) {
+          try {
+            push({ ...primarySource(), prefer: false })
+          } catch { /* */ }
+        }
+        return out
+      }
+      const inst = instancesStore.instances.find((i) => i.id === scope)
+      if (inst?.accessToken) {
+        push({
+          id: inst.id,
+          url: inst.url,
+          client: clientFor(inst.id),
+          guest: false,
+          prefer: true,
+        })
+        return out
+      }
+    }
+
+    // everywhere (default)
+    try {
+      push(primarySource())
+    } catch { /* */ }
+
+    if (opts.isSignedIn.value) {
+      for (const inst of instancesStore.authenticatedInstances) {
+        if (inst.id === instancesStore.activeAccountId) continue
+        try {
+          push({
+            id: inst.id,
+            url: inst.url,
+            client: clientFor(inst.id),
+            guest: false,
+            prefer: false,
+          })
+        } catch { /* */ }
+      }
+      for (const inst of instancesStore.watchingInstances) {
+        push({
+          id: inst.id,
+          url: inst.url,
+          client: publicClient(inst.url),
+          guest: true,
+          prefer: false,
+        })
+      }
+    }
+
+    // Typed / mentioned host — probe its public API too
+    let hostHint: string | null = intent.kind === 'host' ? intent.host : null
+    if (!hostHint && intent.kind === 'handle' && intent.remote) {
+      hostHint = intent.acct.split('@')[1] || null
+    }
+    if (hostHint) {
+      const url = `https://${hostHint}`
+      push({ id: `host:${hostHint}`, url, client: publicClient(url), guest: true, prefer: false })
+    }
+
+    return out.length ? out : [primarySource()]
   }
 
   /** Posts carry their origin so likes/boosts/thread routing use the right server */
-  const withOrigin = (list: mastodon.v1.Status[], url: string) =>
-    list.map((s) => ({ ...s, _instanceUrl: url }) as mastodon.v1.Status)
+  const withOrigin = (list: mastodon.v1.Status[], url: string, id?: string): SourcedStatus[] =>
+    list.map((s) => ({ ...s, _instanceUrl: url, ...(id ? { _instanceId: id } : {}) }) as SourcedStatus)
 
-  const sentQuery = (q: string) =>
-    opts.tab.value === 'posts' ? buildPostQuery(q, opts.postFilters.value) : resolvableQuery(q)
+  const sentQuery = (q: string) => {
+    const base = opts.tab.value === 'posts' ? buildPostQuery(q, opts.postFilters.value) : resolvableQuery(q)
+    // Host-only queries also search people/tags for domain tokens
+    if (detectIntent(q).kind === 'host') {
+      const tokens = hostSearchText(q)
+      return tokens && tokens !== base ? tokens : base
+    }
+    return base
+  }
 
-  // Keyed by account, not just server: `from:me` / "People I follow" differ between two
+  // Keyed by account + scope: `from:me` / "People I follow" differ between two
   // linked accounts on the same instance.
   const cacheKey = (url: string, q: string) =>
-    [url, instancesStore.activeAccountId ?? '', opts.isSignedIn.value ? 'u' : 'g', opts.tab.value, sentQuery(q), opts.peopleFollowingOnly.value ? 'f' : ''].join('|')
+    [
+      url,
+      instancesStore.activeAccountId ?? '',
+      scopeValue(),
+      opts.isSignedIn.value ? 'u' : 'g',
+      opts.tab.value,
+      sentQuery(q),
+      opts.peopleFollowingOnly.value ? 'f' : '',
+    ].join('|')
 
   const clearResults = () => {
     searchRace.abort()
@@ -317,16 +441,22 @@ export function useFediverseSearch(opts: {
       return
     }
 
-    let src: ReturnType<typeof source>
+    let targets: FanTarget[]
     try {
-      src = source()
+      targets = fanTargets(trimmed)
     } catch {
+      clearResults()
+      return
+    }
+    const primary = targets.find((t) => t.prefer) || targets[0]
+    if (!primary) {
       clearResults()
       return
     }
 
     const append = searchOpts?.append ?? false
-    const key = cacheKey(src.url, trimmed)
+    // Load-more pages only the primary (auth) target — fan-out is for first page discovery
+    const key = cacheKey(primary.url, trimmed)
     if (!append && !searchOpts?.resolve) {
       const cached = cacheGet(key)
       if (cached) {
@@ -364,50 +494,91 @@ export function useFediverseSearch(opts: {
     const isAll = tab === 'all'
     const limit = isAll ? ALL_PREVIEW : PAGE_SIZE
     const pageOffset = append ? offset : 0
-    const resolve =
-      !src.guest && (searchOpts?.resolve ?? (intent.kind === 'url' || (intent.kind === 'handle' && intent.remote)))
     const tagForTimeline = tagFromQuery(trimmed)
+    const qSent = sentQuery(trimmed)
+
+    const searchOne = async (t: FanTarget) => {
+      const resolve =
+        !t.guest && (searchOpts?.resolve ?? (intent.kind === 'url' || (intent.kind === 'handle' && intent.remote)))
+      // Guests can't search post text — skip straight to the tag timeline
+      if (t.guest && tab === 'posts') {
+        return {
+          target: t,
+          accounts: [] as SourcedAccount[],
+          statuses: [] as SourcedStatus[],
+          hashtags: [] as mastodon.v1.Tag[],
+        }
+      }
+      try {
+        const res = await t.client.v2.search.list(
+          {
+            q: qSent,
+            limit,
+            resolve,
+            // Only the preferred target pages; fan-out always requests page 1
+            ...(!t.guest && !isAll && t.prefer && append ? { offset: pageOffset } : {}),
+            ...(type ? { type } : {}),
+            ...(tab === 'people' && opts.peopleFollowingOnly.value && !t.guest && t.prefer
+              ? { following: true }
+              : {}),
+          },
+          { requestInit: { signal: ticket.signal } },
+        )
+        return {
+          target: t,
+          accounts: (res.accounts || []).map(
+            (a) => ({ ...a, _sourceUrl: t.url }) as SourcedAccount,
+          ),
+          statuses: withOrigin(res.statuses || [], t.url, t.id),
+          hashtags: res.hashtags || [],
+        }
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') throw e
+        return {
+          target: t,
+          accounts: [] as SourcedAccount[],
+          statuses: [] as SourcedStatus[],
+          hashtags: [] as mastodon.v1.Tag[],
+        }
+      }
+    }
 
     try {
-      // Guests can't search post text — skip straight to the tag timeline
-      const skipSearch = src.guest && tab === 'posts'
-      const resP = skipSearch
-        ? Promise.resolve({ accounts: [], statuses: [], hashtags: [] } as unknown as mastodon.v2.Search)
-        : src.client.v2.search.list(
-            {
-              q: sentQuery(trimmed),
-              limit,
-              resolve,
-              ...(src.guest || isAll ? {} : { offset: pageOffset }),
-              ...(type ? { type } : {}),
-              ...(tab === 'people' && opts.peopleFollowingOnly.value && !src.guest ? { following: true } : {}),
-            },
-            // Typing past "ab" → "abc" cancels the "ab" request outright
-            { requestInit: { signal: ticket.signal } },
-          )
-
-      const wantsTimeline =
-        !append &&
-        !!tagForTimeline &&
-        (tab === 'posts' || isAll) &&
-        (src.guest || intent.kind === 'tag')
-      const timelineP = wantsTimeline
-        ? tagTimelineOf(src.client, tagForTimeline!, isAll ? 6 : PAGE_SIZE)
-        : Promise.resolve(null)
-
-      const res = await resP
+      const fanList = append ? [primary] : targets
+      const batches = await Promise.all(fanList.map(searchOne))
       if (!ticket.isCurrent()) return
 
-      const nextAccounts = res.accounts || []
-      const nextStatuses = withOrigin(res.statuses || [], src.url)
-      let nextTags = res.hashtags || []
+      const preferredHost = (() => {
+        try {
+          return new URL(primary.url).hostname
+        } catch {
+          return null
+        }
+      })()
+
+      let nextAccounts = mergeAccountsByCanonical(
+        batches.map((b) => ({
+          accounts: b.accounts,
+          sourceUrl: b.target.url,
+          prefer: b.target.prefer,
+        })),
+        preferredHost,
+      )
+      let nextStatuses = mergeStatusesByIdentity(batches.map((b) => b.statuses))
+      let nextTags = mergeHashtagsByName(batches.map((b) => b.hashtags))
+
+      // Cap All-tab previews after merge
+      if (isAll && !append) {
+        nextAccounts = nextAccounts.slice(0, ALL_PREVIEW)
+        nextStatuses = nextStatuses.slice(0, ALL_PREVIEW)
+        nextTags = nextTags.slice(0, ALL_PREVIEW)
+      }
 
       if (append) {
         accounts.value = appendUnique(accounts.value, nextAccounts, (a) => a.id)
         statuses.value = appendUnique(statuses.value, nextStatuses, (s) => s.id)
         hashtags.value = appendUnique(hashtags.value, nextTags, (t) => t.name.toLowerCase())
       } else {
-        // Exact tag first — the one someone almost certainly meant
         if (tagForTimeline) {
           const i = nextTags.findIndex((t) => sameTag(t.name, tagForTimeline))
           if (i > 0) nextTags = [nextTags[i]!, ...nextTags.slice(0, i), ...nextTags.slice(i + 1)]
@@ -415,41 +586,45 @@ export function useFediverseSearch(opts: {
         accounts.value = nextAccounts
         statuses.value = nextStatuses
         hashtags.value = nextTags
-        // Relationships are per-account facts, not per-query: keep them so people
-        // still on screen (suggestions after Clear) don't flip back to "Follow".
-        // They're dropped on account switch (see watcher below).
       }
 
+      const primaryBatch = batches.find((b) => b.target.id === primary.id) || batches[0]!
       const page = nextSearchPage(tab, pageOffset, {
-        accounts: nextAccounts.length,
-        statuses: nextStatuses.length,
-        hashtags: nextTags.length,
+        accounts: primaryBatch.accounts.length,
+        statuses: primaryBatch.statuses.length,
+        hashtags: primaryBatch.hashtags.length,
       })
       offset = page.offset
-      // All previews (no paging) and guests (Mastodon refuses offset) stop here
-      searchHasMore.value = !isAll && !src.guest && page.hasMore
+      searchHasMore.value = !isAll && !primary.guest && page.hasMore
 
       if (!append) {
         postsLimited.value =
-          !src.guest &&
+          !primary.guest &&
           (tab === 'posts' || isAll) &&
           !nextStatuses.length &&
           intent.kind === 'text' &&
           !hasPostOperators(trimmed)
 
-        // Signed-in plain word with no post hits: show the #tag timeline instead
-        let timeline = await timelineP
-        let timelineTag = timeline ? tagForTimeline : null
-        if (!timeline && postsLimited.value && tagForTimeline) {
-          timeline = await tagTimelineOf(src.client, tagForTimeline, isAll ? 6 : PAGE_SIZE)
+        const wantsTimeline =
+          !!tagForTimeline && (tab === 'posts' || isAll) && (primary.guest || intent.kind === 'tag' || postsLimited.value)
+
+        let timeline: mastodon.v1.Status[] | null = null
+        let timelineTag: string | null = null
+        if (wantsTimeline && tagForTimeline) {
+          timeline = await tagTimelineOf(primary.client, tagForTimeline, isAll ? 6 : PAGE_SIZE)
           timelineTag = tagForTimeline
         }
         if (!ticket.isCurrent()) return
-        tagTimeline.value = withOrigin(timeline || [], src.url)
+        tagTimeline.value = withOrigin(timeline || [], primary.url, primary.id)
         tagTimelineTag.value = tagTimeline.value.length ? timelineTag : null
 
         topHit.value = isAll
-          ? await pickTopHit(trimmed, { accounts: nextAccounts, statuses: nextStatuses, hashtags: nextTags }, src.client, src.url)
+          ? await pickTopHit(
+              trimmed,
+              { accounts: nextAccounts, statuses: nextStatuses, hashtags: nextTags },
+              primary.client,
+              primary.url,
+            )
           : null
         if (!ticket.isCurrent()) return
         resultsFor.value = trimmed
@@ -468,7 +643,8 @@ export function useFediverseSearch(opts: {
         postsLimited: postsLimited.value,
       })
 
-      const peopleToEnrich = topHit.value?.kind === 'account' ? [topHit.value.account, ...nextAccounts] : nextAccounts
+      const peopleToEnrich =
+        topHit.value?.kind === 'account' ? [topHit.value.account, ...nextAccounts] : nextAccounts
       if (peopleToEnrich.length) void enrichPeople(peopleToEnrich, enrichTicket)
       if (nextTags.length) void enrichTags(nextTags, enrichTicket)
     } catch (e: unknown) {
@@ -484,7 +660,6 @@ export function useFediverseSearch(opts: {
         topHit.value = null
         resultsFor.value = trimmed
       } else {
-        // Keep hasMore so the sentinel can offer Retry (it must not auto-fire again)
         loadMoreError.value = true
       }
     } finally {
@@ -517,11 +692,9 @@ export function useFediverseSearch(opts: {
     const pendingKey = `a:${account.id}`
     if (pendingFollows.has(pendingKey)) return
     pendingFollows.add(pendingKey)
-    const rel = relationships.value[account.id]
     try {
-      const sel = activeClient().v1.accounts.$select(account.id)
-      const next = rel?.following || rel?.requested ? await sel.unfollow() : await sel.follow()
-      relationships.value = { ...relationships.value, [account.id]: next }
+      const next = await cross.toggleFollow(account as SourcedAccount)
+      if (next) relationships.value = { ...relationships.value, [account.id]: next }
     } finally {
       pendingFollows.delete(pendingKey)
     }
@@ -557,9 +730,15 @@ export function useFediverseSearch(opts: {
     void enrichPeople(accts, always)
   }
 
-  // Filters change what the server returns — re-run, bypassing the old cache key
+  // Filters / scope change what the server returns — re-run, bypassing the old cache key
   watch(
-    () => [opts.tab.value, opts.isSignedIn.value, JSON.stringify(opts.postFilters.value), opts.peopleFollowingOnly.value],
+    () => [
+      opts.tab.value,
+      opts.isSignedIn.value,
+      JSON.stringify(opts.postFilters.value),
+      opts.peopleFollowingOnly.value,
+      scopeValue(),
+    ],
     () => {
       if (opts.query.value.trim().length >= 2 && opts.tab.value !== 'servers') void runSearch(opts.query.value)
       else if (opts.tab.value === 'servers') clearResults()

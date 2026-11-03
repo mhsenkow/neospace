@@ -112,8 +112,13 @@ describe('rankServers', () => {
     inst('art.example', 'Art Place'),
   ]
 
-  it('puts name/domain hits above tag and description hits', () => {
-    expect(rankServers(list, 'art').map((i) => i.domain)).toEqual(['art.example', 'mastodon.art'])
+  it('matches domain labels (mastodon.art) as strongly as prefixed names', () => {
+    expect(rankServers(list, 'art').map((i) => i.domain)).toEqual(['mastodon.art', 'art.example'])
+  })
+
+  it('ranks swapped domains like lgbt.tech → tech.lgbt', () => {
+    const withLgbt = [...list, inst('tech.lgbt', 'Tech LGBT')]
+    expect(rankServers(withLgbt, 'lgbt.tech')[0]?.domain).toBe('tech.lgbt')
   })
 
   it('requires every word to match', () => {
