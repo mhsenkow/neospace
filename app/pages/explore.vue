@@ -1022,6 +1022,35 @@ onUnmounted(() => {
 
         <!-- Servers -->
         <template v-else>
+          <section class="explore-join" aria-labelledby="explore-join-h">
+            <h2 id="explore-join-h" class="explore-join__title">Pick a server to join Mastodon</h2>
+            <p class="explore-join__lede">
+              Your account lives on one home server — you can still follow people everywhere.
+              Browse curated communities below, or use Mastodon’s full directory.
+            </p>
+            <div class="explore-join__actions">
+              <a
+                href="https://joinmastodon.org/servers"
+                target="_blank"
+                rel="noopener"
+                class="neo-btn neo-btn--primary"
+              >
+                Open server directory
+              </a>
+              <button
+                v-if="isSignedIn"
+                type="button"
+                class="neo-btn neo-btn--ghost"
+                @click="goAddAccount"
+              >
+                Add an account you already have
+              </button>
+              <NuxtLink v-else to="/login" class="neo-btn neo-btn--ghost">
+                I already have an account
+              </NuxtLink>
+            </div>
+          </section>
+
           <nav class="explore-cats" aria-label="Categories">
             <button
               v-for="cat in categories"
@@ -1048,63 +1077,18 @@ onUnmounted(() => {
             </TransitionGroup>
           </section>
 
-          <section class="explore-join" aria-labelledby="explore-join-h">
-            <div class="explore-join__intro">
-              <h2 id="explore-join-h" class="explore-join__title">Need a Mastodon home?</h2>
-              <p class="explore-join__lede">
-                Your account lives on one server. Open a server above to create an account there,
-                or pick how you’d like to get started.
-              </p>
-            </div>
-
-            <div class="explore-join__actions">
-              <a
-                href="https://joinmastodon.org/servers"
-                target="_blank"
-                rel="noopener"
-                class="neo-btn neo-btn--primary"
-              >
-                Find a server to join
-              </a>
-              <button
-                v-if="isSignedIn"
-                type="button"
-                class="neo-btn neo-btn--ghost"
-                @click="goAddAccount"
-              >
-                Add an account you already have
-              </button>
-              <NuxtLink v-else to="/login" class="neo-btn neo-btn--ghost">
-                I already have an account
-              </NuxtLink>
-            </div>
-
-            <div class="explore-join__host">
-              <p class="explore-join__host-label">Want to run the server instead?</p>
-              <ul class="explore-join__host-list">
-                <li>
-                  <a href="https://joinmastodon.org/hosting" target="_blank" rel="noopener">
-                    Official hosting
-                  </a>
-                  <span>Providers recommended by Mastodon</span>
-                </li>
-                <li>
-                  <a href="https://masto.host/" target="_blank" rel="noopener">Masto.host</a>
-                  <span>Managed hosting, no ops required</span>
-                </li>
-                <li>
-                  <a
-                    href="https://docs.joinmastodon.org/user/run-your-own/"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    Self-host
-                  </a>
-                  <span>Install and run Mastodon yourself</span>
-                </li>
-              </ul>
-            </div>
-          </section>
+          <p class="explore-join__host-line">
+            Prefer to run your own?
+            <a href="https://joinmastodon.org/hosting" target="_blank" rel="noopener">Official hosting</a>
+            ·
+            <a href="https://masto.host/" target="_blank" rel="noopener">Masto.host</a>
+            ·
+            <a
+              href="https://docs.joinmastodon.org/user/run-your-own/"
+              target="_blank"
+              rel="noopener"
+            >Self-host</a>
+          </p>
         </template>
       </template>
 
@@ -1682,21 +1666,21 @@ onUnmounted(() => {
 }
 
 .explore-join {
-  margin-top: 1.75rem;
-  padding-top: 1.35rem;
-  border-top: 1px solid var(--neo-border-color);
+  margin: 0 0 1.15rem;
+  padding: 0 0 1.05rem;
+  border-bottom: 1px solid var(--neo-border-color);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 36rem;
+  gap: 0.7rem;
+  max-width: 40rem;
 }
 
 .explore-join__title {
-  margin: 0 0 0.4rem;
-  font-size: 1.15rem;
+  margin: 0;
+  font-size: 1.2rem;
   font-weight: 650;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
   color: var(--neo-text-primary);
   text-transform: none;
 }
@@ -1715,49 +1699,22 @@ onUnmounted(() => {
   gap: 0.5rem 0.65rem;
 }
 
-.explore-join__host {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.explore-join__host-label {
-  margin: 0;
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--neo-text-tertiary);
-}
-
-.explore-join__host-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-
-  li {
-    display: grid;
-    gap: 0.1rem;
-  }
+.explore-join__host-line {
+  margin: 1.35rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--neo-border-color);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--neo-text-muted);
 
   a {
-    font-size: 0.875rem;
-    font-weight: 600;
     color: var(--neo-accent);
+    font-weight: 600;
     text-decoration: none;
-    width: fit-content;
 
     &:hover {
       text-decoration: underline;
     }
-  }
-
-  span {
-    font-size: 0.78rem;
-    line-height: 1.4;
-    color: var(--neo-text-muted);
   }
 }
 
