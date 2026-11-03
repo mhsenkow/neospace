@@ -11,8 +11,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-/** Measured 2026-10-12 after the font change: 158 entries / 2,668 KiB (was 292 / 4,425 KiB). Headroom ~8%. */
-export const BUDGET = { maxBytes: 2_950_000, maxEntries: 175 }
+/** Measured 2026-11-03 after hammock mode: 176 entries / 2,954 KiB. Headroom ~8%. */
+export const BUDGET = { maxBytes: 3_200_000, maxEntries: 190 }
 
 export function precacheUrls(swSource) {
   return [...swSource.matchAll(/\burl:\s*"([^"]+)"/g)].map((m) => m[1])
