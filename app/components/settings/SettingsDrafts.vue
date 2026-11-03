@@ -43,7 +43,7 @@ onUnmounted(() => {
 })
 
 const labelFor = (key: string) => {
-  if (key === 'new') return 'New post'
+  if (key === 'new') return 'New thread'
   if (key.startsWith('reply:')) return 'Reply'
   if (key.startsWith('quote:')) return 'Quote'
   if (key.startsWith('dm:')) return 'Message'

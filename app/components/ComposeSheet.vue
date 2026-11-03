@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Full-screen / bottom compose sheet for mobile (+ tab) and DM recipient pick.
- * Threads-style: Post lives in the header; footer keeps tools + counter.
+ * Full-screen / bottom compose sheet — Threads-style New thread modal.
+ * Header: Cancel · title · Drafts + More. Footer: Post Options · Post.
  */
 
 import { useComposeSheetStore } from '~/stores/composeSheet'
@@ -9,15 +9,18 @@ import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
 import { isRedraftSlot } from '~/composables/useDraft'
 import { useToastStore } from '~/stores/toast'
-import { emitComposedStatus } from '~/composables/useComposedStatus'
+import { useSettingsStore } from '~/stores/settings'
 import type { mastodon } from 'masto'
 import type RealComposeBox from '~/components/RealComposeBox.vue'
 
 const sheet = useComposeSheetStore()
 const overlayStore = useOverlayStore()
+const settingsStore = useSettingsStore()
 const panelRef = ref<HTMLElement | null>(null)
 const composeRef = ref<InstanceType<typeof RealComposeBox> | null>(null)
 const sheetOpen = computed(() => sheet.open)
+const draftsOpen = ref(false)
+const moreOpen = ref(false)
 
 const { viewportStyle, keyboardOpen, onFocusField } = useKeyboardViewport(sheetOpen, {
   lockScroll: true,
@@ -28,12 +31,9 @@ const listOf = (items: string[]) =>
   items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items[0] || ''
 
 const requestClose = async () => {
-  // Own text, CW, attachments, poll or schedule — a prefilled "@handle " alone doesn't count
   const compose = composeRef.value
   if (compose?.isDirty) {
     const extras: string[] = compose.unsavedExtras ?? []
-    // A redraft's saved slot is keyed to a deleted post — it could never be reopened.
-    // Text-less edits (poll / schedule only) leave nothing a draft could keep.
     const canSave = !isRedraftSlot(sheet.draftSlot) && !!compose.hasDraftText
     const extrasNote = extras.length ? ` Your ${listOf(extras)} won’t be saved with it.` : ''
     const choice = await overlayStore.openChoice({
@@ -49,14 +49,12 @@ const requestClose = async () => {
     })
     if (choice === 'cancel') return
     if (choice === 'secondary') {
-      // Never close on a draft that didn't save — the text would be gone
       const failure = compose.saveDraft()
       if (failure) {
         useToastStore().show({ message: failure, duration: 6000 })
         return
       }
     } else {
-      // Otherwise the autosaved draft reappears next time this composer opens
       compose.discardDraft()
     }
   }
@@ -65,17 +63,15 @@ const requestClose = async () => {
 
 useFocusTrap(panelRef, sheetOpen, {
   onEscape: requestClose,
-  // Prefer the composer — Cancel is first in the DOM and stole focus on mobile
   initialFocus:
     'textarea, .compose-input, #recipient-search-input, .group-pick-sheet__input, .neo-sheet-header__close',
 })
 
 const onPosted = (status: mastodon.v1.Status) => {
-  emitComposedStatus(status)
+  // RealComposeBox already fan-outs via emitComposedStatus (including multi-segment chains)
   sheet.posted(status)
 }
 
-/** Queued for later: nothing to navigate to — close with a clear confirmation */
 const onScheduled = (scheduled: mastodon.v1.ScheduledStatus) => {
   let when = scheduled.scheduledAt
   try {
@@ -90,15 +86,13 @@ const onScheduled = (scheduled: mastodon.v1.ScheduledStatus) => {
 }
 
 const sheetTitleId = 'compose-sheet-title'
-const contextExpanded = ref(false)
-
 const isPicking = ref(false)
 
-const headerCanPost = ref(false)
-const headerSubmitLabel = ref('Post')
-const headerPosting = ref(false)
+const footerCanPost = ref(false)
+const footerSubmitLabel = ref('Post')
+const footerPosting = ref(false)
 
-const syncHeaderActions = () => {
+const syncFooterActions = () => {
   const box = composeRef.value as
     | {
         canPost?: boolean
@@ -106,9 +100,9 @@ const syncHeaderActions = () => {
         isPosting?: boolean
       }
     | null
-  headerCanPost.value = !!box?.canPost
-  headerSubmitLabel.value = box?.submitLabel || 'Post'
-  headerPosting.value = !!box?.isPosting
+  footerCanPost.value = !!box?.canPost
+  footerSubmitLabel.value = box?.submitLabel || 'Post'
+  footerPosting.value = !!box?.isPosting
 }
 
 watch(
@@ -119,13 +113,53 @@ watch(
     sheet.open,
     sheet.instanceKey,
   ],
-  syncHeaderActions,
+  syncFooterActions,
   { flush: 'post' },
 )
 
-const onHeaderPost = () => {
+watch(
+  () => sheet.open,
+  (open) => {
+    if (!open) {
+      draftsOpen.value = false
+      moreOpen.value = false
+    }
+  },
+)
+
+const onFooterPost = () => {
   void composeRef.value?.submit()
 }
+
+const openPostOptions = () => {
+  composeRef.value?.openPostOptions?.()
+}
+
+const openDrafts = () => {
+  draftsOpen.value = true
+}
+
+const onMoreSelect = async (id: string) => {
+  moreOpen.value = false
+  if (id === 'drafts') {
+    openDrafts()
+    return
+  }
+  if (id === 'settings-drafts') {
+    sheet.hide()
+    settingsStore.open('posting')
+    return
+  }
+  if (id === 'discard') {
+    await requestClose()
+  }
+}
+
+const moreActions = [
+  { id: 'drafts', label: 'Drafts' },
+  { id: 'settings-drafts', label: 'Manage drafts in Settings' },
+  { id: 'discard', label: 'Discard', danger: true },
+]
 
 const onPick = async (account: mastodon.v1.Account) => {
   if (isPicking.value) return
@@ -146,7 +180,6 @@ const onPick = async (account: mastodon.v1.Account) => {
     }
     sheet.continueWithRecipient(accountHandle(account))
   } catch (e: any) {
-    const { useToastStore } = await import('~/stores/toast')
     useToastStore().show({
       message: e?.message || 'Couldn’t open that conversation',
     })
@@ -154,6 +187,15 @@ const onPick = async (account: mastodon.v1.Account) => {
     isPicking.value = false
   }
 }
+
+const sheetTitle = computed(() => sheet.title || 'New thread')
+
+const replyPlaceholder = computed(() => {
+  if (sheet.placeholder) return sheet.placeholder
+  if (sheet.inReplyToId) return 'Share your thoughts…'
+  if (sheet.quoteUrl) return 'Add a comment…'
+  return "What's new?"
+})
 </script>
 
 <template>
@@ -181,86 +223,122 @@ const onPick = async (account: mastodon.v1.Account) => {
       />
       <template v-else>
         <NeoSheetHeader
-          :title="sheet.title || 'New post'"
+          :title="sheetTitle"
           :title-id="sheetTitleId"
           :title-sr-only="keyboardOpen"
+          center-title
           @cancel="requestClose"
         >
           <template #trailing>
-            <button
-              type="button"
-              class="compose-sheet__header-post neo-btn neo-btn--primary neo-btn--sm"
-              :disabled="!headerCanPost"
-              :aria-busy="headerPosting || undefined"
-              @click="onHeaderPost"
-            >
-              {{ headerSubmitLabel }}
-            </button>
+            <div class="compose-sheet__header-actions">
+              <button
+                type="button"
+                class="compose-sheet__icon-btn"
+                aria-label="Drafts"
+                title="Drafts"
+                @click="openDrafts"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="8" y1="13" x2="16" y2="13" />
+                  <line x1="8" y1="17" x2="13" y2="17" />
+                </svg>
+              </button>
+              <NeoMenu
+                v-model:open="moreOpen"
+                class="compose-sheet__more"
+                label="More compose options"
+                align="end"
+                teleport
+              >
+                <NeoIcon name="more" :size="20" :stroke="2" />
+                <template #items>
+                  <button
+                    v-for="action in moreActions"
+                    :key="action.id"
+                    type="button"
+                    role="menuitem"
+                    class="compose-sheet__menu-item"
+                    :class="{ 'compose-sheet__menu-item--danger': action.danger }"
+                    @click="onMoreSelect(action.id)"
+                  >
+                    {{ action.label }}
+                  </button>
+                </template>
+              </NeoMenu>
+            </div>
           </template>
         </NeoSheetHeader>
+
         <div
           class="compose-sheet__body"
           data-keyboard-scroll
           @focusin="onFocusField"
         >
-          <!-- Quotes render their card inside RealComposeBox (below the text) -->
-          <article v-if="sheet.contextPost && !sheet.quoteUrl" class="compose-sheet__context">
-            <img
-              v-if="sheet.contextPost.avatar"
-              :src="sheet.contextPost.avatar"
-              alt=""
-              class="compose-sheet__context-avatar"
-            />
-            <div class="compose-sheet__context-body">
-              <p class="compose-sheet__context-meta">
-                <strong>{{ sheet.contextPost.name }}</strong>
-                <span>@{{ sheet.contextPost.handle }}</span>
-              </p>
-              <p
-                class="compose-sheet__context-text"
-                :class="{ 'compose-sheet__context-text--collapsed': !contextExpanded }"
-              >
-                {{ sheet.contextPost.text }}
-              </p>
-              <button
-                v-if="sheet.contextPost.text.length > 120"
-                type="button"
-                class="compose-sheet__context-toggle"
-                :aria-expanded="contextExpanded"
-                @click="contextExpanded = !contextExpanded"
-              >
-                {{ contextExpanded ? 'Show less' : 'Show more' }}
-              </button>
-            </div>
-          </article>
           <RealComposeBox
             ref="composeRef"
             :key="sheet.instanceKey"
+            threads-layout
             submit-in-header
             :initial-text="sheet.initialText || undefined"
             :initial-spoiler="sheet.initialSpoiler || undefined"
             :draft-slot="sheet.draftSlot || undefined"
             :initial-visibility="sheet.initialVisibility || undefined"
             :initial-group-tag="sheet.groupTag || undefined"
-            :placeholder="sheet.placeholder || undefined"
-            :title="sheet.title || undefined"
+            :placeholder="replyPlaceholder"
+            :title="sheetTitle"
             :in-reply-to-id="sheet.inReplyToId || undefined"
             :quote-url="sheet.quoteUrl || undefined"
             :quote-context="sheet.contextPost && sheet.quoteUrl ? sheet.contextPost : undefined"
+            :reply-context="sheet.contextPost && !sheet.quoteUrl ? sheet.contextPost : undefined"
+            :mention-accts="sheet.mentionAccts || undefined"
             :accept-handoff="!sheet.inReplyToId && !sheet.quoteUrl"
             @posted="onPosted"
             @scheduled="onScheduled"
-            @vue:updated="syncHeaderActions"
+            @vue:updated="syncFooterActions"
           />
         </div>
+
+        <footer class="compose-sheet__footer">
+          <button
+            type="button"
+            class="compose-sheet__post-options"
+            @click="openPostOptions"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+              <line x1="4" y1="21" x2="4" y2="14" />
+              <line x1="4" y1="10" x2="4" y2="3" />
+              <line x1="12" y1="21" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12" y2="3" />
+              <line x1="20" y1="21" x2="20" y2="16" />
+              <line x1="20" y1="12" x2="20" y2="3" />
+              <line x1="1" y1="14" x2="7" y2="14" />
+              <line x1="9" y1="8" x2="15" y2="8" />
+              <line x1="17" y1="16" x2="23" y2="16" />
+            </svg>
+            <span>Post Options</span>
+          </button>
+          <button
+            type="button"
+            class="compose-sheet__footer-post neo-btn neo-btn--primary neo-btn--sm"
+            :disabled="!footerCanPost"
+            :aria-busy="footerPosting || undefined"
+            @click="onFooterPost"
+          >
+            {{ footerSubmitLabel }}
+          </button>
+        </footer>
       </template>
     </div>
   </NeoSheet>
+
+  <ComposeDraftsSheet :open="draftsOpen" @close="draftsOpen = false" />
 </template>
 
 <style lang="scss" scoped>
 .compose-sheet__inner {
-  --compose-pad-x: 0.75rem;
+  --compose-pad-x: 0.85rem;
   --compose-pad-y: 0.65rem;
   display: flex;
   flex-direction: column;
@@ -270,15 +348,79 @@ const onPick = async (account: mastodon.v1.Account) => {
   overflow: hidden;
 }
 
-.compose-sheet__header-post {
-  min-width: 4.25rem;
-  min-height: 36px;
-  padding-inline: 0.9rem;
-  font-weight: 700;
+.compose-sheet__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.compose-sheet__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--neo-radius-sm, 4px);
+  background: transparent;
+  color: var(--neo-text-secondary);
+  cursor: pointer;
   touch-action: manipulation;
 
-  &:disabled {
-    opacity: 0.45;
+  &:hover,
+  &:focus-visible {
+    background: var(--neo-bg-hover);
+    color: var(--neo-text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+}
+
+.compose-sheet__more {
+  :deep(.neo-menu__trigger) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    border-radius: var(--neo-radius-sm, 4px);
+    background: transparent;
+    color: var(--neo-text-secondary);
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--neo-bg-hover);
+      color: var(--neo-text-primary);
+    }
+  }
+}
+
+.compose-sheet__menu-item {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 0.55rem 0.85rem;
+  border: none;
+  background: transparent;
+  color: var(--neo-text-primary);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--neo-bg-hover);
+  }
+
+  &--danger {
+    color: var(--neo-danger, #e5484d);
   }
 }
 
@@ -286,39 +428,15 @@ const onPick = async (account: mastodon.v1.Account) => {
   --compose-pad-x: 0.65rem;
   --compose-pad-y: 0.4rem;
 
-  // Soft keyboard — reclaim chrome so the textarea + Post bar stay usable
-  .compose-sheet__context {
-    margin-bottom: 0.4rem;
-    padding: 0.4rem 0.5rem;
-    gap: 0.4rem;
-  }
-
-  .compose-sheet__context-avatar {
-    width: 28px;
-    height: 28px;
-  }
-
-  .compose-sheet__context-text,
-  .compose-sheet__context-text--collapsed {
-    -webkit-line-clamp: 1;
-  }
-
-  .compose-sheet__context-toggle {
-    display: none;
-  }
-
-  :deep(.compose-header) {
-    gap: 0.4rem;
+  :deep(.compose-header),
+  :deep(.compose-thread__author) {
+    gap: 0.35rem;
     margin-bottom: 0.1rem;
   }
 
   :deep(.compose-avatar) {
     width: 28px;
     height: 28px;
-  }
-
-  :deep(.compose-title) {
-    font-size: 0.8125rem;
   }
 
   :deep(.compose-input-wrap),
@@ -335,27 +453,14 @@ const onPick = async (account: mastodon.v1.Account) => {
     grid-template-columns: 56px minmax(0, 1fr);
   }
 
-  :deep(.compose-media__alt-input) {
-    min-height: 2rem;
-    max-height: 3rem;
-  }
-
   :deep(.compose-handoff) {
     padding: 0.3rem 0.45rem;
     font-size: 0.75rem;
   }
 
-  :deep(.compose-footer) {
-    padding: 0.35rem var(--compose-pad-x);
-    padding-bottom: 0.35rem;
-    gap: 0.35rem;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
-  :deep(.compose-language),
-  :deep(.compose-media-count) {
-    display: none;
+  .compose-sheet__footer {
+    padding: 0.4rem var(--compose-pad-x);
+    padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
   }
 
   :deep(.compose-counter) {
@@ -370,7 +475,7 @@ const onPick = async (account: mastodon.v1.Account) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--compose-pad-y) var(--compose-pad-x);
-  padding-bottom: 0;
+  padding-bottom: 0.5rem;
   -webkit-overflow-scrolling: touch;
   flex: 1;
   min-height: 0;
@@ -389,105 +494,75 @@ const onPick = async (account: mastodon.v1.Account) => {
 
   :deep(.compose-input-wrap) {
     flex: 1 1 auto;
-    min-height: 7rem;
+    min-height: 5.5rem;
   }
 
   :deep(.compose-input) {
     flex: 1;
-    min-height: 7rem;
+    min-height: 5.5rem;
     max-height: none;
-    /* Absolute 16px — root rem is 15px; iOS zooms anything smaller */
     font-size: max(16px, 1rem);
     line-height: 1.45;
   }
 
   :deep(.compose-footer) {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    margin-top: auto;
-    margin-inline: calc(-1 * var(--compose-pad-x));
-    padding: 0.5rem var(--compose-pad-x);
-    padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-    background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-top: 1px solid var(--neo-border-color);
+    position: static;
+    margin: 0;
+    padding: 0.35rem 0 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-top: none;
   }
 }
 
-.compose-sheet__context-text--collapsed {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.compose-sheet__context-toggle {
-  min-height: 24px;
-  margin: 0.25rem 0 0;
-  padding: 0;
-  border: none;
-  background: none;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--neo-link);
-  cursor: pointer;
-}
-
-.compose-sheet__context {
+.compose-sheet__footer {
   display: flex;
-  gap: 0.65rem;
-  margin: 0 0 0.75rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: 12px;
-  background: var(--neo-bg-tertiary);
-  border: 1px solid var(--neo-border-color);
-}
-
-.compose-sheet__context-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  object-fit: cover;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   flex-shrink: 0;
+  padding: 0.65rem var(--compose-pad-x);
+  padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--neo-border-color);
+  background: color-mix(in srgb, var(--neo-bg-primary) 96%, transparent);
 }
 
-.compose-sheet__context-body {
-  min-width: 0;
-  flex: 1;
-}
-
-.compose-sheet__context-meta {
-  margin: 0 0 0.25rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-
-  strong {
-    color: var(--neo-text-primary);
-    font-weight: 600;
-  }
-
-  // Long remote handles wrap at 320px instead of widening the sheet
-  strong,
-  span {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-}
-
-.compose-sheet__context-text {
-  overflow-wrap: anywhere;
-  margin: 0;
-  font-size: 0.875rem;
-  line-height: 1.4;
+.compose-sheet__post-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 40px;
+  padding: 0.35rem 0.15rem;
+  border: none;
+  background: transparent;
   color: var(--neo-text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--neo-text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+}
+
+.compose-sheet__footer-post {
+  min-width: 4.5rem;
+  min-height: 36px;
+  padding-inline: 1rem;
+  font-weight: 700;
+  border-radius: 10px;
+  touch-action: manipulation;
+
+  &:disabled {
+    opacity: 0.4;
+  }
 }
 </style>

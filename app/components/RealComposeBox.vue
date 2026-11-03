@@ -9,6 +9,10 @@ import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
 import { cycleActiveAccountWithToast } from '~/composables/useSwitchAccount'
+import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
+import { useToastStore } from '~/stores/toast'
+import { emitComposedStatus } from '~/composables/useComposedStatus'
+import type { ComposeContextPost } from '~/stores/composeSheet'
 import {
   COMPOSE_MEDIA_ACCEPT,
   COMPOSE_PREVIEWABLE_IMAGE,
@@ -81,8 +85,12 @@ const props = withDefaults(
      * ChatComposer pattern so the field stays empty and readable.
      */
     mentionAccts?: string[]
-    /** Hide the footer Post button — parent shows it in sheet header instead */
+    /** Hide the footer Post button — parent shows it in sheet footer/header instead */
     submitInHeader?: boolean
+    /** Threads New thread layout: author rail, slim tools, Add to thread, context card */
+    threadsLayout?: boolean
+    /** Parent post preview under the composer (reply sheet) */
+    replyContext?: ComposeContextPost | null
   }>(),
   {
     placeholder: "What's new?",
@@ -92,6 +100,8 @@ const props = withDefaults(
     acceptHandoff: true,
     disabled: false,
     submitInHeader: false,
+    threadsLayout: false,
+    replyContext: null,
   },
 )
 
@@ -106,6 +116,20 @@ const instancesStore = useInstancesStore()
 const settingsStore = useSettingsStore()
 const handoffStore = useComposeHandoffStore()
 const overlayStore = useOverlayStore()
+const toastStore = useToastStore()
+const { open: openAccountSwitcher } = useAccountSwitcher()
+
+type ThreadSegment = { id: string; text: string }
+const extraSegments = ref<ThreadSegment[]>([])
+const postOptionsOpen = ref(false)
+const emojiPickerOpen = ref(false)
+const contextExpanded = ref(false)
+const COMMON_EMOJI = ['😀', '😂', '🥰', '😍', '🔥', '👍', '👏', '🙌', '💯', '✨', '🎉', '❤️', '💜', '👀', '😅', '🙏']
+
+const newSegmentId = () =>
+  typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `seg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
 const content = ref(props.initialText || '')
 const spoilerText = ref(props.initialSpoiler || '')
@@ -201,6 +225,32 @@ const isScheduledResult = (
 /** Current post is a private mention/DM (locked or user-chosen) */
 const isDirectCompose = computed(
   () => isLockedDirect.value || visibility.value === 'direct',
+)
+
+const canAddSegment = computed(
+  () =>
+    props.threadsLayout &&
+    !props.compact &&
+    !isDirectCompose.value &&
+    !hasSchedule.value &&
+    !isPosting.value,
+)
+
+const addThreadSegment = () => {
+  if (!canAddSegment.value) return
+  extraSegments.value = [...extraSegments.value, { id: newSegmentId(), text: '' }]
+}
+
+const removeThreadSegment = (id: string) => {
+  extraSegments.value = extraSegments.value.filter((s) => s.id !== id)
+}
+
+const filledExtraSegments = computed(() =>
+  extraSegments.value.map((s) => ({ ...s, text: s.text.trim() })).filter((s) => s.text.length > 0),
+)
+
+const hasExtraSegmentDraft = computed(() =>
+  extraSegments.value.some((s) => s.text.trim().length > 0),
 )
 
 const showGroupPicker = computed(
@@ -518,9 +568,12 @@ const missingAltCount = computed(
 )
 const canPost = computed(() => {
   const hasText = content.value.trim().length > 0
+  const hasExtras = filledExtraSegments.value.length > 0
   const hasQuote = !!props.quoteUrl
+  // Multi-segment: first segment may be media-only; extras need their own text
+  const hasBody = hasText || hasMedia.value || hasQuote || hasExtras
   return (
-    (hasText || hasMedia.value || hasQuote) &&
+    hasBody &&
     !isOverLimit.value &&
     !isPosting.value &&
     !isUploading.value &&
@@ -528,6 +581,7 @@ const canPost = computed(() => {
     pollValid.value &&
     !(showPoll.value && hasMedia.value) &&
     (!showPoll.value || hasText) &&
+    !(hasSchedule.value && hasExtras) &&
     allReady.value &&
     instancesStore.isAuthenticated
   )
@@ -549,13 +603,54 @@ const canSwitchPostingAccount = computed(
     instancesStore.authenticatedInstances.length > 1 &&
     !hasMedia.value &&
     !isUploading.value &&
-    !props.inReplyToId,
+    !props.inReplyToId &&
+    !hasExtraSegmentDraft.value,
 )
 
 const cyclePostingAccount = () => {
   if (!canSwitchPostingAccount.value) return
   cycleActiveAccountWithToast()
 }
+
+const openPostingAccountPicker = () => {
+  if (!canSwitchPostingAccount.value) return
+  openAccountSwitcher()
+}
+
+const insertEmoji = (emoji: string) => {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? start
+  content.value = `${content.value.slice(0, start)}${emoji}${content.value.slice(end)}`
+  emojiPickerOpen.value = false
+  nextTick(() => {
+    const caret = start + emoji.length
+    ta?.focus()
+    ta?.setSelectionRange(caret, caret)
+  })
+}
+
+const openPostOptions = () => {
+  postOptionsOpen.value = true
+}
+
+const closePostOptions = () => {
+  postOptionsOpen.value = false
+}
+
+watch(hasSchedule, (on) => {
+  if (on && extraSegments.value.length) {
+    // Scheduling is single-segment only — drop empty trailers, keep text as toast if needed
+    const kept = filledExtraSegments.value
+    if (kept.length) {
+      toastStore.show({
+        message: 'Scheduling posts one segment at a time — extra thread parts were cleared.',
+        duration: 4500,
+      })
+    }
+    extraSegments.value = []
+  }
+})
 
 watch([characterCount, isOverLimit, isNearLimit], () => {
   if (isOverLimit.value) {
@@ -621,6 +716,9 @@ const resetForm = () => {
     : null
   clearAttachments()
   resetPoll()
+  extraSegments.value = []
+  postOptionsOpen.value = false
+  emojiPickerOpen.value = false
   error.value = null
   closeMentions()
 }
@@ -788,6 +886,21 @@ const handlePost = async () => {
       throw new Error(scheduleProblem.value || 'Pick a valid schedule time')
     }
 
+    const chain = filledExtraSegments.value
+    if (hasSchedule.value && chain.length) {
+      throw new Error('Clear the schedule or remove extra thread parts before posting')
+    }
+
+    // First segment may be media/quote-only; extras are text-only follow-ups
+    if (!body.trim() && !mediaIds.value.length && !quote && !chain.length) {
+      throw new Error('Write something or add a photo')
+    }
+    if (!body.trim() && !mediaIds.value.length && !quote && chain.length) {
+      // Promote first extra into the lead post when the main field is empty
+      body = chain[0]!.text
+      chain.shift()
+    }
+
     const quotedStatusId = props.quoteContext?.id?.trim() || undefined
     const postOpts = {
       visibility: postVisibility,
@@ -824,15 +937,59 @@ const handlePost = async () => {
         throw e
       }
     }
-    clearDraft()
-    resetForm()
+
     if (isScheduledResult(result)) {
+      clearDraft()
+      resetForm()
       announcePosted(`Scheduled for ${formatScheduleAnnounce(result.scheduledAt)}`)
       emit('scheduled', result)
-    } else {
-      emit('posted', result)
-      announcePosted(props.inReplyToId ? 'Reply posted' : 'Posted')
+      return
     }
+
+    let lastStatus = result
+    // Fan-out every segment to timelines; emit `posted` once so the sheet closes once
+    emitComposedStatus(lastStatus)
+
+    // Threads "Add to thread" — each following segment replies to the previous
+    let postedCount = 1
+    for (const seg of chain) {
+      try {
+        const next = await statusStore.postStatus(seg.text, {
+          visibility: postVisibility,
+          inReplyToId: lastStatus.id,
+          language: postLanguage.value || undefined,
+        })
+        if (isScheduledResult(next)) break
+        lastStatus = next
+        emitComposedStatus(lastStatus)
+        postedCount += 1
+      } catch (e: unknown) {
+        toastStore.show({
+          message: `Posted ${postedCount} part${postedCount === 1 ? '' : 's'}, but the next one failed. Check your thread.`,
+          duration: 7000,
+        })
+        error.value = mapComposeError(e, {
+          inReplyToId: lastStatus.id,
+          hasMedia: false,
+        })
+        // Still close/reset — earlier parts already live
+        clearDraft()
+        resetForm()
+        emit('posted', lastStatus)
+        return
+      }
+    }
+
+    clearDraft()
+    resetForm()
+    emit('posted', lastStatus)
+    announcePosted(
+      postedCount > 1
+        ? `Posted ${postedCount} parts`
+        : props.inReplyToId
+          ? 'Reply posted'
+          : 'Posted',
+    )
     nextTick(() => {
       textareaRef.value?.focus()
       if (props.initialText && content.value === props.initialText) {
@@ -1034,23 +1191,31 @@ defineExpose({
   canPost,
   isPosting,
   submitLabel,
+  openPostOptions,
   /** Anything the user would lose by closing — own text, CW, attachments, poll, or schedule */
   isDirty: computed(
     () =>
       hasOwnContent.value ||
+      hasExtraSegmentDraft.value ||
       hasMedia.value ||
       (showCW.value && !!spoilerText.value.trim()) ||
       (showPoll.value && filledPollOptions.value.length > 0) ||
       hasSchedule.value,
   ),
   /** Text or CW a draft can actually keep */
-  hasDraftText: computed(() => hasOwnContent.value || (showCW.value && !!spoilerText.value.trim())),
+  hasDraftText: computed(
+    () =>
+      hasOwnContent.value ||
+      hasExtraSegmentDraft.value ||
+      (showCW.value && !!spoilerText.value.trim()),
+  ),
   /** Edits a text-only draft would drop (named for the close dialog) */
   unsavedExtras: computed(() => {
     const out: string[] = []
     if (hasMedia.value) out.push('attachments')
     if (showPoll.value && filledPollOptions.value.length > 0) out.push('poll')
     if (hasSchedule.value) out.push('scheduled time')
+    if (hasExtraSegmentDraft.value) out.push('extra thread parts')
     return out
   }),
   /**
@@ -1074,6 +1239,7 @@ defineExpose({
       'compose--compact': compact,
       'compose--expanded': compactExpanded,
       'compose--header-submit': submitInHeader,
+      'compose--threads': threadsLayout && !compact,
     }"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
@@ -1156,6 +1322,221 @@ defineExpose({
       </div>
     </div>
 
+    <template v-else-if="threadsLayout">
+      <div class="compose-thread" @click.stop>
+        <div class="compose-thread__rail" aria-hidden="true">
+          <img
+            v-if="instancesStore.userAvatar"
+            :src="instancesStore.userAvatar"
+            alt=""
+            class="compose-avatar neo-avatar"
+          />
+          <div
+            v-else
+            class="compose-avatar compose-avatar--placeholder neo-avatar"
+          />
+          <div
+            v-if="canAddSegment || extraSegments.length || replyContext || (quoteUrl && quoteContext)"
+            class="compose-thread__line"
+          />
+        </div>
+
+        <div class="compose-thread__main">
+          <div class="compose-thread__author">
+            <button
+              v-if="instancesStore.authenticatedInstances.length > 1"
+              type="button"
+              class="compose-title compose-title--btn"
+              title="Switch account"
+              aria-label="Switch posting account"
+              :disabled="!canSwitchPostingAccount"
+              @click="openPostingAccountPicker"
+            >
+              <span>{{ postingAs || instancesStore.userDisplayName || 'You' }}</span>
+              <NeoIcon name="chevron-down" :size="14" :stroke="2" />
+            </button>
+            <span v-else class="compose-title">
+              {{ postingAs || instancesStore.userDisplayName || title }}
+            </span>
+            <ComposeGroupPicker
+              v-if="showGroupPicker"
+              v-model="selectedGroupTag"
+              inline
+            />
+          </div>
+
+          <div class="compose-input-wrap">
+            <textarea
+              ref="textareaRef"
+              v-model="content"
+              class="compose-input neo-input"
+              :placeholder="placeholder"
+              :rows="3"
+              enterkeyhint="enter"
+              autocapitalize="sentences"
+              :readonly="inputLocked"
+              :aria-busy="isPosting || isUploading || props.disabled || undefined"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="mentionListShown"
+              :aria-controls="mentionListShown ? mentionListId : undefined"
+              :aria-activedescendant="mentionListShown ? activeMentionId : undefined"
+              :aria-invalid="isOverLimit"
+              :aria-label="composeAriaLabel"
+              :aria-keyshortcuts="submitKeyshortcuts"
+              @focus="onComposeFocus"
+              @blur="composeFocused = false"
+              @paste="onPaste"
+              @keydown="onKeydown"
+              @input="onComposeInput"
+              @click="syncMentions()"
+              @keyup="onMentionKeyup"
+            />
+
+            <ComposeAutocomplete
+              v-if="mentionOpen"
+              :id="mentionListId"
+              :items="suggestions"
+              :kind="suggestionKind"
+              :searching="mentionSearching"
+              :outcome="mentionOutcome"
+              :active-index="mentionIndex"
+              :flip-up="mentionFlipUp"
+              @select="insertSuggestion"
+            />
+          </div>
+
+          <div class="compose-thread__tools">
+            <input
+              ref="fileInputRef"
+              type="file"
+              class="compose-file"
+              tabindex="-1"
+              aria-hidden="true"
+              :accept="COMPOSE_MEDIA_ACCEPT"
+              multiple
+              @change="onFilePicked"
+            />
+            <button
+              type="button"
+              class="compose-tool"
+              aria-label="Add photo"
+              title="Add photo"
+              :disabled="!canAddMore || isPosting || showPoll"
+              @click="openFilePicker"
+            >
+              <NeoIcon name="image" :size="18" :stroke="1.75" />
+            </button>
+            <div class="compose-emoji">
+              <button
+                type="button"
+                class="compose-tool"
+                :class="{ 'compose-tool--active': emojiPickerOpen }"
+                aria-label="Add emoji"
+                title="Add emoji"
+                :aria-expanded="emojiPickerOpen"
+                :disabled="isPosting"
+                @click="emojiPickerOpen = !emojiPickerOpen"
+              >
+                <span aria-hidden="true">☺</span>
+              </button>
+              <div v-if="emojiPickerOpen" class="compose-emoji__panel" role="listbox" aria-label="Emoji">
+                <button
+                  v-for="emoji in COMMON_EMOJI"
+                  :key="emoji"
+                  type="button"
+                  class="compose-emoji__item"
+                  role="option"
+                  :aria-label="emoji"
+                  @click="insertEmoji(emoji)"
+                >
+                  {{ emoji }}
+                </button>
+              </div>
+            </div>
+            <button
+              v-if="instancesStore.canCreatePolls || showPoll"
+              type="button"
+              class="compose-tool"
+              :class="{ 'compose-tool--active': showPoll }"
+              :aria-label="showPoll ? 'Remove poll' : 'Add poll'"
+              :title="hasMedia && !showPoll ? 'Polls can’t include media' : showPoll ? 'Remove poll' : 'Add poll'"
+              :aria-pressed="showPoll"
+              :disabled="isPosting || (hasMedia && !showPoll)"
+              @click="togglePoll"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true">
+                <path d="M4 6h10M4 12h16M4 18h7" />
+              </svg>
+            </button>
+            <span
+              class="compose-counter compose-counter--inline"
+              :class="{
+                'compose-counter--warning': isNearLimit,
+                'compose-counter--error': isOverLimit,
+                'compose-counter--quiet': !isNearLimit && !isOverLimit,
+              }"
+              aria-hidden="true"
+            >
+              {{ characterCount }}/{{ effectiveMaxLength }}
+            </span>
+          </div>
+
+          <div
+            v-for="(seg, segIdx) in extraSegments"
+            :key="seg.id"
+            class="compose-thread__segment"
+          >
+            <div class="compose-thread__segment-head">
+              <img
+                v-if="instancesStore.userAvatar"
+                :src="instancesStore.userAvatar"
+                alt=""
+                class="compose-avatar compose-avatar--sm neo-avatar"
+              />
+              <span class="compose-thread__segment-label">Part {{ segIdx + 2 }}</span>
+              <button
+                type="button"
+                class="compose-thread__remove"
+                :disabled="isPosting"
+                :aria-label="`Remove thread part ${segIdx + 2}`"
+                @click="removeThreadSegment(seg.id)"
+              >
+                Remove
+              </button>
+            </div>
+            <div class="compose-input-wrap compose-input-wrap--segment">
+              <textarea
+                v-model="seg.text"
+                class="compose-input neo-input"
+                placeholder="Say more…"
+                :rows="2"
+                :readonly="inputLocked"
+                :aria-label="`Thread part ${segIdx + 2}`"
+                @keydown="onKeydown"
+              />
+            </div>
+          </div>
+
+          <button
+            v-if="canAddSegment"
+            type="button"
+            class="compose-thread__add"
+            :disabled="isPosting"
+            @click="addThreadSegment"
+          >
+            <img
+              v-if="instancesStore.userAvatar"
+              :src="instancesStore.userAvatar"
+              alt=""
+              class="compose-avatar compose-avatar--sm neo-avatar"
+            />
+            <span>Add to thread</span>
+          </button>
+        </div>
+      </div>
+    </template>
+
     <template v-else>
       <div v-if="!inReplyToId && !quoteUrl" class="compose-header" @click.stop>
         <img
@@ -1230,22 +1611,6 @@ defineExpose({
         />
       </div>
     </template>
-
-    <article v-if="quoteUrl && quoteContext" class="compose-quote" @click.stop>
-      <img
-        v-if="quoteContext.avatar"
-        :src="quoteContext.avatar"
-        alt=""
-        class="compose-quote__avatar"
-      />
-      <div class="compose-quote__body">
-        <p class="compose-quote__meta">
-          <strong>{{ quoteContext.name }}</strong>
-          <span>@{{ quoteContext.handle }}</span>
-        </p>
-        <p class="compose-quote__text">{{ quoteContext.text }}</p>
-      </div>
-    </article>
 
     <div v-if="showCW" class="compose-cw" @click.stop>
       <input
@@ -1429,6 +1794,56 @@ defineExpose({
       </div>
     </div>
 
+    <article v-if="quoteUrl && quoteContext" class="compose-quote" @click.stop>
+      <img
+        v-if="quoteContext.avatar"
+        :src="quoteContext.avatar"
+        alt=""
+        class="compose-quote__avatar"
+      />
+      <div class="compose-quote__body">
+        <p class="compose-quote__meta">
+          <strong>{{ quoteContext.name }}</strong>
+          <span>@{{ quoteContext.handle }}</span>
+        </p>
+        <p class="compose-quote__text">{{ quoteContext.text }}</p>
+      </div>
+    </article>
+
+    <article
+      v-else-if="threadsLayout && replyContext"
+      class="compose-quote compose-quote--reply"
+      @click.stop
+    >
+      <img
+        v-if="replyContext.avatar"
+        :src="replyContext.avatar"
+        alt=""
+        class="compose-quote__avatar"
+      />
+      <div class="compose-quote__body">
+        <p class="compose-quote__meta">
+          <strong>{{ replyContext.name }}</strong>
+          <span>@{{ replyContext.handle }}</span>
+        </p>
+        <p
+          class="compose-quote__text"
+          :class="{ 'compose-quote__text--collapsed': !contextExpanded && replyContext.text.length > 160 }"
+        >
+          {{ replyContext.text }}
+        </p>
+        <button
+          v-if="replyContext.text.length > 160"
+          type="button"
+          class="compose-quote__toggle"
+          :aria-expanded="contextExpanded"
+          @click="contextExpanded = !contextExpanded"
+        >
+          {{ contextExpanded ? 'Show less' : 'Show more' }}
+        </button>
+      </div>
+    </article>
+
     <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ postAnnounce || uploadAnnounce }}</p>
 
     <div v-if="accountSwitchNotice" class="compose-handoff" role="status" @click.stop>
@@ -1460,7 +1875,7 @@ defineExpose({
       @click.stop
     >{{ error }}</div>
 
-    <div v-if="!compact || compactExpanded" class="compose-footer" @click.stop>
+    <div v-if="(!compact || compactExpanded) && !threadsLayout" class="compose-footer" @click.stop>
       <div class="compose-tools">
         <input
           ref="fileInputRef"
@@ -1619,6 +2034,132 @@ defineExpose({
         </button>
       </div>
     </div>
+
+    <!-- Threads sheet: Post Options (visibility / CW / schedule / language / sensitive) -->
+    <Teleport to="body">
+      <Transition appear name="action-sheet">
+        <div
+          v-if="postOptionsOpen"
+          class="compose-options"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="compose-options-title"
+          @click.self="closePostOptions"
+        >
+          <button
+            type="button"
+            class="compose-options__backdrop"
+            tabindex="-1"
+            aria-hidden="true"
+            @click="closePostOptions"
+          />
+          <div class="compose-options__panel" @click.stop>
+            <p id="compose-options-title" class="compose-options__title">Post Options</p>
+
+            <div v-if="!isLockedDirect" class="compose-options__field">
+              <label for="compose-opt-visibility">Visibility</label>
+              <select
+                id="compose-opt-visibility"
+                v-model="visibility"
+                class="compose-visibility-select"
+                :disabled="isPosting"
+              >
+                <option v-for="opt in visibilityOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.icon }} {{ opt.label }}
+                </option>
+              </select>
+            </div>
+            <p v-else class="compose-options__hint">
+              <NeoIcon name="message" :size="14" :stroke="2" />
+              Direct — only mentioned people can see this
+            </p>
+
+            <div class="compose-options__row">
+              <button
+                type="button"
+                class="compose-options__toggle"
+                :class="{ 'compose-options__toggle--on': showCW }"
+                :aria-pressed="showCW"
+                :disabled="isPosting"
+                @click="toggleCW"
+              >
+                Content warning
+              </button>
+              <button
+                type="button"
+                class="compose-options__toggle"
+                :class="{ 'compose-options__toggle--on': markSensitive }"
+                :aria-pressed="markSensitive"
+                :disabled="isPosting || !hasMedia"
+                @click="markSensitive = !markSensitive"
+              >
+                Mark media sensitive
+              </button>
+            </div>
+
+            <div v-if="showCW" class="compose-options__field">
+              <label for="compose-opt-cw">Warning text</label>
+              <input
+                id="compose-opt-cw"
+                v-model="spoilerText"
+                type="text"
+                class="neo-input"
+                placeholder="Content warning"
+                :readonly="isPosting"
+              />
+            </div>
+
+            <div v-if="instancesStore.canSchedulePosts" class="compose-options__field">
+              <label for="compose-opt-schedule">Schedule</label>
+              <div class="compose-schedule">
+                <input
+                  id="compose-opt-schedule"
+                  v-model="scheduledLocal"
+                  type="datetime-local"
+                  class="compose-schedule-input"
+                  :min="scheduleMinLocal"
+                  :disabled="isPosting || extraSegments.length > 0"
+                  :aria-label="hasSchedule ? 'Scheduled post time' : 'Schedule post for later'"
+                />
+                <button
+                  v-if="hasSchedule"
+                  type="button"
+                  class="compose-schedule__clear"
+                  :disabled="isPosting"
+                  aria-label="Clear schedule — post now"
+                  @click="clearSchedule"
+                >
+                  ×
+                </button>
+              </div>
+              <p v-if="extraSegments.length" class="compose-options__hint">
+                Scheduling is available for a single post — remove extra thread parts first.
+              </p>
+              <p v-else-if="hasSchedule" class="compose-options__hint">{{ scheduleZone }}</p>
+              <p v-if="scheduleProblem" class="compose-options__hint" role="alert">{{ scheduleProblem }}</p>
+            </div>
+
+            <div v-if="!isDirectCompose" class="compose-options__field">
+              <label for="compose-opt-lang">Language</label>
+              <select
+                id="compose-opt-lang"
+                v-model="postLanguage"
+                class="compose-language-select"
+                :disabled="isPosting"
+              >
+                <option v-for="opt in languageOptions" :key="opt.code" :value="opt.code">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+
+            <button type="button" class="compose-options__done neo-btn neo-btn--primary" @click="closePostOptions">
+              Done
+            </button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -2386,6 +2927,21 @@ defineExpose({
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+
+  &--collapsed {
+    -webkit-line-clamp: 4;
+  }
+}
+
+.compose-quote__toggle {
+  margin-top: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-link);
+  cursor: pointer;
 }
 
 .compose-language-select {
@@ -2640,5 +3196,306 @@ defineExpose({
 .compose-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.compose--threads {
+  gap: 0.65rem;
+
+  &:focus-within {
+    box-shadow: none;
+  }
+}
+
+.compose-thread {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: start;
+}
+
+.compose-thread__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100%;
+}
+
+.compose-thread__line {
+  flex: 1;
+  width: 2px;
+  min-height: 1.5rem;
+  margin-top: 0.35rem;
+  border-radius: 1px;
+  background: var(--neo-border-color);
+}
+
+.compose-thread__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.compose-thread__author {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.compose-avatar--placeholder {
+  background: var(--neo-bg-tertiary);
+}
+
+.compose-avatar--sm {
+  width: 24px;
+  height: 24px;
+}
+
+.compose-title--btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.compose-thread__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+  margin-top: 0.1rem;
+}
+
+.compose-counter--inline {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+
+.compose-emoji {
+  position: relative;
+}
+
+.compose-emoji__panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border-radius: 12px;
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--neo-text-primary) 14%, transparent);
+}
+
+.compose-emoji__item {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 1.1rem;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--neo-bg-hover);
+  }
+}
+
+.compose-thread__segment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 12px;
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-secondary);
+}
+
+.compose-thread__segment-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.compose-thread__segment-label {
+  flex: 1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+}
+
+.compose-input-wrap--segment .compose-input {
+  min-height: 3rem;
+}
+
+.compose-thread__remove {
+  margin-left: auto;
+  padding: 0.15rem 0;
+  border: none;
+  background: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--neo-danger, #e5484d);
+  }
+}
+
+.compose-thread__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.15rem;
+  padding: 0.25rem 0;
+  border: none;
+  background: transparent;
+  color: var(--neo-text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--neo-text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.compose-options {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.compose-options__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: var(--neo-bg-overlay);
+  cursor: pointer;
+}
+
+.compose-options__panel {
+  position: relative;
+  z-index: 1;
+  margin: 0 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.75rem 0.85rem 0.85rem;
+  background: var(--neo-bg-card);
+  border: 1px solid var(--neo-border-color);
+  border-radius: 16px;
+  max-height: calc(100dvh - 1rem - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+
+  @media (min-width: 640px) {
+    align-self: center;
+    width: 100%;
+    max-width: 22rem;
+    margin-bottom: 1.5rem;
+  }
+}
+
+.compose-options__title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--neo-text-muted);
+}
+
+.compose-options__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+
+  label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neo-text-secondary);
+  }
+
+  select,
+  input {
+    min-height: 40px;
+    width: 100%;
+  }
+}
+
+.compose-options__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.compose-options__toggle {
+  min-height: 36px;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &--on {
+    border-color: color-mix(in srgb, var(--neo-accent) 45%, transparent);
+    background: color-mix(in srgb, var(--neo-accent) 14%, transparent);
+    color: var(--neo-accent);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.compose-options__hint {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+}
+
+.compose-options__done {
+  margin-top: 0.25rem;
+  min-height: 40px;
+}
+
+.action-sheet-enter-active,
+.action-sheet-leave-active {
+  transition: opacity 0.18s ease;
+
+  .compose-options__panel {
+    transition: transform 0.22s ease;
+  }
+}
+
+.action-sheet-enter-from,
+.action-sheet-leave-to {
+  opacity: 0;
+
+  .compose-options__panel {
+    transform: translateY(12px);
+  }
 }
 </style>

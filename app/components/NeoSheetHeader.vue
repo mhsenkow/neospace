@@ -2,7 +2,6 @@
 /**
  * Minimal sheet chrome — icon close + short title (+ optional trailing action).
  * Mobile: icon-only close. Desktop (≥1024px): icon + “Cancel”.
- * Trailing slot: Threads-style Post / Send in the header.
  */
 withDefaults(
   defineProps<{
@@ -10,9 +9,12 @@ withDefaults(
     titleId?: string
     /** Hide the title visually (still exposed to AT via the dialog name). */
     titleSrOnly?: boolean
+    /** Center the title (Threads New thread). */
+    centerTitle?: boolean
   }>(),
   {
     titleSrOnly: false,
+    centerTitle: false,
   },
 )
 
@@ -22,7 +24,13 @@ defineEmits<{
 </script>
 
 <template>
-  <header class="neo-sheet-header" :class="{ 'neo-sheet-header--title-sr': titleSrOnly }">
+  <header
+    class="neo-sheet-header"
+    :class="{
+      'neo-sheet-header--title-sr': titleSrOnly,
+      'neo-sheet-header--centered': centerTitle && !titleSrOnly,
+    }"
+  >
     <button
       type="button"
       class="neo-sheet-header__close"
@@ -42,6 +50,7 @@ defineEmits<{
     <div v-if="$slots.trailing" class="neo-sheet-header__trailing">
       <slot name="trailing" />
     </div>
+    <div v-else-if="centerTitle" class="neo-sheet-header__trailing neo-sheet-header__trailing--spacer" aria-hidden="true" />
   </header>
 </template>
 
@@ -54,6 +63,25 @@ defineEmits<{
   padding: 0.2rem 0.4rem 0.2rem 0.2rem;
   border-bottom: 1px solid var(--neo-border-color);
   flex-shrink: 0;
+}
+
+.neo-sheet-header--centered {
+  position: relative;
+
+  .neo-sheet-header__title {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(50%, 12rem);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .neo-sheet-header__trailing--spacer {
+    width: 44px;
+    min-height: 44px;
+    margin-left: auto;
+  }
 }
 
 .neo-sheet-header--title-sr {

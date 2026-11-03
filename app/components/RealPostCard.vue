@@ -109,7 +109,6 @@ import { useOverlayStore } from '~/stores/overlay'
 import { sanitizeDisplayName, sanitizeStatusHtml } from '~/utils/sanitizeHtml'
 import { stripHtml } from '~/utils/stripHtml'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
-import { useMobileViewport } from '~/composables/useBreakpoint'
 import { usePostActions } from '~/composables/usePostActions'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
 import { provenOwnStatus, sameActingAccount, type ActingAccount } from '~/utils/statusOwnership'
@@ -271,7 +270,6 @@ const boostOpen = ref(false)
 
 const prefersReducedMotion = usePrefersReducedMotion()
 const vGifvAutoplay = gifvAutoplay
-const isMobileViewport = useMobileViewport()
 
 /** Long-post collapse — overflow-based toggle (not char-count only) */
 const contentExpanded = ref(false)
@@ -500,12 +498,6 @@ const contextFromStatus = (): ComposeContextPost => {
   }
 }
 
-/** Phone + iPad: open the thread with the floating reply bar (Threads-style) */
-const preferThreadReplyDock = () =>
-  isMobileViewport.value ||
-  (typeof window !== 'undefined' &&
-    window.matchMedia('(hover: none), (pointer: coarse)').matches)
-
 const openReplyComposer = async () => {
   if (!requireAuth() || isOpeningReply.value) return
   isOpeningReply.value = true
@@ -528,18 +520,13 @@ const openReplyComposer = async () => {
     }
     const handle = authorAcct.value || displayStatus.value.account.acct
     const isDm = displayStatus.value.visibility === 'direct'
-    // Touch: land on the thread dock so you type above the keyboard
-    if (!isDm && preferThreadReplyDock()) {
-      await router.push({
-        path: `/status/${replyId}`,
-        query: statusUrl.value ? { url: statusUrl.value } : undefined,
-      })
-      return
-    }
+    // Threads-style New thread modal with parent context (dock remains on the thread page)
     composeSheet.show({
-      title: isDm ? 'Message' : 'Reply',
-      placeholder: isDm ? `Message @${handle}…` : `Reply to @${handle}…`,
-      initialText: `@${handle} `,
+      title: isDm ? 'Message' : 'New thread',
+      placeholder: isDm ? `Message @${handle}…` : 'Share your thoughts…',
+      // DMs keep the visible @; public replies mention on send (Threads-style empty field)
+      initialText: isDm ? `@${handle} ` : '',
+      mentionAccts: isDm ? undefined : [handle],
       inReplyToId: replyId,
       // Inherit parent visibility so replies to private posts don't go public
       visibility: isDm ? 'direct' : displayStatus.value.visibility,

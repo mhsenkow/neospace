@@ -27,7 +27,8 @@ import { newestIdPerInstance } from '~/stores/edward'
 import { httpStatusFrom, mapErrorToMessage } from '~/utils/friendlyError'
 import { useToastStore } from '~/stores/toast'
 import { useFeedKeyboard } from '~/composables/useFeedKeyboard'
-import { emitComposedStatus, onComposedStatus } from '~/composables/useComposedStatus'
+import { onComposedStatus } from '~/composables/useComposedStatus'
+import { useComposeSheetStore } from '~/stores/composeSheet'
 import { onDeletedStatus } from '~/composables/useDeletedStatus'
 import { dropDeletedStatus, type DeletedStatusEvent } from '~/utils/deletedStatus'
 import { useDeskViewport, useMobileViewport } from '~/composables/useBreakpoint'
@@ -567,8 +568,16 @@ const insertComposedStatus = (status: mastodon.v1.Status) => {
   pendingNew.value = pendingNew.value.filter((s) => statusIdentity(s) !== key)
 }
 
-const onComposePosted = (status: mastodon.v1.Status) => {
-  emitComposedStatus(status)
+const composeSheet = useComposeSheetStore()
+
+const openColumnCompose = () => {
+  if (!instancesStore.isAuthenticated) {
+    router.push('/login')
+    return
+  }
+  composeSheet.show({
+    groupTag: props.column.feedType === 'group' ? props.column.groupTag : undefined,
+  })
 }
 
 /**
@@ -1642,19 +1651,24 @@ onUnmounted(() => {
         <span class="column-ptr__label">{{ pullHint }}</span>
       </div>
 
-      <!-- Compose: desktop first column — Threads-size compact pill -->
+      <!-- Compose: desktop first column — opens Threads-style New thread modal -->
       <div
         v-if="isFirst && instancesStore.isAuthenticated && isDesktop"
         class="column-compose"
       >
-        <LazyRealComposeBox
-          compact
-          :accept-handoff="true"
-          placeholder="What's new?"
-          title="What's new?"
-          :initial-group-tag="column.feedType === 'group' ? column.groupTag : undefined"
-          @posted="onComposePosted"
-        />
+        <button
+          type="button"
+          class="column-compose__launch"
+          @click="openColumnCompose"
+        >
+          <img
+            v-if="instancesStore.userAvatar"
+            :src="instancesStore.userAvatar"
+            alt=""
+            class="column-compose__avatar neo-avatar"
+          />
+          <span class="column-compose__placeholder">What's new?</span>
+        </button>
       </div>
 
       <!-- New posts pill — never auto-jumps the feed -->
@@ -2318,6 +2332,46 @@ onUnmounted(() => {
 .column-compose {
   padding: 0.55rem 0.65rem;
   border-bottom: 1px solid var(--neo-border-color);
+}
+
+.column-compose__launch {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-secondary);
+  color: var(--neo-text-muted);
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--neo-bg-hover);
+    color: var(--neo-text-secondary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+}
+
+.column-compose__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.column-compose__placeholder {
+  font-size: 0.9375rem;
+  font-weight: 500;
 }
 
 .column-state {

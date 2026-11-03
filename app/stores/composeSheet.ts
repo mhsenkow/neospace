@@ -1,6 +1,5 @@
 /**
- * Compose sheet — new post, reply, quote, and DM pick (Threads-style).
- * Desktop still has an inline first-column composer for new posts.
+ * Compose sheet — new post, reply, quote, and DM pick (Threads-style New thread modal).
  */
 
 import { defineStore } from 'pinia'
@@ -37,6 +36,8 @@ interface ComposeSheetState {
   contextPost: ComposeContextPost | null
   /** Threads-style group / hashtag tag for the post */
   groupTag: string | null
+  /** Mentions added on send (not shown in the field) — reply sheet */
+  mentionAccts: string[] | null
   onPosted: ((status: mastodon.v1.Status) => void) | null
 }
 
@@ -55,6 +56,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     quoteUrl: null,
     contextPost: null,
     groupTag: null,
+    mentionAccts: null,
     onPosted: null,
   }),
 
@@ -71,6 +73,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       quoteUrl?: string | null
       contextPost?: ComposeContextPost | null
       groupTag?: string | null
+      mentionAccts?: string[] | null
       onPosted?: (status: mastodon.v1.Status) => void
     }) {
       const nextReply = opts?.inReplyToId ?? null
@@ -87,13 +90,23 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.draftSlot = nextSlot
       this.initialVisibility = opts?.visibility ?? null
       this.placeholder = opts?.placeholder ?? null
-      this.title = opts?.title ?? null
       this.pickRecipient = !!opts?.pickRecipient
       this.inReplyToId = nextReply
       this.quoteUrl = nextQuote
       this.contextPost = opts?.contextPost ?? null
       this.groupTag = opts?.groupTag ? opts.groupTag.replace(/^#/, '') : null
+      this.mentionAccts = opts?.mentionAccts?.length ? [...opts.mentionAccts] : null
       this.onPosted = opts?.onPosted ?? null
+      // Default chrome title — DMs keep an explicit title from the caller
+      this.title =
+        opts?.title ??
+        (opts?.pickRecipient
+          ? 'New message'
+          : nextReply
+            ? 'New thread'
+            : nextQuote
+              ? 'Quote'
+              : 'New thread')
 
       // Remounting while already open wipes an in-progress Loom draft —
       // only bump when opening fresh or switching reply/quote context
@@ -116,6 +129,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.quoteUrl = null
       this.contextPost = null
       this.groupTag = null
+      this.mentionAccts = null
       // keep onPosted (e.g. navigate into the new conversation)
       this.instanceKey += 1
     },
@@ -148,6 +162,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.quoteUrl = null
       this.contextPost = null
       this.groupTag = null
+      this.mentionAccts = null
       this.onPosted = null
     },
   },
