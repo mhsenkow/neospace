@@ -736,7 +736,6 @@ watch(
       padding-left: 0.5rem;
       padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
 
-      .neo-layout--board&,
       .neo-layout--board & {
         overflow: hidden;
       }
