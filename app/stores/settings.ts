@@ -196,6 +196,10 @@ interface SettingsState {
      * efficient = smallest · balanced = default · original = near-full file
      */
     mediaUploadQuality: 'efficient' | 'balanced' | 'original'
+    /**
+     * Home column: forYou = soft engagement ranking · following = strict chronological
+     */
+    homeFeedMode: 'forYou' | 'following'
   }
   
   // Filters
@@ -373,6 +377,7 @@ export const useSettingsStore = defineStore('settings', {
       postingOverrides: {},
       collapseReblogs: true,
       mediaUploadQuality: 'balanced',
+      homeFeedMode: 'forYou',
     },
     
     filters: [],
@@ -519,6 +524,7 @@ export const useSettingsStore = defineStore('settings', {
               parsed.mediaUploadQuality === 'balanced'
                 ? parsed.mediaUploadQuality
                 : 'balanced',
+            homeFeedMode: parsed.homeFeedMode === 'following' ? 'following' : 'forYou',
           }
         }
         // Suite look (wordcount / bruh / loom) wins when hopping instruments —

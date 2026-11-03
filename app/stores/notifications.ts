@@ -13,6 +13,8 @@ import { withinFrontier } from '~/utils/notifHelpers'
 export type NotificationFilterType =
   | 'all'
   | 'mention'
+  | 'reply'
+  | 'quote'
   | 'favourite'
   | 'reblog'
   | 'follow'
@@ -59,12 +61,25 @@ interface NotificationsState {
 const FILTER_TO_TYPES: Record<NotificationFilterType, string[] | undefined> = {
   all: undefined,
   mention: ['mention'],
+  // Client-refined from mentions (replies) / mentions+posts (quotes)
+  reply: ['mention'],
+  quote: ['mention', 'status'],
   favourite: ['favourite'],
   reblog: ['reblog'],
   follow: ['follow', 'follow_request'],
   poll: ['poll'],
   status: ['status'],
   update: ['update'],
+}
+
+const looksLikeQuote = (n: ExtendedNotification) => {
+  const s = n.status
+  if (!s) return false
+  const q = s as { quote?: unknown; quotedStatus?: unknown }
+  if (q.quote || q.quotedStatus) return true
+  // Fediverse quote often ends with a status URL of someone else's post
+  const text = (s.content || '').toLowerCase()
+  return /\/(?:statuses|notes|objects)\//i.test(text) || /quoted/i.test(text)
 }
 
 /** Server-side `types[]` for a filter tab (undefined = everything) */
@@ -155,6 +170,14 @@ export const useNotificationsStore = defineStore('notifications', {
         const types = FILTER_TO_TYPES[state.filter]
         if (types) {
           items = items.filter((n) => types.includes(n.type))
+        }
+        if (state.filter === 'reply') {
+          items = items.filter((n) => !!n.status?.inReplyToId)
+        } else if (state.filter === 'quote') {
+          items = items.filter(looksLikeQuote)
+        } else if (state.filter === 'mention') {
+          // Mentions tab excludes pure reply-to-you rows so Replies has a job
+          items = items.filter((n) => !n.status?.inReplyToId)
         }
       }
 

@@ -365,6 +365,13 @@ const activeRecipe = computed(() =>
     : null,
 )
 
+const homeFeedMode = computed(() => settingsStore.localPreferences.homeFeedMode || 'forYou')
+
+const setHomeFeedMode = (mode: 'forYou' | 'following') => {
+  if (homeFeedMode.value === mode) return
+  settingsStore.updateAppearance({ homeFeedMode: mode })
+}
+
 const feedLabel = computed(() => {
   if (props.column.feedType === 'group' && props.column.groupTag) {
     const group = groupsStore.getGroup(props.column.groupTag)
@@ -375,6 +382,9 @@ const feedLabel = computed(() => {
   }
   if (props.column.feedType === 'local') {
     return `Local (${browsingHost.value})`
+  }
+  if (props.column.feedType === 'home') {
+    return homeFeedMode.value === 'following' ? 'Following' : 'For You'
   }
   return FEED_LABELS[props.column.feedType] ?? props.column.feedType
 })
@@ -798,10 +808,27 @@ const loadTimelinePage = async (
   )
 }
 
+const homeEngagementScore = (status: mastodon.v1.Status) => {
+  const s = status.reblog || status
+  const favs = s.favouritesCount || 0
+  const boosts = s.reblogsCount || 0
+  const replies = s.repliesCount || 0
+  const ageH = Math.max(
+    0.25,
+    (Date.now() - new Date(s.createdAt).getTime()) / 3_600_000,
+  )
+  // Soft engagement ranking — recency still matters so yesterday's viral post
+  // doesn't bury this morning's quiet follows
+  return (favs + boosts * 2 + replies * 1.5) / Math.pow(ageH, 0.55) + 2 / ageH
+}
+
 const displayStatuses = computed(() => {
-  const list = statuses.value
+  let list = statuses.value
   if (props.column.feedType === 'home' && settingsStore.localPreferences.collapseReblogs) {
-    return collapseDuplicateReblogs(list)
+    list = collapseDuplicateReblogs(list)
+  }
+  if (props.column.feedType === 'home' && homeFeedMode.value === 'forYou' && list.length > 1) {
+    return [...list].sort((a, b) => homeEngagementScore(b) - homeEngagementScore(a))
   }
   return list
 })
@@ -1480,6 +1507,32 @@ onUnmounted(() => {
         >
           <span class="column-feed-label">{{ feedLabel }}</span>
         </button>
+        <div
+          v-if="column.feedType === 'home' && canShowHome"
+          class="column-home-mode"
+          role="group"
+          aria-label="Home feed ranking"
+          @pointerdown.stop
+        >
+          <button
+            type="button"
+            class="column-home-mode__opt"
+            :class="{ 'is-on': homeFeedMode === 'forYou' }"
+            :aria-pressed="homeFeedMode === 'forYou'"
+            @click.stop="setHomeFeedMode('forYou')"
+          >
+            For you
+          </button>
+          <button
+            type="button"
+            class="column-home-mode__opt"
+            :class="{ 'is-on': homeFeedMode === 'following' }"
+            :aria-pressed="homeFeedMode === 'following'"
+            @click.stop="setHomeFeedMode('following')"
+          >
+            Following
+          </button>
+        </div>
         <NeoMenu
           v-model:open="feedMenuOpen"
           class="column-feed-menu"
@@ -1632,6 +1685,33 @@ onUnmounted(() => {
         </svg>
       </button>
 
+    </div>
+
+    <!-- Mobile: column header is hidden — keep For you / Following reachable -->
+    <div
+      v-if="column.feedType === 'home' && canShowHome"
+      class="column-home-mode column-home-mode--mobile"
+      role="group"
+      aria-label="Home feed ranking"
+    >
+      <button
+        type="button"
+        class="column-home-mode__opt"
+        :class="{ 'is-on': homeFeedMode === 'forYou' }"
+        :aria-pressed="homeFeedMode === 'forYou'"
+        @click="setHomeFeedMode('forYou')"
+      >
+        For you
+      </button>
+      <button
+        type="button"
+        class="column-home-mode__opt"
+        :class="{ 'is-on': homeFeedMode === 'following' }"
+        :aria-pressed="homeFeedMode === 'following'"
+        @click="setHomeFeedMode('following')"
+      >
+        Following
+      </button>
     </div>
 
     <!-- Scrollable Content -->
@@ -1918,6 +1998,61 @@ onUnmounted(() => {
 
 .column-focus--push {
   margin-left: auto;
+}
+
+.column-home-mode {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 0.35rem;
+  padding: 2px;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-secondary);
+
+  &--mobile {
+    display: none;
+    margin: 0;
+    padding: 0.35rem 0.75rem;
+    border: none;
+    border-bottom: 1px solid var(--neo-border-color);
+    border-radius: 0;
+    background: var(--neo-bg-primary);
+
+    @media (max-width: 1023px) {
+      display: flex;
+      justify-content: center;
+    }
+  }
+
+  &__opt {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 0 0.7rem;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--neo-chrome-fg, var(--neo-text-secondary));
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--neo-text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-focus, var(--neo-accent));
+      outline-offset: 1px;
+    }
+
+    &.is-on {
+      background: var(--neo-bg-card, var(--neo-bg-primary));
+      color: var(--neo-text-primary);
+      box-shadow: 0 1px 2px color-mix(in srgb, var(--neo-text-primary) 14%, transparent);
+    }
+  }
 }
 
 /* Feed / Flick — segmented, quiet until hovered */

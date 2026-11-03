@@ -110,6 +110,7 @@ import { sanitizeDisplayName, sanitizeStatusHtml } from '~/utils/sanitizeHtml'
 import { stripHtml } from '~/utils/stripHtml'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { usePostActions } from '~/composables/usePostActions'
+import { useRelationshipCache } from '~/composables/useRelationshipCache'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
 import { provenOwnStatus, sameActingAccount, type ActingAccount } from '~/utils/statusOwnership'
 import { buildDeletedStatusEvent, type DeletedStatusEvent } from '~/utils/deletedStatus'
@@ -143,11 +144,17 @@ interface Props {
   hideInlineReply?: boolean
   /** flow = list card, flip = full-bleed snap slide */
   variant?: 'flow' | 'flip'
+  /**
+   * Continuous avatar-column connector on the thread page.
+   * `top` connects into this card, `bottom` continues below, `both` does both.
+   */
+  threadConnect?: 'none' | 'top' | 'bottom' | 'both'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   hideInlineReply: false,
   variant: 'flow',
+  threadConnect: 'none',
 })
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
@@ -382,6 +389,15 @@ const mediaAspectRatio = (media: mastodon.v1.MediaAttachment) => {
 }
 
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
+const showThreadLineTop = computed(
+  () => props.threadConnect === 'top' || props.threadConnect === 'both',
+)
+const showThreadLineBottom = computed(
+  () =>
+    props.threadConnect === 'bottom' ||
+    props.threadConnect === 'both' ||
+    (props.threadConnect === 'none' && hasReplies.value),
+)
 
 const isOwnPost = computed(() => {
   const user = instancesStore.currentUser
@@ -389,6 +405,142 @@ const isOwnPost = computed(() => {
   return displayStatus.value.account.id === user.id ||
     displayStatus.value.account.acct === user.acct
 })
+
+const { relationshipOf, ensure: ensureRelationship, follow: followAccount } = useRelationshipCache()
+const authorId = computed(() => displayStatus.value.account?.id || null)
+const authorRelationship = relationshipOf(authorId)
+watch(
+  authorId,
+  (id) => {
+    if (id && !isOwnPost.value && instancesStore.hasAuthenticatedInstance) ensureRelationship(id)
+  },
+  { immediate: true },
+)
+const showFollowBadge = computed(() => {
+  if (!instancesStore.hasAuthenticatedInstance || isOwnPost.value || isFlip.value) return false
+  const rel = authorRelationship.value
+  if (!rel) return true
+  return !rel.following && !rel.requested && !rel.blocking && !rel.blockedBy
+})
+const followBadgeBusy = ref(false)
+const followBadgeFlash = ref(false)
+const onFollowBadge = async (e: Event) => {
+  e.preventDefault()
+  e.stopPropagation()
+  const id = displayStatus.value.account?.id
+  if (!id || !requireAuth() || followBadgeBusy.value) return
+  followBadgeBusy.value = true
+  try {
+    await followAccount(id)
+    followBadgeFlash.value = true
+    if (typeof navigator !== 'undefined') navigator.vibrate?.(10)
+    window.setTimeout(() => {
+      followBadgeFlash.value = false
+    }, 900)
+  } catch {
+    toastStore.show({ message: 'Couldn’t follow that account', duration: 3500 })
+  } finally {
+    followBadgeBusy.value = false
+  }
+}
+
+/** Double-tap / dblclick heart burst over media or body */
+const heartBurst = ref(false)
+let heartBurstTimer: ReturnType<typeof setTimeout> | null = null
+let lastTapAt = 0
+let lastTapX = 0
+let lastTapY = 0
+
+const triggerHeartBurst = () => {
+  heartBurst.value = true
+  if (heartBurstTimer) clearTimeout(heartBurstTimer)
+  heartBurstTimer = setTimeout(() => {
+    heartBurst.value = false
+    heartBurstTimer = null
+  }, 700)
+}
+
+const likeFromDoubleTap = async () => {
+  triggerHeartBurst()
+  if (typeof navigator !== 'undefined') navigator.vibrate?.(10)
+  // Already liked: replay animation only (Threads/IG — never accidental unlike)
+  if (displayStatus.value.favourited) return
+  await handleFavourite()
+}
+
+const onDoubleTapLike = (e: MouseEvent | TouchEvent) => {
+  // Ignore interactive children
+  const target = e.target as HTMLElement | null
+  if (target?.closest('a, button, input, textarea, summary, video, audio, [role="button"]')) return
+
+  if (e instanceof MouseEvent && e.type === 'dblclick') {
+    e.preventDefault()
+    e.stopPropagation()
+    void likeFromDoubleTap()
+    return
+  }
+
+  if (!(e instanceof TouchEvent) || e.touches.length > 1) return
+  const touch = e.changedTouches[0]
+  if (!touch) return
+  const now = Date.now()
+  const dx = Math.abs(touch.clientX - lastTapX)
+  const dy = Math.abs(touch.clientY - lastTapY)
+  if (now - lastTapAt < 320 && dx < 36 && dy < 36) {
+    e.preventDefault()
+    e.stopPropagation()
+    lastTapAt = 0
+    void likeFromDoubleTap()
+    return
+  }
+  lastTapAt = now
+  lastTapX = touch.clientX
+  lastTapY = touch.clientY
+}
+
+onUnmounted(() => {
+  if (heartBurstTimer) clearTimeout(heartBurstTimer)
+})
+
+/** Incoming quote — native object or trailing status URL in content */
+type QuotePreview = {
+  id?: string
+  name: string
+  handle: string
+  avatar?: string | null
+  text: string
+  url?: string | null
+}
+const quotedStatus = computed((): QuotePreview | null => {
+  const s = displayStatus.value as mastodon.v1.Status & {
+    quote?: mastodon.v1.Status | null
+    quotedStatus?: mastodon.v1.Status | null
+  }
+  const q = s.quote || s.quotedStatus
+  if (q?.account) {
+    return {
+      id: q.id,
+      name: q.account.displayName || q.account.username,
+      handle: q.account.acct,
+      avatar: q.account.avatar,
+      text: stripHtml(q.content || '').slice(0, 280),
+      url: q.url || q.uri,
+    }
+  }
+  return null
+})
+
+const engagementSummary = computed(() => {
+  const replies = displayStatus.value.repliesCount || 0
+  const likes = displayStatus.value.favouritesCount || 0
+  const parts: string[] = []
+  if (replies > 0) parts.push(`${formatNumber(replies)} ${replies === 1 ? 'reply' : 'replies'}`)
+  if (likes > 0) parts.push(`${formatNumber(likes)} ${likes === 1 ? 'like' : 'likes'}`)
+  return parts.join(' · ')
+})
+
+const mediaList = computed(() => displayStatus.value.mediaAttachments || [])
+const useMediaCarousel = computed(() => !isFlip.value && mediaList.value.length >= 2)
 
 /** The signed-in account actions are bound to — captured before any await, revalidated after. */
 const actingAccount = (): ActingAccount | null => {
@@ -1061,6 +1213,16 @@ const viewThread = () => {
   openThread()
 }
 
+const openQuoted = (q: QuotePreview) => {
+  if (q.id) {
+    router.push({ path: `/status/${q.id}`, query: q.url ? { url: q.url } : undefined })
+    return
+  }
+  if (q.url) {
+    window.open(q.url, '_blank', 'noopener')
+  }
+}
+
 const onCardKeydown = (e: KeyboardEvent) => {
   if (e.key !== 'Enter' && e.key !== ' ') return
   const t = e.target as HTMLElement
@@ -1172,38 +1334,56 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     <div class="status-main">
       <!-- Avatar Column -->
       <div class="status-avatar-col">
-        <button
-          v-if="accountProfileTo || displayStatus.account?.acct"
-          type="button"
-          class="status-avatar-link"
-          :aria-label="`View profile of ${displayStatus.account.displayName || displayStatus.account.username} (${accountHandle})`"
-          @click="openProfile(displayStatus.account.acct, $event)"
-        >
-          <img
-            :src="displayStatus.account.avatar"
-            alt=""
-            class="status-avatar"
-            loading="lazy"
-            decoding="async"
-          />
-        </button>
-        <a
-          v-else
-          :href="displayStatus.account.url"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="status-avatar-link"
-          :aria-label="`View profile of ${displayStatus.account.displayName || displayStatus.account.username} (${accountHandle})`"
-        >
-          <img
-            :src="displayStatus.account.avatar"
-            alt=""
-            class="status-avatar"
-            loading="lazy"
-            decoding="async"
-          />
-        </a>
-        <div v-if="hasReplies" class="status-thread-line"></div>
+        <div v-if="showThreadLineTop" class="status-thread-line status-thread-line--top" aria-hidden="true" />
+        <div class="status-avatar-wrap">
+          <button
+            v-if="accountProfileTo || displayStatus.account?.acct"
+            type="button"
+            class="status-avatar-link"
+            :aria-label="`View profile of ${displayStatus.account.displayName || displayStatus.account.username} (${accountHandle})`"
+            @click="openProfile(displayStatus.account.acct, $event)"
+          >
+            <img
+              :src="displayStatus.account.avatar"
+              alt=""
+              class="status-avatar"
+              loading="lazy"
+              decoding="async"
+            />
+          </button>
+          <a
+            v-else
+            :href="displayStatus.account.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="status-avatar-link"
+            :aria-label="`View profile of ${displayStatus.account.displayName || displayStatus.account.username} (${accountHandle})`"
+          >
+            <img
+              :src="displayStatus.account.avatar"
+              alt=""
+              class="status-avatar"
+              loading="lazy"
+              decoding="async"
+            />
+          </a>
+          <button
+            v-if="showFollowBadge || followBadgeFlash"
+            type="button"
+            class="status-follow-badge"
+            :class="{ 'status-follow-badge--done': followBadgeFlash || authorRelationship?.following || authorRelationship?.requested }"
+            :disabled="followBadgeBusy || followBadgeFlash || !!authorRelationship?.following || !!authorRelationship?.requested"
+            :aria-label="followBadgeFlash || authorRelationship?.following || authorRelationship?.requested ? `Following ${displayStatus.account.displayName || displayStatus.account.username}` : `Follow ${displayStatus.account.displayName || displayStatus.account.username}`"
+            @click="onFollowBadge"
+          >
+            <NeoIcon
+              :name="followBadgeFlash || authorRelationship?.following || authorRelationship?.requested ? 'check' : 'plus'"
+              :size="12"
+              :stroke="2.5"
+            />
+          </button>
+        </div>
+        <div v-if="showThreadLineBottom" class="status-thread-line" aria-hidden="true" />
       </div>
 
       <!-- Content Column -->
@@ -1435,6 +1615,8 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               :lang="displayStatus.language || undefined"
               v-html="safeContent"
               @click="onContentClick"
+              @dblclick="onDoubleTapLike"
+              @touchend.passive="onDoubleTapLike"
             />
             <button
               v-if="showSeeMore"
@@ -1447,11 +1629,42 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             </button>
           </div>
 
+          <!-- Incoming quote embed -->
+          <button
+            v-if="quotedStatus && !isFlip"
+            type="button"
+            class="status-quote-card"
+            :aria-label="`Quoted post by @${quotedStatus.handle}`"
+            @click.stop="quotedStatus.url ? openQuoted(quotedStatus) : openThread()"
+          >
+            <img
+              v-if="quotedStatus.avatar"
+              :src="quotedStatus.avatar"
+              alt=""
+              class="status-quote-card__avatar"
+              loading="lazy"
+              decoding="async"
+            />
+            <span class="status-quote-card__body">
+              <span class="status-quote-card__meta">
+                <strong>{{ quotedStatus.name }}</strong>
+                <span>@{{ quotedStatus.handle }}</span>
+              </span>
+              <span class="status-quote-card__text">{{ quotedStatus.text }}</span>
+            </span>
+          </button>
+
           <!-- Link preview -->
           <PreviewCard v-if="linkCard && !isFlip" :card="linkCard" />
 
           <!-- Media: gated behind sensitive flag -->
-          <div v-if="displayStatus.mediaAttachments?.length" class="status-media">
+          <div
+            v-if="mediaList.length"
+            class="status-media"
+            :class="{ 'status-media--carousel': useMediaCarousel && !mediaHidden }"
+            @dblclick="onDoubleTapLike"
+            @touchend.passive="onDoubleTapLike"
+          >
             <button
               v-if="mediaHidden"
               type="button"
@@ -1462,54 +1675,61 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               <span class="status-media-cw__hint">Tap to reveal</span>
             </button>
             <template v-else>
-              <template v-for="(media, mediaIdx) in displayStatus.mediaAttachments" :key="media.id">
-                <button
-                  v-if="media.type === 'image'"
-                  type="button"
-                  class="status-media-hit"
-                  :aria-label="media.description || (displayStatus.mediaAttachments.length > 1 ? `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}` : 'View image')"
-                  @click.stop="openLightbox(media)"
-                >
-                  <img
-                    :src="media.previewUrl ?? media.url ?? undefined"
-                    :alt="media.description || ''"
-                    class="status-media-image"
-                    :style="{ aspectRatio: mediaAspectRatio(media) }"
-                    loading="lazy"
-                    decoding="async"
+              <div :class="useMediaCarousel ? 'status-media__track' : 'status-media__grid'">
+                <template v-for="(media, mediaIdx) in mediaList" :key="media.id">
+                  <button
+                    v-if="media.type === 'image'"
+                    type="button"
+                    class="status-media-hit"
+                    :aria-label="media.description || (mediaList.length > 1 ? `View image ${mediaIdx + 1} of ${mediaList.length}` : 'View image')"
+                    @click.stop="openLightbox(media)"
+                  >
+                    <img
+                      :src="media.previewUrl ?? media.url ?? undefined"
+                      :alt="media.description || ''"
+                      class="status-media-image"
+                      :style="useMediaCarousel ? undefined : { aspectRatio: mediaAspectRatio(media) }"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span
+                      v-if="media.description?.trim()"
+                      class="status-media-alt-badge"
+                      title="Has alt text"
+                    >ALT</span>
+                    <span
+                      v-else
+                      class="status-media-alt-badge status-media-alt-badge--missing"
+                      title="No description"
+                    >No description</span>
+                    <span
+                      v-if="useMediaCarousel"
+                      class="status-media__index"
+                      aria-hidden="true"
+                    >{{ mediaIdx + 1 }}/{{ mediaList.length }}</span>
+                  </button>
+                  <video
+                    v-else-if="media.type === 'video' || media.type === 'gifv'"
+                    :src="media.url ?? undefined"
+                    :poster="media.previewUrl ?? undefined"
+                    controls
+                    preload="none"
+                    v-gifv-autoplay="media.type === 'gifv' && readingPrefs.autoplayGifs"
+                    :loop="media.type === 'gifv'"
+                    :muted="media.type === 'gifv'"
+                    playsinline
+                    :aria-label="media.description?.trim() || (media.type === 'gifv' ? 'Animated image' : 'Video attachment')"
+                    class="status-media-video"
                   />
-                  <span
-                    v-if="media.description?.trim()"
-                    class="status-media-alt-badge"
-                    title="Has alt text"
-                  >ALT</span>
-                  <span
-                    v-else
-                    class="status-media-alt-badge status-media-alt-badge--missing"
-                    title="No description"
-                  >No description</span>
-                </button>
-                <video
-                  v-else-if="media.type === 'video' || media.type === 'gifv'"
-                  :src="media.url ?? undefined"
-                  :poster="media.previewUrl ?? undefined"
-                  controls
-                  preload="none"
-                  v-gifv-autoplay="media.type === 'gifv' && readingPrefs.autoplayGifs"
-                  :loop="media.type === 'gifv'"
-                  :muted="media.type === 'gifv'"
-                  playsinline
-                  :aria-label="media.description?.trim() || (media.type === 'gifv' ? 'Animated image' : 'Video attachment')"
-                  class="status-media-video"
-                />
-                <audio
-                  v-else-if="media.type === 'audio'"
-                  :src="media.url ?? undefined"
-                  controls
-                  :aria-label="media.description?.trim() || 'Audio attachment'"
-                  class="status-media-audio"
-                />
-              </template>
+                  <audio
+                    v-else-if="media.type === 'audio'"
+                    :src="media.url ?? undefined"
+                    controls
+                    :aria-label="media.description?.trim() || 'Audio attachment'"
+                    class="status-media-audio"
+                  />
+                </template>
+              </div>
             </template>
           </div>
 
@@ -1525,9 +1745,23 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           />
         </template>
 
-        <!-- Actions: on mobile, like sits in the right thumb zone -->
-        <!-- Reaching for the buttons starts any cross-server import early -->
+        <!-- Threads order: Like · Reply · Repost · Share + trailing Save -->
         <footer class="status-actions" @pointerenter="prewarm" @focusin="prewarm">
+          <button
+            class="status-action status-action--like"
+            :class="{
+              'status-action--liked': displayStatus.favourited,
+              'status-action--pop': likePop,
+            }"
+            :aria-disabled="isFavouriting || undefined"
+            :aria-label="(displayStatus.favouritesCount ?? 0) > 0 ? `Like, ${formatNumber(displayStatus.favouritesCount)}` : 'Like'"
+            :aria-pressed="!!displayStatus.favourited"
+            @click.stop="!isFavouriting && handleFavourite()"
+          >
+            <NeoIcon name="heart" :size="20" :stroke="1.5" :filled="!!displayStatus.favourited" />
+            <span v-if="(displayStatus.favouritesCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
+          </button>
+
           <button
             class="status-action status-action--reply"
             :aria-label="(displayStatus.repliesCount ?? 0) > 0 ? `Reply, ${formatNumber(displayStatus.repliesCount)}` : 'Reply'"
@@ -1572,31 +1806,16 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
             </svg>
           </button>
-
-          <button
-            class="status-action status-action--like"
-            :class="{
-              'status-action--liked': displayStatus.favourited,
-              'status-action--pop': likePop,
-            }"
-            :aria-disabled="isFavouriting || undefined"
-            :aria-label="(displayStatus.favouritesCount ?? 0) > 0 ? `Like, ${formatNumber(displayStatus.favouritesCount)}` : 'Like'"
-            :aria-pressed="!!displayStatus.favourited"
-            @click.stop="!isFavouriting && handleFavourite()"
-          >
-            <NeoIcon name="heart" :size="20" :stroke="1.5" :filled="!!displayStatus.favourited" />
-            <span v-if="(displayStatus.favouritesCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
-          </button>
         </footer>
 
-        <!-- Thread teaser -->
-        <div v-if="hasReplies && !hideInlineReply" class="status-footer-row">
+        <!-- Engagement summary / thread teaser -->
+        <div v-if="(engagementSummary || hasReplies) && !hideInlineReply" class="status-footer-row">
           <button
             class="status-thread-preview"
             @click="viewThread"
           >
             <span class="thread-preview-text">
-              View {{ displayStatus.repliesCount === 1 ? 'reply' : `${formatNumber(displayStatus.repliesCount)} replies` }}
+              {{ engagementSummary || (displayStatus.repliesCount === 1 ? 'View reply' : `View ${formatNumber(displayStatus.repliesCount)} replies`) }}
             </span>
             <svg class="thread-preview-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <polyline points="9 18 15 12 9 6" />
@@ -1604,6 +1823,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           </button>
         </div>
       </div>
+    </div>
+
+    <div v-if="heartBurst" class="status-heart-burst" aria-hidden="true">
+      <NeoIcon name="heart" :size="72" :stroke="1.5" filled />
     </div>
 
     <Teleport v-if="shareSheetMounted || boostOpen" to="body">
@@ -2037,6 +2260,11 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
+.status-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .status-avatar-link {
   position: relative;
   display: flex;
@@ -2073,13 +2301,53 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
+.status-follow-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid var(--neo-bg-card);
+  border-radius: 50%;
+  background: var(--neo-accent);
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+
+  &--done {
+    background: var(--neo-success, #2f9e44);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+}
+
 .status-thread-line {
   flex: 1;
   width: 2px;
   background: var(--neo-border-color);
-  margin-top: 0.5rem;
+  margin-top: 0.35rem;
   min-height: 12px;
   border-radius: 1px;
+
+  &--top {
+    flex: 0 0 auto;
+    margin-top: 0;
+    margin-bottom: 0.35rem;
+    min-height: 10px;
+    align-self: stretch;
+  }
 }
 
 // Content Column
@@ -2283,19 +2551,139 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
+.status-quote-card {
+  display: flex;
+  gap: 0.55rem;
+  width: 100%;
+  margin-top: 0.45rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 12px;
+  background: var(--neo-bg-secondary);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--neo-bg-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 2px;
+  }
+
+  &__avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  &__body {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  &__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+
+    strong {
+      color: var(--neo-text-primary);
+      font-weight: 600;
+    }
+  }
+
+  &__text {
+    font-size: 0.875rem;
+    line-height: 1.35;
+    color: var(--neo-text-secondary);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+}
+
 // Media
 .status-media {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.375rem;
   margin-top: 0.5rem;
-  border-radius: 4px;
+  border-radius: 12px;
   overflow: hidden;
   max-width: 100%;
 
-  &:has(> *:nth-child(2):not(.status-media-cw)) {
-    grid-template-columns: repeat(2, 1fr);
+  &__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.375rem;
+
+    &:has(> *:nth-child(2)) {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
+
+  &--carousel {
+    overflow: visible;
+  }
+
+  &__track {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.15rem;
+    scrollbar-width: thin;
+
+    .status-media-hit,
+    .status-media-video,
+    .status-media-audio {
+      flex: 0 0 85%;
+      max-width: 85%;
+      scroll-snap-align: start;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--neo-bg-tertiary);
+    }
+
+    .status-media-image,
+    .status-media-video {
+      width: 100%;
+      height: min(52vw, 22rem);
+      object-fit: cover;
+      aspect-ratio: auto;
+    }
+  }
+
+  &__index {
+    position: absolute;
+    top: 0.45rem;
+    right: 0.45rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, #000 55%, transparent);
+    color: #fff;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+}
+
+.status-media-hit {
+  position: relative;
 }
 
 .status-media-cw {
@@ -2330,6 +2718,34 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   cursor: zoom-in;
   overflow: hidden;
   max-width: 100%;
+}
+
+.status-heart-burst {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--neo-like, #ff3040);
+  animation: heart-burst 0.7s ease forwards;
+
+  .neo-icon {
+    filter: drop-shadow(0 8px 18px color-mix(in srgb, var(--neo-like, #ff3040) 45%, transparent));
+  }
+}
+
+@keyframes heart-burst {
+  0% { opacity: 0; transform: scale(0.4); }
+  35% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-heart-burst {
+    animation: none;
+    opacity: 0.85;
+  }
 }
 
 .status-see-more {
@@ -2504,7 +2920,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     animation: like-pop 0.32s ease;
   }
 
-  // One-handed mobile: heart in the right thumb zone, bigger targets
   @media (max-width: 1023px) {
     min-height: 48px;
     min-width: 48px;
@@ -2515,29 +2930,17 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       height: 22px;
     }
 
-    &--like {
-      margin-left: auto;
-      min-width: 56px;
-      padding-left: 0.85rem;
-      padding-right: 0.7rem;
-      color: var(--neo-text-tertiary);
-
-      svg {
-        width: 26px;
-        height: 26px;
-      }
-
-      &.status-action--liked {
-        color: var(--neo-like, var(--neo-accent));
-      }
-    }
-
     &--boost .status-action__count,
-    &--reply .status-action__count {
-      // Quieter chrome — icon first; count only when meaningful
+    &--reply .status-action__count,
+    &--like .status-action__count {
       font-size: 0.6875rem;
       opacity: 0.75;
     }
+  }
+
+  // Trailing Save — NeoSpace improves on Threads by keeping 1-tap bookmark
+  &--bookmark {
+    margin-left: auto;
   }
 
   // Boosted = success green (instrument, not Twitter)

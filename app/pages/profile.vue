@@ -320,7 +320,7 @@ const emptyPostsMessage = computed(() => {
   if (p?.locked && !relationship.value?.following && !profileStore.isOwnProfile) {
     return 'Only approved followers can see posts.'
   }
-  return 'No posts yet.'
+  return 'No threads yet.'
 })
 
 const relationshipChips = computed(() => {
@@ -469,7 +469,7 @@ const profileTab = ref<'posts' | 'replies' | 'media' | 'reposts' | 'human' | 'in
   'posts',
 )
 const BASE_PROFILE_TABS = [
-  { id: 'posts', label: 'Posts' },
+  { id: 'posts', label: 'Threads' },
   { id: 'replies', label: 'Replies' },
   { id: 'media', label: 'Media' },
   { id: 'reposts', label: 'Reposts' },
@@ -1226,6 +1226,13 @@ useHead({
               <button
                 type="button"
                 class="neo-btn neo-btn--secondary profile-cta__btn"
+                @click="shareProfile"
+              >
+                Share profile
+              </button>
+              <button
+                type="button"
+                class="neo-btn neo-btn--secondary profile-cta__btn"
                 @click="setProfileTab('insights')"
               >
                 View insights
@@ -1250,6 +1257,15 @@ useHead({
               @click="messageUser"
             >
               Message
+            </button>
+            <button
+              type="button"
+              class="neo-btn neo-btn--secondary profile-cta__btn"
+              aria-label="Share profile"
+              @click="shareProfile"
+            >
+              <NeoIcon name="share" :size="16" :stroke="1.75" />
+              Share
             </button>
           </template>
         </div>

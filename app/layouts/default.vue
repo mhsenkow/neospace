@@ -26,6 +26,7 @@ import DesktopSidebar from '~/components/shell/DesktopSidebar.vue'
 import MobileHeader from '~/components/shell/MobileHeader.vue'
 import MobileDrawer from '~/components/shell/MobileDrawer.vue'
 import MobileTabBar from '~/components/shell/MobileTabBar.vue'
+import { useBoardNav } from '~/composables/useBoardNav'
 
 const LazyEdwardMode = defineAsyncComponent({
   loader: () => import('~/components/edward/EdwardMode.vue'),
@@ -56,6 +57,7 @@ const isOffline = ref(false)
 /** Overlays mount on first open only (keeps their chunks + setup off the boot path). */
 const composeSheet = useComposeSheetStore()
 const algorithmsStore = useAlgorithmsStore()
+const { openCompose } = useBoardNav()
 const { isOpen: accountsManagerOpen } = useAccountsManager()
 const mounted = reactive({ compose: false, algorithm: false, accounts: false, settings: false })
 watchEffect(() => {
@@ -105,6 +107,15 @@ const isTabRoute = computed(
 )
 const showMobileNav = computed(() => !isMobileSubview.value || isTabRoute.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
+
+/** Desktop Threads-style + — mobile already has the tab-bar compose mark */
+const showComposeFab = computed(
+  () =>
+    isDesk.value &&
+    instancesStore.hasAuthenticatedInstance &&
+    !composeSheet.open &&
+    !isThreadRoute.value,
+)
 
 const closeMobileMenu = () => {
   mobileMenuOpen.value = false
@@ -347,6 +358,16 @@ watch(
       }"
     >
       <InstallAppBanner />
+      <button
+        v-if="showComposeFab"
+        type="button"
+        class="compose-fab"
+        aria-label="New thread"
+        title="New thread"
+        @click="openCompose"
+      >
+        <NeoIcon name="plus" :size="26" :stroke="2.25" />
+      </button>
       <!-- Phones get the same tools inside the drawer (Menu → Tools) instead of a floating waffle -->
       <SuiteMenu v-if="isDesk" />
     </div>
@@ -458,6 +479,41 @@ watch(
 }
 
 /* Bottom-right dock for install banner + suite waffle — below modal/drawer */
+.compose-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: var(--neo-text-primary);
+  color: var(--neo-bg-primary);
+  box-shadow:
+    0 2px 8px color-mix(in srgb, var(--neo-text-primary) 22%, transparent),
+    0 10px 28px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 12px color-mix(in srgb, var(--neo-text-primary) 26%, transparent),
+      0 14px 32px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--neo-focus, var(--neo-accent));
+    outline-offset: 3px;
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
 .neo-bottom-dock {
   position: fixed;
   right: max(10px, env(safe-area-inset-right));

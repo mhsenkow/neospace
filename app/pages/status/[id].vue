@@ -28,6 +28,8 @@ import { useMobileViewport } from '~/composables/useBreakpoint'
 import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { getMainScroller, getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
+import { useComposeSheetStore } from '~/stores/composeSheet'
+import { stripHtml } from '~/utils/stripHtml'
 type DmContextPane = 'chat' | 'profile'
 
 const route = useRoute()
@@ -35,6 +37,8 @@ const router = useRouter()
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
 const conversationsStore = useConversationsStore()
+const composeSheet = useComposeSheetStore()
+const activityOpen = ref(false)
 const loadRace = createRaceGuard()
 /** Id our own canonicalising router.replace lands on — its route change isn't a new load */
 let replacedToId: string | null = null
@@ -590,6 +594,50 @@ const visibleAncestors = computed(() => {
   if (!q) return ancestors.value
   return ancestors.value.filter((s) => statusMatchesQuery(s, q))
 })
+
+/** Continuous avatar rail: ancestors connect into focus; top-level replies connect from focus */
+const ancestorConnect = (index: number): 'top' | 'bottom' | 'both' => {
+  if (index === 0) return 'bottom'
+  return 'both'
+}
+const focusConnect = computed((): 'none' | 'top' | 'bottom' | 'both' => {
+  const hasAncestors = visibleAncestors.value.length > 0
+  const hasTopReplies = visibleReplyTree.value.some((n) => n.depth === 0)
+  if (hasAncestors && hasTopReplies) return 'both'
+  if (hasAncestors) return 'top'
+  if (hasTopReplies) return 'bottom'
+  return 'none'
+})
+const replyConnect = (node: { depth: number }, index: number, list: { depth: number }[]) => {
+  if (node.depth > 0) return 'none' as const
+  const next = list[index + 1]
+  const continues = next && next.depth === 0
+  return continues ? ('both' as const) : ('top' as const)
+}
+
+const openThreadActivity = () => {
+  activityOpen.value = true
+}
+
+const expandDockToSheet = () => {
+  const focus = focusStatus.value
+  if (!focus) return
+  composeSheet.show({
+    title: 'New thread',
+    placeholder: 'Share your thoughts…',
+    inReplyToId: publicReplyId.value || focus.id,
+    mentionAccts: replyMentionAccts.value,
+    visibility: focus.visibility === 'direct' ? 'direct' : focus.visibility,
+    contextPost: {
+      id: focus.id,
+      name: focus.account.displayName || focus.account.username,
+      handle: focus.account.acct,
+      avatar: focus.account.avatar,
+      text: stripHtml(focus.content || '').slice(0, 280),
+      url: focus.url || focus.uri,
+    },
+  })
+}
 
 const threadStatusById = computed(() => {
   const map = new Map<string, mastodon.v1.Status>()
@@ -1404,10 +1452,11 @@ useHead({
           </template>
         </p>
         <RealPostCard
-          v-for="status in visibleAncestors"
+          v-for="(status, idx) in visibleAncestors"
           :key="status.id"
           :status="status"
           hide-inline-reply
+          :thread-connect="ancestorConnect(idx)"
           class="thread-post thread-post--ancestor"
           @replied="onReplyPosted"
         />
@@ -1423,17 +1472,30 @@ useHead({
             v-if="focusStatus"
             :status="focusStatus"
             hide-inline-reply
+            :thread-connect="focusConnect"
             class="thread-post thread-post--focus"
             @replied="onReplyPosted"
           />
+          <button
+            v-if="focusStatus"
+            type="button"
+            class="thread-activity-link"
+            @click="openThreadActivity"
+          >
+            View activity
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
         </div>
 
-        <template v-for="node in visibleReplyTree" :key="node.status.id">
+        <template v-for="(node, idx) in visibleReplyTree" :key="node.status.id">
           <!-- Nesting is otherwise only visual (indent) -->
           <p v-if="node.depth > 0" class="sr-only">{{ replyContextLabel(node) }}</p>
           <RealPostCard
             :status="node.status"
             hide-inline-reply
+            :thread-connect="replyConnect(node, idx, visibleReplyTree)"
             class="thread-post thread-post--reply"
             :class="{ 'thread-post--nested': node.depth > 0 }"
             :style="{ '--thread-depth': String(node.depth) }"
@@ -1486,6 +1548,21 @@ useHead({
             title="Reply"
             @posted="onReplyPosted"
           />
+          <button
+            type="button"
+            class="thread-reply-dock__expand"
+            aria-label="Open full composer"
+            title="Open full composer"
+            :disabled="replyResolving || !publicReplyId"
+            @click="expandDockToSheet"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+              <polyline points="15 3 21 3 21 9" />
+              <polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -1493,6 +1570,14 @@ useHead({
         <NuxtLink to="/login" class="neo-btn neo-btn--primary neo-btn--sm">Sign in to reply</NuxtLink>
       </div>
     </template>
+
+    <PostActivitySheet
+      :open="activityOpen"
+      :status-id="focusStatus?.id || null"
+      :likes-count="focusStatus?.favouritesCount"
+      :reposts-count="focusStatus?.reblogsCount"
+      @close="activityOpen = false"
+    />
   </div>
 </template>
 
@@ -1998,6 +2083,25 @@ useHead({
   border: 1px solid color-mix(in srgb, var(--neo-accent) 35%, transparent);
 }
 
+.thread-activity-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.15rem 0 0.35rem 3.1rem;
+  padding: 0.2rem 0;
+  border: none;
+  background: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-text-muted);
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--neo-text-primary);
+  }
+}
+
 .thread-new-pill {
   position: sticky;
   top: calc(var(--neo-thread-top-h, 7rem) + 0.5rem);
@@ -2128,8 +2232,38 @@ useHead({
   }
 
   &__inner {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.35rem;
     width: 100%;
     max-width: 40rem;
+  }
+
+  &__expand {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin-bottom: 0.15rem;
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--neo-text-secondary);
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--neo-bg-hover);
+      color: var(--neo-text-primary);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
   }
 
   :deep(.compose--compact) {

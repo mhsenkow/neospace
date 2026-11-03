@@ -3,6 +3,7 @@ import { useNotificationsStore, type ExtendedNotification, type NotificationFilt
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import { clientFor } from '~/composables/useMasto'
+import { useRelationshipCache } from '~/composables/useRelationshipCache'
 import type { mastodon } from 'masto'
 import { plainTextLowerOf, plainTextOf } from '~/utils/plainText'
 import { clipGraphemes } from '~/utils/stripHtml'
@@ -45,6 +46,8 @@ const canView = computed(() =>
 const FILTER_KEYS: NotificationFilterType[] = [
   'all',
   'mention',
+  'reply',
+  'quote',
   'favourite',
   'reblog',
   'follow',
@@ -67,10 +70,12 @@ const applyFilterFromRoute = (): boolean => {
 
 const filters: { key: NotificationFilterType; label: string; icon: NeoIconName }[] = [
   { key: 'all', label: 'All', icon: 'bell' },
-  { key: 'mention', label: 'Mentions', icon: 'mention' },
-  { key: 'favourite', label: 'Likes', icon: 'heart' },
-  { key: 'reblog', label: 'Boosts', icon: 'reblog' },
   { key: 'follow', label: 'Follows', icon: 'user' },
+  { key: 'reply', label: 'Replies', icon: 'message' },
+  { key: 'mention', label: 'Mentions', icon: 'mention' },
+  { key: 'quote', label: 'Quotes', icon: 'share' },
+  { key: 'favourite', label: 'Likes', icon: 'heart' },
+  { key: 'reblog', label: 'Reposts', icon: 'reblog' },
   { key: 'poll', label: 'Polls', icon: 'poll' },
   { key: 'status', label: 'Posts', icon: 'pen' },
   { key: 'update', label: 'Edits', icon: 'edit' },
@@ -229,6 +234,47 @@ const accountQuery = (instanceId?: string) =>
   instanceId ? { account: instanceId } : {}
 
 const followRequestBusy = ref<Record<string, boolean>>({})
+const {
+  ensure: ensureRelationship,
+  follow: followAccount,
+  cache: relationshipCache,
+} = useRelationshipCache()
+const followBackBusy = reactive(new Set<string>())
+
+const relFor = (accountId: string) => relationshipCache.get(accountId) || null
+
+const followBackLabel = (accountId: string) => {
+  const rel = relFor(accountId)
+  if (rel?.following) return 'Following'
+  if (rel?.requested) return 'Requested'
+  return 'Follow back'
+}
+
+watch(
+  () => notificationsStore.collapsedNotifications,
+  (rows) => {
+    for (const n of rows) {
+      if ((n.type === 'follow' || n.type === 'follow_request') && n.account?.id) {
+        ensureRelationship(n.account.id)
+      }
+    }
+  },
+  { immediate: true },
+)
+
+const handleFollowBack = async (notif: ExtendedNotification, e?: Event) => {
+  e?.stopPropagation()
+  const id = notif.account?.id
+  if (!id || followBackBusy.has(id)) return
+  followBackBusy.add(id)
+  try {
+    await followAccount(id)
+  } catch {
+    toastStore.show({ message: 'Couldn’t update follow' })
+  } finally {
+    followBackBusy.delete(id)
+  }
+}
 
 const authorizeFollowRequest = async (notif: ExtendedNotification, e?: Event) => {
   e?.stopPropagation()
@@ -677,6 +723,24 @@ const chromeTitle = computed(() => {
                     @click="rejectFollowRequest(notif, $event)"
                   >
                     Reject
+                  </button>
+                </div>
+                <div
+                  v-else-if="notif.type === 'follow' && notif.account"
+                  class="notif-item__follow-actions"
+                >
+                  <button
+                    type="button"
+                    class="neo-btn neo-btn--sm"
+                    :class="
+                      relFor(notif.account.id)?.following || relFor(notif.account.id)?.requested
+                        ? 'neo-btn--secondary'
+                        : 'neo-btn--primary'
+                    "
+                    :disabled="followBackBusy.has(notif.account.id)"
+                    @click="handleFollowBack(notif, $event)"
+                  >
+                    {{ followBackLabel(notif.account.id) }}
                   </button>
                 </div>
               </div>
