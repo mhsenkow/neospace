@@ -111,6 +111,12 @@ import { stripHtml } from '~/utils/stripHtml'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
 import { usePostActions } from '~/composables/usePostActions'
 import { useRelationshipCache } from '~/composables/useRelationshipCache'
+import { useMobileViewport } from '~/composables/useBreakpoint'
+import {
+  localBurstPoint,
+  resolveFlipContentClick,
+  useCardSwipeActions,
+} from '~/composables/useCardSwipeActions'
 import type { CollapsedReblogStatus } from '~/utils/statusIdentity'
 import { provenOwnStatus, sameActingAccount, type ActingAccount } from '~/utils/statusOwnership'
 import { buildDeletedStatusEvent, type DeletedStatusEvent } from '~/utils/deletedStatus'
@@ -310,6 +316,7 @@ const reblogLabel = computed(() => {
   return who ? `${who} reposted` : 'Reposted'
 })
 const isFlip = computed(() => props.variant === 'flip')
+const isMobileUi = useMobileViewport()
 const flipMedia = computed(() => {
   const media = displayStatus.value.mediaAttachments || []
   return media.find((m) => m.type === 'image' || m.type === 'gifv' || m.type === 'video') || null
@@ -318,6 +325,7 @@ const pollLayout = computed((): 'default' | 'flip' | 'flip-media' => {
   if (!isFlip.value) return 'default'
   return flipMedia.value ? 'flip-media' : 'flip'
 })
+const useHammockPeek = computed(() => isMobileUi.value || isFlip.value)
 const flipAlign = computed(() => settingsStore.localPreferences.flipTextAlign || 'center')
 const flipSize = computed(() => settingsStore.localPreferences.flipTextSize || 'large')
 
@@ -501,23 +509,32 @@ const onFollowBadge = async (e: Event) => {
 
 /** Double-tap / dblclick heart burst over media or body */
 const heartBurst = ref(false)
+const heartBurstPos = ref<{ x: number; y: number } | null>(null)
+const cardEl = ref<HTMLElement | null>(null)
 let heartBurstTimer: ReturnType<typeof setTimeout> | null = null
 let lastTapAt = 0
 let lastTapX = 0
 let lastTapY = 0
 
-const triggerHeartBurst = () => {
+const triggerHeartBurst = (clientX?: number, clientY?: number) => {
+  const card = cardEl.value
+  if (card && clientX != null && clientY != null) {
+    heartBurstPos.value = localBurstPoint(clientX, clientY, card.getBoundingClientRect())
+  } else {
+    heartBurstPos.value = null
+  }
   heartBurst.value = true
   if (heartBurstTimer) clearTimeout(heartBurstTimer)
   heartBurstTimer = setTimeout(() => {
     heartBurst.value = false
+    heartBurstPos.value = null
     heartBurstTimer = null
   }, 780)
 }
 
-const likeFromDoubleTap = async () => {
-  triggerHeartBurst()
-  if (typeof navigator !== 'undefined') navigator.vibrate?.(10)
+const likeFromDoubleTap = async (clientX?: number, clientY?: number) => {
+  triggerHeartBurst(clientX, clientY)
+  if (typeof navigator !== 'undefined') navigator.vibrate?.(12)
   // Already liked: replay animation only (Threads/IG — never accidental unlike)
   if (displayStatus.value.favourited) return
   await handleFavourite()
@@ -531,7 +548,7 @@ const onDoubleTapLike = (e: MouseEvent | TouchEvent) => {
   if (e instanceof MouseEvent && e.type === 'dblclick') {
     e.preventDefault()
     e.stopPropagation()
-    void likeFromDoubleTap()
+    void likeFromDoubleTap(e.clientX, e.clientY)
     return
   }
 
@@ -545,13 +562,27 @@ const onDoubleTapLike = (e: MouseEvent | TouchEvent) => {
     e.preventDefault()
     e.stopPropagation()
     lastTapAt = 0
-    void likeFromDoubleTap()
+    void likeFromDoubleTap(touch.clientX, touch.clientY)
     return
   }
   lastTapAt = now
   lastTapX = touch.clientX
   lastTapY = touch.clientY
 }
+
+const heartBurstStyle = computed(() => {
+  const pos = heartBurstPos.value
+  if (!pos) return undefined
+  // Margin centers without fighting the burst keyframes' transform
+  return {
+    left: `${pos.x}px`,
+    top: `${pos.y}px`,
+    right: 'auto',
+    bottom: 'auto',
+    marginLeft: '-36px',
+    marginTop: '-36px',
+  } as Record<string, string>
+})
 
 onUnmounted(() => {
   if (heartBurstTimer) clearTimeout(heartBurstTimer)
@@ -595,7 +626,7 @@ const engagementSummary = computed(() => {
 })
 
 const mediaList = computed(() => displayStatus.value.mediaAttachments || [])
-const useMediaCarousel = computed(() => !isFlip.value && mediaList.value.length >= 2)
+const useMediaCarousel = computed(() => mediaList.value.length >= 2)
 
 /** The signed-in account actions are bound to — captured before any await, revalidated after. */
 const actingAccount = (): ActingAccount | null => {
@@ -681,6 +712,39 @@ const {
   sourceInstanceUrl: computed(
     () => (props.status as ExtendedStatus)._instanceUrl || null,
   ),
+})
+
+const swipeEnabled = computed(() => isMobileUi.value && !isFlip.value)
+const {
+  offset: swipeOffset,
+  intent: swipeIntent,
+  dragging: swipeDragging,
+  bind: bindCardSwipe,
+} = useCardSwipeActions({
+  enabled: swipeEnabled,
+  onLike: () => {
+    void handleFavourite()
+  },
+  onReply: () => {
+    openThreadPeek(true)
+  },
+})
+
+watch(
+  cardEl,
+  (el) => {
+    bindCardSwipe(el)
+  },
+  { immediate: true },
+)
+
+const cardSwipeStyle = computed(() => {
+  if (!swipeDragging.value && swipeOffset.value === 0) return undefined
+  const reduced = prefersReducedMotion.value
+  return {
+    transform: `translate3d(${swipeOffset.value}px, 0, 0)`,
+    transition: swipeDragging.value || reduced ? 'none' : 'transform 220ms var(--neo-ease-out, ease-out)',
+  } as Record<string, string>
 })
 
 const handleBoost = async () => {
@@ -779,7 +843,23 @@ const openQuoteComposer = async () => {
   })
 }
 
+const openThreadPeek = (focusInput = true) => {
+  if (!requireAuth()) return
+  overlayStore.openThreadPeek({
+    status: displayStatus.value,
+    focusInput,
+    onReplied: (created) => {
+      displayStatus.value.repliesCount = (displayStatus.value.repliesCount || 0) + 1
+      emit('replied', created)
+    },
+  })
+}
+
 const handleReply = () => {
+  if (useHammockPeek.value) {
+    openThreadPeek(true)
+    return
+  }
   void openReplyComposer()
 }
 
@@ -1267,6 +1347,10 @@ const openThread = () => {
 }
 
 const viewThread = () => {
+  if (useHammockPeek.value) {
+    openThreadPeek(false)
+    return
+  }
   openThread()
 }
 
@@ -1325,6 +1409,16 @@ const onContentClick = (e: MouseEvent) => {
     }
     return
   }
+  const nav = resolveFlipContentClick({
+    isFlip: isFlip.value,
+    overflows: contentOverflows.value,
+    expanded: contentExpanded.value,
+  })
+  if (nav === 'toggle-expand') {
+    contentExpanded.value = !contentExpanded.value
+    return
+  }
+  if (nav === 'noop') return
   openThread()
 }
 
@@ -1354,19 +1448,33 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 <template>
   <article
     v-if="!removed"
+    ref="cardEl"
     class="status-card"
     :class="{
       'status-card--menu-open': isMenuOpen,
       'status-card--flip': isFlip,
       'status-card--flip-media': isFlip && !!flipMedia,
       'status-card--reduce-motion': prefersReducedMotion,
+      'status-card--swipe-like': swipeIntent === 'like',
+      'status-card--swipe-reply': swipeIntent === 'reply',
       [`status-card--flip-align-${flipAlign}`]: isFlip,
       [`status-card--flip-size-${flipSize}`]: isFlip,
     }"
+    :style="cardSwipeStyle"
     :aria-labelledby="cardLabelId"
     tabindex="0"
     @keydown="onCardKeydown"
+    @dblclick="onDoubleTapLike"
+    @touchend.passive="onDoubleTapLike"
   >
+    <div
+      v-if="swipeIntent !== 'none' && Math.abs(swipeOffset) > 20"
+      class="status-swipe-hint"
+      :class="swipeIntent === 'like' ? 'status-swipe-hint--like' : 'status-swipe-hint--reply'"
+      aria-hidden="true"
+    >
+      <NeoIcon :name="swipeIntent === 'like' ? 'heart' : 'message'" :size="22" :stroke="1.5" :filled="swipeIntent === 'like'" />
+    </div>
     <!-- Ranked algorithm feeds / For You — tap for score X-Ray -->
     <div v-if="rankWhy && !isFlip" class="status-rank">
       <button
@@ -1743,7 +1851,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
         <!-- Regular Content (no spoiler text) -->
         <template v-else>
-          <div class="status-content-wrap">
+          <div
+            class="status-content-wrap"
+            :class="{ 'status-content-wrap--expanded': isFlip && contentExpanded }"
+          >
             <div
               ref="contentEl"
               class="status-content status-content--clickable"
@@ -1751,8 +1862,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               :lang="displayStatus.language || undefined"
               v-html="safeContent"
               @click="onContentClick"
-              @dblclick="onDoubleTapLike"
-              @touchend.passive="onDoubleTapLike"
             />
             <button
               v-if="showSeeMore"
@@ -1798,8 +1907,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             v-if="mediaList.length"
             class="status-media"
             :class="{ 'status-media--carousel': useMediaCarousel && !mediaHidden }"
-            @dblclick="onDoubleTapLike"
-            @touchend.passive="onDoubleTapLike"
           >
             <button
               v-if="mediaHidden"
@@ -2043,7 +2150,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       </div>
     </div>
 
-    <div v-if="heartBurst" class="status-heart-burst" aria-hidden="true">
+    <div
+      v-if="heartBurst"
+      class="status-heart-burst"
+      :class="{ 'status-heart-burst--anchored': !!heartBurstPos }"
+      :style="heartBurstStyle"
+      aria-hidden="true"
+    >
       <NeoIcon name="heart" :size="72" :stroke="1.5" filled />
     </div>
 
@@ -2268,6 +2381,15 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
         justify-content: center;
       }
 
+      .status-content-wrap--expanded {
+        max-height: 68%;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+        justify-content: flex-start;
+        mask-image: none;
+      }
+
       .status-content {
         font-size: var(--flip-type);
         line-height: var(--flip-leading);
@@ -2298,7 +2420,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       }
 
       .status-actions {
-        bottom: 4.5rem;
+        bottom: 1.25rem;
       }
     }
 
@@ -2377,22 +2499,63 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     .status-actions {
       position: absolute;
       right: 0.35rem;
-      bottom: 5.5rem;
+      bottom: 1.25rem;
       flex-direction: column;
       align-items: center;
-      gap: 0.2rem;
+      gap: 0.15rem;
       width: auto;
-      padding: 0;
+      padding: 0.35rem 0.2rem;
       z-index: 2;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--neo-bg-primary) 55%, transparent);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
 
     .status-action {
       margin-left: 0 !important;
       min-width: 48px;
+      min-height: 48px;
       color: var(--neo-text-secondary);
 
       &__count {
         font-size: 0.6875rem;
+        font-weight: 600;
+      }
+    }
+
+    .status-media--carousel {
+      position: relative;
+      overflow: hidden;
+
+      .status-media__track {
+        height: 100%;
+        gap: 0;
+        padding-bottom: 0;
+        scrollbar-width: none;
+
+        &::-webkit-scrollbar {
+          display: none;
+        }
+
+        .status-media-hit,
+        .status-media-video {
+          flex: 0 0 100%;
+          max-width: 100%;
+          height: 100%;
+          border-radius: 0;
+        }
+
+        .status-media-image,
+        .status-media-video {
+          height: 100%;
+          max-height: none;
+        }
+      }
+
+      .status-media__index {
+        top: 0.75rem;
+        right: 4.5rem;
       }
     }
 
@@ -3113,6 +3276,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 
 // Media
 .status-media {
+  position: relative;
   margin-top: 0.5rem;
   border-radius: 12px;
   overflow: hidden;
@@ -3226,8 +3390,41 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   animation: heart-burst var(--neo-dur-celebrate, 420ms) var(--neo-ease-out) forwards;
   animation-duration: 0.78s;
 
+  &--anchored {
+    inset: auto;
+    width: 72px;
+    height: 72px;
+    place-items: center;
+  }
+
   .neo-icon {
     filter: drop-shadow(0 8px 18px color-mix(in srgb, var(--neo-like, #ff3040) 45%, transparent));
+  }
+}
+
+.status-swipe-hint {
+  position: absolute;
+  top: 50%;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translateY(-50%);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--neo-text-primary) 18%, transparent);
+
+  &--like {
+    left: 0.75rem;
+    color: #fff;
+    background: var(--neo-like, #ff3040);
+  }
+
+  &--reply {
+    right: 0.75rem;
+    color: #fff;
+    background: var(--neo-accent);
   }
 }
 

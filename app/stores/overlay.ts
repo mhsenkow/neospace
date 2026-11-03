@@ -3,6 +3,7 @@
  */
 
 import { defineStore } from 'pinia'
+import type { mastodon } from 'masto'
 
 /** Optional attachment metadata for the lightbox loupe / analytical HUD */
 export type LightboxMediaMeta = {
@@ -88,6 +89,16 @@ export type AccountSwitcherState = {
   open: boolean
 }
 
+/** Mobile hammock-mode thread peek + quick reply drawer */
+export type ThreadPeekState = {
+  open: boolean
+  status: mastodon.v1.Status | null
+  focusInput: boolean
+}
+
+type ThreadPeekReplied = (created: mastodon.v1.Status) => void
+let threadPeekOnReplied: ThreadPeekReplied | null = null
+
 export const useOverlayStore = defineStore('overlay', {
   state: () => ({
     accountSwitcher: {
@@ -97,6 +108,11 @@ export const useOverlayStore = defineStore('overlay', {
     accountsManager: {
       open: false,
     } as AccountSwitcherState,
+    threadPeek: {
+      open: false,
+      status: null,
+      focusInput: false,
+    } as ThreadPeekState,
     lightbox: {
       open: false,
       src: '',
@@ -146,6 +162,28 @@ export const useOverlayStore = defineStore('overlay', {
 
     toggleAccountSwitcher() {
       this.accountSwitcher.open = !this.accountSwitcher.open
+    },
+
+    openThreadPeek(opts: {
+      status: mastodon.v1.Status
+      focusInput?: boolean
+      onReplied?: ThreadPeekReplied
+    }) {
+      threadPeekOnReplied = opts.onReplied ?? null
+      this.threadPeek = {
+        open: true,
+        status: opts.status,
+        focusInput: !!opts.focusInput,
+      }
+    },
+
+    notifyThreadPeekReplied(created: mastodon.v1.Status) {
+      threadPeekOnReplied?.(created)
+    },
+
+    closeThreadPeek() {
+      this.threadPeek = { open: false, status: null, focusInput: false }
+      threadPeekOnReplied = null
     },
 
     openLightbox(opts: { src: string; alt?: string; items?: LightboxItem[]; index?: number }) {

@@ -12,6 +12,7 @@ import { useThemeStore } from '~/stores/theme'
 import { useOverlayStore } from '~/stores/overlay'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
+import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
 import { categoryTint, useShellAppearance } from '~/composables/useShellAppearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { useSuiteGroups } from '~/composables/useSuiteGroups'
@@ -32,6 +33,7 @@ const themeStore = useThemeStore()
 const overlayStore = useOverlayStore()
 const { open: openAccounts } = useAccountsManager()
 const { open: openAccountSwitcher } = useAccountSwitcher()
+const { show: openFeedback } = useFeedbackNotes()
 const { boardPortal } = useBoardPortal()
 const linkedAccountCount = computed(() => instancesStore.signedInInstances.length)
 const { currentThemeLabel, cycleTheme } = useShellAppearance()
@@ -497,6 +499,14 @@ useFocusTrap(mobileSidebarRef, open, {
         type="button"
       >
         Settings
+      </button>
+      <button
+        class="mobile-sidebar__action"
+        type="button"
+        aria-label="Leave a note"
+        @click="openFeedback(); closeMobileMenu()"
+      >
+        Leave a note
       </button>
       <button
         class="mobile-sidebar__action"

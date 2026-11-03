@@ -156,6 +156,20 @@ const isDeskTabs = computed(
   () => columnsStore.deskDensity === 'tabs' && !isMobileUi.value,
 )
 
+const scrollActiveFeedToTop = () => {
+  if (!import.meta.client) return
+  const root = columnsContainer.value
+  if (!root) return
+  const col = root.querySelector(
+    `.timeline-column:not(.board-col--hidden) .column-scroll, .panel-column:not(.board-col--hidden) .column-scroll`,
+  ) as HTMLElement | null
+  // Prefer the slide matching the active index when several are mounted
+  const slides = root.querySelectorAll<HTMLElement>('.timeline-column .column-scroll, .panel-column .column-scroll')
+  const active = slides[activeColumnIndex.value] || col
+  if (!active || active.scrollTop <= 0) return
+  active.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 const activeFeedTabId = computed({
   get: () => {
     if (isDeskTabs.value && columnsStore.focusedColumnId) {
@@ -166,13 +180,17 @@ const activeFeedTabId = computed({
   set: (id: string) => {
     const idx = columnsStore.columns.findIndex((c) => c.id === id)
     if (idx < 0) return
+    const same = columnsStore.columns[activeColumnIndex.value]?.id === id
     activeColumnIndex.value = idx
     if (isDeskTabs.value) {
       columnsStore.setFocusedColumn(id)
+      if (same) scrollActiveFeedToTop()
       return
     }
     // Always re-park — same-id taps recover Android desync; use auto on mobile
     scrollToColumn(idx, isMobileUi.value ? 'auto' : 'smooth')
+    // Native-app pattern: tap the already-active feed pill → jump to top
+    if (same && isMobileUi.value) scrollActiveFeedToTop()
   },
 })
 
@@ -1509,13 +1527,16 @@ useHead({ title: 'Home | NeoSpace' })
         </span>
       </button>
 
-      <p
+      <button
         v-if="!isPhoneLandscapeUi"
+        type="button"
         class="mobile-feed-chrome__title"
-        :title="activeFeedChromeTitle"
+        :title="`${activeFeedChromeTitle}. Tap to scroll to top`"
+        :aria-label="`${activeFeedChromeTitle}. Scroll to top`"
+        @click="scrollActiveFeedToTop"
       >
         {{ activeFeedChromeTitle }}
-      </p>
+      </button>
 
       <!-- Phone landscape: feed pills live in the slim top bar (no bottom dock) -->
       <div
@@ -1535,8 +1556,10 @@ useHead({ title: 'Home | NeoSpace' })
       </div>
 
       <div class="mobile-feed-chrome__actions">
+        <!-- Portrait phones: bottom pills + horizontal swipe already switch feeds.
+             Landscape keeps jump buttons because the bottom dock is gone. -->
         <button
-          v-if="columnsStore.columnCount >= 2 || isMobileUi"
+          v-if="isPhoneLandscapeUi && (columnsStore.columnCount >= 2 || isMobileUi)"
           type="button"
           class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-chrome__jump"
           aria-label="Previous feed"
@@ -1548,7 +1571,7 @@ useHead({ title: 'Home | NeoSpace' })
           </svg>
         </button>
         <button
-          v-if="columnsStore.columnCount >= 2 || isMobileUi"
+          v-if="isPhoneLandscapeUi && (columnsStore.columnCount >= 2 || isMobileUi)"
           type="button"
           class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-chrome__jump"
           aria-label="Next feed"
@@ -1557,20 +1580,6 @@ useHead({ title: 'Home | NeoSpace' })
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
-
-        <button
-          v-if="columnsStore.canRemoveColumn && !boardPortal"
-          type="button"
-          class="neo-btn neo-btn--tertiary neo-btn--icon mobile-feed-chrome__jump"
-          aria-label="Remove this feed"
-          title="Remove this feed"
-          @click="removeActiveColumn"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
 
@@ -2859,14 +2868,26 @@ useHead({ title: 'Home | NeoSpace' })
     min-width: 0;
     margin: 0;
     padding: 0 0.15rem;
+    border: none;
+    background: transparent;
+    font: inherit;
     font-size: 0.9375rem;
     font-weight: 650;
     letter-spacing: -0.01em;
     color: var(--neo-text-primary);
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.2;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
   }
 
   &__actions {

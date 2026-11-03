@@ -430,10 +430,8 @@ onUnmounted(() => {
     border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
   }
 
-  /* Desktop: note lives in the sidebar footer */
-  @media (min-width: 1024px) {
-    display: none;
-  }
+  /* Leave a note lives in MobileDrawer (phones) and the sidebar footer (desktop) */
+  display: none;
 }
 
 .notes-overlay {

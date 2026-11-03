@@ -7,7 +7,7 @@
 import { useOverlayStore } from '~/stores/overlay'
 
 const overlay = useOverlayStore()
-const mounted = reactive({ report: false, lightbox: false })
+const mounted = reactive({ report: false, lightbox: false, threadPeek: false })
 
 watch(
   () => overlay.report.open,
@@ -23,11 +23,19 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  () => overlay.threadPeek.open,
+  (open) => {
+    if (open) mounted.threadPeek = true
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
   <NeoConfirm />
   <LazyNeoReport v-if="mounted.report" />
   <LazyNeoLightbox v-if="mounted.lightbox" />
+  <LazyThreadPeekSheet v-if="mounted.threadPeek" />
   <NeoToastHost />
 </template>
