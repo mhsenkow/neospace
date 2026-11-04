@@ -101,9 +101,11 @@ const toggle = (idx: number) => {
     selected.value = selected.value.includes(idx)
       ? selected.value.filter((i) => i !== idx)
       : [...selected.value, idx]
-  } else {
-    selected.value = [idx]
+    return
   }
+  // Single-choice: tap votes immediately (no second Vote step)
+  selected.value = [idx]
+  if (!props.voting && showVoting.value) emit('vote', [idx])
 }
 
 const submit = () => {
@@ -155,6 +157,7 @@ const closesLabel = computed(() => {
       </fieldset>
       <div class="status-poll-actions">
         <button
+          v-if="poll.multiple"
           type="submit"
           class="neo-btn neo-btn--primary neo-btn--sm"
           :disabled="!selected.length || voting"
@@ -163,7 +166,10 @@ const closesLabel = computed(() => {
           {{ voting ? 'Voting…' : 'Vote' }}
         </button>
         <span class="status-poll-info">
-          {{ poll.multiple ? 'Select all that apply · ' : '' }}{{ closesLabel }}
+          <template v-if="poll.multiple">Select all that apply · </template>
+          <template v-else-if="voting">Voting… · </template>
+          <template v-else>Tap to vote · </template>
+          {{ closesLabel }}
         </span>
       </div>
     </form>
@@ -244,13 +250,19 @@ const closesLabel = computed(() => {
 .status-poll-option--choice {
   align-items: center;
   justify-content: flex-start;
-  min-height: 44px;
+  min-height: 48px;
+  padding: 0.65rem 0.85rem;
   cursor: pointer;
   border: 1px solid var(--neo-border-color);
+  -webkit-tap-highlight-color: transparent;
 
   &:focus-within {
     outline: 2px solid var(--neo-focus);
     outline-offset: 1px;
+  }
+
+  &:active {
+    background-color: var(--neo-accent-soft);
   }
 }
 

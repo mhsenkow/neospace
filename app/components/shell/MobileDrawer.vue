@@ -43,18 +43,22 @@ const { currentThemeLabel, cycleTheme } = useShellAppearance()
 const router = useRouter()
 
 const activeBoardColumn = computed(() => {
-  const id = activeBoardColumnId.value
-  return id ? columnsStore.columns.find((c) => c.id === id) || null : null
+  const id = activeBoardColumnId.value || columnsStore.focusedColumnId
+  if (id) {
+    const match = columnsStore.columns.find((c) => c.id === id)
+    if (match) return match
+  }
+  return columnsStore.columns[0] || null
 })
 const flickEnabled = computed(
   () => !!activeBoardColumn.value && isTimelineFeed(activeBoardColumn.value.feedType),
 )
 const flickOn = computed(() => activeBoardColumn.value?.viewMode === 'flip')
 
-const toggleFlickFromDrawer = () => {
+const setFlickFromDrawer = (mode: 'flow' | 'flip') => {
   const col = activeBoardColumn.value
   if (!col || !isTimelineFeed(col.feedType)) return
-  columnsStore.toggleColumnViewMode(col.id)
+  columnsStore.setColumnViewMode(col.id, mode)
 }
 
 const openAddFeedFromDrawer = () => {
@@ -354,15 +358,34 @@ useFocusTrap(mobileSidebarRef, open, {
       </nav>
 
       <section class="mobile-sidebar__board" aria-label="Feed controls">
-        <button
-          type="button"
-          class="mobile-sidebar__action"
-          :aria-pressed="flickOn"
-          :disabled="!flickEnabled"
-          @click="toggleFlickFromDrawer"
+        <div
+          class="mobile-sidebar__mode"
+          role="group"
+          aria-label="How to move through this feed"
         >
-          {{ flickOn ? 'Flick view on' : 'Flick view — one post at a time' }}
-        </button>
+          <button
+            type="button"
+            class="mobile-sidebar__mode-opt"
+            :class="{ 'is-on': !flickOn }"
+            :aria-pressed="!flickOn"
+            :disabled="!flickEnabled"
+            title="Feed — scroll a list"
+            @click="setFlickFromDrawer('flow')"
+          >
+            Feed
+          </button>
+          <button
+            type="button"
+            class="mobile-sidebar__mode-opt"
+            :class="{ 'is-on': flickOn }"
+            :aria-pressed="flickOn"
+            :disabled="!flickEnabled"
+            title="Flick — one post at a time"
+            @click="setFlickFromDrawer('flip')"
+          >
+            Flick
+          </button>
+        </div>
         <button
           type="button"
           class="mobile-sidebar__action"
@@ -756,10 +779,42 @@ useFocusTrap(mobileSidebarRef, open, {
   &__board {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: 0.35rem;
     margin: 0.35rem 0.75rem 0.85rem;
     padding-top: 0.55rem;
     border-top: 1px solid var(--neo-border-color);
+  }
+
+  &__mode {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.2rem;
+    padding: 0.2rem;
+    border-radius: var(--neo-radius-md, 8px);
+    background: var(--neo-bg-tertiary);
+  }
+
+  &__mode-opt {
+    min-height: 40px;
+    border: none;
+    border-radius: var(--neo-radius-sm, 6px);
+    background: transparent;
+    color: var(--neo-text-secondary);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 650;
+    cursor: pointer;
+
+    &.is-on {
+      background: var(--neo-bg-primary);
+      color: var(--neo-text-primary);
+      box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--neo-accent) 70%, transparent);
+    }
+
+    &:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
   }
 
   &__guest {

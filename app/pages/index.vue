@@ -877,6 +877,12 @@ const toggleActiveViewMode = () => {
   columnsStore.toggleColumnViewMode(col.id)
 }
 
+const setActiveViewMode = (mode: 'flow' | 'flip') => {
+  const col = columnsStore.columns[activeColumnIndex.value]
+  if (!col || !isTimelineFeed(col.feedType)) return
+  columnsStore.setColumnViewMode(col.id, mode)
+}
+
 /** Scroll fires many times per frame — measure slides at most once per frame. */
 let columnsScrollRaf = 0
 
@@ -2002,6 +2008,33 @@ useHead({ title: 'Home | NeoSpace' })
       class="mobile-feed-tabs"
       aria-label="Feeds"
     >
+      <div
+        v-if="!boardPortal && activeColumnIsTimeline"
+        class="mobile-feed-tabs__mode"
+        role="group"
+        aria-label="How to move through this feed"
+      >
+        <button
+          type="button"
+          class="mobile-feed-tabs__mode-opt"
+          :class="{ 'is-on': activeViewMode !== 'flip' }"
+          :aria-pressed="activeViewMode !== 'flip'"
+          title="Feed — scroll a list"
+          @click="setActiveViewMode('flow')"
+        >
+          Feed
+        </button>
+        <button
+          type="button"
+          class="mobile-feed-tabs__mode-opt"
+          :class="{ 'is-on': activeViewMode === 'flip' }"
+          :aria-pressed="activeViewMode === 'flip'"
+          title="Flick — one post at a time"
+          @click="setActiveViewMode('flip')"
+        >
+          Flick
+        </button>
+      </div>
       <div ref="feedTabsScroller" class="mobile-feed-tabs__scroller">
         <NeoTabs
           class="mobile-feed-tabs__neo"
@@ -2955,7 +2988,7 @@ useHead({ title: 'Home | NeoSpace' })
   display: none;
   flex-shrink: 0;
   align-items: center;
-  gap: 0;
+  gap: 0.4rem;
   // Sits directly above the tab bar as one bottom thumb stack
   padding: 0.35rem 0.55rem 0.2rem;
   border-top: 1px solid color-mix(in srgb, var(--neo-border-color) 70%, transparent);
@@ -2970,6 +3003,43 @@ useHead({ title: 'Home | NeoSpace' })
 
   @media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
     display: none;
+  }
+
+  &__mode {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex-shrink: 0;
+    gap: 0.15rem;
+    padding: 0.15rem;
+    border-radius: 8px;
+    background: var(--neo-bg-tertiary);
+  }
+
+  &__mode-opt {
+    min-width: 3.1rem;
+    min-height: 36px;
+    padding: 0 0.55rem;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--neo-text-tertiary);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &.is-on {
+      background: var(--neo-bg-primary);
+      color: var(--neo-text-primary);
+      box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--neo-accent) 70%, transparent);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 1px;
+    }
   }
 
   &__scroller {

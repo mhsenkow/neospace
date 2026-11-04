@@ -420,7 +420,9 @@ const pollHideTotals = ref(false)
 const canHidePollTotals = computed(
   () => instancesStore.serverCapabilities.software === 'mastodon',
 )
-const pollInputRefs = ref<HTMLInputElement[]>([])
+const pollEditorRef = ref<{ focusFirst: () => void; firstInput: () => HTMLInputElement | null } | null>(
+  null,
+)
 
 const filledPollOptions = computed(() =>
   pollOptions.value.map((o) => o.trim()).filter(Boolean),
@@ -453,6 +455,12 @@ const pollError = computed(() => {
   }
   return ''
 })
+const pollHint = computed(() => {
+  if (!showPoll.value || pollError.value) return ''
+  if (filledPollOptions.value.length < POLL_MIN_OPTIONS) return 'Add at least two options.'
+  if (!content.value.trim()) return 'Add a question above your poll.'
+  return 'Ready to post when you’re happy with the choices.'
+})
 
 // Account switch / metadata refresh can drop the chosen duration out of range — snap to the nearest allowed
 watch(
@@ -476,22 +484,34 @@ const resetPoll = () => {
   pollHideTotals.value = false
 }
 
-const addPollOption = () => {
-  if (pollOptions.value.length < POLL_MAX_OPTIONS_LIVE.value) pollOptions.value = [...pollOptions.value, '']
+const focusPollEditor = () => {
+  nextTick(() => {
+    pollEditorRef.value?.focusFirst()
+    const el = pollEditorRef.value?.firstInput()
+    if (el) scrollFieldIntoKeyboardView(el, { behavior: scrollBehavior() })
+  })
 }
-const removePollOption = (idx: number) => {
-  if (pollOptions.value.length <= POLL_MIN_OPTIONS) return
-  pollOptions.value = pollOptions.value.filter((_, i) => i !== idx)
-}
-const togglePoll = () => {
+
+const togglePoll = async () => {
   if (isPosting.value) return
   if (showPoll.value) {
+    const dirty =
+      filledPollOptions.value.length > 0 || pollMultiple.value || pollHideTotals.value
+    if (dirty) {
+      const ok = await overlayStore.openConfirm({
+        title: 'Remove poll?',
+        body: 'Your poll options will be discarded.',
+        confirmLabel: 'Remove',
+        danger: true,
+      })
+      if (!ok) return
+    }
     resetPoll()
     return
   }
   if (hasMedia.value) return
   showPoll.value = true
-  nextTick(() => pollInputRefs.value?.[0]?.focus())
+  focusPollEditor()
 }
 
 /** Screen-reader confirmation — the form just resets on success otherwise */
@@ -1542,6 +1562,23 @@ defineExpose({
             </span>
           </div>
 
+          <ComposePollEditor
+            v-if="showPoll"
+            ref="pollEditorRef"
+            v-model:options="pollOptions"
+            v-model:duration="pollDuration"
+            v-model:multiple="pollMultiple"
+            v-model:hide-totals="pollHideTotals"
+            :disabled="isPosting"
+            :min-options="POLL_MIN_OPTIONS"
+            :max-options="POLL_MAX_OPTIONS_LIVE"
+            :max-characters-per-option="pollLimits.maxCharactersPerOption"
+            :durations="POLL_DURATIONS"
+            :can-hide-totals="canHidePollTotals"
+            :error="pollError"
+            :hint="pollHint"
+          />
+
           <TransitionGroup name="compose-segment" tag="div" class="compose-thread__segments">
             <div
               v-for="(seg, segIdx) in extraSegments"
@@ -1686,57 +1723,22 @@ defineExpose({
       />
     </div>
 
-    <fieldset v-if="showPoll" class="compose-poll" :disabled="isPosting" @click.stop>
-      <legend class="compose-poll__legend">Poll</legend>
-      <div v-for="(_, idx) in pollOptions" :key="idx" class="compose-poll__row">
-        <input
-          :ref="(el) => { if (el) pollInputRefs[idx] = el as HTMLInputElement }"
-          v-model="pollOptions[idx]"
-          type="text"
-          class="compose-poll__input neo-input"
-          :maxlength="pollLimits.maxCharactersPerOption"
-          :placeholder="`Option ${idx + 1}`"
-          :aria-label="`Poll option ${idx + 1}`"
-        />
-        <button
-          v-if="pollOptions.length > POLL_MIN_OPTIONS"
-          type="button"
-          class="compose-poll__remove"
-          :aria-label="`Remove option ${idx + 1}`"
-          @click="removePollOption(idx)"
-        >
-          ×
-        </button>
-      </div>
-      <div class="compose-poll__settings">
-        <button
-          v-if="pollOptions.length < POLL_MAX_OPTIONS_LIVE"
-          type="button"
-          class="compose-poll__add"
-          @click="addPollOption"
-        >
-          + Add option
-        </button>
-        <label class="compose-poll__field">
-          <span>Ends in</span>
-          <select v-model.number="pollDuration" class="compose-poll__select" aria-label="Poll duration">
-            <option v-for="d in POLL_DURATIONS" :key="d.seconds" :value="d.seconds">{{ d.label }}</option>
-          </select>
-        </label>
-        <label class="compose-poll__field">
-          <input v-model="pollMultiple" type="checkbox" />
-          <span>Allow multiple choices</span>
-        </label>
-        <label v-if="canHidePollTotals" class="compose-poll__field compose-poll__field--wrap">
-          <input v-model="pollHideTotals" type="checkbox" />
-          <span>Hide vote counts until the poll closes</span>
-        </label>
-        <p v-if="canHidePollTotals && pollHideTotals" class="compose-poll__hint">
-          Totals stay hidden on Mastodon until voting ends; other clients may show them differently.
-        </p>
-      </div>
-      <p v-if="pollError" class="compose-poll__error" role="alert">{{ pollError }}</p>
-    </fieldset>
+    <ComposePollEditor
+      v-if="showPoll && !threadsLayout"
+      ref="pollEditorRef"
+      v-model:options="pollOptions"
+      v-model:duration="pollDuration"
+      v-model:multiple="pollMultiple"
+      v-model:hide-totals="pollHideTotals"
+      :disabled="isPosting"
+      :min-options="POLL_MIN_OPTIONS"
+      :max-options="POLL_MAX_OPTIONS_LIVE"
+      :max-characters-per-option="pollLimits.maxCharactersPerOption"
+      :durations="POLL_DURATIONS"
+      :can-hide-totals="canHidePollTotals"
+      :error="pollError"
+      :hint="pollHint"
+    />
 
     <aside v-if="peerTubeHint" class="compose-peertube" @click.stop>
       <p class="compose-peertube__text">{{ peerTubeHint }}</p>
@@ -2516,108 +2518,6 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-
-.compose-poll {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-width: 0;
-  margin: 0.5rem 0 0;
-  padding: 0.6rem 0.65rem;
-  border: 1px solid var(--neo-border-color);
-  border-radius: var(--neo-radius-md, 8px);
-  background: var(--neo-bg-tertiary);
-}
-
-.compose-poll__legend {
-  padding: 0 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--neo-text-muted);
-}
-
-.compose-poll__row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.compose-poll__input {
-  flex: 1;
-  min-width: 0;
-  /* Absolute 16px — iOS zooms anything smaller */
-  font-size: max(16px, 1rem);
-}
-
-.compose-poll__remove,
-.compose-poll__add {
-  border: none;
-  background: transparent;
-  color: var(--neo-text-muted);
-  font: inherit;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--neo-accent);
-  }
-}
-
-.compose-poll__remove {
-  flex-shrink: 0;
-  width: 2rem;
-  height: 2rem;
-  font-size: 1.125rem;
-  line-height: 1;
-}
-
-.compose-poll__add {
-  min-height: 2rem;
-  padding: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--neo-link);
-}
-
-.compose-poll__settings {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.9rem;
-  font-size: 0.8125rem;
-  color: var(--neo-text-secondary);
-}
-
-.compose-poll__field {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.compose-poll__field--wrap {
-  flex: 1 1 100%;
-}
-
-.compose-poll__hint {
-  margin: 0;
-  flex: 1 1 100%;
-  font-size: 0.75rem;
-  color: var(--neo-text-muted);
-}
-
-.compose-poll__select {
-  padding: 0.25rem 0.35rem;
-  font: inherit;
-  background-color: var(--neo-bg-primary);
-  color: var(--neo-text-primary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: var(--neo-radius-sm);
-}
-
-.compose-poll__error {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--neo-danger, #dc2626);
 }
 
 .compose-input {
