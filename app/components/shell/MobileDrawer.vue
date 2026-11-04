@@ -8,6 +8,7 @@ import { useAlgorithmsStore } from '~/stores/algorithms'
 import { recipeTip } from '~/utils/algorithms'
 import { useColumnsStore, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
 import { useActiveBoardColumnId, useRequestAddFeed } from '~/composables/useBoardNav'
+import { useMobileDiscoverTab } from '~/composables/useMobileDiscoverTab'
 import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
 import { useOverlayStore } from '~/stores/overlay'
@@ -91,6 +92,7 @@ const closeMobileMenu = () => {
 }
 
 const { openBoardFeed, openFeedOrRoute, openGroup, boardColumnIs, goHome } = useBoardNav()
+const { preferDiscoverTab } = useMobileDiscoverTab()
 const { path: routePath } = useActivityNav()
 const searchActive = computed(() => routePath.value === '/explore' || boardColumnIs('search'))
 const messagesActive = computed(() => routePath.value === '/messages' || boardColumnIs('messages'))
@@ -172,6 +174,8 @@ const openBoardFeedFromDrawer = (feedType: ColumnFeedType, feedParam?: string) =
 }
 
 const openDrawerFeedOrRoute = (feedType: ColumnFeedType, fallback: string) => {
+  if (feedType === 'search') preferDiscoverTab('search')
+  if (feedType === 'messages') preferDiscoverTab('messages')
   closeMobileMenu()
   void openFeedOrRoute(feedType, fallback)
 }

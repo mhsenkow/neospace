@@ -363,14 +363,13 @@ html[data-motion='still'] {
 // toasts clear the pills-only strip above the mobile tab bar on the board.
 @media (max-width: #{vars.$bp-phone-max}) and (min-height: #{vars.$bp-phone-landscape-h + 1px}) {
   html.neo-route-board {
-    // Feed|Flick + pills sit taller than the old pill-only strip
-    --neo-feed-tabs-h: 56px;
+    --neo-feed-tabs-h: 48px;
   }
 }
 
 @media (max-width: #{vars.$bp-phone-max}) and (orientation: portrait) {
   html.neo-route-board {
-    --neo-feed-tabs-h: 56px;
+    --neo-feed-tabs-h: 48px;
   }
 }
 

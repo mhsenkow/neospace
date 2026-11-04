@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
+import { useConversationsStore } from '~/stores/conversations'
+import { useColumnsStore, isTimelineFeed } from '~/stores/columns'
 import { usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
+import { useActiveBoardColumnId } from '~/composables/useBoardNav'
+import { useMobileDiscoverTab } from '~/composables/useMobileDiscoverTab'
 
 const open = defineModel<boolean>('open', { default: false })
 
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
+const conversationsStore = useConversationsStore()
+const columnsStore = useColumnsStore()
 const { boardPortal } = useBoardPortal()
 const { openFeedOrRoute, boardColumnIs, goHome, openCompose } = useBoardNav()
+const activeBoardColumnId = useActiveBoardColumnId()
+const { discoverTab, preferDiscoverTab } = useMobileDiscoverTab()
 const route = useRoute()
 const { isActivity } = useActivityNav()
 const isPhoneLandscape = usePhoneLandscape()
@@ -19,25 +27,59 @@ const navEl = ref<HTMLElement | null>(null)
 useAutoHideNav(navEl)
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
+const messagesBadge = computed(() => conversationsStore.badgeLabel)
 
 const activityActive = computed(
-  () => isActivity.value || boardColumnIs('notifications'),
+  () => isActivity.value || boardColumnIs('notifications') || boardPortal.value === 'activity',
 )
 
 const searchActive = computed(
-  () => route.path === '/explore' || boardColumnIs('search'),
+  () =>
+    route.path === '/explore' ||
+    boardColumnIs('search') ||
+    boardPortal.value === 'search',
 )
 
-/** Home owns aria-current only when another tab isn't claiming the board column. */
+const messagesActive = computed(
+  () =>
+    route.path === '/messages' ||
+    boardColumnIs('messages') ||
+    boardPortal.value === 'inbox',
+)
+
+const activeBoardColumn = computed(() => {
+  const id = activeBoardColumnId.value || columnsStore.focusedColumnId
+  if (id) {
+    const match = columnsStore.columns.find((c) => c.id === id)
+    if (match) return match
+  }
+  return columnsStore.columns[0] || null
+})
+
+/**
+ * Home is focused only while you're actually in a timeline feed —
+ * not Search / Messages / Activity / Profile / other board portals.
+ */
 const homeActive = computed(() => {
   if (route.path !== '/') return false
-  return !(
+  if (boardPortal.value) return false
+  if (
     boardColumnIs('messages') ||
     boardColumnIs('notifications') ||
     boardColumnIs('profile') ||
     boardColumnIs('search')
-  )
+  ) {
+    return false
+  }
+  const col = activeBoardColumn.value
+  return !col || isTimelineFeed(col.feedType)
 })
+
+/** Prefer Messages in the tab when signed in and that was the last drawer pick. */
+const showMessagesTab = computed(
+  () =>
+    instancesStore.hasAuthenticatedInstance && discoverTab.value === 'messages',
+)
 
 const openHome = () => {
   void goHome()
@@ -48,7 +90,13 @@ const openActivity = () => {
 }
 
 const openSearch = () => {
+  preferDiscoverTab('search')
   void openFeedOrRoute('search', '/explore')
+}
+
+const openMessages = () => {
+  preferDiscoverTab('messages')
+  void openFeedOrRoute('messages', '/messages')
 }
 
 const toggleMenu = () => {
@@ -90,6 +138,22 @@ onUnmounted(() => {
       <NeoIcon name="menu" :size="20" :stroke="1.75" />
     </button>
     <button
+      v-if="showMessagesTab"
+      type="button"
+      class="mobile-nav__item mobile-nav__item--badge"
+      :class="{
+        active: messagesActive,
+        'chrome-hint': boardPortal === 'inbox',
+      }"
+      :aria-label="messagesBadge ? `Messages, ${messagesBadge} unread` : 'Messages'"
+      :aria-current="messagesActive ? 'page' : undefined"
+      @click="openMessages"
+    >
+      <NeoIcon name="message" :size="20" :stroke="messagesActive || boardPortal === 'inbox' ? 2 : 1.75" />
+      <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
+    </button>
+    <button
+      v-else
       type="button"
       class="mobile-nav__item"
       :class="{
@@ -105,7 +169,7 @@ onUnmounted(() => {
     <span class="mobile-nav__sep" aria-hidden="true" />
   </template>
 
-  <!-- Threads order: Home · Search · Compose · Activity · Profile -->
+  <!-- Home · Search|Messages · Compose · Activity · Profile -->
   <button
     type="button"
     class="mobile-nav__item"
@@ -118,6 +182,22 @@ onUnmounted(() => {
   </button>
 
   <button
+    v-if="showMessagesTab"
+    type="button"
+    class="mobile-nav__item mobile-nav__item--badge"
+    :class="{
+      active: messagesActive,
+      'chrome-hint': boardPortal === 'inbox',
+    }"
+    :aria-label="messagesBadge ? `Messages, ${messagesBadge} unread` : 'Messages'"
+    :aria-current="messagesActive ? 'page' : undefined"
+    @click="openMessages"
+  >
+    <NeoIcon name="message" :size="22" :stroke="messagesActive || boardPortal === 'inbox' ? 2 : 1.5" />
+    <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
+  </button>
+  <button
+    v-else
     type="button"
     class="mobile-nav__item"
     :class="{
@@ -136,7 +216,7 @@ onUnmounted(() => {
     type="button"
     class="mobile-nav__item mobile-nav__compose"
     aria-label="New post"
-    @click="openCompose"
+    @click="openCompose()"
   >
     <span class="mobile-nav__compose-mark" aria-hidden="true">
       <NeoIcon name="edit" :size="20" :stroke="1.85" />
@@ -216,9 +296,6 @@ onUnmounted(() => {
 }
 
 .mobile-nav {
-  // In-flow flex sibling after <main> — sits at the bottom of the phone column shell.
-  // (Do not put this before main: overflow:hidden parents break sticky-bottom and it
-  // lands under the header, which is what production looked like.)
   position: relative;
   flex-shrink: 0;
   width: 100%;
@@ -334,7 +411,6 @@ onUnmounted(() => {
     }
   }
 
-  // Threads-like create chip in the bar — quiet outline, not a second solid FAB
   &__compose-mark {
     display: flex;
     align-items: center;
