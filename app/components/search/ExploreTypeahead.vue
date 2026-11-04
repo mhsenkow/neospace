@@ -90,7 +90,7 @@ const { instances: curated } = useCuratedInstances()
 const instancesStore = useInstancesStore()
 const toastStore = useToastStore()
 const { openServerOnBoard } = useBoardNav()
-const { toggleFollow } = useCrossAccountAction()
+const { toggleFollow, canPickAccount, accountHandle } = useCrossAccountAction()
 const { following, loadFollowing } = useAccountSearch()
 
 const activeIndex = ref(0)
@@ -284,9 +284,26 @@ const followHandle = async (row: Row, e: Event) => {
   }
   followBusy.value = true
   try {
-    await toggleFollow(row.account)
+    const active = instancesStore.activeAccount
+    const who = active ? accountHandle(active) : 'you'
+    if (canPickAccount.value && active) {
+      const { useOverlayStore } = await import('~/stores/overlay')
+      const ok = await useOverlayStore().openConfirm({
+        title: `Follow as ${who}?`,
+        body: `@${row.acct} — switch accounts first if you meant a different login.`,
+        confirmLabel: 'Follow',
+      })
+      if (!ok) return
+    }
+    const rel = await toggleFollow(row.account)
+    toastStore.show({
+      message:
+        rel?.following || rel?.requested
+          ? `Following @${row.acct} as ${who}`
+          : `Unfollowed @${row.acct}`,
+      duration: 2400,
+    })
     emit('follow', row.account)
-    toastStore.show({ message: `Updated follow for @${row.acct}`, duration: 2200 })
   } catch (err: any) {
     toastStore.show({ message: err?.message || 'Couldn’t update follow' })
   } finally {

@@ -37,5 +37,6 @@ watch(
   <LazyNeoReport v-if="mounted.report" />
   <LazyNeoLightbox v-if="mounted.lightbox" />
   <LazyThreadPeekSheet v-if="mounted.threadPeek" />
+  <LazyBoardCoachSheet />
   <NeoToastHost />
 </template>

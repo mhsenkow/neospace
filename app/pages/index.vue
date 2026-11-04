@@ -1432,6 +1432,11 @@ onMounted(async () => {
     bindCarouselGestures()
     // Edge slides sit left of feeds — jump to first feed without animating through Settings
     scrollToColumn(activeColumnIndex.value, 'auto')
+    if (instancesStore.hasAuthenticatedInstance && isMobileUi.value) {
+      const { startIfNeeded } = useBoardCoach()
+      // Let the board paint first so the coach doesn't fight the carousel park
+      window.setTimeout(() => startIfNeeded(), 700)
+    }
   })
 })
 

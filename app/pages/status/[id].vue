@@ -642,13 +642,13 @@ watch(
   },
 )
 
-const expandDockToSheet = (seedText?: string) => {
+const expandDockToSheet = (seedText = '') => {
   const focus = focusStatus.value
   if (!focus) return
   composeSheet.show({
     title: 'New thread',
     placeholder: 'Share your thoughts…',
-    initialText: seedText || '',
+    initialText: seedText,
     inReplyToId: publicReplyId.value || focus.id,
     mentionAccts: replyMentionAccts.value,
     visibility: focus.visibility === 'direct' ? 'direct' : focus.visibility,
@@ -662,6 +662,8 @@ const expandDockToSheet = (seedText?: string) => {
     },
   })
 }
+
+const onExpandDockClick = () => expandDockToSheet()
 
 /** Peek → full thread: reopen compose with the draft the reader already typed */
 const consumePeekHandoff = () => {
@@ -1673,7 +1675,7 @@ useHead({
             aria-label="Open full composer"
             title="Open full composer"
             :disabled="replyResolving || !publicReplyId"
-            @click="expandDockToSheet"
+            @click="onExpandDockClick"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
               <polyline points="15 3 21 3 21 9" />

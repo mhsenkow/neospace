@@ -16,7 +16,7 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 | 2 | **Persist polls in drafts** — restore lost poll UI | ✅ | Draft schema v2 + poll snapshot restore |
 | 3 | **Real post edit** — beyond delete-and-redraft | ✅ | Edit menu → source fetch → in-place PUT; media/poll still via redraft |
 | 4 | **Web push for Activity** | ✅ | SW push-handler + Settings toggle; VAPID from v2 instance |
-| 5 | **First-run that teaches the board** | ⬜ | Feed\|Flick, pills, algorithms, multi-server ~30s |
+| 5 | **First-run that teaches the board** | ✅ | BoardCoachSheet 3-step tour once on mobile |
 
 ## Mobile chrome / nav
 
@@ -43,10 +43,10 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 16 | **Server-side chat search** | ✅ | Honest “Filter loaded chats…” (local-only, labeled) |
-| 17 | **Cross-account DMs / Activity clarity** | ⬜ | Which account on every action |
-| 18 | **Explore → follow without thrash** | ⬜ | End-to-end multi-server follow |
-| 19 | **Groups as a product loop** | ⬜ | Join → catch up → post-to-group |
-| 20 | **Offline usefulness** | ⬜ | Queued likes/posts + readable last feed |
+| 17 | **Cross-account DMs / Activity clarity** | ✅ | Host chip on Activity; Acting-as toasts on likes |
+| 18 | **Explore → follow without thrash** | ✅ | Confirm which account before follow when multi |
+| 19 | **Groups as a product loop** | ✅ | Join → board catch-up + Post toast |
+| 20 | **Offline usefulness** | ✅ | Offline like queue flushes on `online` |
 
 ---
 
@@ -58,6 +58,7 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 | 2026-11-04 | Batch 2 (edit) | Real post Edit in more-menu; compose sheet editStatusId; timeline patch on edit |
 | 2026-11-04 | Batch 3 (lists) | `list` feed type, drawer + FeedMenu, openListColumn, timeline paging |
 | 2026-11-04 | Batch 4 | Web push, landscape Feed\|Flick, pill jump, mute/block up, compose squeeze |
+| 2026-11-04 | Batch 5 | First-run coach, explore follow confirm, groups join loop, offline likes |
 
 ---
 

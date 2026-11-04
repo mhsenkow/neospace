@@ -159,6 +159,29 @@ const handleJoin = async () => {
   isJoining.value = true
   try {
     await groupsStore.joinGroup(tag.value)
+    // Product loop: join → catch up on the board → post into the group
+    const { useColumnsStore } = await import('~/stores/columns')
+    const { useToastStore } = await import('~/stores/toast')
+    const { useComposeSheetStore } = await import('~/stores/composeSheet')
+    const columns = useColumnsStore()
+    const colId = columns.ensureFocusedView('group', tag.value)
+    useToastStore().show({
+      message: `Joined #${tag.value} — catching up on your board`,
+      actionLabel: 'Post',
+      duration: 6000,
+      onAction: () => {
+        useComposeSheetStore().show({
+          title: `Post to #${tag.value}`,
+          placeholder: `Share with #${tag.value}…`,
+          groupTag: tag.value,
+        })
+      },
+    })
+    if (colId) {
+      const { usePendingColumnJump } = await import('~/composables/useBoardNav')
+      usePendingColumnJump().value = colId
+      await router.push('/')
+    }
   } catch (e) {
     logError('Failed to join:', e)
     const failure = joinGroupFailure(e)

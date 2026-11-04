@@ -64,13 +64,16 @@ export function usePostActions(options: {
 
   let resolvedIdCache: string | null = null
   let resolvedClientCache: mastodon.rest.Client | null = null
+  let resolvedInstanceIdCache: string | null = null
   /** Why the last resolve failed — drives the toast wording + escape hatch */
   let lastFailure: FederationFailure | null = null
-  let inflight: Promise<{ client: mastodon.rest.Client; id: string } | null> | null = null
+  type ActionCtx = { client: mastodon.rest.Client; id: string; instanceId: string }
+  let inflight: Promise<ActionCtx | null> | null = null
 
   const clearActionCache = () => {
     resolvedIdCache = null
     resolvedClientCache = null
+    resolvedInstanceIdCache = null
     inflight = null
   }
 
@@ -91,10 +94,11 @@ export function usePostActions(options: {
     clearActionCache,
   )
 
-  const remember = (client: mastodon.rest.Client, id: string) => {
+  const remember = (client: mastodon.rest.Client, id: string, instanceId: string) => {
     resolvedClientCache = client
     resolvedIdCache = id
-    return { client, id }
+    resolvedInstanceIdCache = instanceId
+    return { client, id, instanceId }
   }
 
   /**
@@ -111,9 +115,13 @@ export function usePostActions(options: {
     }
   }
 
-  const getActionContext = async (): Promise<{ client: mastodon.rest.Client; id: string } | null> => {
-    if (resolvedClientCache && resolvedIdCache) {
-      return { client: resolvedClientCache, id: resolvedIdCache }
+  const getActionContext = async (): Promise<ActionCtx | null> => {
+    if (resolvedClientCache && resolvedIdCache && resolvedInstanceIdCache) {
+      return {
+        client: resolvedClientCache,
+        id: resolvedIdCache,
+        instanceId: resolvedInstanceIdCache,
+      }
     }
     // A prewarm may already be resolving this post — share it
     if (inflight) return inflight
@@ -123,13 +131,14 @@ export function usePostActions(options: {
     return inflight
   }
 
-  const resolveContext = async (): Promise<{ client: mastodon.rest.Client; id: string } | null> => {
+  const resolveContext = async (): Promise<ActionCtx | null> => {
     lastFailure = null
     const homeUrl = actingUrl()
     if (!homeUrl) return null
 
     const status = options.displayStatus.value
     const primaryClient = activeClient()
+    const activeId = instancesStore.activeAccountId || ''
     const activeHost = hostnameOf(homeUrl)
     const sourceUrl = sourceUrlOf()
     const sourceHost = sourceUrl ? hostnameOf(sourceUrl) : ''
@@ -139,7 +148,7 @@ export function usePostActions(options: {
 
     // Fetched via the active account — local id is already valid.
     if (sourceHost && sourceHost === activeHost) {
-      return remember(primaryClient, status.id)
+      return remember(primaryClient, status.id, activeId)
     }
 
     // Multi-account / Edward: act on the account that served this row — its id
@@ -152,20 +161,20 @@ export function usePostActions(options: {
           announcedActingAs.add(source.id)
           toastStore.show({ message: `Acting as ${who} — the account that saw this post`, duration: 3600 })
         }
-        return remember(clientFor(source.id), status.id)
+        return remember(clientFor(source.id), status.id, source.id)
       }
     }
 
     // Status HTML/AP URL is on the active host.
     if (lookupUrl && hostnameOf(lookupUrl) === activeHost) {
-      return remember(primaryClient, status.id)
+      return remember(primaryClient, status.id, activeId)
     }
 
     // Import onto your server: ActivityPub id first, then the page URL
     const candidates = resolveCandidates(status.uri, options.statusUrl.value, status.url)
     if (candidates.length) {
       const { id: localId, failure } = await statusStore.resolveStatusDetailed(candidates)
-      if (localId) return remember(primaryClient, localId)
+      if (localId) return remember(primaryClient, localId, activeId)
       lastFailure = failure
     }
 
@@ -174,7 +183,9 @@ export function usePostActions(options: {
     // without a matching ActivityPub uri we fail closed instead of acting on it.
     try {
       const fetched = await statusStore.fetchStatus(status.id)
-      if (status.uri && fetched?.uri === status.uri) return remember(primaryClient, status.id)
+      if (status.uri && fetched?.uri === status.uri) {
+        return remember(primaryClient, status.id, activeId)
+      }
     } catch {
       /* foreign id */
     }
@@ -231,6 +242,20 @@ export function usePostActions(options: {
       const ctx = await getActionContext()
       if (!ctx) throw new Error('Not resolvable')
 
+      if (import.meta.client && !navigator.onLine && ctx.instanceId) {
+        const { enqueue } = useOfflineQueue()
+        enqueue({
+          kind: want ? 'favourite' : 'unfavourite',
+          statusId: ctx.id,
+          instanceId: ctx.instanceId,
+        })
+        toastStore.show({
+          message: want ? 'Liked — will sync when you’re back online' : 'Unlike queued offline',
+          duration: 3200,
+        })
+        return
+      }
+
       if (want) {
         await ctx.client.v1.statuses.$select(ctx.id).favourite()
       } else {
@@ -238,6 +263,31 @@ export function usePostActions(options: {
       }
     } catch (e) {
       clearActionCache()
+      // Network drop mid-flight — keep the optimistic state and queue it
+      const offlineish =
+        import.meta.client &&
+        (!navigator.onLine ||
+          (e instanceof TypeError && /fetch|network/i.test(e.message || '')))
+      if (offlineish) {
+        try {
+          const ctx = await getActionContext().catch(() => null)
+          if (ctx) {
+            const { enqueue } = useOfflineQueue()
+            enqueue({
+              kind: want ? 'favourite' : 'unfavourite',
+              statusId: ctx.id,
+              instanceId: ctx.instanceId,
+            })
+            toastStore.show({
+              message: want ? 'Liked — will sync when you’re back online' : 'Unlike queued offline',
+              duration: 3200,
+            })
+            return
+          }
+        } catch {
+          /* fall through to revert */
+        }
+      }
       if (s.favourited === want) {
         s.favourited = !want
         s.favouritesCount = Math.max(0, (s.favouritesCount || 0) + (want ? -1 : 1))
