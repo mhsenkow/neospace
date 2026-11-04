@@ -7,6 +7,7 @@ import type { RouteLocationRaw } from 'vue-router'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useInstancesStore } from '~/stores/instances'
+import { useComposeModality, type ComposeModality } from '~/composables/useComposeModality'
 
 /** Always re-set so index can re-park even when focusedColumnId is unchanged. */
 export function usePendingColumnJump() {
@@ -130,8 +131,9 @@ export function useBoardNav() {
   /**
    * New-post entry shared by the sidebar and tab bar: guests go to sign-in,
    * otherwise the sheet opens tagged with the group being viewed (route or focused column).
+   * Pass `modality` from the peek FAB; omit it for the neutral tab-bar create.
    */
-  const openCompose = () => {
+  const openCompose = (opts?: { modality?: ComposeModality }) => {
     if (!useInstancesStore().isAuthenticated) {
       router.push('/login')
       return
@@ -142,7 +144,14 @@ export function useBoardNav() {
     const columnTag = focused?.feedType === 'group' && focused.groupTag ? focused.groupTag : null
     useComposeSheetStore().show({
       groupTag: routeTag || columnTag || undefined,
+      modality: opts?.modality ?? null,
     })
+  }
+
+  /** Peek FAB — open into the user's preferred modality (camera / pen / mic). */
+  const openComposePreferred = () => {
+    const { preferred } = useComposeModality()
+    openCompose({ modality: preferred.value })
   }
 
   const openGroup = async (tag: string) => {
@@ -169,6 +178,7 @@ export function useBoardNav() {
     openGroup,
     openServerOnBoard,
     openCompose,
+    openComposePreferred,
     goHome,
   }
 }

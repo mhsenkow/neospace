@@ -57,7 +57,8 @@ const isOffline = ref(false)
 /** Overlays mount on first open only (keeps their chunks + setup off the boot path). */
 const composeSheet = useComposeSheetStore()
 const algorithmsStore = useAlgorithmsStore()
-const { openCompose } = useBoardNav()
+const { openCompose, openComposePreferred } = useBoardNav()
+const { preferredIcon, preferred } = useComposeModality()
 const { isOpen: accountsManagerOpen, open: openAccountsManager } = useAccountsManager()
 const router = useRouter()
 
@@ -442,11 +443,12 @@ watch(
         v-if="showPeekCompose"
         type="button"
         class="compose-fab compose-fab--peek"
-        aria-label="New thread"
-        title="New thread"
-        @click="openCompose"
+        :class="`compose-fab--peek-${preferred}`"
+        :aria-label="preferred === 'media' ? 'New photo' : preferred === 'voice' ? 'Voice note' : 'New thread'"
+        :title="preferred === 'media' ? 'New photo' : preferred === 'voice' ? 'Voice note' : 'New thread'"
+        @click="openComposePreferred"
       >
-        <NeoIcon name="pen" :size="22" :stroke="2" />
+        <NeoIcon :name="preferredIcon" :size="22" :stroke="2" />
       </button>
     </Transition>
     <NeoOverlayHost />

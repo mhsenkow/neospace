@@ -194,6 +194,8 @@ const replyPlaceholder = computed(() => {
   if (sheet.placeholder) return sheet.placeholder
   if (sheet.inReplyToId) return 'Share your thoughts…'
   if (sheet.quoteUrl) return 'Add a comment…'
+  if (sheet.initialModality === 'media') return 'Add a caption…'
+  if (sheet.initialModality === 'voice') return 'Say something…'
   return "What's new?"
 })
 </script>
@@ -286,6 +288,7 @@ const replyPlaceholder = computed(() => {
             :draft-slot="sheet.draftSlot || undefined"
             :initial-visibility="sheet.initialVisibility || undefined"
             :initial-group-tag="sheet.groupTag || undefined"
+            :initial-modality="sheet.initialModality || undefined"
             :placeholder="replyPlaceholder"
             :title="sheetTitle"
             :in-reply-to-id="sheet.inReplyToId || undefined"

@@ -28,6 +28,11 @@ import { useOverlayStore } from '~/stores/overlay'
 import { httpStatusFrom, mapComposeError } from '~/utils/friendlyError'
 import type { mastodon } from 'masto'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
+import {
+  modalityFromPost,
+  useComposeModality,
+  type ComposeModality,
+} from '~/composables/useComposeModality'
 
 const isApplePlatform = (() => {
   if (typeof navigator === 'undefined') return false
@@ -91,6 +96,11 @@ const props = withDefaults(
     threadsLayout?: boolean
     /** Parent post preview under the composer (reply sheet) */
     replyContext?: ComposeContextPost | null
+    /**
+     * Entry modality from the peek FAB — `media` opens the photo picker,
+     * `write` focuses the field, `voice` stubs until recording ships.
+     */
+    initialModality?: ComposeModality | null
   }>(),
   {
     placeholder: "What's new?",
@@ -102,6 +112,7 @@ const props = withDefaults(
     submitInHeader: false,
     threadsLayout: false,
     replyContext: null,
+    initialModality: null,
   },
 )
 
@@ -118,6 +129,7 @@ const handoffStore = useComposeHandoffStore()
 const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
 const { open: openAccountSwitcher } = useAccountSwitcher()
+const { recordSuccess: recordComposeModality } = useComposeModality()
 
 type ThreadSegment = { id: string; text: string }
 const extraSegments = ref<ThreadSegment[]>([])
@@ -999,6 +1011,12 @@ const handlePost = async () => {
       }
     }
 
+    // Teach the peek FAB what you usually post (skip replies — those aren't "new thread")
+    if (!props.inReplyToId && !props.quoteUrl) {
+      recordComposeModality(
+        modalityFromPost({ hasMedia: mediaIds.value.length > 0 }),
+      )
+    }
     clearDraft()
     resetForm()
     emit('posted', lastStatus)
@@ -1199,6 +1217,25 @@ onMounted(() => {
     })
   }
   void applyHandoff()
+  // Peek FAB modality — run after draft/handoff so we don't fight restored text
+  void nextTick(() => {
+    const mode = props.initialModality
+    if (!mode || props.inReplyToId || props.quoteUrl || props.compact) return
+    if (mode === 'media') {
+      if (!hasMedia.value && canAddMore.value && !showPoll.value) {
+        // Brief delay so the sheet finish opening before the system picker covers it
+        window.setTimeout(() => openFilePicker(), 280)
+      }
+      return
+    }
+    if (mode === 'voice') {
+      toastStore.show({
+        message: 'Voice notes are coming soon — write for now',
+        duration: 3200,
+      })
+    }
+    textareaRef.value?.focus({ preventScroll: true })
+  })
 })
 
 onUnmounted(() => {
@@ -1211,6 +1248,7 @@ defineExpose({
   isPosting,
   submitLabel,
   openPostOptions,
+  openFilePicker,
   /** Anything the user would lose by closing — own text, CW, attachments, poll, or schedule */
   isDirty: computed(
     () =>
@@ -1259,6 +1297,8 @@ defineExpose({
       'compose--expanded': compactExpanded,
       'compose--header-submit': submitInHeader,
       'compose--threads': threadsLayout && !compact,
+      'compose--modality-media': initialModality === 'media',
+      'compose--modality-voice': initialModality === 'voice',
     }"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
@@ -1439,12 +1479,13 @@ defineExpose({
             <button
               type="button"
               class="compose-tool"
-              aria-label="Add photo"
-              title="Add photo"
+              :class="{ 'compose-tool--emphasis': initialModality === 'media' }"
+              aria-label="Add photo or video"
+              title="Add photo or video"
               :disabled="!canAddMore || isPosting || showPoll"
               @click="openFilePicker"
             >
-              <NeoIcon name="image" :size="18" :stroke="1.75" />
+              <NeoIcon :name="initialModality === 'media' ? 'camera' : 'image'" :size="18" :stroke="1.75" />
             </button>
             <div class="compose-emoji">
               <button
@@ -2205,6 +2246,14 @@ defineExpose({
     overflow: hidden;
     border-color: var(--neo-accent);
     background: color-mix(in srgb, var(--neo-accent) 6%, var(--neo-bg-card));
+  }
+
+  // Peek FAB opened photo/video — nudge attention to the media tool
+  &--modality-media {
+    .compose-thread__tools .compose-tool--emphasis {
+      color: var(--neo-accent);
+      background: var(--neo-accent-soft);
+    }
   }
 
   &--compact {

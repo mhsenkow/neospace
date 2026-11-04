@@ -5,6 +5,7 @@
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { logError } from '~/utils/log'
+import type { ComposeModality } from '~/composables/useComposeModality'
 
 export type ComposeVisibility = 'public' | 'unlisted' | 'private' | 'direct'
 
@@ -38,6 +39,11 @@ interface ComposeSheetState {
   groupTag: string | null
   /** Mentions added on send (not shown in the field) — reply sheet */
   mentionAccts: string[] | null
+  /**
+   * Entry modality for the peek FAB / optimized compose.
+   * `null` = neutral (tab-bar New thread). Applied on mount only.
+   */
+  initialModality: ComposeModality | null
   onPosted: ((status: mastodon.v1.Status) => void) | null
 }
 
@@ -57,6 +63,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     contextPost: null,
     groupTag: null,
     mentionAccts: null,
+    initialModality: null,
     onPosted: null,
   }),
 
@@ -74,6 +81,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       contextPost?: ComposeContextPost | null
       groupTag?: string | null
       mentionAccts?: string[] | null
+      modality?: ComposeModality | null
       onPosted?: (status: mastodon.v1.Status) => void
     }) {
       const nextReply = opts?.inReplyToId ?? null
@@ -96,6 +104,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.contextPost = opts?.contextPost ?? null
       this.groupTag = opts?.groupTag ? opts.groupTag.replace(/^#/, '') : null
       this.mentionAccts = opts?.mentionAccts?.length ? [...opts.mentionAccts] : null
+      this.initialModality = opts?.modality ?? null
       this.onPosted = opts?.onPosted ?? null
       // Default chrome title — DMs keep an explicit title from the caller
       this.title =
@@ -106,7 +115,11 @@ export const useComposeSheetStore = defineStore('composeSheet', {
             ? 'New thread'
             : nextQuote
               ? 'Quote'
-              : 'New thread')
+              : this.initialModality === 'media'
+                ? 'New photo'
+                : this.initialModality === 'voice'
+                  ? 'Voice note'
+                  : 'New thread')
 
       // Remounting while already open wipes an in-progress Loom draft —
       // only bump when opening fresh or switching reply/quote context
@@ -130,6 +143,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.contextPost = null
       this.groupTag = null
       this.mentionAccts = null
+      this.initialModality = null
       // keep onPosted (e.g. navigate into the new conversation)
       this.instanceKey += 1
     },
@@ -163,6 +177,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.contextPost = null
       this.groupTag = null
       this.mentionAccts = null
+      this.initialModality = null
       this.onPosted = null
     },
   },

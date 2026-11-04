@@ -160,6 +160,16 @@ export const ICONS = {
     }),
     h('circle', { cx: 12, cy: 13, r: 4 }),
   ],
+  mic: () => [
+    h('path', { d: 'M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z' }),
+    h('path', { d: 'M19 10v2a7 7 0 01-14 0v-2' }),
+    h('line', { x1: 12, y1: 19, x2: 12, y2: 23 }),
+    h('line', { x1: 8, y1: 23, x2: 16, y2: 23 }),
+  ],
+  video: () => [
+    h('polygon', { points: '23 7 16 12 23 17 23 7' }),
+    h('rect', { x: 1, y: 5, width: 15, height: 14, rx: 2, ry: 2 }),
+  ],
   more: () => [
     h('circle', { cx: 12, cy: 5, r: 1, fill: 'currentColor', stroke: 'none' }),
     h('circle', { cx: 12, cy: 12, r: 1, fill: 'currentColor', stroke: 'none' }),
