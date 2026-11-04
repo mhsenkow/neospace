@@ -99,6 +99,51 @@ const openMessages = () => {
   void openFeedOrRoute('messages', '/messages')
 }
 
+/** Long-press the discover tab to swap Search ↔ Messages without opening the drawer. */
+let discoverHoldTimer: ReturnType<typeof setTimeout> | null = null
+let discoverHoldFired = false
+const DISCOVER_HOLD_MS = 480
+const toastStore = useToastStore()
+
+const clearDiscoverHold = () => {
+  if (discoverHoldTimer) {
+    clearTimeout(discoverHoldTimer)
+    discoverHoldTimer = null
+  }
+}
+
+const onDiscoverPointerDown = () => {
+  if (!instancesStore.hasAuthenticatedInstance) return
+  discoverHoldFired = false
+  clearDiscoverHold()
+  discoverHoldTimer = setTimeout(() => {
+    discoverHoldTimer = null
+    discoverHoldFired = true
+    const next = showMessagesTab.value ? 'search' : 'messages'
+    preferDiscoverTab(next)
+    toastStore.show({
+      message:
+        next === 'messages'
+          ? 'Tab is Messages — long-press again for Search'
+          : 'Tab is Search — long-press again for Messages',
+      duration: 2800,
+    })
+  }, DISCOVER_HOLD_MS)
+}
+
+const onDiscoverPointerUp = () => {
+  clearDiscoverHold()
+}
+
+const onDiscoverClick = (open: () => void) => {
+  // Hold already swapped the tab — don't also navigate
+  if (discoverHoldFired) {
+    discoverHoldFired = false
+    return
+  }
+  open()
+}
+
 const toggleMenu = () => {
   open.value = !open.value
 }
@@ -113,6 +158,7 @@ watch(
 )
 
 onUnmounted(() => {
+  clearDiscoverHold()
   document.documentElement.classList.remove('neo-phone-landscape')
 })
 </script>
@@ -189,9 +235,18 @@ onUnmounted(() => {
       active: messagesActive,
       'chrome-hint': boardPortal === 'inbox',
     }"
-    :aria-label="messagesBadge ? `Messages, ${messagesBadge} unread` : 'Messages'"
+    :aria-label="
+      messagesBadge
+        ? `Messages, ${messagesBadge} unread. Long-press for Search.`
+        : 'Messages. Long-press for Search.'
+    "
     :aria-current="messagesActive ? 'page' : undefined"
-    @click="openMessages"
+    :title="'Messages · long-press for Search'"
+    @pointerdown="onDiscoverPointerDown"
+    @pointerup="onDiscoverPointerUp"
+    @pointercancel="clearDiscoverHold"
+    @pointerleave="clearDiscoverHold"
+    @click.prevent="onDiscoverClick(openMessages)"
   >
     <NeoIcon name="message" :size="22" :stroke="messagesActive || boardPortal === 'inbox' ? 2 : 1.5" />
     <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
@@ -204,9 +259,20 @@ onUnmounted(() => {
       active: searchActive,
       'chrome-hint': boardPortal === 'search',
     }"
-    aria-label="Search"
+    :aria-label="
+      instancesStore.hasAuthenticatedInstance
+        ? 'Search. Long-press for Messages.'
+        : 'Search'
+    "
     :aria-current="searchActive ? 'page' : undefined"
-    @click="openSearch"
+    :title="
+      instancesStore.hasAuthenticatedInstance ? 'Search · long-press for Messages' : 'Search'
+    "
+    @pointerdown="onDiscoverPointerDown"
+    @pointerup="onDiscoverPointerUp"
+    @pointercancel="clearDiscoverHold"
+    @pointerleave="clearDiscoverHold"
+    @click.prevent="onDiscoverClick(openSearch)"
   >
     <NeoIcon name="search" :size="22" :stroke="searchActive || boardPortal === 'search' ? 2 : 1.5" />
   </button>

@@ -60,20 +60,40 @@ describe('drafts — account scoping', () => {
     expect(readDraft(draftStorageKey('acct-a', 'new'))?.text).toBe('current')
   })
 
-  it('persists scalars only', () => {
+  it('persists scalars and polls, drops attachments', () => {
     writeDraft(draftStorageKey('a', 'new'), {
       text: 'x',
       spoiler: 'cw',
       visibility: 'unlisted',
-      // @ts-expect-error attachments / polls are deliberately not part of the payload
+      poll: {
+        options: ['Yes', 'No'],
+        duration: 86400,
+        multiple: false,
+        hideTotals: true,
+      },
+      // @ts-expect-error attachments stay out of the stored payload
       attachments: [{ id: '1' }],
     })
     const raw = JSON.parse(store.getItem(draftStorageKey('a', 'new'))!)
-    expect(Object.keys(raw).sort()).toEqual(['spoiler', 'text', 'updatedAt', 'v', 'visibility'])
+    expect(Object.keys(raw).sort()).toEqual([
+      'poll',
+      'spoiler',
+      'text',
+      'updatedAt',
+      'v',
+      'visibility',
+    ])
+    expect(raw.attachments).toBeUndefined()
     expect(readDraft(draftStorageKey('a', 'new'))).toEqual({
       text: 'x',
       spoiler: 'cw',
       visibility: 'unlisted',
+      poll: {
+        options: ['Yes', 'No'],
+        duration: 86400,
+        multiple: false,
+        hideTotals: true,
+      },
     })
   })
 })

@@ -130,6 +130,47 @@ const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
 const { open: openAccountSwitcher } = useAccountSwitcher()
 const { recordSuccess: recordComposeModality } = useComposeModality()
+const voiceNote = useVoiceNote()
+const voiceBusy = computed(() => voiceNote.recording.value)
+const voiceElapsedLabel = computed(() => {
+  const s = voiceNote.elapsedSec.value
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `${m}:${r.toString().padStart(2, '0')}`
+})
+
+const attachVoiceNote = async (file: File | null) => {
+  if (!file) return
+  const result = await addFiles([file])
+  if (result.accepted > 0) {
+    toastStore.show({ message: 'Voice note attached', duration: 2200 })
+  } else if (result.rejected[0]) {
+    toastStore.show({
+      message: result.rejected[0].reason || 'Couldn’t attach voice note',
+      duration: 3600,
+    })
+  }
+}
+
+const toggleVoiceNote = async () => {
+  if (voiceNote.recording.value) {
+    const file = await voiceNote.stop()
+    await attachVoiceNote(file)
+    return
+  }
+  if (showPoll.value) {
+    toastStore.show({ message: 'Remove the poll before adding a voice note', duration: 2800 })
+    return
+  }
+  if (!canAddMore.value) {
+    toastStore.show({ message: 'Attachment limit reached', duration: 2800 })
+    return
+  }
+  const ok = await voiceNote.start()
+  if (!ok && voiceNote.error.value) {
+    toastStore.show({ message: voiceNote.error.value, duration: 3600 })
+  }
+}
 
 type ThreadSegment = { id: string; text: string }
 const extraSegments = ref<ThreadSegment[]>([])
@@ -288,6 +329,7 @@ const {
   text: draftText,
   spoiler: draftSpoiler,
   visibility: draftVisibility,
+  poll: draftPoll,
   saveError: draftSaveError,
   conflict: draftConflict,
   resolveConflict: resolveDraftConflict,
@@ -296,6 +338,16 @@ const {
   flush: flushDraft,
   scheduleSave: scheduleDraftSave,
 } = useDraft(draftKey)
+
+const applyDraftPoll = () => {
+  const snap = draftPoll.value
+  if (!snap || hasMedia.value) return
+  showPoll.value = true
+  pollOptions.value = snap.options.length >= 2 ? [...snap.options] : ['', '']
+  pollDuration.value = snap.duration
+  pollMultiple.value = snap.multiple
+  pollHideTotals.value = snap.hideTotals && canHidePollTotals.value
+}
 
 const applyDraft = () => {
   if (draftText.value) {
@@ -308,6 +360,7 @@ const applyDraft = () => {
   if (draftVisibility.value && !isLockedDirect.value) {
     visibility.value = draftVisibility.value
   }
+  applyDraftPoll()
 }
 
 /** Autosave couldn't keep the whole draft — say so instead of losing text quietly */
@@ -323,6 +376,9 @@ const resolveConflictChoice = (choice: 'theirs' | 'mine') => {
   spoilerText.value = theirs.spoiler
   showCW.value = !!theirs.spoiler
   if (theirs.visibility && !isLockedDirect.value) visibility.value = theirs.visibility
+  draftPoll.value = theirs.poll ?? null
+  if (theirs.poll) applyDraftPoll()
+  else resetPoll()
 }
 
 const persistDraft = () => {
@@ -333,6 +389,22 @@ const persistDraft = () => {
       : content.value
   draftSpoiler.value = showCW.value ? spoilerText.value : ''
   draftVisibility.value = visibility.value
+  draftPoll.value =
+    showPoll.value && filledPollOptions.value.length >= POLL_MIN_OPTIONS
+      ? {
+          options: [...pollOptions.value],
+          duration: pollDuration.value,
+          multiple: pollMultiple.value,
+          hideTotals: pollHideTotals.value,
+        }
+      : showPoll.value
+        ? {
+            options: pollOptions.value.length >= 2 ? [...pollOptions.value] : ['', ''],
+            duration: pollDuration.value,
+            multiple: pollMultiple.value,
+            hideTotals: pollHideTotals.value,
+          }
+        : null
   scheduleDraftSave()
 }
 
@@ -382,7 +454,7 @@ const hasOwnContent = computed(() => {
   return !!text && (!!props.draftSlot || text !== (props.initialText || '').trim())
 })
 
-// ── Poll (not persisted with drafts — like attachments, scalars only) ──
+// ── Poll (persisted with drafts as a scalar snapshot; media still is not) ──
 const POLL_DURATION_CHOICES = [
   { seconds: 5 * 60, label: '5 minutes' },
   { seconds: 30 * 60, label: '30 minutes' },
@@ -1034,7 +1106,10 @@ const handlePost = async () => {
     // Teach the peek FAB what you usually post (skip replies — those aren't "new thread")
     if (!props.inReplyToId && !props.quoteUrl) {
       recordComposeModality(
-        modalityFromPost({ hasMedia: mediaIds.value.length > 0 }),
+        modalityFromPost({
+          hasMedia: mediaIds.value.length > 0,
+          hasVoice: attachments.value.some((a) => /^audio\//i.test(a.file.type)),
+        }),
       )
     }
     clearDraft()
@@ -1207,9 +1282,13 @@ watch(
   },
 )
 
-watch([content, spoilerText, visibility, showCW], () => {
-  persistDraft()
-})
+watch(
+  [content, spoilerText, visibility, showCW, showPoll, pollOptions, pollDuration, pollMultiple, pollHideTotals],
+  () => {
+    persistDraft()
+  },
+  { deep: true },
+)
 
 const dismissHandoffNotice = () => {
   handoffNotice.value = null
@@ -1249,10 +1328,17 @@ onMounted(() => {
       return
     }
     if (mode === 'voice') {
-      toastStore.show({
-        message: 'Voice notes are coming soon — write for now',
-        duration: 3200,
-      })
+      if (voiceNote.supported.value && !hasMedia.value && !showPoll.value) {
+        // Open straight into record — mic permission prompt is the modality
+        window.setTimeout(() => {
+          void toggleVoiceNote()
+        }, 280)
+      } else if (!voiceNote.supported.value) {
+        toastStore.show({
+          message: 'Voice notes need a browser that can record audio',
+          duration: 3600,
+        })
+      }
     }
     textareaRef.value?.focus({ preventScroll: true })
   })
@@ -1506,6 +1592,23 @@ defineExpose({
               @click="openFilePicker"
             >
               <NeoIcon :name="initialModality === 'media' ? 'camera' : 'image'" :size="18" :stroke="1.75" />
+            </button>
+            <button
+              v-if="voiceNote.supported"
+              type="button"
+              class="compose-tool"
+              :class="{
+                'compose-tool--emphasis': initialModality === 'voice',
+                'compose-tool--active': voiceBusy,
+                'compose-tool--recording': voiceBusy,
+              }"
+              :aria-label="voiceBusy ? `Stop recording ${voiceElapsedLabel}` : 'Record voice note'"
+              :title="voiceBusy ? `Stop · ${voiceElapsedLabel}` : 'Record voice note'"
+              :aria-pressed="voiceBusy"
+              :disabled="isPosting || showPoll || (!canAddMore && !voiceBusy)"
+              @click="toggleVoiceNote"
+            >
+              <NeoIcon name="mic" :size="18" :stroke="1.75" />
             </button>
             <div class="compose-emoji">
               <button
@@ -1761,6 +1864,23 @@ defineExpose({
     </aside>
 
     <!-- Media previews -->
+    <div
+      v-if="voiceBusy"
+      class="compose-voice"
+      role="status"
+      aria-live="polite"
+      @click.stop
+    >
+      <span class="compose-voice__dot" aria-hidden="true" />
+      <span class="compose-voice__label">Recording {{ voiceElapsedLabel }}</span>
+      <button type="button" class="compose-voice__stop" @click="toggleVoiceNote">
+        Stop &amp; attach
+      </button>
+      <button type="button" class="compose-voice__cancel" @click="voiceNote.cancel()">
+        Cancel
+      </button>
+    </div>
+
     <div v-if="attachments.length" ref="composeMediaRef" class="compose-media" @click.stop>
       <p v-if="mediaStorageHost || mediaOptimizeSummary" class="compose-media__commons">
         <span v-if="mediaOptimizeSummary">{{ mediaOptimizeSummary }}</span>
@@ -1960,6 +2080,19 @@ defineExpose({
           @click="openFilePicker"
         >
           <NeoIcon name="image" :size="18" :stroke="1.75" />
+        </button>
+        <button
+          v-if="voiceNote.supported"
+          type="button"
+          class="compose-tool"
+          :class="{ 'compose-tool--active': voiceBusy, 'compose-tool--recording': voiceBusy }"
+          :aria-label="voiceBusy ? `Stop recording ${voiceElapsedLabel}` : 'Record voice note'"
+          :title="voiceBusy ? `Stop · ${voiceElapsedLabel}` : 'Record voice note'"
+          :aria-pressed="voiceBusy"
+          :disabled="isPosting || showPoll || (!canAddMore && !voiceBusy)"
+          @click="toggleVoiceNote"
+        >
+          <NeoIcon name="mic" :size="18" :stroke="1.75" />
         </button>
         <button
           type="button"
@@ -3025,6 +3158,71 @@ defineExpose({
   &--active {
     color: var(--neo-text-primary);
     background-color: color-mix(in srgb, var(--neo-warning) 35%, transparent);
+  }
+
+  &--recording {
+    color: var(--neo-danger, #dc2626);
+    background-color: color-mix(in srgb, var(--neo-danger, #dc2626) 16%, transparent);
+  }
+}
+
+.compose-voice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--neo-radius-md, 8px);
+  background: color-mix(in srgb, var(--neo-danger, #dc2626) 12%, var(--neo-bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--neo-danger, #dc2626) 35%, var(--neo-border-color));
+}
+
+.compose-voice__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--neo-danger, #dc2626);
+  animation: compose-voice-pulse 1s ease-in-out infinite;
+}
+
+.compose-voice__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--neo-text-primary);
+}
+
+.compose-voice__stop,
+.compose-voice__cancel {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  cursor: pointer;
+  min-height: 2.25rem;
+  padding: 0 0.35rem;
+}
+
+.compose-voice__stop {
+  color: var(--neo-accent);
+}
+
+.compose-voice__cancel {
+  color: var(--neo-text-muted);
+}
+
+@keyframes compose-voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
   }
 }
 

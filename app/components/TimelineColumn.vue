@@ -314,7 +314,7 @@ const savedCursor = ref<string | null>(null)
 const lastLoadAddedNothing = ref(false)
 /** Consecutive empty-add pages while still hasMore — drives quiet auto-skip. */
 const sparseSkipStreak = ref(0)
-const AUTO_SPARSE_SKIPS = 4
+const AUTO_SPARSE_SKIPS = 8
 const newPostsAnnounce = ref('')
 let newPostsAnnounceTimer: ReturnType<typeof setTimeout> | null = null
 

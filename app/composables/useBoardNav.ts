@@ -120,6 +120,9 @@ export function useBoardNav() {
 
   /** Home chrome: leave shelf-focus and park on the primary feed. */
   const goHome = async () => {
+    // Leave edge portals (search / inbox / activity / …) so Home means feeds
+    const { setBoardPortal } = useBoardPortal()
+    setBoardPortal(null)
     columnsStore.clearColumnFocus()
     const home =
       columnsStore.findColumn('home') ||

@@ -3,9 +3,9 @@
  * Keyed by new / reply:id / quote / dm / group:tag, scoped per active account
  * (`neospace_draft:<accountId>:<key>`) so text typed as A never shows up for B.
  *
- * Only scalars persist (text, CW, visibility). Attachments, polls and schedule are
- * NOT restored from localStorage — uploaded media ids are server/account-bound and
- * can expire, so a restored draft is text-only.
+ * Scalars persist (text, CW, visibility) plus an optional poll snapshot.
+ * Attachments and schedule are NOT restored — uploaded media ids are
+ * server/account-bound and can expire.
  *
  * Legacy unscoped keys (`neospace_draft:<key>`) are migrated to the active account
  * only when exactly one account is signed in (unambiguous); otherwise ignored.
@@ -23,10 +23,19 @@ import {
 
 export type DraftVisibility = 'public' | 'unlisted' | 'private' | 'direct'
 
-type DraftPayload = {
+/** Poll options snapshot — no media ids, safe to park in localStorage */
+export type DraftPoll = {
+  options: string[]
+  duration: number
+  multiple: boolean
+  hideTotals: boolean
+}
+
+export type DraftPayload = {
   text: string
   spoiler: string
   visibility: DraftVisibility | ''
+  poll?: DraftPoll | null
 }
 
 /**
@@ -49,7 +58,7 @@ export function draftSaveMessage(reason: 'too-large' | 'storage') {
 }
 
 /** Bump when the stored shape changes; records from a newer build are ignored, never overwritten blindly */
-export const DRAFT_SCHEMA_VERSION = 1
+export const DRAFT_SCHEMA_VERSION = 2
 
 const PREFIX = 'neospace_draft:'
 /** Slot prefix for the inline DM composer (ChatComposer) — hidden from the saved-drafts list */
@@ -112,11 +121,11 @@ export function listAccountDrafts(accountId: string): ListedDraft[] {
       const record = readDraftRecord(skey)
       if (!record) continue
       const { payload } = record
-      if (!payload.text.trim() && !payload.spoiler.trim()) continue
+      if (!payload.text.trim() && !payload.spoiler.trim() && !payload.poll) continue
       out.push({
         key: draftKey,
         storageKey: skey,
-        text: payload.text,
+        text: payload.text || (payload.poll ? '(poll draft)' : ''),
         spoiler: payload.spoiler,
         visibility: payload.visibility,
         updatedAt: record.updatedAt,
@@ -147,6 +156,23 @@ export function migrateLegacyDraft(accountId: string, key: string, canMigrate: b
   }
 }
 
+export function parseDraftPoll(raw: unknown): DraftPoll | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const o = raw as Record<string, unknown>
+  const options = Array.isArray(o.options)
+    ? o.options.filter((x): x is string => typeof x === 'string').slice(0, 8)
+    : []
+  if (options.length < 2) return null
+  const duration = typeof o.duration === 'number' && Number.isFinite(o.duration) ? o.duration : 0
+  if (duration <= 0) return null
+  return {
+    options: options.length >= 2 ? options : ['', ''],
+    duration,
+    multiple: !!o.multiple,
+    hideTotals: !!o.hideTotals,
+  }
+}
+
 /**
  * Parse one stored record. Legacy (unversioned) objects are accepted as-is; anything that
  * isn't a plain object, or that a newer build wrote, is rejected so it can't become a
@@ -160,6 +186,7 @@ export function parseDraftRecord(raw: string | null): { payload: DraftPayload; u
     const rec = data as Record<string, unknown>
     if (rec.v !== undefined && (typeof rec.v !== 'number' || rec.v > DRAFT_SCHEMA_VERSION)) return null
     const visibility = rec.visibility
+    const poll = parseDraftPoll(rec.poll)
     return {
       payload: {
         text: typeof rec.text === 'string' ? rec.text : '',
@@ -171,6 +198,7 @@ export function parseDraftRecord(raw: string | null): { payload: DraftPayload; u
           visibility === 'direct'
             ? visibility
             : '',
+        ...(poll ? { poll } : {}),
       },
       updatedAt:
         typeof rec.updatedAt === 'number' && Number.isFinite(rec.updatedAt) && rec.updatedAt > 0
@@ -207,13 +235,14 @@ export function readDraftUpdatedAt(skey: string): number {
 export function writeDraft(skey: string, input: DraftPayload): DraftSaveResult {
   if (typeof localStorage === 'undefined') return { ok: false, reason: 'storage' }
   try {
-    // Scalars only — whatever else a caller hands over (attachments, polls) is dropped
+    const poll = parseDraftPoll(input.poll)
     const payload: DraftPayload = {
       text: input.text,
       spoiler: input.spoiler,
       visibility: input.visibility,
+      ...(poll ? { poll } : {}),
     }
-    if (!payload.text.trim() && !payload.spoiler.trim()) {
+    if (!payload.text.trim() && !payload.spoiler.trim() && !poll) {
       localStorage.removeItem(skey)
       return { ok: true }
     }
@@ -231,6 +260,7 @@ export function useDraft(key: Ref<string> | string) {
   const text = ref('')
   const spoiler = ref('')
   const visibility = ref<DraftVisibility | ''>('')
+  const poll = ref<DraftPoll | null>(null)
   /** Why the last save failed (too long / storage) — surfaced by the composer */
   const saveError = ref<'' | 'too-large' | 'storage'>('')
   /** Another tab saved different text into this slot since we last read/wrote it */
@@ -258,11 +288,13 @@ export function useDraft(key: Ref<string> | string) {
       text.value = ''
       spoiler.value = ''
       visibility.value = ''
+      poll.value = null
       return
     }
     text.value = data.text
     spoiler.value = data.spoiler
     visibility.value = data.visibility
+    poll.value = data.poll ?? null
   }
 
   const clear = () => {
@@ -273,6 +305,7 @@ export function useDraft(key: Ref<string> | string) {
     text.value = ''
     spoiler.value = ''
     visibility.value = ''
+    poll.value = null
     saveError.value = ''
     conflict.value = null
     knownRevision = 0
@@ -290,6 +323,7 @@ export function useDraft(key: Ref<string> | string) {
       text: text.value,
       spoiler: spoiler.value,
       visibility: visibility.value,
+      poll: poll.value,
     })
     saveError.value = result.ok ? '' : result.reason
     if (result.ok) {
@@ -319,13 +353,14 @@ export function useDraft(key: Ref<string> | string) {
     if (
       theirs.text === text.value &&
       theirs.spoiler === spoiler.value &&
-      theirs.visibility === visibility.value
+      theirs.visibility === visibility.value &&
+      JSON.stringify(theirs.poll ?? null) === JSON.stringify(poll.value)
     ) {
       knownRevision = record.updatedAt
       return
     }
     // Local edits still pending: the next autosave would clobber theirs — let the user choose
-    if (timer || text.value.trim() || spoiler.value.trim()) {
+    if (timer || text.value.trim() || spoiler.value.trim() || poll.value) {
       conflict.value = theirs
     }
   }
@@ -342,6 +377,7 @@ export function useDraft(key: Ref<string> | string) {
       text.value = theirs.text
       spoiler.value = theirs.spoiler
       visibility.value = theirs.visibility
+      poll.value = theirs.poll ?? null
       knownRevision = readDraftUpdatedAt(currentKey())
       return theirs
     }
@@ -398,6 +434,7 @@ export function useDraft(key: Ref<string> | string) {
     text,
     spoiler,
     visibility,
+    poll,
     saveError,
     conflict,
     resolveConflict,
