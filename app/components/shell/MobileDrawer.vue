@@ -204,20 +204,43 @@ const reduceMotion = usePrefersReducedMotion()
 const drawerDragX = ref(0)
 let drawerSwipePointer: number | null = null
 let drawerSwipeStartX = 0
+let drawerSwipeCapturing = false
 const DRAWER_SWIPE_CLOSE_PX = 88
+/** Wait past this before capturing — early capture steals mouse clicks on desktop. */
+const DRAWER_SWIPE_CAPTURE_PX = 12
+
+const isDrawerInteractiveTarget = (target: EventTarget | null) => {
+  if (!(target instanceof Element)) return false
+  return !!target.closest(
+    'a, button, input, select, textarea, label, summary, [role="button"], [role="link"], [role="menuitem"]',
+  )
+}
 
 const onDrawerPointerDown = (e: PointerEvent) => {
-  if (e.pointerType === 'mouse' && e.button !== 0) return
+  // Mouse/trackpad: never swipe-drag — setPointerCapture was eating algorithm/tool clicks
+  // in desktop DevTools / narrow desktop windows while real phones (touch) still worked.
+  if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return
+  if (e.pointerType === 'pen' && e.button !== 0) return
+  if (isDrawerInteractiveTarget(e.target)) return
   drawerSwipePointer = e.pointerId
   drawerSwipeStartX = e.clientX
   drawerDragX.value = 0
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  drawerSwipeCapturing = false
 }
 
 const onDrawerPointerMove = (e: PointerEvent) => {
   if (drawerSwipePointer !== e.pointerId) return
-  const dx = e.clientX - drawerSwipeStartX
-  drawerDragX.value = Math.max(0, dx)
+  const dx = Math.max(0, e.clientX - drawerSwipeStartX)
+  if (!drawerSwipeCapturing) {
+    if (dx < DRAWER_SWIPE_CAPTURE_PX) return
+    drawerSwipeCapturing = true
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+  }
+  drawerDragX.value = dx
 }
 
 const finishDrawerSwipe = (e: PointerEvent) => {
@@ -225,10 +248,13 @@ const finishDrawerSwipe = (e: PointerEvent) => {
   if (drawerDragX.value >= DRAWER_SWIPE_CLOSE_PX) closeMobileMenu()
   drawerDragX.value = 0
   drawerSwipePointer = null
-  try {
-    ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
-  } catch {
-    /* ignore */
+  if (drawerSwipeCapturing) {
+    drawerSwipeCapturing = false
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
   }
 }
 
