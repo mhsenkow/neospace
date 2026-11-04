@@ -26,7 +26,7 @@ import DesktopSidebar from '~/components/shell/DesktopSidebar.vue'
 import MobileHeader from '~/components/shell/MobileHeader.vue'
 import MobileDrawer from '~/components/shell/MobileDrawer.vue'
 import MobileTabBar from '~/components/shell/MobileTabBar.vue'
-import { useBoardNav } from '~/composables/useBoardNav'
+import { useBoardNav, useNavChromeHidden } from '~/composables/useBoardNav'
 
 const LazyEdwardMode = defineAsyncComponent({
   loader: () => import('~/components/edward/EdwardMode.vue'),
@@ -132,10 +132,23 @@ const isTabRoute = computed(
 const showMobileNav = computed(() => !isMobileSubview.value || isTabRoute.value)
 const showMobileHeader = computed(() => !isMobileSubview.value)
 
-/** Desktop / tablet Threads-style + — phone already has the tab-bar compose mark */
+const navChromeHidden = useNavChromeHidden()
+
+/** Desktop / tablet Threads-style + in the dock */
 const showComposeFab = computed(
   () =>
     isSidebarShell.value &&
+    instancesStore.hasAuthenticatedInstance &&
+    !composeSheet.open &&
+    !isThreadRoute.value,
+)
+
+/** Phone: floating + replaces the tucked tab bar (stays reachable while reading) */
+const showPeekCompose = computed(
+  () =>
+    !isSidebarShell.value &&
+    showMobileNav.value &&
+    navChromeHidden.value &&
     instancesStore.hasAuthenticatedInstance &&
     !composeSheet.open &&
     !isThreadRoute.value,
@@ -409,6 +422,17 @@ watch(
       <!-- Phones get the same tools inside the drawer (Menu → Tools) instead of a floating waffle -->
       <SuiteMenu v-if="isSidebarShell" />
     </div>
+    <!-- Outside the dock so auto-hide translate doesn't carry it off-screen -->
+    <button
+      v-if="showPeekCompose"
+      type="button"
+      class="compose-fab compose-fab--peek"
+      aria-label="New thread"
+      title="New thread"
+      @click="openCompose"
+    >
+      <NeoIcon name="plus" :size="26" :stroke="2.25" />
+    </button>
     <NeoOverlayHost />
     <LazyEdwardMode v-if="edwardActive" />
   </div>
@@ -574,7 +598,8 @@ watch(
   pointer-events: auto;
   transition:
     transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring),
-    box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
+    box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+    opacity var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
   :deep(.neo-icon) {
     transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
@@ -604,6 +629,35 @@ watch(
     :deep(.neo-icon) {
       transform: rotate(45deg) scale(0.9);
     }
+  }
+
+  &--peek {
+    position: fixed;
+    z-index: var(--neo-z-shell-header, 90);
+    left: 50%;
+    // Sit above feed pills (and the home indicator) while the tab bar is tucked
+    bottom: max(
+      0.85rem,
+      calc(env(safe-area-inset-bottom, 0px) + var(--neo-feed-tabs-h, 0px) + 0.55rem)
+    );
+    margin-left: -1.625rem;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 999px;
+    background: var(--neo-accent);
+    color: var(--neo-text-on-accent, var(--neo-text-inverse));
+    animation: compose-peek-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes compose-peek-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

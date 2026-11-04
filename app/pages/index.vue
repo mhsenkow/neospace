@@ -41,6 +41,7 @@ const notificationsStore = useNotificationsStore()
 const { boardPortal, setBoardPortal } = useBoardPortal()
 const pendingColumnJump = usePendingColumnJump()
 const activeBoardColumnId = useActiveBoardColumnId()
+const requestAddFeed = useRequestAddFeed()
 const router = useRouter()
 const reducedMotion = usePrefersReducedMotion()
 /** JS smooth scrolling ignores the CSS reduced-motion rule — downgrade it here */
@@ -48,6 +49,12 @@ const motionBehavior = (behavior: ScrollBehavior): ScrollBehavior =>
   reducedMotion.value && behavior === 'smooth' ? 'auto' : behavior
 
 const addMenuOpen = ref(false)
+watch(requestAddFeed, (want) => {
+  if (!want) return
+  requestAddFeed.value = false
+  if (!columnsStore.canAddColumn) return
+  addMenuOpen.value = true
+})
 const boardFullLabel = `Board full (${MAX_COLUMNS}/${MAX_COLUMNS}) — remove a feed to add another`
 const addAlgorithmsExpanded = ref(true)
 const addGroupsExpanded = ref(true)
@@ -2793,6 +2800,7 @@ useHead({ title: 'Home | NeoSpace' })
 
 // ========================================
 // Mobile feed chrome (top) + feed tabs (bottom)
+// Portrait: no top feed chrome (Threads-clean). Landscape keeps the slim bar.
 // ========================================
 .mobile-feed-chrome {
   display: none;
@@ -2806,11 +2814,8 @@ useHead({ title: 'Home | NeoSpace' })
   position: relative;
   z-index: var(--neo-z-sticky-bar, 20);
 
-  @media (max-width: 767px) {
-    display: flex;
-  }
-
   &--landscape {
+    display: flex;
     min-height: 36px;
     padding: 0.1rem 0.25rem;
     gap: 0.15rem;

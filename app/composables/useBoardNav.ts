@@ -18,6 +18,16 @@ export function useActiveBoardColumnId() {
   return useState<string | null>('neo-active-board-column-id', () => null)
 }
 
+/** Drawer / chrome can request the board’s Add feed sheet without owning its menu. */
+export function useRequestAddFeed() {
+  return useState('neo-request-add-feed', () => false)
+}
+
+/** True while the phone tab bar is tucked away (floating compose peek). */
+export function useNavChromeHidden() {
+  return useState('neo-nav-chrome-hidden', () => false)
+}
+
 export function useBoardNav() {
   const columnsStore = useColumnsStore()
   const router = useRouter()

@@ -6,7 +6,8 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { recipeTip } from '~/utils/algorithms'
-import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
+import { useColumnsStore, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
+import { useActiveBoardColumnId, useRequestAddFeed } from '~/composables/useBoardNav'
 import { useSettingsStore } from '~/stores/settings'
 import { useThemeStore } from '~/stores/theme'
 import { useOverlayStore } from '~/stores/overlay'
@@ -35,9 +36,31 @@ const { open: openAccounts } = useAccountsManager()
 const { open: openAccountSwitcher } = useAccountSwitcher()
 const { show: openFeedback } = useFeedbackNotes()
 const { boardPortal } = useBoardPortal()
+const activeBoardColumnId = useActiveBoardColumnId()
+const requestAddFeed = useRequestAddFeed()
 const linkedAccountCount = computed(() => instancesStore.signedInInstances.length)
 const { currentThemeLabel, cycleTheme } = useShellAppearance()
 const router = useRouter()
+
+const activeBoardColumn = computed(() => {
+  const id = activeBoardColumnId.value
+  return id ? columnsStore.columns.find((c) => c.id === id) || null : null
+})
+const flickEnabled = computed(
+  () => !!activeBoardColumn.value && isTimelineFeed(activeBoardColumn.value.feedType),
+)
+const flickOn = computed(() => activeBoardColumn.value?.viewMode === 'flip')
+
+const toggleFlickFromDrawer = () => {
+  const col = activeBoardColumn.value
+  if (!col || !isTimelineFeed(col.feedType)) return
+  columnsStore.toggleColumnViewMode(col.id)
+}
+
+const openAddFeedFromDrawer = () => {
+  closeMobileMenu()
+  requestAddFeed.value = true
+}
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
 const messagesBadge = computed(() => conversationsStore.badgeLabel)
@@ -303,6 +326,31 @@ useFocusTrap(mobileSidebarRef, open, {
           </span>
         </button>
       </nav>
+
+      <section class="mobile-sidebar__board" aria-label="Feed controls">
+        <button
+          type="button"
+          class="mobile-sidebar__action"
+          :aria-pressed="flickOn"
+          :disabled="!flickEnabled"
+          @click="toggleFlickFromDrawer"
+        >
+          {{ flickOn ? 'Flick view on' : 'Flick view — one post at a time' }}
+        </button>
+        <button
+          type="button"
+          class="mobile-sidebar__action"
+          :disabled="!columnsStore.canAddColumn"
+          :aria-label="
+            columnsStore.canAddColumn
+              ? `Add feed (${columnsStore.columnCount} on board)`
+              : 'Board full — remove a feed to add another'
+          "
+          @click="openAddFeedFromDrawer"
+        >
+          Add feed
+        </button>
+      </section>
 
       <div
         v-if="!instancesStore.hasAuthenticatedInstance"
@@ -677,6 +725,15 @@ useFocusTrap(mobileSidebarRef, open, {
       background: var(--neo-accent-soft);
       color: var(--neo-accent);
     }
+  }
+
+  &__board {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin: 0.35rem 0.75rem 0.85rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--neo-border-color);
   }
 
   &__guest {

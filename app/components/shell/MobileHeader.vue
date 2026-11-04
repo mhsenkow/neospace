@@ -4,7 +4,7 @@ import { usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
 const open = defineModel<boolean>('open', { default: false })
 
 const { boardPortal } = useBoardPortal()
-const { openFeedOrRoute, boardColumnIs, goHome } = useBoardNav()
+const { goHome } = useBoardNav()
 const route = useRoute()
 const isPhoneLandscape = usePhoneLandscape()
 const isSidebarShell = useSidebarShell()
@@ -13,56 +13,33 @@ const toggleMenu = () => {
   open.value = !open.value
 }
 
-const searchActive = computed(
-  () => route.path === '/explore' || boardColumnIs('search'),
-)
-
-const openSearch = () => {
-  void openFeedOrRoute('search', '/explore')
-}
-
 /** Hidden in phone landscape (rail owns menu/search) and tablet+ (sidebar). */
 const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
 </script>
 
 <template>
+<!-- Threads-clean top: menu + mark only. Search lives in the bottom tab bar. -->
 <header v-if="visible" class="mobile-header">
-  <div class="mobile-header__start">
-    <button
-      class="mobile-header__btn"
-      :class="{ 'chrome-hint': boardPortal === 'settings' || boardPortal === 'communities' }"
-      @click="toggleMenu"
-      aria-label="Menu"
-      type="button"
-      :aria-expanded="open"
-      aria-controls="mobile-sidebar"
-    >
-      <NeoIcon name="menu" :size="20" :stroke="1.75" />
-    </button>
-    <NuxtLink
-      to="/"
-      class="mobile-header__logo"
-      aria-label="NeoSpace home"
-      @click="void goHome()"
-    >
-      <NeoMark :show-brand="false" :active="route.path === '/'" />
-    </NuxtLink>
-  </div>
-  <div class="mobile-header__actions">
-    <button
-      type="button"
-      class="mobile-header__btn"
-      :class="{
-        'mobile-header__btn--active': searchActive,
-        'chrome-hint': boardPortal === 'search',
-      }"
-      aria-label="Search"
-      :aria-current="searchActive ? 'page' : undefined"
-      @click="openSearch"
-    >
-      <NeoIcon name="search" :size="20" :stroke="searchActive || boardPortal === 'search' ? 2 : 1.75" />
-    </button>
-  </div>
+  <button
+    class="mobile-header__btn"
+    :class="{ 'chrome-hint': boardPortal === 'settings' || boardPortal === 'communities' }"
+    @click="toggleMenu"
+    aria-label="Menu"
+    type="button"
+    :aria-expanded="open"
+    aria-controls="mobile-sidebar"
+  >
+    <NeoIcon name="menu" :size="20" :stroke="1.75" />
+  </button>
+  <NuxtLink
+    to="/"
+    class="mobile-header__logo"
+    aria-label="NeoSpace home"
+    @click="void goHome()"
+  >
+    <NeoMark :show-brand="false" :active="route.path === '/'" />
+  </NuxtLink>
+  <span class="mobile-header__spacer" aria-hidden="true" />
 </header>
 </template>
 
@@ -75,7 +52,7 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
   height: calc(44px + var(--neo-safe-top, env(safe-area-inset-top, 0px)));
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   padding: var(--neo-safe-top, env(safe-area-inset-top, 0px)) max(0.35rem, env(safe-area-inset-right, 0px)) 0
     max(0.35rem, env(safe-area-inset-left, 0px));
   // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
@@ -92,18 +69,10 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
     display: none;
   }
 
-  &__start {
-    display: flex;
-    align-items: center;
-    gap: 0.1rem;
-    min-width: 0;
-  }
-
-  &__actions {
-    display: flex;
-    align-items: center;
-    gap: 0.05rem;
-    margin-left: auto;
+  &__spacer {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
   }
 
   &__btn {
@@ -129,20 +98,19 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
     &:active {
       background: var(--neo-bg-hover);
     }
-
-    &--active {
-      color: var(--neo-accent);
-      background: var(--neo-accent-soft);
-    }
   }
 
   &__logo {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     text-decoration: none;
     color: inherit;
     padding: 0 0.15rem;
     border-radius: var(--neo-radius-sm, 4px);
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
 
     &:focus-visible {
       outline: 2px solid var(--neo-accent);

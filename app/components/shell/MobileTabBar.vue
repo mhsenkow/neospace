@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { useInstancesStore } from '~/stores/instances'
 import { useNotificationsStore } from '~/stores/notifications'
-import { useConversationsStore } from '~/stores/conversations'
 import { usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
 
 const open = defineModel<boolean>('open', { default: false })
 
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
-const conversationsStore = useConversationsStore()
 const { boardPortal } = useBoardPortal()
 const { openFeedOrRoute, boardColumnIs, goHome, openCompose } = useBoardNav()
 const route = useRoute()
-const { path, isActivity } = useActivityNav()
+const { isActivity } = useActivityNav()
 const isPhoneLandscape = usePhoneLandscape()
 const isSidebarShell = useSidebarShell()
 
@@ -21,11 +19,6 @@ const navEl = ref<HTMLElement | null>(null)
 useAutoHideNav(navEl)
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
-const messagesBadge = computed(() => conversationsStore.badgeLabel)
-
-const messagesActive = computed(
-  () => path.value === '/messages' || boardColumnIs('messages'),
-)
 
 const activityActive = computed(
   () => isActivity.value || boardColumnIs('notifications'),
@@ -48,10 +41,6 @@ const homeActive = computed(() => {
 
 const openHome = () => {
   void goHome()
-}
-
-const openMessages = () => {
-  void openFeedOrRoute('messages', '/messages')
 }
 
 const openActivity = () => {
@@ -116,6 +105,7 @@ onUnmounted(() => {
     <span class="mobile-nav__sep" aria-hidden="true" />
   </template>
 
+  <!-- Threads order: Home · Search · Compose · Activity · Profile -->
   <button
     type="button"
     class="mobile-nav__item"
@@ -128,36 +118,18 @@ onUnmounted(() => {
   </button>
 
   <button
-    v-if="instancesStore.hasAuthenticatedInstance"
     type="button"
-    class="mobile-nav__item mobile-nav__item--badge"
-    :class="{
-      active: messagesActive,
-      'chrome-hint': boardPortal === 'inbox',
-    }"
-    :aria-label="messagesBadge ? `Messages, ${messagesBadge} unread` : 'Messages'"
-    :aria-current="messagesActive ? 'page' : undefined"
-    @click="openMessages"
-  >
-    <NeoIcon
-      name="send"
-      :size="22"
-      :stroke="messagesActive || boardPortal === 'inbox' ? 2 : 1.5"
-      :filled="messagesActive"
-    />
-    <span v-if="messagesBadge" class="nav-badge" aria-hidden="true">{{ messagesBadge }}</span>
-  </button>
-  <NuxtLink
-    v-else
-    to="/login"
     class="mobile-nav__item"
     :class="{
-      'chrome-hint': boardPortal === 'inbox',
+      active: searchActive,
+      'chrome-hint': boardPortal === 'search',
     }"
-    aria-label="Messages — sign in"
+    aria-label="Search"
+    :aria-current="searchActive ? 'page' : undefined"
+    @click="openSearch"
   >
-    <NeoIcon name="send" :size="22" :stroke="boardPortal === 'inbox' ? 2 : 1.5" />
-  </NuxtLink>
+    <NeoIcon name="search" :size="22" :stroke="searchActive || boardPortal === 'search' ? 2 : 1.5" />
+  </button>
 
   <button
     type="button"

@@ -17,6 +17,7 @@
 
 import { onMounted, onUnmounted, watch, type Ref } from 'vue'
 import { matchesMedia } from '~/utils/cachedMedia'
+import { useNavChromeHidden } from '~/composables/useBoardNav'
 
 const DURATION_MS = 240
 const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
@@ -46,6 +47,7 @@ const isMobileShell = () =>
 
 export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
   const route = useRoute()
+  const chromeHidden = useNavChromeHidden()
   let phase: Phase = 'shown'
   let timer: ReturnType<typeof setTimeout> | null = null
   let travelled = 0
@@ -128,6 +130,7 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     // Play: the bar slides off the bottom edge, the pills settle at the bottom
     slide(els, els.map(() => 0), animate)
     root.classList.add('neo-nav-hidden')
+    chromeHidden.value = true
     phase = 'hiding'
     timer = setTimeout(() => {
       phase = 'hidden'
@@ -139,6 +142,7 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     const els = riders()
     clearRiders(els)
     document.documentElement.classList.remove('neo-nav-collapsed')
+    chromeHidden.value = false
     phase = 'shown'
   }
 
@@ -227,6 +231,7 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     const root = document.documentElement
     clearRiders(riders())
     root.classList.remove('neo-nav-hidden', 'neo-nav-collapsed')
+    chromeHidden.value = false
   })
 
   return { show, hide }
