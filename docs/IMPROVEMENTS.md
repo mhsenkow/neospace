@@ -14,7 +14,7 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 |---|------|--------|-------|
 | 1 | **Ship or hide voice notes** — FAB can prefer voice but compose only toasted “coming soon” | ✅ | MediaRecorder → audio File attach; mic tool + recording bar |
 | 2 | **Persist polls in drafts** — restore lost poll UI | ✅ | Draft schema v2 + poll snapshot restore |
-| 3 | **Real post edit** — beyond delete-and-redraft | 🔄 | Next |
+| 3 | **Real post edit** — beyond delete-and-redraft | ✅ | Edit menu → source fetch → in-place PUT; media/poll still via redraft |
 | 4 | **Web push for Activity** | ⬜ | VAPID + subscription + permission UX |
 | 5 | **First-run that teaches the board** | ⬜ | Feed\|Flick, pills, algorithms, multi-server ~30s |
 
@@ -55,6 +55,7 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 | Date | Shipped | Commit / notes |
 |------|---------|----------------|
 | 2026-11-04 | Tracker + batch 1 | Voice notes, poll drafts, Messages long-press, portal Home, sparse skips, chat filter label |
+| 2026-11-04 | Batch 2 (edit) | Real post Edit in more-menu; compose sheet editStatusId; timeline patch on edit |
 
 ---
 

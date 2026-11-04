@@ -526,6 +526,31 @@ export const useStatusStore = defineStore('status', {
       }
     },
 
+    /** Edit one of your own statuses in place (Mastodon PUT /api/v1/statuses/:id). */
+    async updateStatus(
+      statusId: string,
+      content: string,
+      options: {
+        accountId: string
+        spoilerText?: string
+        sensitive?: boolean
+        language?: string
+        mediaIds?: string[]
+      },
+    ): Promise<mastodon.v1.Status> {
+      this.credentialsForAccount(options.accountId)
+      const params: Record<string, unknown> = {
+        status: content,
+        spoilerText: options.spoilerText || undefined,
+        sensitive: options.sensitive || undefined,
+        language: options.language || undefined,
+      }
+      if (options.mediaIds?.length) params.mediaIds = options.mediaIds
+      return await clientFor(options.accountId)
+        .v1.statuses.$select(statusId)
+        .update(params as never)
+    },
+
     /** Pin one of your public / unlisted posts to your profile */
     async pinStatus(statusId: string, accountId: string): Promise<mastodon.v1.Status> {
       this.credentialsForAccount(accountId)

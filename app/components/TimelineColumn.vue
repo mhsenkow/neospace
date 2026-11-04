@@ -742,7 +742,14 @@ const insertComposedStatus = (status: mastodon.v1.Status) => {
   if (!acceptsComposedStatus(status)) return
   const key = statusIdentity(status)
   if (!key) return
-  if (statuses.value.some((s) => statusIdentity(s) === key)) return
+  const existingIdx = statuses.value.findIndex((s) => statusIdentity(s) === key)
+  if (existingIdx >= 0) {
+    // Edited posts re-emit with the same identity — patch in place
+    const next = [...statuses.value]
+    next[existingIdx] = { ...statuses.value[existingIdx], ...status } as (typeof statuses.value)[number]
+    statuses.value = next
+    return
+  }
   withPrependMotion(() => {
     statuses.value = dedupeStatusesByIdentity([status, ...statuses.value])
   })

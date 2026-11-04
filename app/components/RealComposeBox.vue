@@ -98,9 +98,11 @@ const props = withDefaults(
     replyContext?: ComposeContextPost | null
     /**
      * Entry modality from the peek FAB — `media` opens the photo picker,
-     * `write` focuses the field, `voice` stubs until recording ships.
+     * `write` focuses the field, `voice` starts recording when supported.
      */
     initialModality?: ComposeModality | null
+    /** When set, Post updates this status instead of creating a new one */
+    editStatusId?: string | null
   }>(),
   {
     placeholder: "What's new?",
@@ -113,6 +115,7 @@ const props = withDefaults(
     threadsLayout: false,
     replyContext: null,
     initialModality: null,
+    editStatusId: null,
   },
 )
 
@@ -987,6 +990,24 @@ const handlePost = async () => {
   error.value = null
 
   try {
+    // In-place edit — text / CW only (media & poll edits stay on delete-&-redraft)
+    if (props.editStatusId) {
+      const accountId = instancesStore.activeAccountId
+      if (!accountId) throw new Error('Sign in to edit')
+      const edited = await statusStore.updateStatus(props.editStatusId, content.value.trim(), {
+        accountId,
+        spoilerText: showCW.value ? spoilerText.value : undefined,
+        sensitive: markSensitive.value || undefined,
+        language: postLanguage.value || undefined,
+      })
+      clearDraft()
+      resetForm()
+      emitComposedStatus(edited)
+      emit('posted', edited)
+      announcePosted('Post updated')
+      return
+    }
+
     let body = prependMentions(content.value)
     const quote = props.quoteUrl?.trim()
     if (quote && !body.includes(quote)) {
@@ -1142,10 +1163,12 @@ const handlePost = async () => {
 
 const submitLabel = computed(() => {
   if (isPosting.value) {
+    if (props.editStatusId) return 'Saving…'
     if (hasSchedule.value) return 'Scheduling…'
     return props.inReplyToId ? 'Sending…' : 'Posting…'
   }
   if (isUploading.value) return 'Uploading…'
+  if (props.editStatusId) return 'Save'
   if (hasSchedule.value) return 'Schedule'
   if (props.inReplyToId) return 'Reply'
   if (isDirectCompose.value) return 'Send'

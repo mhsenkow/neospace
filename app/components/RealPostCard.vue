@@ -1141,6 +1141,46 @@ const handleDelete = async () => {
   }
 }
 
+/** Edit in place — keeps replies, media, and the original post id */
+const handleEdit = async () => {
+  if (isDeleting.value) return
+  const target = captureManageTarget()
+  if (!target) return
+  isMenuOpen.value = false
+  if (!sameActingAccount(target.account, actingAccount())) {
+    toastStore.show({
+      message: 'Switch to the account that posted this to edit it.',
+      duration: 4000,
+    })
+    return
+  }
+  const source = await statusStore.fetchStatusSource(target.statusId, target.account.id)
+  if (!source.ok) {
+    toastStore.show({
+      message:
+        source.reason === 'unsupported'
+          ? 'This server doesn’t support editing posts.'
+          : source.reason === 'auth'
+            ? 'Couldn’t read your post — sign in again.'
+            : 'Couldn’t open this post for editing.',
+      duration: 4000,
+    })
+    return
+  }
+  const s = displayStatus.value
+  composeSheet.show({
+    title: 'Edit post',
+    initialText: source.text,
+    spoilerText: source.spoilerText || s.spoilerText || '',
+    visibility: s.visibility,
+    editStatusId: target.statusId,
+    onPosted: (updated) => {
+      // Patch the card immediately; feeds also hear emitComposedStatus from the sheet
+      Object.assign(displayStatus.value, updated)
+    },
+  })
+}
+
 /** Delete, then reopen the text (and CW / visibility / reply target) in the composer */
 const handleRedraft = async () => {
   if (isDeleting.value) return
@@ -1696,6 +1736,19 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                     <path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7z" />
                   </svg>
                   <span>{{ displayStatus.pinned ? 'Unpin from profile' : 'Pin to profile' }}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item"
+                  :disabled="isDeleting"
+                  @click="handleEdit"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+                  </svg>
+                  <span>Edit</span>
                 </button>
                 <button
                   type="button"

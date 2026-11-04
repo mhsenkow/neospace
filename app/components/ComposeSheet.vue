@@ -286,6 +286,7 @@ const replyPlaceholder = computed(() => {
             :initial-text="sheet.initialText || undefined"
             :initial-spoiler="sheet.initialSpoiler || undefined"
             :draft-slot="sheet.draftSlot || undefined"
+            :edit-status-id="sheet.editStatusId || undefined"
             :initial-visibility="sheet.initialVisibility || undefined"
             :initial-group-tag="sheet.groupTag || undefined"
             :initial-modality="sheet.initialModality || undefined"

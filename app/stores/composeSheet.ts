@@ -28,6 +28,8 @@ interface ComposeSheetState {
   initialSpoiler: string
   /** Own draft slot (`redraft:<id>`, or a saved draft's key) so a "new post" draft can't overwrite the prefill */
   draftSlot: string | null
+  /** When set, Post updates this status in place instead of creating a new one */
+  editStatusId: string | null
   initialVisibility: ComposeVisibility | null
   placeholder: string | null
   title: string | null
@@ -54,6 +56,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     initialText: '',
     initialSpoiler: '',
     draftSlot: null,
+    editStatusId: null,
     initialVisibility: null,
     placeholder: null,
     title: null,
@@ -72,6 +75,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       initialText?: string
       spoilerText?: string
       draftSlot?: string | null
+      editStatusId?: string | null
       visibility?: ComposeVisibility
       placeholder?: string
       title?: string
@@ -87,8 +91,10 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       const nextReply = opts?.inReplyToId ?? null
       const nextQuote = opts?.quoteUrl ?? null
       const nextSlot = opts?.draftSlot ?? null
+      const nextEdit = opts?.editStatusId ?? null
       const contextChanged =
         this.draftSlot !== nextSlot ||
+        this.editStatusId !== nextEdit ||
         this.inReplyToId !== nextReply ||
         this.quoteUrl !== nextQuote ||
         !!opts?.pickRecipient !== this.pickRecipient
@@ -96,6 +102,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.initialText = opts?.initialText ?? ''
       this.initialSpoiler = opts?.spoilerText ?? ''
       this.draftSlot = nextSlot
+      this.editStatusId = nextEdit
       this.initialVisibility = opts?.visibility ?? null
       this.placeholder = opts?.placeholder ?? null
       this.pickRecipient = !!opts?.pickRecipient
@@ -109,17 +116,19 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       // Default chrome title — DMs keep an explicit title from the caller
       this.title =
         opts?.title ??
-        (opts?.pickRecipient
-          ? 'New message'
-          : nextReply
-            ? 'New thread'
-            : nextQuote
-              ? 'Quote'
-              : this.initialModality === 'media'
-                ? 'New photo'
-                : this.initialModality === 'voice'
-                  ? 'Voice note'
-                  : 'New thread')
+        (nextEdit
+          ? 'Edit post'
+          : opts?.pickRecipient
+            ? 'New message'
+            : nextReply
+              ? 'New thread'
+              : nextQuote
+                ? 'Quote'
+                : this.initialModality === 'media'
+                  ? 'New photo'
+                  : this.initialModality === 'voice'
+                    ? 'Voice note'
+                    : 'New thread')
 
       // Remounting while already open wipes an in-progress Loom draft —
       // only bump when opening fresh or switching reply/quote context
@@ -135,6 +144,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.initialText = `${handle} `
       this.initialSpoiler = ''
       this.draftSlot = null
+      this.editStatusId = null
       this.initialVisibility = 'direct'
       this.placeholder = 'Write a private message…'
       this.title = 'New message'
@@ -168,6 +178,7 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.initialText = ''
       this.initialSpoiler = ''
       this.draftSlot = null
+      this.editStatusId = null
       this.initialVisibility = null
       this.placeholder = null
       this.title = null
