@@ -631,14 +631,32 @@ const setProfileTab = async (
   await fetchStatusesGuarded(true, optsForTab(tab))
 }
 
+/** Fully-qualified handle without leading @ — for NeoSpace deep links that still resolve on Mastodon. */
+const shareAcct = computed(() => fullHandle.value.replace(/^@/, '').trim())
+
+/** NeoSpace profile URL that latches onto the Fediverse acct. */
+const neoSpaceProfileUrl = computed(() => {
+  if (!import.meta.client || !shareAcct.value) return ''
+  const origin = window.location.origin
+  return `${origin}/profile?user=${encodeURIComponent(shareAcct.value)}`
+})
+
+/**
+ * Share NeoSpace, not the instance profile page — so recipients land in NeoSpace
+ * while the `user=` param keeps the Mastodon identity (@user@host).
+ * Canonical Mastodon URL stays available via “Copy Mastodon link”.
+ */
 const shareProfile = async () => {
   const p = profileStore.viewedProfile
-  if (!p) return
-  const url = p.url || `${window.location.origin}/profile?user=${encodeURIComponent(p.acct)}`
+  if (!p || !neoSpaceProfileUrl.value) return
+  const url = neoSpaceProfileUrl.value
   const title = plainDisplayName(p.displayName, p.username)
+  const text = fullHandle.value
+    ? `${fullHandle.value} on NeoSpace`
+    : undefined
   try {
     if (navigator.share) {
-      await navigator.share({ title, url, text: fullHandle.value })
+      await navigator.share({ title, url, text })
       return
     }
   } catch (e) {
@@ -646,7 +664,25 @@ const shareProfile = async () => {
   }
   try {
     await navigator.clipboard.writeText(url)
-    toastStore.show({ message: 'Profile link copied' })
+    toastStore.show({ message: 'NeoSpace profile link copied' })
+  } catch {
+    toastStore.show({ message: 'Couldn’t copy link' })
+  }
+}
+
+const copyMastodonProfileLink = async () => {
+  const url = instanceProfileUrl.value
+  if (!url) {
+    toastStore.show({ message: 'No Mastodon profile URL for this account' })
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    toastStore.show({
+      message: instanceHost.value
+        ? `Copied ${instanceHost.value} profile link`
+        : 'Mastodon profile link copied',
+    })
   } catch {
     toastStore.show({ message: 'Couldn’t copy link' })
   }
@@ -919,11 +955,21 @@ useHead({
           <template #items>
             <button type="button" role="menuitem" class="profile-menu-item" @click="shareProfile">
               <NeoIcon name="share" :size="18" :stroke="1.75" />
-              <span>Share profile</span>
+              <span>Share NeoSpace profile</span>
             </button>
             <button type="button" role="menuitem" class="profile-menu-item" @click="copyHandle">
               <NeoIcon name="mention" :size="18" :stroke="1.75" />
               <span>Copy handle</span>
+            </button>
+            <button
+              v-if="instanceProfileUrl"
+              type="button"
+              role="menuitem"
+              class="profile-menu-item"
+              @click="copyMastodonProfileLink"
+            >
+              <NeoIcon name="globe" :size="18" :stroke="1.75" />
+              <span>Copy Mastodon link</span>
             </button>
             <button type="button" role="menuitem" class="profile-menu-item" @click="toggleAccountInspect">
               <NeoIcon name="search" :size="18" :stroke="1.75" />
