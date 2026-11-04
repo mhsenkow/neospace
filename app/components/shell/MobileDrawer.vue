@@ -18,6 +18,7 @@ import { useFeedbackNotes } from '~/composables/useFeedbackNotes'
 import { categoryTint, useShellAppearance } from '~/composables/useShellAppearance'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
 import { useSuiteGroups } from '~/composables/useSuiteGroups'
+import { useMastodonLists } from '~/composables/useMastodonLists'
 import { SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
 import type { NeoIconName } from '~/utils/neoIcons'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
@@ -183,6 +184,15 @@ const openDrawerFeedOrRoute = (feedType: ColumnFeedType, fallback: string) => {
 const openNewAlgorithmFromDrawer = () => {
   closeMobileMenu()
   algorithmsStore.openEditor()
+}
+
+const { lists: mastodonLists } = useMastodonLists()
+
+const openListFromDrawer = async (listId: string, title: string) => {
+  closeMobileMenu()
+  // openBoardFeed adds/focuses; openListColumn then stamps the title for chrome
+  await openBoardFeed('list', listId)
+  columnsStore.openListColumn(listId, title)
 }
 
 const openSettingsFromDrawer = async () => {
@@ -421,6 +431,34 @@ useFocusTrap(mobileSidebarRef, open, {
           Sign in
         </NuxtLink>
       </div>
+
+      <section
+        v-if="instancesStore.hasAuthenticatedInstance && mastodonLists.length"
+        class="mobile-sidebar__groups"
+        aria-labelledby="drawer-lists-title"
+      >
+        <div class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 id="drawer-lists-title" class="mobile-sidebar__groups-title">Lists</h2>
+          </div>
+          <ul class="mobile-sidebar__suggest-list">
+            <li v-for="list in mastodonLists" :key="list.id">
+              <button
+                type="button"
+                class="mobile-sidebar__suggest"
+                :class="{ 'mobile-sidebar__suggest--on': boardColumnIs('list', list.id) }"
+                :aria-current="boardColumnIs('list', list.id) ? 'true' : undefined"
+                @click="openListFromDrawer(list.id, list.title)"
+              >
+                <span class="mobile-sidebar__suggest-icon mobile-sidebar__suggest-icon--glyph">
+                  <NeoIcon name="users" :size="18" :stroke="1.75" />
+                </span>
+                <span class="mobile-sidebar__suggest-label">{{ list.title }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
 
       <section class="mobile-sidebar__groups" aria-labelledby="drawer-algorithms-title">
         <div class="mobile-sidebar__groups-block">

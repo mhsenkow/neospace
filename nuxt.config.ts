@@ -113,6 +113,8 @@ export default defineNuxtConfig({
       clientsClaim: true,
       // Update waits for pwa-update.client.ts to send SKIP_WAITING
       skipWaiting: false,
+      // Mastodon Activity web-push show/click handlers (public/push-handler.js)
+      importScripts: ['/push-handler.js'],
     },
     client: {
       installPrompt: true,

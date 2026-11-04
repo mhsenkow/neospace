@@ -535,6 +535,9 @@ const feedLabel = computed(() => {
   if (props.column.feedType === 'algorithm') {
     return activeRecipe.value?.name || 'Algorithm'
   }
+  if (props.column.feedType === 'list') {
+    return props.column.listTitle || 'List'
+  }
   if (props.column.feedType === 'local') {
     return columnPinnedHost.value || columnPinnedInstanceId.value
       ? `Local (${browsingHost.value})`
@@ -687,7 +690,8 @@ const switchFeed = (type: ColumnFeedType, feedParam?: string) => {
   if (type === props.column.feedType) {
     if (type === 'group' && feedParam === props.column.groupTag) return
     if (type === 'algorithm' && feedParam === props.column.algorithmId) return
-    if (type !== 'group' && type !== 'algorithm') return
+    if (type === 'list' && feedParam === props.column.listId) return
+    if (type !== 'group' && type !== 'algorithm' && type !== 'list') return
   }
   emit('update-feed-type', type, feedParam)
 }
@@ -889,12 +893,14 @@ const jumpToNew = () => {
   }
   pendingNew.value = []
   newPostsAnnounce.value = ''
-  scrollContainer.value?.scrollTo({ top: 0, behavior: scrollBehavior() })
+  // Pill tap should land immediately — never animate-scroll away from where
+  // the reader was (smooth scroll felt like the feed was stealing focus).
+  scrollContainer.value?.scrollTo({ top: 0, behavior: 'auto' })
   nextTick(() => {
     const first = scrollContainer.value?.querySelector(
       'article.status-card, article[tabindex]',
     ) as HTMLElement | null
-    first?.focus?.()
+    first?.focus?.({ preventScroll: true })
   })
 }
 
@@ -967,6 +973,15 @@ const loadTimelinePage = async (
       hasMore.value = !page.exhausted && !!page.nextCursor
     }
     return page.statuses
+  }
+  if (props.column.feedType === 'list' && props.column.listId) {
+    if (!instancesStore.hasAuthenticatedInstance) return []
+    const active = instancesStore.activeAccount
+    if (!active) return []
+    const client = instancesStore.getClient(active.id)
+    return withBrowseOrigin(
+      await client.v1.timelines.list.$select(props.column.listId).list({ limit: 20 }),
+    )
   }
   if (props.column.feedType === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return []
@@ -1364,6 +1379,9 @@ const fetchTimeline = async (refresh = false): Promise<boolean> => {
           : 'Sign in to view saved posts',
       )
     }
+    if (props.column.feedType === 'list' && !instancesStore.hasAuthenticatedInstance) {
+      throw new Error('Sign in to view your lists')
+    }
 
     result = await loadTimelinePage(gen)
     if (
@@ -1495,6 +1513,20 @@ const loadMore = async () => {
           algoSourceCursor.value = page.nextCursor
           // Keep paging even when a window had zero matches (sparse filters)
           hasMore.value = !page.exhausted && !!page.nextCursor
+        }
+        break
+      }
+      case 'list': {
+        if (props.column.listId && maxId.value) {
+          const active = instancesStore.activeAccount
+          if (active) {
+            const client = instancesStore.getClient(active.id)
+            newStatuses = withBrowseOrigin(
+              await client.v1.timelines.list
+                .$select(props.column.listId)
+                .list({ limit: 20, maxId: maxId.value }),
+            )
+          }
         }
         break
       }
@@ -1882,6 +1914,7 @@ onUnmounted(() => {
               :active-feed-type="column.feedType"
               :active-algorithm-id="column.algorithmId"
               :active-group-tag="column.groupTag"
+              :active-list-id="column.listId"
               :can-show-home="canShowHome"
               :groups-expanded="groupsExpanded"
               :joined-groups="joinedGroups"

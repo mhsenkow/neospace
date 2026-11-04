@@ -1706,6 +1706,49 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                 </svg>
                 <span>Copy link</span>
               </button>
+              <template v-if="canInteract && !isOwnPost">
+                <div class="status-dropdown-divider" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item"
+                  :disabled="isMuting"
+                  @click="handleMute"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
+                    <line x1="23" y1="9" x2="17" y2="15" />
+                    <line x1="17" y1="9" x2="23" y2="15" />
+                  </svg>
+                  <span>Mute @{{ displayStatus.account.username }}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item status-dropdown-item--danger"
+                  :disabled="isBlocking"
+                  @click="handleBlock"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                  </svg>
+                  <span>Block @{{ displayStatus.account.username }}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="status-dropdown-item status-dropdown-item--danger"
+                  @click="handleReport"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>Report</span>
+                </button>
+              </template>
               <button type="button" role="menuitem" class="status-dropdown-item" @click="handleOpenOriginal">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
@@ -1777,49 +1820,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                     <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
                   </svg>
                   <span>Delete</span>
-                </button>
-              </template>
-              <template v-if="canInteract && !isOwnPost">
-                <div class="status-dropdown-divider" role="separator" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item"
-                  :disabled="isMuting"
-                  @click="handleMute"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                    <line x1="23" y1="9" x2="17" y2="15" />
-                    <line x1="17" y1="9" x2="23" y2="15" />
-                  </svg>
-                  <span>Mute @{{ displayStatus.account.username }}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  :disabled="isBlocking"
-                  @click="handleBlock"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-                  </svg>
-                  <span>Block @{{ displayStatus.account.username }}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  @click="handleReport"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span>Report</span>
                 </button>
               </template>
             </template>

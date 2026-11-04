@@ -127,8 +127,18 @@ const openFullThread = () => {
   const s = parent.value
   if (!s?.id) return
   const url = s.url || s.uri
+  // Prefer the resolved home-server id so the full page doesn't re-resolve from a
+  // foreign status id (peek → full continuity).
+  const id = replyId.value || s.id
+  const draftText = draft.value.trim()
   overlay.closeThreadPeek()
-  void navigateTo({ path: `/status/${s.id}`, query: url ? { url } : undefined })
+  void navigateTo({
+    path: `/status/${id}`,
+    query: {
+      ...(url ? { url } : {}),
+      ...(draftText ? { compose: '1', draft: draftText.slice(0, 500) } : {}),
+    },
+  })
 }
 
 const setReplyTarget = (acct: string) => {

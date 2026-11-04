@@ -457,6 +457,43 @@ const replyPlaceholder = computed(() => {
     grid-template-columns: 56px minmax(0, 1fr);
   }
 
+  /* Poll + keyboard: tighten rows so choices stay reachable above the footer */
+  :deep(.compose-poll__legend),
+  :deep(.compose-poll__lead) {
+    display: none;
+  }
+
+  :deep(.compose-poll) {
+    gap: 0.3rem;
+    margin-top: 0.15rem;
+    padding-top: 0.15rem;
+  }
+
+  :deep(.compose-poll__row) {
+    gap: 0.3rem;
+  }
+
+  :deep(.compose-poll__input) {
+    min-height: 2rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.875rem;
+  }
+
+  :deep(.compose-poll__settings) {
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+
+  :deep(.compose-poll__field),
+  :deep(.compose-poll__hint) {
+    font-size: 0.75rem;
+  }
+
+  :deep(.compose-tools) {
+    gap: 0.15rem;
+    padding-top: 0.2rem;
+  }
+
   :deep(.compose-handoff) {
     padding: 0.3rem 0.45rem;
     font-size: 0.75rem;

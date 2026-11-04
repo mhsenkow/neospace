@@ -48,6 +48,7 @@ export function useBoardNav() {
     if (!col || col.feedType !== feedType) return false
     if (feedType === 'group') return col.groupTag === feedParam
     if (feedType === 'algorithm') return col.algorithmId === feedParam
+    if (feedType === 'list') return col.listId === feedParam
     if (feedType === 'profile') return !col.profileAcct
     return true
   }

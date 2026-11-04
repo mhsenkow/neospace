@@ -1010,7 +1010,10 @@ const handlePost = async () => {
 
     let body = prependMentions(content.value)
     const quote = props.quoteUrl?.trim()
-    if (quote && !body.includes(quote)) {
+    const quotedStatusIdEarly = props.quoteContext?.id?.trim() || undefined
+    // Native quotedStatusId servers don't need the URL stuffed into the body;
+    // keep URL append only as a fallback for instances without quote support.
+    if (quote && !quotedStatusIdEarly && !body.includes(quote)) {
       body = `${body.trim()}\n\n${quote}`
     }
     const tag = selectedGroupTag.value?.replace(/^#/, '').trim()
@@ -1045,7 +1048,7 @@ const handlePost = async () => {
       chain.shift()
     }
 
-    const quotedStatusId = props.quoteContext?.id?.trim() || undefined
+    const quotedStatusId = quotedStatusIdEarly
     const postOpts = {
       visibility: postVisibility,
       spoilerText: showCW.value ? spoilerText.value : undefined,
@@ -1073,10 +1076,14 @@ const handlePost = async () => {
         quotedStatusId,
       })
     } catch (e: unknown) {
-      // Native quotes aren't universal — fall back to the URL already in the body
+      // Native quotes aren't universal — fall back to URL-in-body quote posts
       const code = httpStatusFrom(e)
       if (quotedStatusId && (code === 404 || code === 422)) {
-        result = await statusStore.postStatus(body, postOpts)
+        let fallback = body
+        if (quote && !fallback.includes(quote)) {
+          fallback = `${fallback.trim()}\n\n${quote}`
+        }
+        result = await statusStore.postStatus(fallback, postOpts)
       } else {
         throw e
       }

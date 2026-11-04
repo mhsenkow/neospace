@@ -6,6 +6,7 @@
 import { FEED_LABELS, type ColumnFeedType } from '~/stores/columns'
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useInstancesStore } from '~/stores/instances'
+import { useMastodonLists } from '~/composables/useMastodonLists'
 import { recipeTip } from '~/utils/algorithms'
 
 export type FeedMenuVariant = 'add' | 'switch'
@@ -21,6 +22,7 @@ const props = withDefaults(
     activeFeedType?: ColumnFeedType
     activeAlgorithmId?: string | null
     activeGroupTag?: string | null
+    activeListId?: string | null
     canShowHome?: boolean
     groupsExpanded?: boolean
     joinedGroups?: FeedMenuGroup[]
@@ -32,6 +34,7 @@ const props = withDefaults(
   {
     activeAlgorithmId: null,
     activeGroupTag: null,
+    activeListId: null,
     canShowHome: false,
     groupsExpanded: false,
     joinedGroups: () => [],
@@ -50,6 +53,7 @@ const emit = defineEmits<{
 
 const algorithmsStore = useAlgorithmsStore()
 const instancesStore = useInstancesStore()
+const { lists: mastodonLists } = useMastodonLists()
 
 const isSwitch = computed(() => props.variant === 'switch')
 const menuRole = computed(() => (isSwitch.value ? 'menuitemradio' : 'menuitem'))
@@ -75,6 +79,7 @@ const isActive = (type: ColumnFeedType, param?: string) => {
   if (!isSwitch.value || props.activeFeedType !== type) return false
   if (type === 'algorithm') return props.activeAlgorithmId === param
   if (type === 'group') return props.activeGroupTag === param
+  if (type === 'list') return props.activeListId === param
   return true
 }
 
@@ -246,6 +251,22 @@ const onPick = (type: ColumnFeedType, param?: string) => emit('pick', type, para
       <NeoIcon name="edit" :size="16" :stroke="1.5" />
       Edit / share…
     </button>
+
+    <template v-if="instancesStore.hasAuthenticatedInstance && mastodonLists.length">
+      <span :class="subheadClass">Lists</span>
+      <button
+        v-for="list in mastodonLists"
+        :key="list.id"
+        type="button"
+        :role="menuRole"
+        :aria-checked="isSwitch ? isActive('list', list.id) : undefined"
+        :class="[itemClass, { 'feed-dropdown__item--active': isSwitch && isActive('list', list.id) }]"
+        @click="onPick('list', list.id)"
+      >
+        <NeoIcon v-if="!compactAdd" name="users" :size="16" :stroke="1.5" />
+        {{ list.title }}
+      </button>
+    </template>
   </template>
 
   <template v-if="isSwitch && joinedGroups.length > 0">

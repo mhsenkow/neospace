@@ -125,6 +125,9 @@ const columnTabLabels = computed(() =>
     if (column.feedType === 'algorithm' && column.algorithmId) {
       return algorithmsStore.getRecipe(column.algorithmId)?.name || 'Algorithm'
     }
+    if (column.feedType === 'list') {
+      return column.listTitle || 'List'
+    }
     if (column.feedType === 'local') {
       return `Local (${localHostLabel.value})`
     }
@@ -296,8 +299,16 @@ const removeColumnAt = (columnId: string) => {
   })
 }
 
-const addColumn = (feedType: ColumnFeedType, groupTag?: string) => {
-  const id = columnsStore.addColumn(feedType, groupTag)
+const { lists: mastodonLists } = useMastodonLists()
+
+const addColumn = (feedType: ColumnFeedType, feedParam?: string) => {
+  let id: string | undefined | null
+  if (feedType === 'list' && feedParam) {
+    const title = mastodonLists.value.find((l) => l.id === feedParam)?.title
+    id = columnsStore.openListColumn(feedParam, title)
+  } else {
+    id = columnsStore.addColumn(feedType, feedParam)
+  }
   addMenuOpen.value = false
   addGroupQuery.value = ''
   nextTick(() => {
@@ -875,6 +886,12 @@ const toggleActiveViewMode = () => {
   const col = columnsStore.columns[activeColumnIndex.value]
   if (!col || !isTimelineFeed(col.feedType)) return
   columnsStore.toggleColumnViewMode(col.id)
+}
+
+const setActiveViewMode = (mode: 'flow' | 'flip') => {
+  const col = columnsStore.columns[activeColumnIndex.value]
+  if (!col || !isTimelineFeed(col.feedType)) return
+  columnsStore.setColumnViewMode(col.id, mode)
 }
 
 /** Scroll fires many times per frame — measure slides at most once per frame. */
@@ -1516,23 +1533,35 @@ useHead({ title: 'Home | NeoSpace' })
       :class="{ 'mobile-feed-chrome--landscape': isPhoneLandscapeUi }"
       aria-label="Feed controls"
     >
-      <button
-        type="button"
-        class="mobile-feed-chrome__mode"
-        :class="{ 'mobile-feed-chrome__mode--flip': activeViewMode === 'flip' }"
-        aria-label="Flick view — one post at a time"
-        :aria-pressed="activeViewMode === 'flip'"
-        title="Flick view — one post at a time"
-        :disabled="!!boardPortal || !activeColumnIsTimeline"
-        @click="toggleActiveViewMode"
+      <!-- Same Feed|Flick control as portrait header — landscape used to only have a glyph -->
+      <div
+        class="mobile-feed-chrome__mode-switch"
+        role="group"
+        aria-label="How to move through this feed"
       >
-        <span class="mode-glyph" aria-hidden="true">
-          <span class="mode-glyph__flow">
-            <i /><i /><i />
-          </span>
-          <span class="mode-glyph__flip" />
-        </span>
-      </button>
+        <button
+          type="button"
+          class="mobile-feed-chrome__mode-opt"
+          :class="{ 'is-on': activeViewMode !== 'flip' }"
+          :aria-pressed="activeViewMode !== 'flip'"
+          title="Feed — scroll a list"
+          :disabled="!!boardPortal || !activeColumnIsTimeline"
+          @click="setActiveViewMode('flow')"
+        >
+          Feed
+        </button>
+        <button
+          type="button"
+          class="mobile-feed-chrome__mode-opt"
+          :class="{ 'is-on': activeViewMode === 'flip' }"
+          :aria-pressed="activeViewMode === 'flip'"
+          title="Flick — one post at a time"
+          :disabled="!!boardPortal || !activeColumnIsTimeline"
+          @click="setActiveViewMode('flip')"
+        >
+          Flick
+        </button>
+      </div>
 
       <button
         v-if="!isPhoneLandscapeUi"
@@ -1774,7 +1803,13 @@ useHead({ title: 'Home | NeoSpace' })
           :focused="columnsStore.focusedColumnId === column.id"
           @remove="removeColumnAt(column.id)"
           @focus="onColumnFocus(column.id)"
-          @update-feed-type="(type: ColumnFeedType, groupTag?: string) => columnsStore.updateColumnFeedType(column.id, type, groupTag)"
+          @update-feed-type="(type: ColumnFeedType, feedParam?: string) => {
+            const listTitle =
+              type === 'list' && feedParam
+                ? mastodonLists.find((l) => l.id === feedParam)?.title
+                : undefined
+            columnsStore.updateColumnFeedType(column.id, type, feedParam, { listTitle })
+          }"
           @column-drag-start="onColumnDragStart"
           @column-drag-end="onColumnDragEnd"
           @column-drag-over="onColumnDragOver"
@@ -2820,10 +2855,55 @@ useHead({ title: 'Home | NeoSpace' })
     padding: 0.1rem 0.25rem;
     gap: 0.15rem;
 
-    .mobile-feed-chrome__jump,
-    .mobile-feed-chrome__mode {
+    .mobile-feed-chrome__jump {
       width: 36px;
       height: 32px;
+    }
+
+    .mobile-feed-chrome__mode-switch {
+      margin-right: 0.15rem;
+    }
+  }
+
+  &__mode-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex-shrink: 0;
+    gap: 0.12rem;
+    padding: 0.12rem;
+    border-radius: 8px;
+    background: var(--neo-bg-tertiary);
+  }
+
+  &__mode-opt {
+    min-width: 2.5rem;
+    min-height: 28px;
+    padding: 0 0.4rem;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--neo-text-tertiary);
+    font: inherit;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+
+    &.is-on {
+      background: var(--neo-bg-primary);
+      color: var(--neo-text-primary);
+      box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--neo-accent) 70%, transparent);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 1px;
     }
   }
 

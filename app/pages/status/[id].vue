@@ -642,12 +642,13 @@ watch(
   },
 )
 
-const expandDockToSheet = () => {
+const expandDockToSheet = (seedText?: string) => {
   const focus = focusStatus.value
   if (!focus) return
   composeSheet.show({
     title: 'New thread',
     placeholder: 'Share your thoughts…',
+    initialText: seedText || '',
     inReplyToId: publicReplyId.value || focus.id,
     mentionAccts: replyMentionAccts.value,
     visibility: focus.visibility === 'direct' ? 'direct' : focus.visibility,
@@ -660,6 +661,18 @@ const expandDockToSheet = () => {
       url: focus.url || focus.uri,
     },
   })
+}
+
+/** Peek → full thread: reopen compose with the draft the reader already typed */
+const consumePeekHandoff = () => {
+  if (route.query.compose !== '1') return
+  const raw = route.query.draft
+  const draft = typeof raw === 'string' ? raw : ''
+  expandDockToSheet(draft)
+  const nextQuery = { ...route.query }
+  delete nextQuery.compose
+  delete nextQuery.draft
+  void router.replace({ path: route.path, query: nextQuery })
 }
 
 const threadStatusById = computed(() => {
@@ -1057,7 +1070,10 @@ const onVisibilityChange = () => {
 }
 
 onMounted(() => {
-  void loadThread().then(() => startThreadPoll())
+  void loadThread().then(() => {
+    startThreadPoll()
+    consumePeekHandoff()
+  })
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 

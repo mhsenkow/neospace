@@ -18,6 +18,7 @@ export type ColumnFeedType =
   | 'favourites'
   | 'bookmarks'
   | 'algorithm'
+  | 'list'
   | 'profile'
   | 'search'
   | 'notifications'
@@ -48,6 +49,7 @@ export const FEED_CATALOG: { type: ColumnFeedType; label: string }[] = [
   { type: 'favourites', label: 'Liked' },
   { type: 'bookmarks', label: 'Saved' },
   { type: 'algorithm', label: 'Algorithm' },
+  { type: 'list', label: 'List' },
   { type: 'profile', label: 'Profile' },
   { type: 'search', label: 'Search' },
   { type: 'notifications', label: 'Notifications' },
@@ -70,7 +72,8 @@ export function isTimelineFeed(type: ColumnFeedType): boolean {
     type === 'group' ||
     type === 'favourites' ||
     type === 'bookmarks' ||
-    type === 'algorithm'
+    type === 'algorithm' ||
+    type === 'list'
   )
 }
 
@@ -84,6 +87,10 @@ export interface ColumnConfig {
   groupTag?: string
   /** Custom / shared algorithm recipe id */
   algorithmId?: string
+  /** Mastodon list id */
+  listId?: string
+  /** Cached list title for chrome labels */
+  listTitle?: string
   /** Device-local; not synced via profile field */
   viewMode?: ColumnViewMode
   /**
@@ -93,7 +100,12 @@ export interface ColumnConfig {
    */
   profileAcct?: string
   /** Restore this feed when leaving a profile peek */
-  returnFeed?: { feedType: ColumnFeedType; groupTag?: string; algorithmId?: string }
+  returnFeed?: {
+    feedType: ColumnFeedType
+    groupTag?: string
+    algorithmId?: string
+    listId?: string
+  }
   /**
    * Pin this column to a connected instance id, or `'all'` for unified
    * multi-account Home. When unset, the column follows the global active account
@@ -145,6 +157,7 @@ const FEED_TYPES: ColumnFeedType[] = [
   'favourites',
   'bookmarks',
   'algorithm',
+  'list',
   'profile',
   'search',
   'notifications',
@@ -197,6 +210,12 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       columns.push({ id: generateId(), feedType: 'algorithm', algorithmId })
       continue
     }
+    if (part.startsWith('list:')) {
+      const listId = part.slice(5).trim()
+      if (!listId) continue
+      columns.push({ id: generateId(), feedType: 'list', listId })
+      continue
+    }
     // local@host:tech.lgbt / home@all / federated@<instanceId>
     const pinned = part.match(/^(local|federated|home)@(host:)?(.+)$/i)
     if (pinned) {
@@ -210,7 +229,12 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       columns.push(col)
       continue
     }
-    if ((FEED_TYPES as string[]).includes(part) && part !== 'group' && part !== 'algorithm') {
+    if (
+      (FEED_TYPES as string[]).includes(part) &&
+      part !== 'group' &&
+      part !== 'algorithm' &&
+      part !== 'list'
+    ) {
       columns.push({ id: generateId(), feedType: part as ColumnFeedType })
       continue
     }
@@ -235,10 +259,14 @@ function defaultColumns(preferHome: boolean): ColumnConfig[] {
 }
 
 function feedKey(
-  c: Pick<ColumnConfig, 'feedType' | 'groupTag' | 'algorithmId' | 'instanceId' | 'serverHost'>,
+  c: Pick<
+    ColumnConfig,
+    'feedType' | 'groupTag' | 'algorithmId' | 'listId' | 'instanceId' | 'serverHost'
+  >,
 ) {
   if (c.feedType === 'group' && c.groupTag) return `group:${c.groupTag}`
   if (c.feedType === 'algorithm' && c.algorithmId) return `algo:${c.algorithmId}`
+  if (c.feedType === 'list' && c.listId) return `list:${c.listId}`
   const pin = c.instanceId || (c.serverHost ? `host:${c.serverHost.toLowerCase()}` : '')
   return pin ? `${c.feedType}@${pin}` : c.feedType
 }
@@ -272,8 +300,10 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
     if (!FEED_TYPES.includes(feedType)) continue
     const groupTag = optionalString(c.groupTag)
     const algorithmId = optionalString(c.algorithmId)
+    const listId = optionalString(c.listId)
     if (feedType === 'group' && !groupTag) continue
     if (feedType === 'algorithm' && !algorithmId) continue
+    if (feedType === 'list' && !listId) continue
     let id = optionalString(c.id)
     if (!id || ids.has(id)) id = generateId()
     ids.add(id)
@@ -284,6 +314,11 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
     }
     if (feedType === 'group') col.groupTag = groupTag
     if (feedType === 'algorithm') col.algorithmId = algorithmId
+    if (feedType === 'list') {
+      col.listId = listId
+      const listTitle = optionalString(c.listTitle)
+      if (listTitle) col.listTitle = listTitle
+    }
     const profileAcct = optionalString(c.profileAcct)
     if (feedType === 'profile' && profileAcct) col.profileAcct = profileAcct
     const instanceId = optionalString(c.instanceId)
@@ -298,6 +333,7 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
         feedType: back.feedType as ColumnFeedType,
         groupTag: optionalString(back.groupTag),
         algorithmId: optionalString(back.algorithmId),
+        listId: optionalString(back.listId),
       }
     }
     out.push(col)
@@ -480,6 +516,9 @@ export const useColumnsStore = defineStore('columns', {
         if (feedType === 'algorithm') {
           return c.feedType === 'algorithm' && c.algorithmId === feedParam
         }
+        if (feedType === 'list') {
+          return c.feedType === 'list' && c.listId === feedParam
+        }
         if (feedType === 'profile') return c.feedType === 'profile' && !c.profileAcct
         if (
           (feedType === 'local' || feedType === 'federated' || feedType === 'home') &&
@@ -564,6 +603,12 @@ export const useColumnsStore = defineStore('columns', {
         )
         if (existing) return existing.id
       }
+      if (feedType === 'list' && feedParam) {
+        const existing = this.columns.find(
+          (c) => c.feedType === 'list' && c.listId === feedParam,
+        )
+        if (existing) return existing.id
+      }
       if (
         (feedType === 'local' || feedType === 'federated' || feedType === 'home') &&
         feedParam
@@ -581,6 +626,7 @@ export const useColumnsStore = defineStore('columns', {
       }
       if (feedType === 'group' && feedParam) col.groupTag = feedParam
       if (feedType === 'algorithm' && feedParam) col.algorithmId = feedParam
+      if (feedType === 'list' && feedParam) col.listId = feedParam
       if (
         (feedType === 'local' || feedType === 'federated' || feedType === 'home' ||
           feedType === 'favourites' ||
@@ -593,6 +639,18 @@ export const useColumnsStore = defineStore('columns', {
       this.columns.push(col)
       this.persist()
       return col.id
+    },
+
+    /** Open a Mastodon list on the board, remembering its title for chrome. */
+    openListColumn(listId: string, title?: string): string | null {
+      const id = this.ensureFocusedView('list', listId)
+      if (!id || !title) return id
+      const col = this.columns.find((c) => c.id === id)
+      if (col && col.listTitle !== title) {
+        col.listTitle = title
+        this.persist()
+      }
+      return id
     },
 
     /**
@@ -768,12 +826,24 @@ export const useColumnsStore = defineStore('columns', {
       })
     },
 
-    updateColumnFeedType(columnId: string, feedType: ColumnFeedType, feedParam?: string) {
+    updateColumnFeedType(
+      columnId: string,
+      feedType: ColumnFeedType,
+      feedParam?: string,
+      opts?: { listTitle?: string },
+    ) {
       const column = this.columns.find((c) => c.id === columnId)
       if (column) {
         column.feedType = feedType
         column.groupTag = feedType === 'group' ? feedParam : undefined
         column.algorithmId = feedType === 'algorithm' ? feedParam : undefined
+        if (feedType === 'list' && feedParam) {
+          column.listId = feedParam
+          if (opts?.listTitle) column.listTitle = opts.listTitle
+        } else {
+          delete column.listId
+          delete column.listTitle
+        }
         column.profileAcct = undefined
         column.returnFeed = undefined
         this.persist()
@@ -795,12 +865,16 @@ export const useColumnsStore = defineStore('columns', {
           feedType: column.feedType,
           groupTag: column.groupTag,
           algorithmId: column.algorithmId,
+          listId: column.listId,
         }
       }
       column.feedType = 'profile'
       column.profileAcct = handle
       column.groupTag = undefined
       column.algorithmId = undefined
+      delete column.listId
+      // keep listTitle only while on a list feed — drop on peek
+      delete column.listTitle
       // Stay on the board: clear another column's focus so this peel is visible
       if (this.focusedColumnId && this.focusedColumnId !== columnId) {
         this.focusedColumnId = null
@@ -820,10 +894,18 @@ export const useColumnsStore = defineStore('columns', {
         column.feedType = back.feedType
         column.groupTag = back.feedType === 'group' ? back.groupTag : undefined
         column.algorithmId = back.feedType === 'algorithm' ? back.algorithmId : undefined
+        if (back.feedType === 'list' && back.listId) {
+          column.listId = back.listId
+        } else {
+          delete column.listId
+          delete column.listTitle
+        }
       } else {
         column.feedType = 'home'
         column.groupTag = undefined
         column.algorithmId = undefined
+        delete column.listId
+        delete column.listTitle
       }
       if (this.focusedColumnId === columnId) {
         this.focusedColumnId = null
