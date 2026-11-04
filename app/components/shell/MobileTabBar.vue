@@ -209,14 +209,17 @@ onUnmounted(() => {
 </template>
 
 <style lang="scss" scoped>
+/* Nav is the last flex child — negative top margin frees space for main above it */
 :global(html.neo-nav-collapsed .mobile-nav:not(.mobile-nav--landscape)) {
   position: relative;
-  margin-bottom: calc(-1 * var(--neo-nav-live-h, 56px));
+  margin-top: calc(-1 * var(--neo-nav-live-h, 56px));
 }
 
 .mobile-nav {
-  position: sticky;
-  bottom: 0;
+  // In-flow flex sibling after <main> — sits at the bottom of the phone column shell.
+  // (Do not put this before main: overflow:hidden parents break sticky-bottom and it
+  // lands under the header, which is what production looked like.)
+  position: relative;
   flex-shrink: 0;
   width: 100%;
   min-height: var(--neo-mobile-nav-h, 56px);
@@ -238,8 +241,6 @@ onUnmounted(() => {
   }
 
   &--landscape {
-    position: relative;
-    bottom: auto;
     order: -1;
     align-self: stretch;
     width: var(--neo-landscape-rail-w, 52px);

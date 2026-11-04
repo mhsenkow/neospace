@@ -19,6 +19,7 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
 
 <template>
 <!-- Threads-clean top: menu + mark only. Search lives in the bottom tab bar. -->
+<!-- Single quiet top row — tabs + feed pills live in the thumb zone at the bottom -->
 <header v-if="visible" class="mobile-header">
   <button
     class="mobile-header__btn"
@@ -39,6 +40,7 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
   >
     <NeoMark :show-brand="false" :active="route.path === '/'" />
   </NuxtLink>
+  <!-- Balance the menu hit target so the mark stays optically centered -->
   <span class="mobile-header__spacer" aria-hidden="true" />
 </header>
 </template>
@@ -49,13 +51,13 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
   position: relative;
   flex-shrink: 0;
   width: 100%;
-  height: calc(44px + var(--neo-safe-top, env(safe-area-inset-top, 0px)));
+  height: calc(40px + var(--neo-safe-top, env(safe-area-inset-top, 0px)));
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--neo-safe-top, env(safe-area-inset-top, 0px)) max(0.35rem, env(safe-area-inset-right, 0px)) 0
     max(0.35rem, env(safe-area-inset-left, 0px));
-  // Threads-quiet top — no hard rule; solid fill (backdrop-filter blacks out iOS)
+  // Threads-quiet top — one slim row only
   background: var(--neo-bg-primary);
   border-bottom: none;
   z-index: var(--neo-z-shell-header, 90);

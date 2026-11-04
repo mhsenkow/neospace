@@ -398,11 +398,12 @@ watch(
       </div>
     </div>
 
-    <MobileTabBar v-if="!isSidebarShell && showMobileNav" v-model:open="mobileMenuOpen" />
-
     <main id="main-content" class="main-content" tabindex="-1">
       <slot />
     </main>
+
+    <!-- After main so portrait flex stacks it at the bottom (sticky-before-main sat under the header). -->
+    <MobileTabBar v-if="!isSidebarShell && showMobileNav" v-model:open="mobileMenuOpen" />
 
     <!-- Sticky v-if: fetch each sheet's chunk on first open, keep it for close transitions -->
     <LazyComposeSheet v-if="mounted.compose" />

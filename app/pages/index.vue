@@ -2956,12 +2956,11 @@ useHead({ title: 'Home | NeoSpace' })
   flex-shrink: 0;
   align-items: center;
   gap: 0;
-  padding: 0.25rem 0.55rem;
-  border-top: 1px solid var(--neo-border-color);
+  // Sits directly above the tab bar as one bottom thumb stack
+  padding: 0.35rem 0.55rem 0.2rem;
+  border-top: 1px solid color-mix(in srgb, var(--neo-border-color) 70%, transparent);
   border-bottom: none;
-  background: color-mix(in srgb, var(--neo-bg-primary) 94%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: var(--neo-bg-primary);
   position: relative;
   z-index: var(--neo-z-sticky-bar, 20);
 
