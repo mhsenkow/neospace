@@ -308,9 +308,13 @@ const algoSourceCursor = ref<string | null>(null)
 const savedCursor = ref<string | null>(null)
 /**
  * Last loadMore added nothing new (sparse algorithm window, all-duplicate
- * page) — the sentinel never left view, so the observer won't fire again.
+ * page) — after a few quiet auto-skips we pause for a manual "Look further"
+ * so we don't scan forever.
  */
 const lastLoadAddedNothing = ref(false)
+/** Consecutive empty-add pages while still hasMore — drives quiet auto-skip. */
+const sparseSkipStreak = ref(0)
+const AUTO_SPARSE_SKIPS = 4
 const newPostsAnnounce = ref('')
 let newPostsAnnounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -357,7 +361,29 @@ const scrollBehavior = (): ScrollBehavior => (reducedMotion.value ? 'auto' : 'sm
 const pendingLabel = computed(() => {
   const n = pendingNew.value.length
   if (n <= 0) return ''
-  return n === 1 ? '1 new post' : `${n} new posts`
+  return n === 1 ? '↑ 1 new post' : `↑ ${n} new posts`
+})
+
+const sparsePauseCopy = computed(() => {
+  if (props.column.feedType === 'algorithm') {
+    return {
+      title: 'No matches in that stretch',
+      body: 'This filter skipped a window with nothing that fits. Keep looking further back, or refine the algorithm.',
+      action: 'Look further',
+    }
+  }
+  return {
+    title: 'Already caught up through here',
+    body: 'That page was mostly posts you’ve already seen. Look further back for older ones.',
+    action: 'Look further',
+  }
+})
+
+const endOfFeedCopy = computed(() => {
+  if (props.column.feedType === 'algorithm') return 'End of matches'
+  if (props.column.feedType === 'favourites') return 'End of liked posts'
+  if (props.column.feedType === 'bookmarks') return 'End of saved posts'
+  return 'You’re all caught up'
 })
 
 watch(pendingLabel, (label) => {
@@ -1299,6 +1325,7 @@ const fetchTimeline = async (refresh = false): Promise<boolean> => {
   // An in-flight loadMore from the previous generation won't clear this itself
   isLoadingMore.value = false
   lastLoadAddedNothing.value = false
+  sparseSkipStreak.value = 0
   if (refresh) {
     // Keep existing posts visible until the new page lands — avoids blank Federated
     // when a newer fetch aborts an in-flight one (init + account/filter watches).
@@ -1482,21 +1509,47 @@ const loadMore = async () => {
     } else if (props.column.feedType !== 'algorithm') {
       hasMore.value = newStatuses.length > 0
     }
-    lastLoadAddedNothing.value = added === 0 && hasMore.value
+
+    if (added > 0) {
+      sparseSkipStreak.value = 0
+      lastLoadAddedNothing.value = false
+    } else if (hasMore.value) {
+      sparseSkipStreak.value += 1
+      // Quietly skip a few empty/duplicate windows before asking the reader
+      lastLoadAddedNothing.value = sparseSkipStreak.value >= AUTO_SPARSE_SKIPS
+    } else {
+      sparseSkipStreak.value = 0
+      lastLoadAddedNothing.value = false
+    }
   } catch (e: any) {
     if (gen !== fetchGen) return
     logError('Load more error:', e)
     const friendly = mapErrorToMessage(e)
     loadMoreError.value = friendly.detail || friendly.title || 'Couldn’t load more'
   } finally {
-    if (gen === fetchGen) {
-      isLoadingMore.value = false
-      // A short page can leave the sentinel in view, and IntersectionObserver only
-      // fires on change — re-arm it. A page that added nothing stops here (manual
-      // "Load more" below) instead of auto-scanning the whole source timeline.
-      if (added > 0 && hasMore.value) rearmInfiniteObserver()
+    if (gen !== fetchGen) return
+    isLoadingMore.value = false
+    // A short page can leave the sentinel in view, and IntersectionObserver only
+    // fires on change — re-arm it. Empty-add pages auto-continue a few times
+    // (quiet "Looking further…") then pause for a manual Look further.
+    if (!hasMore.value) return
+    if (added > 0) {
+      rearmInfiniteObserver()
+      return
     }
+    if (sparseSkipStreak.value < AUTO_SPARSE_SKIPS && !loadMoreError.value) {
+      // Call immediately so isLoadingMore flips true again before paint
+      void loadMore()
+      return
+    }
+    // Paused for a manual Look further — do not re-arm (would loop forever)
   }
+}
+
+const continueAfterSparsePause = () => {
+  sparseSkipStreak.value = 0
+  lastLoadAddedNothing.value = false
+  void loadMore()
 }
 
 const ensureInfiniteObserver = () => {
@@ -1507,7 +1560,8 @@ const ensureInfiniteObserver = () => {
         entries[0]?.isIntersecting &&
         !isLoadingMore.value &&
         hasMore.value &&
-        !loadMoreError.value
+        !loadMoreError.value &&
+        !lastLoadAddedNothing.value
       ) {
         loadMore()
       }
@@ -2019,6 +2073,7 @@ onUnmounted(() => {
           v-if="pendingNew.length"
           type="button"
           class="column-new-pill"
+          :aria-label="`${pendingLabel}. Jump to the top.`"
           @click="jumpToNew"
         >
           {{ pendingLabel }}
@@ -2027,8 +2082,10 @@ onUnmounted(() => {
 
       <!-- Busy-timeline gap: catch-up hit its page cap -->
       <div v-if="timelineGap" class="column-gap" role="status">
-        <p class="column-gap__text">More new posts are still arriving — this feed was very busy.</p>
-        <button type="button" class="column-retry" @click="recoverTimelineGap">
+        <p class="column-gap__text">
+          This feed was busy — some newer posts may still be catching up.
+        </p>
+        <button type="button" class="column-retry column-retry--accent" @click="recoverTimelineGap">
           Reload feed
         </button>
       </div>
@@ -2136,28 +2193,47 @@ onUnmounted(() => {
         <div ref="loadTrigger" class="column-load-trigger" :class="{ 'column-load-trigger--flip': isFlip }">
           <Transition name="fade">
             <div v-if="isLoadingMore" class="column-loading-more" role="status" aria-busy="true">
-              <FunLoader :size="120" quiet label="Loading more" />
+              <FunLoader
+                :size="sparseSkipStreak > 0 ? 72 : 120"
+                quiet
+                :label="sparseSkipStreak > 0 ? 'Looking further' : 'Loading more'"
+              />
+              <p v-if="sparseSkipStreak > 0" class="column-loading-more__hint">
+                Looking further…
+              </p>
             </div>
           </Transition>
-          <div v-if="loadMoreError" class="column-load-more-error" role="alert">
-            <p>{{ loadMoreError }}</p>
+          <div v-if="loadMoreError" class="column-load-foot column-load-foot--error" role="alert">
+            <p class="column-load-foot__title">Couldn’t load more</p>
+            <p class="column-load-foot__body">{{ loadMoreError }}</p>
             <button type="button" class="column-retry" @click="loadMoreError = null; loadMore()">
-              Retry
+              Try again
             </button>
           </div>
           <div
             v-else-if="lastLoadAddedNothing && hasMore && !isLoadingMore"
-            class="column-load-more-error"
+            class="column-load-foot"
+            role="status"
           >
-            <p>{{ column.feedType === 'algorithm' ? 'No matches in that stretch.' : 'Nothing new on that page.' }}</p>
-            <button type="button" class="column-retry" @click="loadMore()">
-              Keep looking
+            <p class="column-load-foot__title">{{ sparsePauseCopy.title }}</p>
+            <p class="column-load-foot__body">{{ sparsePauseCopy.body }}</p>
+            <button type="button" class="column-retry column-retry--accent" @click="continueAfterSparsePause">
+              {{ sparsePauseCopy.action }}
             </button>
           </div>
         </div>
 
-        <div v-if="!hasMore && statuses.length > 0 && !isFlip" class="column-end" role="status">
-          <span aria-hidden="true">&#x2728;</span> All caught up
+        <div
+          v-if="!hasMore && statuses.length > 0 && !isLoadingMore"
+          class="column-end"
+          :class="{ 'column-end--flip': isFlip }"
+          role="status"
+        >
+          <p class="column-end__title">{{ endOfFeedCopy }}</p>
+          <p class="column-end__body">Pull to refresh, or check back when something new lands.</p>
+          <button type="button" class="column-retry" @click="fetchTimeline(true)">
+            Refresh feed
+          </button>
         </div>
       </template>
     </div>
@@ -2794,8 +2870,11 @@ onUnmounted(() => {
   }
 
   @media (max-width: 1023px) {
-    // Let the last post's actions scroll clear of the floating note/waffle buttons
-    padding-bottom: 3.75rem;
+    // Clear bottom pills + tab bar so end-of-feed / Look further isn't tucked under chrome
+    padding-bottom: calc(
+      var(--neo-mobile-nav-h, 56px) + var(--neo-feed-tabs-h, 48px) + env(safe-area-inset-bottom, 0px) +
+        1.25rem
+    );
   }
 
   &--flip {
@@ -2927,29 +3006,64 @@ onUnmounted(() => {
 }
 
 .column-retry {
-  padding: 0.5rem 1rem;
+  padding: 0.55rem 1.1rem;
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--neo-text-secondary);
   background: var(--neo-bg-tertiary);
+  border: none;
   border-radius: var(--neo-radius-lg);
+  cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 
   &:hover {
     background: var(--neo-bg-hover);
     color: var(--neo-text-primary);
   }
+
+  &--accent {
+    color: var(--neo-text-on-accent, #fff);
+    background: var(--neo-accent);
+
+    &:hover {
+      background: var(--neo-accent-hover, var(--neo-accent));
+      color: var(--neo-text-on-accent, #fff);
+    }
+  }
 }
 
-.column-load-more-error {
+.column-load-foot {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem;
+  gap: 0.35rem;
+  margin: 0.35rem 0.75rem 0.75rem;
+  padding: 1rem 1rem 1.15rem;
   text-align: center;
   color: var(--neo-text-muted);
   font-size: 0.875rem;
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
+
+  &--error {
+    border-color: color-mix(in srgb, var(--neo-danger, #dc2626) 35%, var(--neo-border-color));
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    color: var(--neo-text-primary);
+  }
+
+  &__body {
+    margin: 0 0 0.45rem;
+    max-width: 22rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--neo-text-secondary);
+  }
 }
 
 .column-posts {
@@ -3059,21 +3173,55 @@ onUnmounted(() => {
 
 .column-loading-more {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
+  gap: 0.35rem;
   min-height: 9rem;
   padding: 1.25rem 0.75rem;
   box-sizing: border-box;
+
+  &__hint {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--neo-text-muted);
+  }
 }
 
 .column-end {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.375rem;
-  padding: 1.5rem 1rem;
+  gap: 0.35rem;
+  margin: 0.5rem 0.75rem 1.25rem;
+  padding: 1.25rem 1rem 1.35rem;
+  text-align: center;
   font-size: 0.8125rem;
   color: var(--neo-text-muted);
+  background: var(--neo-bg-secondary);
+  border: 1px solid var(--neo-border-color);
+  border-radius: var(--neo-radius-lg);
+
+  &--flip {
+    margin-inline: 1rem;
+    min-height: calc(var(--flip-port, 0px) * 0.35);
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    color: var(--neo-text-primary);
+  }
+
+  &__body {
+    margin: 0 0 0.45rem;
+    max-width: 20rem;
+    line-height: 1.4;
+    color: var(--neo-text-secondary);
+  }
 }
 
 // ========================================

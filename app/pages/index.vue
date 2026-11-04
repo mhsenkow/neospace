@@ -2173,7 +2173,7 @@ useHead({ title: 'Home | NeoSpace' })
     max-width: 100%;
     margin-inline: 0;
     // Publish for layout dock / FAB (inherits up through main → layout)
-    --neo-feed-tabs-h: 48px;
+    --neo-feed-tabs-h: 56px;
   }
 
   @media (max-height: 500px) and (orientation: landscape) and (max-width: 1023px) {
