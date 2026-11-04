@@ -130,10 +130,11 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     // Play: the bar slides off the bottom edge, the pills settle at the bottom
     slide(els, els.map(() => 0), animate)
     root.classList.add('neo-nav-hidden')
-    chromeHidden.value = true
+    // Peek FAB waits until the bar is fully gone — never double up with the tab compose
     phase = 'hiding'
     timer = setTimeout(() => {
       phase = 'hidden'
+      chromeHidden.value = true
       clearRiders(riders())
     }, animate ? DURATION_MS : 0)
   }
@@ -142,7 +143,6 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     const els = riders()
     clearRiders(els)
     document.documentElement.classList.remove('neo-nav-collapsed')
-    chromeHidden.value = false
     phase = 'shown'
   }
 
@@ -151,6 +151,8 @@ export function useAutoHideNav(navRef: Ref<HTMLElement | null>) {
     const root = document.documentElement
     const animate = !instant && !reducedMotion() && !!navRef.value?.offsetHeight
     clearTimer()
+    // Drop the floating + immediately so it never overlaps the returning tab compose
+    chromeHidden.value = false
     root.classList.remove('neo-nav-hidden')
     if (!animate || !root.classList.contains('neo-nav-collapsed')) {
       finishShow()

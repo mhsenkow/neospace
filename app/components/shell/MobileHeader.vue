@@ -55,9 +55,9 @@ const visible = computed(() => !isPhoneLandscape.value && !isSidebarShell.value)
   justify-content: space-between;
   padding: var(--neo-safe-top, env(safe-area-inset-top, 0px)) max(0.35rem, env(safe-area-inset-right, 0px)) 0
     max(0.35rem, env(safe-area-inset-left, 0px));
-  // Solid fill — translucent + backdrop-filter flashes black on iOS while translating
+  // Threads-quiet top — no hard rule; solid fill (backdrop-filter blacks out iOS)
   background: var(--neo-bg-primary);
-  border-bottom: 1px solid var(--neo-border-color);
+  border-bottom: none;
   z-index: var(--neo-z-shell-header, 90);
   box-sizing: border-box;
 

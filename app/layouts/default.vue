@@ -134,25 +134,38 @@ const showMobileHeader = computed(() => !isMobileSubview.value)
 
 const navChromeHidden = useNavChromeHidden()
 
-/** Desktop / tablet Threads-style + in the dock */
+/** Desktop dock: post from most surfaces; skip thread focus and the DM inbox. */
 const showComposeFab = computed(
   () =>
     isSidebarShell.value &&
     instancesStore.hasAuthenticatedInstance &&
     !composeSheet.open &&
-    !isThreadRoute.value,
+    !isThreadRoute.value &&
+    !isMessagesRoute.value,
 )
 
-/** Phone: floating + replaces the tucked tab bar (stays reachable while reading) */
-const showPeekCompose = computed(
-  () =>
-    !isSidebarShell.value &&
-    showMobileNav.value &&
-    navChromeHidden.value &&
-    instancesStore.hasAuthenticatedInstance &&
-    !composeSheet.open &&
-    !isThreadRoute.value,
-)
+/**
+ * Phone peek FAB: only while reading the home feed with the tab bar fully tucked.
+ * No FAB on DMs / activity / profile / search / portals — those aren’t “new post” contexts.
+ */
+const showPeekCompose = computed(() => {
+  if (isSidebarShell.value) return false
+  if (!showMobileNav.value || !navChromeHidden.value) return false
+  if (!instancesStore.hasAuthenticatedInstance || composeSheet.open) return false
+  if (path.value !== '/') return false
+  const portal = boardPortal.value
+  if (
+    portal === 'search' ||
+    portal === 'inbox' ||
+    portal === 'activity' ||
+    portal === 'profile' ||
+    portal === 'settings' ||
+    portal === 'communities'
+  ) {
+    return false
+  }
+  return true
+})
 
 const closeMobileMenu = () => {
   mobileMenuOpen.value = false
@@ -423,16 +436,18 @@ watch(
       <SuiteMenu v-if="isSidebarShell" />
     </div>
     <!-- Outside the dock so auto-hide translate doesn't carry it off-screen -->
-    <button
-      v-if="showPeekCompose"
-      type="button"
-      class="compose-fab compose-fab--peek"
-      aria-label="New thread"
-      title="New thread"
-      @click="openCompose"
-    >
-      <NeoIcon name="plus" :size="26" :stroke="2.25" />
-    </button>
+    <Transition name="compose-peek">
+      <button
+        v-if="showPeekCompose"
+        type="button"
+        class="compose-fab compose-fab--peek"
+        aria-label="New thread"
+        title="New thread"
+        @click="openCompose"
+      >
+        <NeoIcon name="pen" :size="22" :stroke="2" />
+      </button>
+    </Transition>
     <NeoOverlayHost />
     <LazyEdwardMode v-if="edwardActive" />
   </div>
@@ -631,34 +646,42 @@ watch(
     }
   }
 
+  // Threads: solid create chip, lower-right, only while the tab bar is gone
   &--peek {
     position: fixed;
     z-index: var(--neo-z-shell-header, 90);
-    left: 50%;
-    // Sit above feed pills (and the home indicator) while the tab bar is tucked
+    right: max(0.85rem, env(safe-area-inset-right, 0px));
+    left: auto;
+    margin-left: 0;
     bottom: max(
       0.85rem,
       calc(env(safe-area-inset-bottom, 0px) + var(--neo-feed-tabs-h, 0px) + 0.55rem)
     );
-    margin-left: -1.625rem;
-    width: 3.25rem;
-    height: 3.25rem;
-    border-radius: 999px;
-    background: var(--neo-accent);
-    color: var(--neo-text-on-accent, var(--neo-text-inverse));
-    animation: compose-peek-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    width: 3.35rem;
+    height: 3.35rem;
+    border-radius: 18px;
+    background: var(--neo-text-primary);
+    color: var(--neo-bg-primary);
+    box-shadow:
+      0 4px 14px color-mix(in srgb, var(--neo-text-primary) 22%, transparent),
+      0 12px 32px color-mix(in srgb, var(--neo-text-primary) 16%, transparent);
   }
 }
 
-@keyframes compose-peek-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.86);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.compose-peek-enter-active {
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.compose-peek-leave-active {
+  transition:
+    opacity 140ms cubic-bezier(0.4, 0, 1, 1),
+    transform 140ms cubic-bezier(0.4, 0, 1, 1);
+}
+.compose-peek-enter-from,
+.compose-peek-leave-to {
+  opacity: 0;
+  transform: translate3d(10px, 14px, 0) scale(0.88);
 }
 
 .neo-bottom-dock {

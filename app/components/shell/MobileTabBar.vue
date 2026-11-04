@@ -132,15 +132,26 @@ onUnmounted(() => {
   </button>
 
   <button
+    v-if="instancesStore.hasAuthenticatedInstance"
     type="button"
     class="mobile-nav__item mobile-nav__compose"
     aria-label="New post"
     @click="openCompose"
   >
-    <span class="mobile-nav__compose-mark">
-      <NeoIcon name="plus" :size="22" :stroke="2" />
+    <span class="mobile-nav__compose-mark" aria-hidden="true">
+      <NeoIcon name="edit" :size="20" :stroke="1.85" />
     </span>
   </button>
+  <NuxtLink
+    v-else
+    to="/login"
+    class="mobile-nav__item mobile-nav__compose"
+    aria-label="New post — sign in"
+  >
+    <span class="mobile-nav__compose-mark" aria-hidden="true">
+      <NeoIcon name="edit" :size="20" :stroke="1.85" />
+    </span>
+  </NuxtLink>
 
   <button
     v-if="instancesStore.hasAuthenticatedInstance"
@@ -309,30 +320,34 @@ onUnmounted(() => {
   }
 
   &__compose {
-    color: var(--neo-text-secondary);
+    color: var(--neo-text-primary);
 
-    &.active,
-    &:focus-visible {
-      color: var(--neo-accent);
+    &:focus-visible .mobile-nav__compose-mark {
+      outline: 2px solid var(--neo-accent);
+      outline-offset: 2px;
     }
 
     &:active .mobile-nav__compose-mark {
       transform: scale3d(var(--neo-press-squash-x, 1.08), var(--neo-press-squash-y, 0.88), 1);
+      background: var(--neo-bg-hover);
     }
   }
 
+  // Threads-like create chip in the bar — quiet outline, not a second solid FAB
   &__compose-mark {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 32px;
-    border-radius: var(--neo-radius-xl, 10px);
-    background: var(--neo-accent);
-    color: var(--neo-text-on-accent, var(--neo-text-inverse));
+    width: 48px;
+    height: 34px;
+    border-radius: 12px;
+    border: 1.5px solid var(--neo-border-strong, var(--neo-border-color));
+    background: var(--neo-bg-secondary);
+    color: var(--neo-text-primary);
     transition:
       transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring),
-      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out);
+      background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
+      border-color var(--neo-dur-quick, 160ms) var(--neo-ease-out);
   }
 }
 </style>
