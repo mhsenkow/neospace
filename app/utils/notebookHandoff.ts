@@ -1,6 +1,6 @@
 /**
- * Throughline (notebook) → NeoSpace handoff (sibling of the bruh contract).
- * Opens NeoSpace with `?compose=notebook&text=…` and, when the opener survives,
+ * Throughline (notebook) → LoomSpace handoff (sibling of the bruh contract).
+ * Opens LoomSpace with `?compose=notebook&text=…` and, when the opener survives,
  * posts `notebook-neospace-share` (v1: { text }) after our ready ping.
  * Text only — never tokens, never files. AI stays in Throughline.
  */

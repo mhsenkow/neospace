@@ -1,5 +1,5 @@
 /**
- * Pure Loom → NeoSpace handoff helpers (story URLs, lineage, chart alt).
+ * Pure Loom → LoomSpace handoff helpers (story URLs, lineage, chart alt).
  * Kept free of Pinia / browser APIs so smoke tests can run in Node.
  */
 

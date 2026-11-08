@@ -109,8 +109,8 @@ onMounted(async () => {
         ? `Linked ${fullHandle} — opening your profile…`
         : 'Account linked — opening your profile…'
       : fullHandle
-        ? `Now posting as ${fullHandle} — opening NeoSpace…`
-        : 'You’re in — opening NeoSpace…'
+        ? `Now posting as ${fullHandle} — opening LoomSpace…`
+        : 'You’re in — opening LoomSpace…'
     signedIn.value = true
 
     scrubUrl()
@@ -142,7 +142,7 @@ const handleRetry = () => {
 }
 
 useHead({
-  title: computed(() => (error.value ? 'Sign-in failed | NeoSpace' : 'Signing in… | NeoSpace')),
+  title: computed(() => (error.value ? 'Sign-in failed | LoomSpace' : 'Signing in… | LoomSpace')),
 })
 
 definePageMeta({

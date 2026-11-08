@@ -274,7 +274,7 @@ onUnmounted(() => {
           </header>
 
           <p v-if="!keyboardOpen" class="notes-panel__lede">
-            Files as a <strong>public</strong> GitHub issue on NeoSpace — bugs, UX, ideas.
+            Files as a <strong>public</strong> GitHub issue on LoomSpace — bugs, UX, ideas.
             The current page URL is included. Screenshots aren’t attached yet.
           </p>
 

@@ -1,5 +1,5 @@
 /**
- * NeoSpace Multi-Instance / Accounts Store
+ * LoomSpace Multi-Instance / Accounts Store
  *
  * Single source of truth for connected instances and authenticated accounts.
  * Supports watching public timelines and multi-account OAuth.
@@ -92,7 +92,7 @@ export interface ExtendedStatus extends mastodon.v1.Status {
 interface MultiInstanceState {
   instances: ConnectedInstance[]
   activeAccountId: string | null
-  /** First / home identity for this NeoSpace session — other logins hang off it */
+  /** First / home identity for this LoomSpace session — other logins hang off it */
   primaryAccountId: string | null
   activeInstanceFilter: string | null
   isLoading: boolean
@@ -109,7 +109,7 @@ interface MultiInstanceState {
 const STORAGE_KEY = 'neospace_instances'
 const LEGACY_AUTH_KEY = 'neospace_auth'
 const STORAGE_VERSION = 1
-const APP_NAME = 'NeoSpace'
+const APP_NAME = 'LoomSpace'
 const SCOPES = 'read write follow push'
 /** Directory / preview / add-server probes — masto has no default timeout */
 const PEEK_TIMEOUT_MS = 8_000
@@ -209,7 +209,7 @@ export const useInstancesStore = defineStore('instances', {
     hasAuthenticatedInstance: (state): boolean =>
       state.instances.some((i) => i.accessToken && i.user),
 
-    /** Main NeoSpace identity — other server logins are linked under this session */
+    /** Main LoomSpace identity — other server logins are linked under this session */
     primaryAccount(state): ConnectedInstance | null {
       if (state.primaryAccountId) {
         const primary = state.instances.find(
@@ -550,7 +550,7 @@ export const useInstancesStore = defineStore('instances', {
       })
     },
 
-    /** Keep a stable "main" identity for the NeoSpace session */
+    /** Keep a stable "main" identity for the LoomSpace session */
     ensurePrimaryAccount() {
       const authed = this.authenticatedInstances
       if (!authed.length) {
@@ -987,7 +987,7 @@ export const useInstancesStore = defineStore('instances', {
       }
     },
 
-    /** Revoke tokens then drop the instance from NeoSpace */
+    /** Revoke tokens then drop the instance from LoomSpace */
     async removeAccount(instanceId: string) {
       await this.logoutInstance(instanceId)
       this.removeInstance(instanceId)
@@ -1010,7 +1010,7 @@ export const useInstancesStore = defineStore('instances', {
     },
 
     /**
-     * Wipe NeoSpace local device data (drafts, settings, columns, etc.).
+     * Wipe LoomSpace local device data (drafts, settings, columns, etc.).
      * Does not revoke remote tokens — call logoutAll first if needed.
      */
     clearLocalDeviceData() {

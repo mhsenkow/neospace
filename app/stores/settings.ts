@@ -1,5 +1,5 @@
 /**
- * NeoSpace Settings Store
+ * LoomSpace Settings Store
  * 
  * Manages user preferences fetched from and synced to Mastodon.
  * Provides a 1:1 mapping with Mastodon's settings where possible.
@@ -69,7 +69,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     id: 'whats-new',
     label: "What's new",
     icon: 'sparkle',
-    description: 'Short notes on recent NeoSpace updates',
+    description: 'Short notes on recent LoomSpace updates',
     keywords: ['changelog', 'updates', 'release', 'notes', 'tldr', 'version', 'shipped'],
   },
   {
@@ -97,7 +97,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     id: 'appearance',
     label: 'Appearance',
     icon: 'palette',
-    description: 'Customize how NeoSpace looks',
+    description: 'Customize how LoomSpace looks',
     keywords: ['theme', 'dark', 'light', 'font', 'dyslexic', 'density', 'radius', 'ui', 'contrast', 'motion', 'css', 'size', 'corners', 'chrome', 'flip', 'lines'],
   },
   {
@@ -125,7 +125,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     id: 'humans',
     label: 'Humans first',
     icon: 'heart',
-    description: 'Why NeoSpace exists — people over farms',
+    description: 'Why LoomSpace exists — people over farms',
     keywords: [
       'human',
       'humans',
@@ -576,7 +576,7 @@ export const useSettingsStore = defineStore('settings', {
 
     /** Follow sibling tools editing ibm.tools.shared (bruh / loom / words). */
     startSuiteLookSync(): () => void {
-      // Another tab changed NeoSpace's own appearance prefs: follow them (apply only —
+      // Another tab changed LoomSpace's own appearance prefs: follow them (apply only —
       // never write back, or the two tabs would ping-pong)
       const onPrefsStorage = (e: StorageEvent) => {
         if (e.key !== LOCAL_PREFS_KEY) return

@@ -28,6 +28,6 @@ export function extractProfileCss(fields: NamedField[] | null | undefined): stri
   return fields?.find(isProfileCssField)?.value || ''
 }
 
-/** NeoSpace's own column-layout field (kept out of the visible profile tokens) */
+/** LoomSpace's own column-layout field (kept out of the visible profile tokens) */
 export const isColumnsField = (field: NamedField) =>
   (field.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'neospacecolumns'

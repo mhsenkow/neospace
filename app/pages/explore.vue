@@ -704,7 +704,7 @@ watch(
 )
 
 useHead({
-  title: 'Search | NeoSpace',
+  title: 'Search | LoomSpace',
   meta: [{ name: 'description', content: 'Search people, posts, hashtags, and servers across the fediverse.' }],
 })
 

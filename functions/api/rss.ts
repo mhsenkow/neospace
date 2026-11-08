@@ -1,5 +1,5 @@
 /**
- * GET /api/rss?url=<encoded> — fetch + parse an RSS/Atom feed for NeoSpace columns.
+ * GET /api/rss?url=<encoded> — fetch + parse an RSS/Atom feed for LoomSpace columns.
  * SSRF-guarded, origin-checked, rate-limited, edge-cached.
  */
 
@@ -7,7 +7,7 @@ import type { PagesFunction } from '@cloudflare/workers-types'
 import { parseRssXml, sanitizeRssFetchUrl } from '../../shared/rssParser'
 import { allowRequest, clientIp } from '../utils/rateLimit'
 
-const UA = 'NeoSpace-RSS/1.0 (+https://neospace.ibm.io)'
+const UA = 'LoomSpace-RSS/1.0 (+https://neospace.ibm.io)'
 const UPSTREAM_TIMEOUT_MS = 8_000
 const MAX_BODY_BYTES = 1_500_000
 const MAX_REDIRECTS = 4
@@ -208,7 +208,7 @@ export const onRequestGet: PagesFunction = async (context) => {
   const cached = await cache.match(cacheKey)
   if (cached) {
     const hit = new Response(cached.body, cached)
-    hit.headers.set('X-NeoSpace-Cache', 'HIT')
+    hit.headers.set('X-LoomSpace-Cache', 'HIT')
     return hit
   }
 
@@ -217,7 +217,7 @@ export const onRequestGet: PagesFunction = async (context) => {
     return json(
       { error: fetched.error },
       fetched.status,
-      { 'Cache-Control': 'no-store', 'X-NeoSpace-Cache': 'MISS' },
+      { 'Cache-Control': 'no-store', 'X-LoomSpace-Cache': 'MISS' },
     )
   }
 
@@ -231,7 +231,7 @@ export const onRequestGet: PagesFunction = async (context) => {
 
   const response = json(payload, 200, {
     'Cache-Control': `public, s-maxage=${CACHE_TTL_SEC}, stale-while-revalidate=${STALE_SEC}`,
-    'X-NeoSpace-Cache': 'MISS',
+    'X-LoomSpace-Cache': 'MISS',
   })
 
   // Store a clone for the next visitor (edge cache)

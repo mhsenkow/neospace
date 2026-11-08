@@ -30,7 +30,7 @@ export const SUITE_URLS = {
   ibm: SUITE_HOME,
 } as const
 
-/** Waffle groups for NeoSpace. `currentId` marks the active instrument. */
+/** Waffle groups for LoomSpace. `currentId` marks the active instrument. */
 export function suiteGroups(opts?: {
   currentId?: string
   extraGroups?: SuiteGroup[]

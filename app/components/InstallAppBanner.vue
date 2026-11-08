@@ -27,8 +27,8 @@ const onInstallClick = async () => {
 const subtitle = computed(() => {
   if (canNativeInstall.value) return 'Add to your home screen for a full-screen app.'
   if (isAndroid.value) return 'Add it from Chrome’s ⋮ menu — see how.'
-  if (isIos.value) return 'Add NeoSpace to your Home Screen from Safari Share.'
-  return 'Install NeoSpace on this device.'
+  if (isIos.value) return 'Add LoomSpace to your Home Screen from Safari Share.'
+  return 'Install LoomSpace on this device.'
 })
 </script>
 
@@ -41,7 +41,7 @@ const subtitle = computed(() => {
       aria-labelledby="install-banner-title"
     >
       <div class="install-banner__copy">
-        <strong id="install-banner-title">Install NeoSpace</strong>
+        <strong id="install-banner-title">Install LoomSpace</strong>
         <span>{{ subtitle }}</span>
       </div>
       <div class="install-banner__actions">
@@ -64,7 +64,7 @@ const subtitle = computed(() => {
           Tap <strong>Add to Home screen</strong> or <strong>Install app</strong>
           (sometimes under <strong>Add to…</strong>).
         </li>
-        <li>Confirm — NeoSpace appears as an icon.</li>
+        <li>Confirm — LoomSpace appears as an icon.</li>
       </ol>
       <ol v-else-if="showHowTo && isIos" class="install-banner__steps">
         <li>Open in <strong>Safari</strong>.</li>

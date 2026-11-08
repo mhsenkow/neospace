@@ -8,7 +8,7 @@ import { useComposeSheetStore } from '../app/stores/composeSheet'
 import { useLoomHandoff } from '../app/composables/useLoomHandoff'
 
 /**
- * Suite → NeoSpace handoffs under the production opener policy.
+ * Suite → LoomSpace handoffs under the production opener policy.
  * public/_headers sends `Cross-Origin-Opener-Policy: same-origin`, which severs
  * `window.opener` for any cross-origin sibling that opened us. The `?compose=` query
  * is therefore the delivery path that must work; postMessage is a bonus that only

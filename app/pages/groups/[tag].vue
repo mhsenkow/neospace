@@ -263,7 +263,7 @@ const addToBoard = async () => {
 
 // Page meta
 useHead({
-  title: computed(() => `${displayGroup.value.name} · Groups | NeoSpace`),
+  title: computed(() => `${displayGroup.value.name} · Groups | LoomSpace`),
   meta: [
     { 
       name: 'description', 

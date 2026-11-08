@@ -29,7 +29,7 @@ function isHttpUrl(url: string): boolean {
  * @param emojis - Allowlisted custom emoji from the status/account
  * @param opts.escape - Escape HTML first (default true). Pass false for sanitized status HTML.
  * @param opts.reduceMotion - Use each emoji's `staticUrl` (first frame). Defaults to the
- *   OS `prefers-reduced-motion` setting or NeoSpace's Reduce motion setting.
+ *   OS `prefers-reduced-motion` setting or LoomSpace's Reduce motion setting.
  */
 export function emojify(
   text: string,

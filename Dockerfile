@@ -1,4 +1,4 @@
-# NeoSpace Docker Image — static SPA behind nginx-unprivileged
+# LoomSpace Docker Image — static SPA behind nginx-unprivileged
 
 # Base images are pinned by digest (the tag is only a readable hint). Dependabot's docker
 # ecosystem (.github/dependabot.yml) proposes bumps; to refresh by hand:

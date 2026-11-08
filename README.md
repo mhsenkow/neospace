@@ -1,4 +1,4 @@
-# NeoSpace
+# LoomSpace
 
 Multi-column Fediverse client for Mastodon, GoToSocial, and other ActivityPub-compatible servers. TweetDeck-style boards, multi-account OAuth, deep theming, and ibm.io suite integration — all in the browser as a static SPA.
 
@@ -11,9 +11,9 @@ Multi-column Fediverse client for Mastodon, GoToSocial, and other ActivityPub-co
 
 ---
 
-## What NeoSpace is
+## What LoomSpace is
 
-NeoSpace is a frontend-only Fediverse client. It talks directly to your instance's REST API via [masto.js](https://github.com/neet/masto.js) — no NeoSpace backend for timelines or auth. You pick a server, approve OAuth, and get a multi-column board for home, local, federated, groups, search, notifications, and DMs.
+LoomSpace is a frontend-only Fediverse client. It talks directly to your instance's REST API via [masto.js](https://github.com/neet/masto.js) — no LoomSpace backend for timelines or auth. You pick a server, approve OAuth, and get a multi-column board for home, local, federated, groups, search, notifications, and DMs.
 
 It is part of the [ibm.io](https://ibm.io/) tool suite (alongside [Loom](https://loom.ibm.io/) and [wordcount](https://ibm.io/wordcount/)), sharing Braun-inspired design tokens and cross-app compose handoff.
 

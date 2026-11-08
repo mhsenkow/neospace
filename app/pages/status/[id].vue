@@ -1117,9 +1117,9 @@ watch(showDmContextChrome, (show) => {
 
 useHead({
   title: computed(() => {
-    if (!focusStatus.value) return 'Thread | NeoSpace'
-    if (isDirectThread.value) return `${threadTitle.value} | NeoSpace`
-    return `Thread · @${focusStatus.value.account.acct} | NeoSpace`
+    if (!focusStatus.value) return 'Thread | LoomSpace'
+    if (isDirectThread.value) return `${threadTitle.value} | LoomSpace`
+    return `Thread · @${focusStatus.value.account.acct} | LoomSpace`
   }),
 })
 </script>

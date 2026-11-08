@@ -1,4 +1,4 @@
-# NeoSpace improvements tracker
+# LoomSpace improvements tracker
 
 _Started: Nov 2026 · From the “top 20 still improve” pass after Threads chrome / poll / scroll polish._
 

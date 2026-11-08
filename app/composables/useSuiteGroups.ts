@@ -1,5 +1,5 @@
 /**
- * Suite tool groups for NeoSpace — shared by the desktop waffle (SuiteMenu) and the
+ * Suite tool groups for LoomSpace — shared by the desktop waffle (SuiteMenu) and the
  * mobile drawer, so both list the same tools (incl. the Edward entry) with the same copy.
  */
 

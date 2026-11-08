@@ -1,5 +1,5 @@
 /**
- * NeoSpace Groups Store
+ * LoomSpace Groups Store
  * 
  * Groups are a friendly abstraction over hashtags.
  * Under the hood: Following a group = following a hashtag

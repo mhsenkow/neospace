@@ -39,7 +39,7 @@ describe('inspectStatusSignals', () => {
         favouritesCount: 3,
         reblogsCount: 1,
         repliesCount: 2,
-        application: { name: 'NeoSpace' },
+        application: { name: 'LoomSpace' },
         tags: [{ name: 'cats' }],
         mentions: [{ acct: 'bob@other.social' }],
         mediaAttachments: [{ type: 'image' }],
@@ -49,7 +49,7 @@ describe('inspectStatusSignals', () => {
     )
     expect(signals.originHost).toBe('origin.social')
     expect(signals.browsingHint).toBe('home.social')
-    expect(signals.application).toBe('NeoSpace')
+    expect(signals.application).toBe('LoomSpace')
     expect(signals.language).toBe('en')
     expect(signals.tagCount).toBe(1)
     expect(signals.mentionCount).toBe(1)
@@ -78,7 +78,7 @@ describe('inspectAccountSignals', () => {
         id: '1',
         createdAt: '2026-01-01T10:00:00Z',
         content: '<p>hi</p>',
-        application: { name: 'NeoSpace' },
+        application: { name: 'LoomSpace' },
         mediaAttachments: [{ type: 'image' }],
       },
       {
@@ -86,7 +86,7 @@ describe('inspectAccountSignals', () => {
         createdAt: '2026-01-01T14:00:00Z',
         content: '<p>reply</p>',
         inReplyToId: '1',
-        application: { name: 'NeoSpace' },
+        application: { name: 'LoomSpace' },
       },
       {
         id: '3',
@@ -105,7 +105,7 @@ describe('inspectAccountSignals', () => {
     expect(signals.observed?.boostRatio).toBeCloseTo(1 / 3)
     expect(signals.observed?.mediaRatio).toBeCloseTo(1 / 3)
     expect(signals.observed?.medianHoursBetweenPosts).toBe(4)
-    expect(signals.observed?.clients[0]!.name).toBe('NeoSpace')
+    expect(signals.observed?.clients[0]!.name).toBe('LoomSpace')
     expect(JSON.parse(signalsToJsonSummary('account', signals)).kind).toBe('account')
   })
 })

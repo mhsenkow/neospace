@@ -1,32 +1,34 @@
-# App Store Connect — NeoSpace (iOS)
+# App Store Connect — LoomSpace (iOS)
 
-Bundle ID: `io.ibm.neospace`  
+Bundle ID: `io.ibm.neospace` (ASC display name: **loomspace**)  
 Team: `WC44W2QVE4` · Category: **Social Networking**  
 
 Shell: Capacitor (`ios/`) packing the same static UI as [neospace.ibm.io](https://neospace.ibm.io)
 
 ## Name
-NeoSpace
+LoomSpace
 
 ## Subtitle (≤30 chars)
-Fediverse boards & feeds
+Fediverse boards & RSS packs
 
 ## Promotional text (≤170)
-Multi-column Mastodon client — home, local, groups, DMs, and Edward. Sign in with any Mastodon server.
+Multi-column Mastodon client with switchable Feed Packs, RSS columns, custom algorithms, groups, and DMs. Sign in with any Mastodon server.
 
 ## Description
-NeoSpace is a Fediverse client for iPhone and iPad — the same experience as neospace.ibm.io, packaged for the App Store.
+LoomSpace is a Fediverse desk for iPhone and iPad — the same experience as neospace.ibm.io, packaged for the App Store.
 
-• Multi-column boards for home, local, federated, and hashtag groups  
+• Multi-column boards for home, local, federated, lists, and hashtag groups  
+• Feed Packs — up to eight named boards you can switch and share  
+• Native RSS / Atom columns beside Mastodon timelines  
+• Custom algorithms you can build and share  
 • Multi-account sign-in via your Mastodon (or compatible) server  
-• Compose with polls, media, drafts, and scheduling where your server allows  
+• Compose with media, drafts, and scheduling where your server allows  
 • Direct messages, notifications, and profile tools  
-• Edward — lean back and watch the fediverse float by  
 
-No NeoSpace account. You approve access on your chosen server (OAuth). Tokens stay on device.
+No LoomSpace account. You approve access on your chosen server (OAuth). Tokens stay on device.
 
 ## Keywords
-mastodon,fediverse,social,timeline,activitypub,boards,microblog
+mastodon,fediverse,rss,social,timeline,activitypub,boards,packs,microblog
 
 ## Support URL
 https://github.com/mhsenkow/neospace
@@ -38,29 +40,32 @@ https://neospace.ibm.io
 https://neospace.ibm.io/privacy
 
 ## Age rating
-12+ (user-generated content from the Fediverse; no NeoSpace-hosted UGC).
+12+ (user-generated content from the Fediverse; no LoomSpace-hosted UGC).
 
 ## App Privacy
-Disclose network activity to third-party Mastodon servers the user chooses. No advertising SDK. Prefer accurate nutrition labels once the portal form is filled.
+Disclose network activity to third-party Mastodon servers the user chooses. No advertising SDK.
 
 ## Review notes
-1. Launch → Sign in → enter a Mastodon host (e.g. fosstodon.org) → Approve NeoSpace.  
-2. OAuth returns into the app → Home timeline.  
-3. Compose a draft (do not require posting).  
+1. Launch → Sign in → enter a Mastodon host (e.g. fosstodon.org) → Approve LoomSpace.  
+2. OAuth returns into the app → Home board.  
+3. Open Menu → Packs (or Add feed → RSS) without requiring a post.  
 
-Demo: any public Mastodon account the reviewer owns. No NeoSpace credentials.
+Demo: any public Mastodon account the reviewer owns. No LoomSpace credentials.
 
 Privacy: https://neospace.ibm.io/privacy
 
 ## Build / encryption
-- Marketing version **1.0**, build **1** (bump `CURRENT_PROJECT_VERSION` in Xcode)  
+- Marketing version **1.0**, build **2** (bump `CURRENT_PROJECT_VERSION` in Xcode)  
 - `ITSAppUsesNonExemptEncryption` = false (HTTPS only)
 
-## One-time portal setup
-1. Create App ID `io.ibm.neospace` with Associated Domains.  
-2. New ASC app → bundle ID match.  
-3. Confirm AASA live: `curl -sI https://neospace.ibm.io/.well-known/apple-app-site-association`  
-4. Archive via `./scripts/ios-submit.sh open` or `build`, upload TestFlight.
+## Store media
+```bash
+node scripts/capture-ios-store-screenshots.mjs
+node scripts/build-app-previews.mjs
+node scripts/upload-store-media.mjs --ios-only --replace-ios
+```
 
-## Screenshots
-Capture on device after OAuth works: Home board, compose, notifications (iPhone 6.7" required).
+## One-time portal setup
+1. App ID `io.ibm.neospace` with Associated Domains (`applinks:neospace.ibm.io`).  
+2. URL Types: `loomspace` (+ legacy `neospace`).  
+3. Archive: `./scripts/ios-submit.sh build` then `./scripts/ios-submit.sh upload`.

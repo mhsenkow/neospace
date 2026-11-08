@@ -1,5 +1,5 @@
 /**
- * Loom / bruh → NeoSpace postMessage / compose handoff.
+ * Loom / bruh → LoomSpace postMessage / compose handoff.
  * Registers the message listener early (before auth init) so shares aren't lost.
  * bruh (the suite's writing room) rides the same channel as text-only shares.
  */

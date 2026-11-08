@@ -49,8 +49,8 @@ export default defineNuxtConfig({
       'icons/icon.svg',
     ],
     manifest: {
-      name: 'NeoSpace',
-      short_name: 'NeoSpace',
+      name: 'LoomSpace',
+      short_name: 'LoomSpace',
       description: 'A multi-column Fediverse client — feeds, groups, and multi-server logins.',
       theme_color: '#1a1a18',
       background_color: '#1a1a18',
@@ -128,21 +128,21 @@ export default defineNuxtConfig({
   // App metadata
   app: {
     head: {
-      title: 'NeoSpace',
+      title: 'LoomSpace',
       htmlAttrs: {
         lang: 'en'
       },
       meta: [
-        { name: 'description', content: 'NeoSpace — a multi-column Fediverse client.' },
+        { name: 'description', content: 'LoomSpace — a multi-column Fediverse client.' },
         // Link unfurls (Mastodon cards etc.) — absolute image URL, 1200×630 under public/
-        { property: 'og:site_name', content: 'NeoSpace' },
+        { property: 'og:site_name', content: 'LoomSpace' },
         { property: 'og:type', content: 'website' },
-        { property: 'og:title', content: 'NeoSpace' },
+        { property: 'og:title', content: 'LoomSpace' },
         { property: 'og:description', content: 'A multi-column Fediverse client — feeds, groups, and multi-server logins.' },
         { property: 'og:image', content: 'https://neospace.ibm.io/og-image.png' },
         { property: 'og:image:width', content: '1200' },
         { property: 'og:image:height', content: '630' },
-        { property: 'og:image:alt', content: 'NeoSpace — a multi-column Fediverse client' },
+        { property: 'og:image:alt', content: 'LoomSpace — a multi-column Fediverse client' },
         { name: 'twitter:card', content: 'summary_large_image' },
         // interactive-widget: Android Chrome resizes the layout when the soft
         // keyboard opens so fixed composers (DMs / reply dock) stay visible.
@@ -157,7 +157,7 @@ export default defineNuxtConfig({
         { name: 'mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
-        { name: 'apple-mobile-web-app-title', content: 'NeoSpace' },
+        { name: 'apple-mobile-web-app-title', content: 'LoomSpace' },
         { name: 'format-detection', content: 'telephone=no' },
         { name: 'color-scheme', content: 'light dark' },
       ],

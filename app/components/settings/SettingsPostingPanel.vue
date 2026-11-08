@@ -144,7 +144,7 @@ const mediaQualityOptions = [
           </p>
           <p class="settings-hint">
             Photos are resized on your device before upload so they don’t overwhelm your
-            server. Media is stored on the instance you post from — not on NeoSpace.
+            server. Media is stored on the instance you post from — not on LoomSpace.
           </p>
           <div class="settings-option-list">
             <label

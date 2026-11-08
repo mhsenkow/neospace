@@ -22,7 +22,7 @@ interface Env {
 
 import type { PagesFunction } from '@cloudflare/workers-types'
 
-const UA = 'NeoSpace-Feedback/1.0'
+const UA = 'LoomSpace-Feedback/1.0'
 const GITHUB_FETCH_TIMEOUT_MS = 30_000
 
 const RATE_LIMIT = 5
@@ -316,7 +316,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const title =
     payload.title.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, FEEDBACK_TITLE_MAX) ||
-    'NeoSpace feedback'
+    'LoomSpace feedback'
   // Fence alone stops @mentions / #issue cross-refs — don't entity-escape inside ```text (NS-436)
   const rawUserBody = (payload.body || '(no description)').trim().slice(0, FEEDBACK_BODY_MAX)
   const fencedBody = ['```text', rawUserBody.replace(/```/g, "'''"), '```'].join('\n')

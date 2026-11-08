@@ -87,7 +87,7 @@ const makeMain = (id: string, event?: Event) => {
   const account = accounts.value.find((a) => a.id === id)
   if (account) {
     useToastStore().show({
-      message: `${handleOf(account)} is now your main account — NeoSpace opens as it`,
+      message: `${handleOf(account)} is now your main account — LoomSpace opens as it`,
     })
   }
 }
@@ -171,7 +171,7 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
             <h2 id="acct-sheet-title" class="acct-sheet__title">Accounts</h2>
             <p class="acct-sheet__subtitle">
               <strong>Active</strong> posts &amp; reads.
-              <strong>Main</strong> opens NeoSpace.
+              <strong>Main</strong> opens LoomSpace.
             </p>
           </header>
 
@@ -230,7 +230,7 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
                 type="button"
                 class="acct-sheet__pin"
                 :aria-label="`Make ${handleOf(account)} your main account`"
-                title="Make main — NeoSpace opens as this account"
+                title="Make main — LoomSpace opens as this account"
                 @click="makeMain(account.id, $event)"
               >
                 Make main
@@ -338,7 +338,7 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
               v-if="multi && instancesStore.activeAccount && !isPrimary(instancesStore.activeAccount)"
               type="button"
               class="acct-sheet__action"
-              title="Open NeoSpace as this account on every fresh launch"
+              title="Open LoomSpace as this account on every fresh launch"
               @click="makeMain(instancesStore.activeAccount.id)"
             >
               Make this main

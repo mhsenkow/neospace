@@ -7,7 +7,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
  */
 const config: CapacitorConfig = {
   appId: 'io.ibm.neospace',
-  appName: 'NeoSpace',
+  appName: 'LoomSpace',
   webDir: '.output/public',
   server: {
     androidScheme: 'https',
@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
   ios: {
     contentInset: 'automatic',
     preferredContentMode: 'mobile',
-    scheme: 'NeoSpace',
+    scheme: 'LoomSpace',
   },
 }
 

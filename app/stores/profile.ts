@@ -1,5 +1,5 @@
 /**
- * NeoSpace Profile Store
+ * LoomSpace Profile Store
  * 
  * Manages profile viewing and editing.
  * Updates sync directly to your Mastodon/GoToSocial instance.

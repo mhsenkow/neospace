@@ -103,7 +103,7 @@ const shareActivePackFromDrawer = async () => {
   const url = buildPackShareUrl(window.location.origin, encoded)
   try {
     if (navigator.share) {
-      await navigator.share({ title: pack.name, url, text: `NeoSpace pack: ${pack.name}` })
+      await navigator.share({ title: pack.name, url, text: `LoomSpace pack: ${pack.name}` })
       return
     }
   } catch (e) {
@@ -398,7 +398,7 @@ useFocusTrap(mobileSidebarRef, open, {
   >
     <div class="mobile-sidebar__header">
       <!-- Plain link: the logo isn't a nav item, so it never claims aria-current -->
-      <a href="/" class="mobile-sidebar__logo" aria-label="NeoSpace home" @click.prevent="goHomeFromDrawer">
+      <a href="/" class="mobile-sidebar__logo" aria-label="LoomSpace home" @click.prevent="goHomeFromDrawer">
         <NeoMark />
       </a>
       <button class="mobile-sidebar__close" @click="closeMobileMenu" type="button" aria-label="Close menu">

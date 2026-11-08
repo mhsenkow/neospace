@@ -1,4 +1,4 @@
-# NeoSpace status
+# LoomSpace status
 
 _Last updated: Oct 2026_
 
@@ -10,7 +10,7 @@ See also: [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md) · [AUDIT-2026-10.m
 
 ## Goals (unchanged)
 
-NeoSpace aims to be a **production-quality, multi-column Fediverse client** in the ibm.io suite:
+LoomSpace aims to be a **production-quality, multi-column Fediverse client** in the ibm.io suite:
 
 - TweetDeck-style boards with per-column feeds and persistent layouts
 - Multi-account OAuth across Mastodon-compatible instances

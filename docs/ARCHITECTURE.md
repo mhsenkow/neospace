@@ -1,16 +1,16 @@
-# NeoSpace architecture
+# LoomSpace architecture
 
-How NeoSpace is built — accurate to the codebase as of Oct 2026.
+How LoomSpace is built — accurate to the codebase as of Oct 2026.
 
 ---
 
 ## Overview
 
-NeoSpace is a **Nuxt 4 client-only SPA** (`ssr: false` in `nuxt.config.ts`). The browser holds OAuth tokens and talks directly to Fediverse instance REST APIs via **masto.js**. There is no NeoSpace backend for timelines, auth, or media — only a single **Cloudflare Pages Function** for leave-a-note feedback.
+LoomSpace is a **Nuxt 4 client-only SPA** (`ssr: false` in `nuxt.config.ts`). The browser holds OAuth tokens and talks directly to Fediverse instance REST APIs via **masto.js**. There is no LoomSpace backend for timelines, auth, or media — only a single **Cloudflare Pages Function** for leave-a-note feedback.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Browser (NeoSpace SPA)                                 │
+│  Browser (LoomSpace SPA)                                 │
 │  ┌──────────┐  ┌────────────┐  ┌─────────────────────┐  │
 │  │  Pages   │  │ Pinia      │  │ composables/        │  │
 │  │  (routes)│◄─┤ stores     │◄─┤ useMasto, usePager  │  │
@@ -97,7 +97,7 @@ Key settings in `nuxt.config.ts`:
 | `overlay` | `stores/overlay.ts` | Global lightbox / sheet host state |
 | `toast` | `stores/toast.ts` | Toast notifications |
 | `composeSheet` | `stores/composeSheet.ts` | Mobile compose sheet open/close, remount guard for Loom handoff |
-| `composeHandoff` | `stores/composeHandoff.ts` | Loom → NeoSpace chart image + caption pipeline |
+| `composeHandoff` | `stores/composeHandoff.ts` | Loom → LoomSpace chart image + caption pipeline |
 
 **Note:** `instances.ts` is large (~870 lines) and mixes OAuth, persistence, and timeline logic — splitting it is a deferred epic ([PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md) #6).
 

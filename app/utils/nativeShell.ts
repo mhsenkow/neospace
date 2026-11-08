@@ -5,7 +5,9 @@
 
 export const NATIVE_OAUTH_REDIRECT_URI = 'https://neospace.ibm.io/auth/callback'
 /** Custom-scheme fallback when Universal Links are unavailable (dev / first TestFlight). */
-export const NATIVE_OAUTH_SCHEME_REDIRECT = 'neospace://auth/callback'
+export const NATIVE_OAUTH_SCHEME_REDIRECT = 'loomspace://auth/callback'
+
+const CUSTOM_SCHEMES = new Set(['loomspace:', 'neospace:'])
 
 export function isNativeShell(): boolean {
   if (typeof window === 'undefined') return false
@@ -29,13 +31,16 @@ export function oauthRedirectUri(): string {
 export function isOAuthCallbackUrl(url: string): boolean {
   try {
     const u = new URL(url)
-    if (u.protocol === 'neospace:' && (u.hostname === 'auth' || u.pathname.startsWith('//auth'))) {
+    if (CUSTOM_SCHEMES.has(u.protocol) && (u.hostname === 'auth' || u.pathname.startsWith('//auth'))) {
       return true
     }
     if (u.hostname === 'neospace.ibm.io' && u.pathname.replace(/\/+$/, '') === '/auth/callback') {
       return true
     }
-    return u.pathname.replace(/\/+$/, '') === '/auth/callback' && (u.searchParams.has('code') || u.searchParams.has('error'))
+    return (
+      u.pathname.replace(/\/+$/, '') === '/auth/callback' &&
+      (u.searchParams.has('code') || u.searchParams.has('error'))
+    )
   } catch {
     return /\/auth\/callback/i.test(url)
   }
@@ -45,8 +50,8 @@ export function isOAuthCallbackUrl(url: string): boolean {
 export function oauthCallbackRouteFromUrl(url: string): string {
   try {
     const u = new URL(url)
-    // neospace://auth/callback?code=… → pathname may be empty; host is "auth"
-    if (u.protocol === 'neospace:') {
+    // loomspace://auth/callback?code=… → pathname may be empty; host is "auth"
+    if (CUSTOM_SCHEMES.has(u.protocol)) {
       const qs = u.search || ''
       return `/auth/callback${qs}`
     }

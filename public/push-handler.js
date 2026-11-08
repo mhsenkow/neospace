@@ -4,7 +4,7 @@
  */
 /* eslint-disable no-undef */
 self.addEventListener('push', (event) => {
-  let title = 'NeoSpace'
+  let title = 'LoomSpace'
   let body = 'New activity'
   let url = '/notifications'
   let tag = 'neo-activity'

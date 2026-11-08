@@ -1,5 +1,5 @@
 /**
- * NeoSpace Theme Store
+ * LoomSpace Theme Store
  *
  * Manages optional custom profile CSS (historically "Chaos Mode"):
  * Myspace-era skins from Mastodon profile metadata fields

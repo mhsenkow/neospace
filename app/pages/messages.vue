@@ -190,7 +190,7 @@ const showRefreshBanner = computed(() => conversationsStore.quietRefreshFailures
 
 const pageTitle = computed(() => {
   const n = conversationsStore.unreadCount
-  return n > 0 ? `Messages (${n} unread) | NeoSpace` : 'Messages | NeoSpace'
+  return n > 0 ? `Messages (${n} unread) | LoomSpace` : 'Messages | LoomSpace'
 })
 
 const chromeTitle = computed(() => {

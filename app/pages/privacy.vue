@@ -3,11 +3,11 @@
  * Public privacy page for App Store Connect / marketing URL.
  */
 useHead({
-  title: 'Privacy | NeoSpace',
+  title: 'Privacy | LoomSpace',
   meta: [
     {
       name: 'description',
-      content: 'How NeoSpace handles your data — local-first Fediverse client.',
+      content: 'How LoomSpace handles your data — local-first Fediverse client.',
     },
   ],
 })
@@ -20,11 +20,11 @@ definePageMeta({
 <template>
   <main class="privacy">
     <header class="privacy__head">
-      <NuxtLink to="/" class="privacy__mark" aria-label="NeoSpace home">NS</NuxtLink>
+      <NuxtLink to="/" class="privacy__mark" aria-label="LoomSpace home">NS</NuxtLink>
       <h1>Privacy</h1>
       <p class="privacy__lede">
-        NeoSpace is a Fediverse client. Your posts and identity live on the Mastodon (or
-        compatible) server you choose — not on a NeoSpace account database.
+        LoomSpace is a Fediverse client. Your posts and identity live on the Mastodon (or
+        compatible) server you choose — not on a LoomSpace account database.
       </p>
     </header>
 
@@ -54,7 +54,7 @@ definePageMeta({
     <section class="privacy__section">
       <h2>Analytics &amp; tracking</h2>
       <p>
-        NeoSpace does not embed third-party advertising or analytics SDKs. Fonts are self-hosted.
+        LoomSpace does not embed third-party advertising or analytics SDKs. Fonts are self-hosted.
       </p>
     </section>
 
@@ -62,7 +62,7 @@ definePageMeta({
       <h2>iOS App Store build</h2>
       <p>
         The native shell loads the same client bundled with the app. Sign-in uses your chosen
-        Mastodon server’s OAuth page; NeoSpace does not create a separate NeoSpace login.
+        Mastodon server’s OAuth page; LoomSpace does not create a separate LoomSpace login.
       </p>
     </section>
 

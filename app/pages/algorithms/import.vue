@@ -20,7 +20,7 @@ definePageMeta({
   layout: 'default',
 })
 
-useHead({ title: 'Import algorithm | NeoSpace' })
+useHead({ title: 'Import algorithm | LoomSpace' })
 
 const route = useRoute()
 const router = useRouter()
@@ -62,7 +62,7 @@ const error = computed(() => {
   const d = decoded.value
   if (!d) return 'This share link is invalid or corrupted.'
   if (!d.ok && d.reason === 'version') {
-    return 'This link was made with a newer NeoSpace — refresh to update.'
+    return 'This link was made with a newer LoomSpace — refresh to update.'
   }
   if (!d.ok) return 'This share link is invalid or corrupted.'
   return null
@@ -122,10 +122,10 @@ async function addToBoard() {
         </p>
         <p class="algo-import__note">
           <template v-if="preview.ranker">
-            This ranks posts from trending, federated, and tag sources — not just your home timeline. NeoSpace never posts or follows on the curator’s behalf.
+            This ranks posts from trending, federated, and tag sources — not just your home timeline. LoomSpace never posts or follows on the curator’s behalf.
           </template>
           <template v-else>
-            This adds a filtered view on <em>your</em> timelines — NeoSpace never posts or follows on the curator’s behalf.
+            This adds a filtered view on <em>your</em> timelines — LoomSpace never posts or follows on the curator’s behalf.
           </template>
         </p>
         <div class="algo-import__actions">

@@ -14,7 +14,7 @@ const props = defineProps<{ error: NuxtError }>()
 const notFound = computed(() => props.error?.statusCode === 404)
 
 useHead({
-  title: () => (notFound.value ? 'Page not found | NeoSpace' : 'Something went wrong | NeoSpace'),
+  title: () => (notFound.value ? 'Page not found | LoomSpace' : 'Something went wrong | LoomSpace'),
 })
 
 const goHome = () => clearError({ redirect: '/' })
@@ -52,7 +52,7 @@ const copyDetails = async () => {
       <div class="neo-error__card">
         <p class="neo-error__eyebrow">404</p>
         <h1 class="neo-error__title">Page not found</h1>
-        <p class="neo-error__desc">This link doesn’t go anywhere in NeoSpace.</p>
+        <p class="neo-error__desc">This link doesn’t go anywhere in LoomSpace.</p>
         <div class="neo-error__actions">
           <button v-if="canGoBack" type="button" class="neo-btn neo-btn--tertiary" @click="goBack">Go back</button>
           <button type="button" class="neo-btn neo-btn--primary" @click="goHome">Back home</button>
@@ -64,7 +64,7 @@ const copyDetails = async () => {
     <div class="neo-error__card">
       <p class="neo-error__eyebrow">Error</p>
       <h1 class="neo-error__title">Something went wrong</h1>
-      <p class="neo-error__desc" role="alert">NeoSpace hit an unexpected problem. Reloading usually fixes it.</p>
+      <p class="neo-error__desc" role="alert">LoomSpace hit an unexpected problem. Reloading usually fixes it.</p>
       <p class="neo-error__detail">{{ errorSummary }}</p>
       <div class="neo-error__actions">
         <button type="button" class="neo-btn neo-btn--primary" @click="reload">Reload</button>

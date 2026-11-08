@@ -1,4 +1,4 @@
-# Contributing to NeoSpace
+# Contributing to LoomSpace
 
 How to develop, check, and land changes. For product context see [STATUS.md](./STATUS.md); for system design see [ARCHITECTURE.md](./ARCHITECTURE.md).
 

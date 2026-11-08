@@ -1,6 +1,6 @@
 /**
- * bruh → NeoSpace handoff (sibling of the Loom contract).
- * bruh is the paper-first writing room in the suite; it opens NeoSpace with
+ * bruh → LoomSpace handoff (sibling of the Loom contract).
+ * bruh is the paper-first writing room in the suite; it opens LoomSpace with
  * `?compose=bruh&text=…` and, when the opener survives, posts
  * `bruh-neospace-share` (v1: { text, doc }) after our `neospace-bruh-ready` ping.
  * Text only — never tokens, never files.

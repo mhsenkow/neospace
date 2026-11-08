@@ -2286,7 +2286,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     -webkit-backdrop-filter: none !important;
   }
 
-  // Full-bleed Flip slide (TikTok-ish, still NeoSpace)
+  // Full-bleed Flip slide (TikTok-ish, still LoomSpace)
   &--flip {
     height: var(--flip-port, 100%);
     min-height: var(--flip-port, 100%);
@@ -3822,7 +3822,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     }
   }
 
-  // Trailing Save — NeoSpace improves on Threads by keeping 1-tap bookmark
+  // Trailing Save — LoomSpace improves on Threads by keeping 1-tap bookmark
   &--bookmark {
     margin-left: auto;
   }

@@ -97,9 +97,9 @@ const joinedRail = useHorizontalRail(joinedRailRef)
 const retryGroups = () => void groupsStore.initializeGroups(true)
 
 useHead({
-  title: 'Groups | NeoSpace',
+  title: 'Groups | LoomSpace',
   meta: [
-    { name: 'description', content: 'Join communities and discover groups on NeoSpace.' },
+    { name: 'description', content: 'Join communities and discover groups on LoomSpace.' },
   ],
 })
 </script>

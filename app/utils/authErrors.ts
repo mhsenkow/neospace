@@ -11,13 +11,13 @@ const KNOWN: Record<string, string> = {
   invalid_grant:
     'That authorization code expired. Please start sign-in again from the beginning.',
   invalid_client:
-    'Try again — NeoSpace will reconnect to this server.',
+    'Try again — LoomSpace will reconnect to this server.',
   invalid_scope:
-    'This server doesn’t allow everything NeoSpace asks for. Try again, or pick a different server.',
+    'This server doesn’t allow everything LoomSpace asks for. Try again, or pick a different server.',
   invalid_request:
     'Something interrupted sign-in. Please try again from the beginning.',
   unauthorized_client:
-    'This server rejected the NeoSpace app. Try again or pick a different server.',
+    'This server rejected the LoomSpace app. Try again or pick a different server.',
   server_error:
     'The server had a temporary problem. Wait a moment and try again.',
   temporarily_unavailable:
@@ -42,7 +42,7 @@ export function friendlyAuthError(raw: string): string {
     return KNOWN.invalid_state!
   }
   if (lower.includes('instance not found') || lower.includes('server not found')) {
-    return 'We couldn’t find that server in NeoSpace. Start sign-in again and pick your server.'
+    return 'We couldn’t find that server in LoomSpace. Start sign-in again and pick your server.'
   }
   if (lower.includes('network') || lower.includes('failed to fetch') || lower.includes('offline')) {
     return 'Couldn’t reach the server. Check your connection and try again.'

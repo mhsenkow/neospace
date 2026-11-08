@@ -1,4 +1,4 @@
-/** NeoSpace leave-a-note → GitHub issues */
+/** LoomSpace leave-a-note → GitHub issues */
 
 import { formatLogRingForFeedback } from '~/utils/log'
 import {

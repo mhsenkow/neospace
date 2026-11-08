@@ -1,5 +1,5 @@
 /**
- * Sanitize Mastodon profile CSS before injecting into NeoSpace.
+ * Sanitize Mastodon profile CSS before injecting into LoomSpace.
  * Profile fields are attacker-controlled (another user's skin applies while
  * viewing their profile); raw injection is exfil / UI spoofing.
  *

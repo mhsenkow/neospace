@@ -1,5 +1,5 @@
 /**
- * NeoSpace Status Actions Store
+ * LoomSpace Status Actions Store
  *
  * Posting and account/status actions against the active Mastodon account.
  * Timeline fetching lives in TimelineColumn (per-column state).

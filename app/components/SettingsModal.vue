@@ -282,7 +282,7 @@ watch(
                 <div class="settings-form">
                   <div class="settings-humans">
                     <p class="settings-humans__lede">
-                      NeoSpace is here so <strong>humans</strong> can find each other, understand
+                      LoomSpace is here so <strong>humans</strong> can find each other, understand
                       each other, and stay in control of their attention. Not to farm engagement.
                       Not to capitalize the commons.
                     </p>

@@ -32,7 +32,10 @@
     "cf:deploy:ci": "npm run generate && wrangler pages deploy",
     "ios:sync": "npm run generate && npx cap sync ios",
     "ios:open": "npx cap open ios",
-    "ios:xcode": "npm run ios:sync && npx cap open ios"
+    "ios:xcode": "npm run ios:sync && npx cap open ios",
+    "ios:shots": "node scripts/capture-ios-store-screenshots.mjs",
+    "ios:previews": "node scripts/build-app-previews.mjs",
+    "ios:store-media": "npm run ios:shots && npm run ios:previews && node scripts/upload-store-media.mjs --ios-only --replace-ios"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.2",

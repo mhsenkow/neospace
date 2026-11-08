@@ -63,7 +63,7 @@ const setViewMode = (mode: 'flow' | 'flip') => {
   <NuxtLink
     to="/"
     class="mobile-header__logo"
-    aria-label="NeoSpace home"
+    aria-label="LoomSpace home"
     @click="void goHome()"
   >
     <NeoMark :show-brand="false" :active="route.path === '/'" />

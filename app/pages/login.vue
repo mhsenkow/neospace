@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Login — pick a server you already use, approve NeoSpace, come back.
+ * Login — pick a server you already use, approve LoomSpace, come back.
  */
 
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
@@ -167,7 +167,7 @@ const displayOf = (account: ConnectedInstance) =>
   plainDisplayName(account.user?.displayName, account.user?.username)
 
 useHead({
-  title: computed(() => (isAddMode.value ? 'Add account | NeoSpace' : 'Sign in | NeoSpace')),
+  title: computed(() => (isAddMode.value ? 'Add account | LoomSpace' : 'Sign in | LoomSpace')),
 })
 
 definePageMeta({
@@ -193,7 +193,7 @@ definePageMeta({
             Choose the server for the account you want to add — it can be one you’re already on.
           </template>
           <template v-else>
-            Choose your server. Approve NeoSpace, then you’re in.
+            Choose your server. Approve LoomSpace, then you’re in.
           </template>
         </p>
         <a v-if="isAddMode" href="#" class="login__back" @click.prevent="goBack">{{ backLabel }}</a>
@@ -221,7 +221,7 @@ definePageMeta({
         <li class="login__step">
           <span class="login__step-num" aria-hidden="true">3</span>
           <span class="login__step-text">
-            <strong>Back in NeoSpace</strong>
+            <strong>Back in LoomSpace</strong>
             <em>All your servers, one place</em>
           </span>
         </li>
@@ -273,7 +273,7 @@ definePageMeta({
       <div v-if="isConnecting" class="login__connecting" role="status" aria-live="polite">
         <div class="login__spinner" aria-hidden="true"></div>
         <p class="login__connecting-title">Taking you to {{ connectingTo }}</p>
-        <p class="login__connecting-hint">Sign in there if asked, then approve NeoSpace.</p>
+        <p class="login__connecting-hint">Sign in there if asked, then approve LoomSpace.</p>
         <button type="button" class="neo-btn neo-btn--secondary" @click="resetConnecting">
           Cancel
         </button>

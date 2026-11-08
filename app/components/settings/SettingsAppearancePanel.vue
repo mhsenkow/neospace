@@ -190,7 +190,7 @@ const importAppearance = async (event: Event) => {
   if (!file) return
   try {
     if (file.size > APPEARANCE_IMPORT_MAX_BYTES) {
-      throw new Error('That file is too large to be a NeoSpace appearance export')
+      throw new Error('That file is too large to be a LoomSpace appearance export')
     }
     const text = await file.text()
     try {
@@ -519,7 +519,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
       <p class="settings-hint">
         Optional Myspace-style skins. If your Mastodon profile has a field named
         <code>css</code>, <code>custom_css</code>, <code>theme</code>, <code>style</code>, or
-        <code>chaos_css</code>, NeoSpace can apply that CSS here. (Formerly called Chaos Mode.)
+        <code>chaos_css</code>, LoomSpace can apply that CSS here. (Formerly called Chaos Mode.)
       </p>
 
       <label class="settings-toggle">

@@ -306,7 +306,7 @@ async function copyShareLink() {
     if (navigator.share) {
       await navigator.share({
         title: stamped.name,
-        text: `Try my NeoSpace algorithm: ${stamped.name}${stamped.authorAcct ? ` — curated by @${stamped.authorAcct}` : ''}`,
+        text: `Try my LoomSpace algorithm: ${stamped.name}${stamped.authorAcct ? ` — curated by @${stamped.authorAcct}` : ''}`,
         url,
       })
       return

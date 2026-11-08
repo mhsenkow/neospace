@@ -1,4 +1,4 @@
-# NeoSpace mobile release acceptance
+# LoomSpace mobile release acceptance
 
 Complete on a **physical device** with a **Release / TestFlight** build (not `nuxt dev`).
 

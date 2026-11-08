@@ -20,7 +20,7 @@ const formatDate = (iso: string) => {
 <template>
   <div class="settings-group settings-whats-new">
     <p class="settings-hint">
-      Short notes on what changed in NeoSpace. Full engineering checklists live in the repo docs.
+      Short notes on what changed in LoomSpace. Full engineering checklists live in the repo docs.
     </p>
 
     <article

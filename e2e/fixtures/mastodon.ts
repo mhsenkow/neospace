@@ -155,7 +155,7 @@ export const secondOauthToken = { ...oauthToken, access_token: 'e2e-access-token
 /** OAuth app registered for the fixture host (POST /api/v1/apps) */
 export const oauthApp = {
   id: '1',
-  name: 'NeoSpace',
+  name: 'LoomSpace',
   website: null,
   redirect_uri: 'http://127.0.0.1/auth/callback',
   client_id: 'e2e-client',

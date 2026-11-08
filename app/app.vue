@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * NeoSpace — root app shell
+ * LoomSpace — root app shell
  */
 
 import { getMainScroller } from '~/utils/pageScroll'

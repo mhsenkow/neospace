@@ -35,7 +35,7 @@ const togglePush = async () => {
       class="settings-group"
     >
       <p class="settings-hint">
-        Get system notifications for mentions, follows, likes, and boosts while NeoSpace is closed.
+        Get system notifications for mentions, follows, likes, and boosts while LoomSpace is closed.
       </p>
       <button
         type="button"
@@ -53,7 +53,7 @@ const togglePush = async () => {
       class="settings-group"
     >
       <p class="settings-hint">
-        This browser can’t receive web push. Try installing NeoSpace as an app, or use Chrome / Edge / Firefox.
+        This browser can’t receive web push. Try installing LoomSpace as an app, or use Chrome / Edge / Firefox.
       </p>
     </div>
 

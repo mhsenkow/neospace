@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NeoSpace — iOS TestFlight / App Store helper (Capacitor)
+# LoomSpace — iOS TestFlight / App Store helper (Capacitor)
 #
 # Prerequisites (one-time, in Xcode):
 #   1. Accounts → Apple ID (team WC44W2QVE4)
@@ -20,7 +20,7 @@ cd "$ROOT"
 CMD="${1:-sync}"
 PROJECT="ios/App/App.xcodeproj"
 SCHEME="App"
-ARCHIVE_PATH="ios/build/NeoSpace.xcarchive"
+ARCHIVE_PATH="ios/build/LoomSpace.xcarchive"
 EXPORT_PATH="ios/build"
 EXPORT_PLIST="ios/ExportOptions.plist"
 
@@ -40,9 +40,11 @@ case "$CMD" in
     # Capacitor 8 SPM project — use .xcodeproj (no CocoaPods workspace)
     xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
       -configuration Release -destination 'generic/platform=iOS' \
-      -archivePath "$ARCHIVE_PATH" archive
+      -archivePath "$ARCHIVE_PATH" \
+      -allowProvisioningUpdates archive
     xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" \
-      -exportPath "$EXPORT_PATH" -exportOptionsPlist "$EXPORT_PLIST"
+      -exportPath "$EXPORT_PATH" -exportOptionsPlist "$EXPORT_PLIST" \
+      -allowProvisioningUpdates
     echo "IPA:"
     find ios/build -name '*.ipa' 2>/dev/null || true
     ;;

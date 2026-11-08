@@ -1,4 +1,4 @@
-/* NeoSpace PWA rescue — chunk-load failures only (avoids wipe loops). */
+/* LoomSpace PWA rescue — chunk-load failures only (avoids wipe loops). */
 (function () {
   try {
     var K = 'neospace_sw_rescue'

@@ -1,5 +1,5 @@
 /**
- * NeoSpace → Loom insights export (CSV + preferred chart via postMessage).
+ * LoomSpace → Loom insights export (CSV + preferred chart via postMessage).
  */
 
 import { LOOM_ORIGINS } from '~/utils/loomHandoff'
@@ -28,7 +28,7 @@ export type LoomPreferredChart = {
   subtitle?: string
 }
 
-export type NeoSpaceLoomDataMessage = {
+export type LoomSpaceLoomDataMessage = {
   type: 'neospace-loom-data'
   v: 1
   files: LoomExportFile[]
@@ -64,7 +64,7 @@ export function buildInsightsExport(report: InsightsReport): {
       xField: 'date',
       yField: 'engagement',
       title: `Engagement · @${acct}`,
-      subtitle: `Last ${report.windowDays} days · NeoSpace insights`,
+      subtitle: `Last ${report.windowDays} days · LoomSpace insights`,
     },
   }
 }
@@ -96,13 +96,13 @@ export async function exportInsightsToLoom(
   report: InsightsReport,
 ): Promise<'posted' | 'downloaded' | 'slow'> {
   const { files, preferred } = buildInsightsExport(report)
-  const payload: NeoSpaceLoomDataMessage = {
+  const payload: LoomSpaceLoomDataMessage = {
     type: 'neospace-loom-data',
     v: 1,
     files,
     preferred,
     source: {
-      label: 'NeoSpace insights',
+      label: 'LoomSpace insights',
       acct: report.account.acct || undefined,
     },
   }

@@ -68,7 +68,7 @@ export function readSuiteLook(): SuiteLookSlice {
   return out
 }
 
-/** Publish NeoSpace look into the suite blob (other tools pick it up). */
+/** Publish LoomSpace look into the suite blob (other tools pick it up). */
 export function writeSuiteLook(slice: SuiteLookSlice) {
   const partial: SharedBlob = {}
   if (slice.theme !== undefined) partial.theme = slice.theme
@@ -78,7 +78,7 @@ export function writeSuiteLook(slice: SuiteLookSlice) {
   writeBlob(partial)
 }
 
-/** Surface NeoSpace in wordcount's recent-tools list. */
+/** Surface LoomSpace in wordcount's recent-tools list. */
 export function rememberSuiteVisit(id = 'neospace') {
   const blob = readBlob()
   const recent = Array.isArray(blob.recent)

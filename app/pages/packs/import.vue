@@ -17,7 +17,7 @@ definePageMeta({
   layout: 'default',
 })
 
-useHead({ title: 'Import pack | NeoSpace' })
+useHead({ title: 'Import pack | LoomSpace' })
 
 const route = useRoute()
 const router = useRouter()
@@ -47,7 +47,7 @@ const error = computed(() => {
   const d = decoded.value
   if (!d) return 'This share link is invalid or corrupted.'
   if (!d.ok && d.reason === 'version') {
-    return 'This link was made with a newer NeoSpace — refresh to update.'
+    return 'This link was made with a newer LoomSpace — refresh to update.'
   }
   if (!d.ok) return 'This share link is invalid or corrupted.'
   return null
@@ -175,7 +175,7 @@ async function addFeedsToCurrent() {
         </ul>
         <p class="pack-import__note">
           Installs as a switchable board (max {{ columnsStore.maxPacks }} packs ×
-          {{ columnsStore.maxColumns }} feeds). NeoSpace never posts on the curator’s behalf.
+          {{ columnsStore.maxColumns }} feeds). LoomSpace never posts on the curator’s behalf.
         </p>
         <div class="pack-import__actions">
           <button

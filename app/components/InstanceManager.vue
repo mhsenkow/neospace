@@ -111,7 +111,7 @@ const removeAccount = async (instance: ConnectedInstance) => {
   const handle = handleOf(instance)
   const ok = await overlayStore.openConfirm({
     title: 'Remove account?',
-    body: `Remove ${handle} from NeoSpace? You’ll be signed out of this server.`,
+    body: `Remove ${handle} from LoomSpace? You’ll be signed out of this server.`,
     confirmLabel: 'Remove',
     danger: true,
   })
@@ -140,7 +140,7 @@ const signIn = async (instance: ConnectedInstance) => {
 
 const makeMain = (instance: ConnectedInstance) => {
   instancesStore.setPrimaryAccount(instance.id)
-  toastStore.show({ message: `${handleOf(instance)} is now your main account — NeoSpace opens as it` })
+  toastStore.show({ message: `${handleOf(instance)} is now your main account — LoomSpace opens as it` })
 }
 
 const signOut = async (instance: ConnectedInstance) => {
@@ -281,7 +281,7 @@ const isActive = (instance: ConnectedInstance) =>
                         v-if="instance.id !== instancesStore.primaryAccount?.id"
                         type="button"
                         class="action-label"
-                        title="Open NeoSpace as this account on every fresh launch"
+                        title="Open LoomSpace as this account on every fresh launch"
                         @click="makeMain(instance)"
                       >
                         Make main

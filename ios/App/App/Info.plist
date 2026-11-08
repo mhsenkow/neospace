@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>NeoSpace</string>
+        <string>LoomSpace</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -29,6 +29,7 @@
 			<string>io.ibm.neospace.oauth</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>loomspace</string>
 				<string>neospace</string>
 			</array>
 		</dict>

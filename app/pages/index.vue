@@ -1504,7 +1504,7 @@ onUnmounted(() => {
 
 definePageMeta({ keepalive: true })
 
-useHead({ title: 'Home | NeoSpace' })
+useHead({ title: 'Home | LoomSpace' })
 </script>
 
 <template>

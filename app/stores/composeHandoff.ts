@@ -1,7 +1,7 @@
 /**
  * Cross-app compose handoff — Loom chart + lineage, bruh page excerpt + link.
  *
- * Reliable path: sibling opens NeoSpace with `?compose=loom|bruh&…`.
+ * Reliable path: sibling opens LoomSpace with `?compose=loom|bruh&…`.
  * Loom publishes the story (KV-backed `/s/{id}.img`); we fetch PNG + lineage.
  * bruh lands a short query caption; postMessage upgrades with caption + `/s/{id}`.
  * postMessage is an optional fast path when opener survives.
@@ -117,7 +117,7 @@ function handoffNotice(hasImage: boolean, source: StoredShare['source'] = 'loom'
     return 'Cell from Throughline. Edit, schedule, or post — AI stays in the notebook.'
   }
   if (!hasImage) {
-    return 'Caption ready — chart image missing; try Post to NeoSpace again from Loom'
+    return 'Caption ready — chart image missing; try Post to LoomSpace again from Loom'
   }
   return `Chart + lineage loaded. Add alt text, then post. ${STORY_PUBLIC_NOTICE}`
 }

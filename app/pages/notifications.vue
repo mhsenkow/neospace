@@ -35,7 +35,7 @@ const overlayStore = useOverlayStore()
 useHead({
   title: computed(() => {
     const n = notificationsStore.unreadCount
-    return n > 0 ? `(${n > 99 ? '99+' : n}) Activity | NeoSpace` : 'Activity | NeoSpace'
+    return n > 0 ? `(${n > 99 ? '99+' : n}) Activity | LoomSpace` : 'Activity | LoomSpace'
   }),
 })
 

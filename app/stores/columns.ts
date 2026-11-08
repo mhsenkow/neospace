@@ -1,5 +1,5 @@
 /**
- * NeoSpace Column Layout Store
+ * LoomSpace Column Layout Store
  *
  * Multi-column TweetDeck-style layout configuration.
  * Persisted per-account in localStorage (device-local; not federated to profile).

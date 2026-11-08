@@ -140,7 +140,7 @@ const fieldTokens = computed((): ProfileFieldToken[] =>
     // Presence fields that became a chip are shown there; any other (a second Homepage,
     // "Website: coming soon") is still an ordinary token
     .filter((_, i) => !presenceResolved.value.consumed.has(i))
-    // NeoSpace's own fields (CSS, column layout) aren't profile content — same rules the
+    // LoomSpace's own fields (CSS, column layout) aren't profile content — same rules the
     // CSS lookup uses, so "Style: Jazz" still shows and `custom_css` never leaks as a chip
     .filter((f) => !isProfileCssField(f) && !isColumnsField(f))
     .map((f) => {
@@ -631,10 +631,10 @@ const setProfileTab = async (
   await fetchStatusesGuarded(true, optsForTab(tab))
 }
 
-/** Fully-qualified handle without leading @ — for NeoSpace deep links that still resolve on Mastodon. */
+/** Fully-qualified handle without leading @ — for LoomSpace deep links that still resolve on Mastodon. */
 const shareAcct = computed(() => fullHandle.value.replace(/^@/, '').trim())
 
-/** NeoSpace profile URL that latches onto the Fediverse acct. */
+/** LoomSpace profile URL that latches onto the Fediverse acct. */
 const neoSpaceProfileUrl = computed(() => {
   if (!import.meta.client || !shareAcct.value) return ''
   const origin = window.location.origin
@@ -642,7 +642,7 @@ const neoSpaceProfileUrl = computed(() => {
 })
 
 /**
- * Share NeoSpace, not the instance profile page — so recipients land in NeoSpace
+ * Share LoomSpace, not the instance profile page — so recipients land in LoomSpace
  * while the `user=` param keeps the Mastodon identity (@user@host).
  * Canonical Mastodon URL stays available via “Copy Mastodon link”.
  */
@@ -652,7 +652,7 @@ const shareProfile = async () => {
   const url = neoSpaceProfileUrl.value
   const title = plainDisplayName(p.displayName, p.username)
   const text = fullHandle.value
-    ? `${fullHandle.value} on NeoSpace`
+    ? `${fullHandle.value} on LoomSpace`
     : undefined
   try {
     if (navigator.share) {
@@ -664,7 +664,7 @@ const shareProfile = async () => {
   }
   try {
     await navigator.clipboard.writeText(url)
-    toastStore.show({ message: 'NeoSpace profile link copied' })
+    toastStore.show({ message: 'LoomSpace profile link copied' })
   } catch {
     toastStore.show({ message: 'Couldn’t copy link' })
   }
@@ -935,8 +935,8 @@ const triggerHeaderUpload = () => {
 useHead({
   title: computed(() => {
     const p = profileStore.viewedProfile
-    if (!p) return 'Profile | NeoSpace'
-    return `${plainDisplayName(p.displayName, p.username)} | NeoSpace`
+    if (!p) return 'Profile | LoomSpace'
+    return `${plainDisplayName(p.displayName, p.username)} | LoomSpace`
   }),
 })
 </script>
@@ -955,7 +955,7 @@ useHead({
           <template #items>
             <button type="button" role="menuitem" class="profile-menu-item" @click="shareProfile">
               <NeoIcon name="share" :size="18" :stroke="1.75" />
-              <span>Share NeoSpace profile</span>
+              <span>Share LoomSpace profile</span>
             </button>
             <button type="button" role="menuitem" class="profile-menu-item" @click="copyHandle">
               <NeoIcon name="mention" :size="18" :stroke="1.75" />

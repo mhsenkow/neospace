@@ -44,7 +44,7 @@ const makeMain = (acct: ConnectedInstance) => {
   if (isExpired(acct)) return
   instancesStore.setPrimaryAccount(acct.id)
   toastStore.show({
-    message: `${handleOf(acct)} is now your main account — NeoSpace opens as it`,
+    message: `${handleOf(acct)} is now your main account — LoomSpace opens as it`,
   })
 }
 
@@ -219,7 +219,7 @@ const clearDeviceData = async () => {
 
       <h3 class="settings-subheading">Install app</h3>
       <p v-if="alreadyInstalled" class="settings-hint">
-        NeoSpace is already installed on this device.
+        LoomSpace is already installed on this device.
       </p>
       <template v-else>
         <p class="settings-hint">
@@ -230,7 +230,7 @@ const clearDeviceData = async () => {
                 ? 'Chrome often hides Install in ⋮ — use Add to Home screen, or tap below if Chrome offers a prompt.'
                 : isIos
                   ? 'In Safari: Share → Add to Home Screen.'
-                  : 'Install NeoSpace on a phone for the app experience.'
+                  : 'Install LoomSpace on a phone for the app experience.'
           }}
         </p>
         <button
@@ -239,7 +239,7 @@ const clearDeviceData = async () => {
           class="settings-btn settings-btn--primary"
           @click="installNative"
         >
-          Install NeoSpace
+          Install LoomSpace
         </button>
         <ol v-if="isAndroid && !canNativeInstall" class="settings-install-steps">
           <li>Open neospace.ibm.io in the <strong>Chrome</strong> app.</li>
@@ -255,7 +255,7 @@ const clearDeviceData = async () => {
       <div class="settings-divider" />
 
       <h3 class="settings-subheading">Sign out</h3>
-      <p class="settings-hint">Revoke tokens and leave NeoSpace on this device.</p>
+      <p class="settings-hint">Revoke tokens and leave LoomSpace on this device.</p>
       <button
         type="button"
         class="settings-btn settings-btn--ghost"
@@ -289,7 +289,7 @@ const clearDeviceData = async () => {
         Open Instance Settings →
       </a>
       <p v-else-if="instancesStore.instanceUrl" class="settings-hint">
-        This server's account settings page isn't known to NeoSpace — visit
+        This server's account settings page isn't known to LoomSpace — visit
         {{ instancesStore.instanceUrl.replace('https://', '') }} directly.
       </p>
 

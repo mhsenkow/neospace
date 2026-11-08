@@ -116,7 +116,7 @@ const shareActivePack = async () => {
   packMenuOpen.value = false
   try {
     if (navigator.share) {
-      await navigator.share({ title: pack.name, url, text: `NeoSpace pack: ${pack.name}` })
+      await navigator.share({ title: pack.name, url, text: `LoomSpace pack: ${pack.name}` })
       return
     }
   } catch (e) {
@@ -280,7 +280,7 @@ watch(
       to="/"
       class="sidebar__logo"
       :class="{ 'sidebar__logo--on': isHome }"
-      aria-label="NeoSpace home"
+      aria-label="LoomSpace home"
       @click="onHomeClick"
     >
       <NeoMark :active="isHome" />

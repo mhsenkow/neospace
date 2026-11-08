@@ -1,6 +1,6 @@
-# NeoSpace documentation
+# LoomSpace documentation
 
-Documentation for the NeoSpace Fediverse client. Start with the [project README](../README.md) for quick start and deploy.
+Documentation for the LoomSpace Fediverse client. Start with the [project README](../README.md) for quick start and deploy.
 
 ## Index
 
