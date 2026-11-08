@@ -1,6 +1,6 @@
 # App Store Connect — LoomSpace (iOS)
 
-Bundle ID: `io.ibm.neospace` (ASC display name: **loomspace**)  
+Bundle ID: `io.ibm.neospace` (ASC display name: **LoomSpace**)  
 Team: `WC44W2QVE4` · Category: **Social Networking**  
 
 Shell: Capacitor (`ios/`) packing the same static UI as [neospace.ibm.io](https://neospace.ibm.io)
