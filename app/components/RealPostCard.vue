@@ -480,6 +480,7 @@ watch(
   { immediate: true },
 )
 const showFollowBadge = computed(() => {
+  if (isRssItem.value) return false
   if (!instancesStore.hasAuthenticatedInstance || isOwnPost.value || isFlip.value) return false
   const rel = authorRelationship.value
   if (!rel) return true
@@ -663,8 +664,12 @@ const threadTo = computed(() => {
   }
 })
 
-const canInteract = computed(() =>
-  instancesStore.hasAuthenticatedInstance
+const isRssItem = computed(
+  () => !!(displayStatus.value as ExtendedStatus & { _isRss?: boolean })._isRss,
+)
+
+const canInteract = computed(
+  () => instancesStore.hasAuthenticatedInstance && !isRssItem.value,
 )
 
 /** In-app profile (posts + header); API client is from auth store */
@@ -1381,6 +1386,13 @@ const handleOpenOriginal = () => {
 }
 
 const openThread = () => {
+  if (isRssItem.value) {
+    const url = statusUrl.value
+    if (url && typeof window !== 'undefined') {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+    return
+  }
   const to = threadTo.value
   if (!to) return
   router.push(to)

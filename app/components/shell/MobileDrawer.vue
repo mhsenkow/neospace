@@ -6,6 +6,7 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { recipeTip } from '~/utils/algorithms'
+import { STARTER_PACKS } from '~/utils/packs'
 import { useColumnsStore, isTimelineFeed, type ColumnFeedType } from '~/stores/columns'
 import { useActiveBoardColumnId, useRequestAddFeed } from '~/composables/useBoardNav'
 import { useMobileDiscoverTab } from '~/composables/useMobileDiscoverTab'
@@ -66,6 +67,72 @@ const setFlickFromDrawer = (mode: 'flow' | 'flip') => {
 const openAddFeedFromDrawer = () => {
   closeMobileMenu()
   requestAddFeed.value = true
+}
+
+const switchPackFromDrawer = (packId: string) => {
+  columnsStore.switchPack(packId)
+  closeMobileMenu()
+}
+
+const createPackFromDrawer = () => {
+  const name = window.prompt('Name this pack', `Pack ${columnsStore.packs.length + 1}`)
+  if (name === null) return
+  const id = columnsStore.createPack(name.trim() || undefined)
+  if (!id) {
+    // board full of packs
+    return
+  }
+  closeMobileMenu()
+}
+
+const shareActivePackFromDrawer = async () => {
+  closeMobileMenu()
+  const pack = columnsStore.activePack
+  if (!pack) return
+  const { encodePackShare, buildPackShareUrl } = await import('~/utils/packs')
+  const { useAlgorithmsStore } = await import('~/stores/algorithms')
+  const { useToastStore } = await import('~/stores/toast')
+  const algorithms = useAlgorithmsStore()
+  algorithms.hydrate()
+  const active = instancesStore.activeAccount
+  const encoded = encodePackShare(pack, {
+    authorAcct: active?.user?.acct,
+    authorName: active?.user?.displayName || active?.user?.username,
+    algorithms: algorithms.allRecipes,
+  })
+  const url = buildPackShareUrl(window.location.origin, encoded)
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: pack.name, url, text: `NeoSpace pack: ${pack.name}` })
+      return
+    }
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    useToastStore().show({ message: 'Pack link copied' })
+  } catch {
+    useToastStore().show({ message: 'Couldn’t copy pack link' })
+  }
+}
+
+const renameActivePackFromDrawer = () => {
+  const pack = columnsStore.activePack
+  if (!pack) return
+  const name = window.prompt('Rename pack', pack.name)
+  if (name === null) return
+  columnsStore.renamePack(pack.id, name)
+}
+
+const unusedStarters = computed(() => {
+  const names = new Set(columnsStore.packs.map((p) => p.name.toLowerCase()))
+  return STARTER_PACKS.filter((s) => !names.has(s.name.toLowerCase()))
+})
+
+const installStarterFromDrawer = (starterId: string) => {
+  const id = columnsStore.installStarterPack(starterId)
+  if (id) closeMobileMenu()
 }
 
 const notifBadge = computed(() => notificationsStore.badgeLabel)
@@ -193,6 +260,18 @@ const openListFromDrawer = async (listId: string, title: string) => {
   // openBoardFeed adds/focuses; openListColumn then stamps the title for chrome
   await openBoardFeed('list', listId)
   columnsStore.openListColumn(listId, title)
+}
+
+const addRssFromDrawer = async () => {
+  closeMobileMenu()
+  const raw = window.prompt(
+    'Paste an RSS or Atom feed URL\n(e.g. https://example.com/feed.xml or https://mastodon.social/@user.rss)',
+  )
+  if (!raw) return
+  const url = raw.trim()
+  if (!/^https?:\/\//i.test(url)) return
+  await openBoardFeed('rss', url)
+  columnsStore.openRssColumn(url)
 }
 
 const openSettingsFromDrawer = async () => {
@@ -371,6 +450,65 @@ useFocusTrap(mobileSidebarRef, open, {
         </button>
       </nav>
 
+      <section class="mobile-sidebar__groups" aria-labelledby="drawer-packs-title">
+        <div class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 id="drawer-packs-title" class="mobile-sidebar__groups-title">Packs</h2>
+            <button
+              v-if="columnsStore.canAddPack"
+              type="button"
+              class="mobile-sidebar__groups-all"
+              aria-label="New pack"
+              @click="createPackFromDrawer"
+            >
+              New
+            </button>
+          </div>
+          <ul class="mobile-sidebar__suggest-list">
+            <li v-for="pack in columnsStore.packs" :key="pack.id">
+              <button
+                type="button"
+                class="mobile-sidebar__suggest"
+                :class="{ 'mobile-sidebar__suggest--on': columnsStore.activePackId === pack.id }"
+                :aria-current="columnsStore.activePackId === pack.id ? 'true' : undefined"
+                @click="switchPackFromDrawer(pack.id)"
+              >
+                <span class="mobile-sidebar__suggest-icon mobile-sidebar__suggest-icon--glyph">
+                  <NeoIcon name="bookmark" :size="18" :stroke="1.75" />
+                </span>
+                <span class="mobile-sidebar__suggest-label">{{ pack.name }}</span>
+              </button>
+            </li>
+          </ul>
+          <div class="mobile-sidebar__pack-actions">
+            <button type="button" class="mobile-sidebar__action" @click="renameActivePackFromDrawer">
+              Rename
+            </button>
+            <button type="button" class="mobile-sidebar__action" @click="shareActivePackFromDrawer">
+              Share
+            </button>
+          </div>
+          <template v-if="unusedStarters.length && columnsStore.canAddPack">
+            <p class="mobile-sidebar__groups-hint">Starters</p>
+            <ul class="mobile-sidebar__suggest-list">
+              <li v-for="starter in unusedStarters" :key="starter.id">
+                <button
+                  type="button"
+                  class="mobile-sidebar__suggest"
+                  :title="starter.description"
+                  @click="installStarterFromDrawer(starter.id)"
+                >
+                  <span class="mobile-sidebar__suggest-icon mobile-sidebar__suggest-icon--glyph">
+                    <NeoIcon name="sparkle" :size="18" :stroke="1.75" />
+                  </span>
+                  <span class="mobile-sidebar__suggest-label">{{ starter.name }}</span>
+                </button>
+              </li>
+            </ul>
+          </template>
+        </div>
+      </section>
+
       <section class="mobile-sidebar__board" aria-label="Feed controls">
         <div
           class="mobile-sidebar__mode"
@@ -454,6 +592,41 @@ useFocusTrap(mobileSidebarRef, open, {
                   <NeoIcon name="users" :size="18" :stroke="1.75" />
                 </span>
                 <span class="mobile-sidebar__suggest-label">{{ list.title }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="mobile-sidebar__groups" aria-labelledby="drawer-rss-title">
+        <div class="mobile-sidebar__groups-block">
+          <div class="mobile-sidebar__groups-head">
+            <h2 id="drawer-rss-title" class="mobile-sidebar__groups-title">Open web</h2>
+            <button
+              type="button"
+              class="mobile-sidebar__groups-all"
+              aria-label="Add RSS feed"
+              @click="addRssFromDrawer"
+            >
+              Add RSS
+            </button>
+          </div>
+          <ul class="mobile-sidebar__suggest-list">
+            <li
+              v-for="col in columnsStore.columns.filter((c) => c.feedType === 'rss' && c.rssUrl)"
+              :key="col.id"
+            >
+              <button
+                type="button"
+                class="mobile-sidebar__suggest"
+                :class="{ 'mobile-sidebar__suggest--on': boardColumnIs('rss', col.rssUrl) }"
+                :aria-current="boardColumnIs('rss', col.rssUrl) ? 'true' : undefined"
+                @click="openBoardFeedFromDrawer('rss', col.rssUrl)"
+              >
+                <span class="mobile-sidebar__suggest-icon mobile-sidebar__suggest-icon--glyph">
+                  <NeoIcon name="globe" :size="18" :stroke="1.75" />
+                </span>
+                <span class="mobile-sidebar__suggest-label">{{ col.rssTitle || col.rssUrl }}</span>
               </button>
             </li>
           </ul>
@@ -920,6 +1093,27 @@ useFocusTrap(mobileSidebarRef, open, {
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--neo-text-muted);
+  }
+
+  &__groups-hint {
+    margin: 0.55rem 0 0.2rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--neo-text-muted);
+  }
+
+  &__pack-actions {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.2rem;
+
+    .mobile-sidebar__action {
+      width: auto;
+      flex: 1;
+      justify-content: center;
+      padding: 0.55rem 0.5rem;
+      font-size: 0.8125rem;
+    }
   }
 
   &__groups-all {

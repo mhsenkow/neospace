@@ -9,6 +9,15 @@ import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { logError } from '~/utils/log'
+import {
+  MAX_PACKS,
+  PACKS_STORAGE_KEY,
+  defaultDailyPack,
+  newPackId,
+  type FeedPack,
+  STARTER_PACKS,
+  starterToPack,
+} from '~/utils/packs'
 
 export type ColumnFeedType =
   | 'home'
@@ -19,6 +28,7 @@ export type ColumnFeedType =
   | 'bookmarks'
   | 'algorithm'
   | 'list'
+  | 'rss'
   | 'profile'
   | 'search'
   | 'notifications'
@@ -50,6 +60,7 @@ export const FEED_CATALOG: { type: ColumnFeedType; label: string }[] = [
   { type: 'bookmarks', label: 'Saved' },
   { type: 'algorithm', label: 'Algorithm' },
   { type: 'list', label: 'List' },
+  { type: 'rss', label: 'RSS' },
   { type: 'profile', label: 'Profile' },
   { type: 'search', label: 'Search' },
   { type: 'notifications', label: 'Notifications' },
@@ -73,7 +84,8 @@ export function isTimelineFeed(type: ColumnFeedType): boolean {
     type === 'favourites' ||
     type === 'bookmarks' ||
     type === 'algorithm' ||
-    type === 'list'
+    type === 'list' ||
+    type === 'rss'
   )
 }
 
@@ -91,6 +103,10 @@ export interface ColumnConfig {
   listId?: string
   /** Cached list title for chrome labels */
   listTitle?: string
+  /** Absolute RSS/Atom feed URL */
+  rssUrl?: string
+  /** Cached feed title for chrome labels */
+  rssTitle?: string
   /** Device-local; not synced via profile field */
   viewMode?: ColumnViewMode
   /**
@@ -105,6 +121,7 @@ export interface ColumnConfig {
     groupTag?: string
     algorithmId?: string
     listId?: string
+    rssUrl?: string
   }
   /**
    * Pin this column to a connected instance id, or `'all'` for unified
@@ -136,6 +153,9 @@ interface ColumnsState {
   deskDensity: DeskDensity
   /** Device-local: when set, only this column is shown (desktop); required in tabs mode */
   focusedColumnId: string | null
+  /** Named boards (max MAX_PACKS); active pack mirrors `columns` */
+  packs: FeedPack[]
+  activePackId: string | null
 }
 
 const STORAGE_KEY = 'neospace_columns_v2'
@@ -158,6 +178,7 @@ const FEED_TYPES: ColumnFeedType[] = [
   'bookmarks',
   'algorithm',
   'list',
+  'rss',
   'profile',
   'search',
   'notifications',
@@ -216,6 +237,12 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       columns.push({ id: generateId(), feedType: 'list', listId })
       continue
     }
+    if (part.startsWith('rss:')) {
+      const rssUrl = part.slice(4).trim()
+      if (!rssUrl || !/^https?:\/\//i.test(rssUrl)) continue
+      columns.push({ id: generateId(), feedType: 'rss', rssUrl })
+      continue
+    }
     // local@host:tech.lgbt / home@all / federated@<instanceId>
     const pinned = part.match(/^(local|federated|home)@(host:)?(.+)$/i)
     if (pinned) {
@@ -233,7 +260,8 @@ export function decodeColumns(raw: string): ColumnConfig[] | null {
       (FEED_TYPES as string[]).includes(part) &&
       part !== 'group' &&
       part !== 'algorithm' &&
-      part !== 'list'
+      part !== 'list' &&
+      part !== 'rss'
     ) {
       columns.push({ id: generateId(), feedType: part as ColumnFeedType })
       continue
@@ -261,14 +289,20 @@ function defaultColumns(preferHome: boolean): ColumnConfig[] {
 function feedKey(
   c: Pick<
     ColumnConfig,
-    'feedType' | 'groupTag' | 'algorithmId' | 'listId' | 'instanceId' | 'serverHost'
+    'feedType' | 'groupTag' | 'algorithmId' | 'listId' | 'rssUrl' | 'instanceId' | 'serverHost'
   >,
 ) {
   if (c.feedType === 'group' && c.groupTag) return `group:${c.groupTag}`
   if (c.feedType === 'algorithm' && c.algorithmId) return `algo:${c.algorithmId}`
   if (c.feedType === 'list' && c.listId) return `list:${c.listId}`
+  if (c.feedType === 'rss' && c.rssUrl) return `rss:${c.rssUrl}`
   const pin = c.instanceId || (c.serverHost ? `host:${c.serverHost.toLowerCase()}` : '')
   return pin ? `${c.feedType}@${pin}` : c.feedType
+}
+
+/** Public token used by pack share codecs */
+export function columnFeedKey(c: ColumnConfig): string {
+  return feedKey(c)
 }
 
 /** Sentinel instanceId: Home column merges every signed-in account */
@@ -301,9 +335,11 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
     const groupTag = optionalString(c.groupTag)
     const algorithmId = optionalString(c.algorithmId)
     const listId = optionalString(c.listId)
+    const rssUrl = optionalString(c.rssUrl)
     if (feedType === 'group' && !groupTag) continue
     if (feedType === 'algorithm' && !algorithmId) continue
     if (feedType === 'list' && !listId) continue
+    if (feedType === 'rss' && (!rssUrl || !/^https?:\/\//i.test(rssUrl))) continue
     let id = optionalString(c.id)
     if (!id || ids.has(id)) id = generateId()
     ids.add(id)
@@ -318,6 +354,11 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
       col.listId = listId
       const listTitle = optionalString(c.listTitle)
       if (listTitle) col.listTitle = listTitle
+    }
+    if (feedType === 'rss' && rssUrl) {
+      col.rssUrl = rssUrl
+      const rssTitle = optionalString(c.rssTitle)
+      if (rssTitle) col.rssTitle = rssTitle
     }
     const profileAcct = optionalString(c.profileAcct)
     if (feedType === 'profile' && profileAcct) col.profileAcct = profileAcct
@@ -334,6 +375,7 @@ function normalizeColumns(cols: unknown[]): ColumnConfig[] {
         groupTag: optionalString(back.groupTag),
         algorithmId: optionalString(back.algorithmId),
         listId: optionalString(back.listId),
+        rssUrl: optionalString(back.rssUrl),
       }
     }
     out.push(col)
@@ -360,12 +402,75 @@ export function parseStoredLayout(raw: unknown): StoredLayoutMeta | null {
   return { columns, updatedAt, dirty }
 }
 
+type PacksBucket = {
+  packs: FeedPack[]
+  activePackId: string | null
+}
+
+function readPacksBucket(accountKey: string): PacksBucket | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(PACKS_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { byAccount?: Record<string, PacksBucket> }
+    const bucket = parsed?.byAccount?.[accountKey || 'guest']
+    if (!bucket || !Array.isArray(bucket.packs) || !bucket.packs.length) return null
+    const packs = bucket.packs
+      .filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.name === 'string')
+      .map((p) => ({
+        id: p.id,
+        name: String(p.name).slice(0, 48) || 'Pack',
+        description: typeof p.description === 'string' ? p.description.slice(0, 160) : undefined,
+        icon: typeof p.icon === 'string' ? p.icon : undefined,
+        columns: normalizeColumns(Array.isArray(p.columns) ? p.columns : []),
+        updatedAt: typeof p.updatedAt === 'number' ? p.updatedAt : Date.now(),
+      }))
+      .filter((p) => p.columns.length > 0)
+      .slice(0, MAX_PACKS)
+    if (!packs.length) return null
+    const activePackId =
+      typeof bucket.activePackId === 'string' && packs.some((p) => p.id === bucket.activePackId)
+        ? bucket.activePackId
+        : packs[0]!.id
+    return { packs, activePackId }
+  } catch {
+    return null
+  }
+}
+
+function writePacksBucket(accountKey: string, bucket: PacksBucket) {
+  if (typeof window === 'undefined') return
+  try {
+    let byAccount: Record<string, PacksBucket> = {}
+    try {
+      const existing = localStorage.getItem(PACKS_STORAGE_KEY)
+      if (existing) {
+        const parsed = JSON.parse(existing)
+        if (parsed?.byAccount && typeof parsed.byAccount === 'object') {
+          byAccount = parsed.byAccount
+        }
+      }
+    } catch {
+      byAccount = {}
+    }
+    byAccount[accountKey || 'guest'] = {
+      packs: bucket.packs.slice(0, MAX_PACKS),
+      activePackId: bucket.activePackId,
+    }
+    localStorage.setItem(PACKS_STORAGE_KEY, JSON.stringify({ v: 1, byAccount }))
+  } catch (e) {
+    logError('Failed to save packs:', e)
+  }
+}
+
 export const useColumnsStore = defineStore('columns', {
   state: (): ColumnsState => ({
     columns: defaultColumns(false),
     accountKey: 'guest',
     layoutDirty: false,
     layoutUpdatedAt: 0,
+    packs: [],
+    activePackId: null,
     ...readDeskLayout(),
   }),
 
@@ -378,6 +483,10 @@ export const useColumnsStore = defineStore('columns', {
     isTabsDensity: (state): boolean => state.deskDensity === 'tabs',
     focusedColumn: (state): ColumnConfig | null =>
       state.columns.find((c) => c.id === state.focusedColumnId) || null,
+    activePack: (state): FeedPack | null =>
+      state.packs.find((p) => p.id === state.activePackId) || state.packs[0] || null,
+    canAddPack: (state): boolean => state.packs.length < MAX_PACKS,
+    maxPacks: (): number => MAX_PACKS,
   },
 
   actions: {
@@ -454,8 +563,154 @@ export const useColumnsStore = defineStore('columns', {
 
     persist() {
       this.saveToStorage({ markDirty: true })
+      // Keep the active pack's columns in sync with the live board
+      this.syncActivePackColumns()
+      this.savePacks()
       // Profile-field sync disabled: it federated followed tags, corrupted other
       // metadata fields, and fired an Update on every reorder. Layout stays local.
+    },
+
+    syncActivePackColumns() {
+      if (!this.activePackId || !this.packs.length) return
+      const idx = this.packs.findIndex((p) => p.id === this.activePackId)
+      if (idx < 0) return
+      const pack = this.packs[idx]!
+      this.packs[idx] = {
+        ...pack,
+        columns: this.columns.map((c) => ({ ...c })),
+        updatedAt: Date.now(),
+      }
+    },
+
+    savePacks() {
+      writePacksBucket(this.accountKey, {
+        packs: this.packs,
+        activePackId: this.activePackId,
+      })
+    },
+
+    ensurePacksHydrated() {
+      if (this.packs.length) return
+      const bucket = readPacksBucket(this.accountKey)
+      if (bucket) {
+        this.packs = bucket.packs
+        this.activePackId = bucket.activePackId
+        const active = this.packs.find((p) => p.id === this.activePackId) || this.packs[0]!
+        this.columns = active.columns.map((c) => ({ ...c }))
+        this.activePackId = active.id
+        return
+      }
+      // Migrate current board into the first "Daily" pack
+      const daily = defaultDailyPack(this.columns.map((c) => ({ ...c })))
+      this.packs = [daily]
+      this.activePackId = daily.id
+      this.savePacks()
+    },
+
+    switchPack(packId: string) {
+      if (packId === this.activePackId) return
+      const next = this.packs.find((p) => p.id === packId)
+      if (!next) return
+      // Save current board into the pack we're leaving
+      this.syncActivePackColumns()
+      this.activePackId = next.id
+      this.columns = next.columns.map((c) => ({ ...c }))
+      this.focusedColumnId = null
+      this.saveDeskLayout()
+      this.persist()
+    },
+
+    createPack(name?: string, columns?: ColumnConfig[]): string | null {
+      if (this.packs.length >= MAX_PACKS) return null
+      this.syncActivePackColumns()
+      const pack: FeedPack = {
+        id: newPackId(),
+        name: (name || `Pack ${this.packs.length + 1}`).trim().slice(0, 48) || 'Pack',
+        columns: (columns?.length
+          ? columns
+          : defaultColumns(useInstancesStore().hasAuthenticatedInstance)
+        ).map((c) => ({ ...c, id: generateId() })),
+        updatedAt: Date.now(),
+      }
+      this.packs.push(pack)
+      this.activePackId = pack.id
+      this.columns = pack.columns.map((c) => ({ ...c }))
+      this.focusedColumnId = null
+      this.saveDeskLayout()
+      this.persist()
+      return pack.id
+    },
+
+    renamePack(packId: string, name: string) {
+      const pack = this.packs.find((p) => p.id === packId)
+      const clean = name.trim().slice(0, 48)
+      if (!pack || !clean) return
+      pack.name = clean
+      pack.updatedAt = Date.now()
+      this.savePacks()
+    },
+
+    duplicatePack(packId: string): string | null {
+      if (this.packs.length >= MAX_PACKS) return null
+      const src = this.packs.find((p) => p.id === packId)
+      if (!src) return null
+      this.syncActivePackColumns()
+      const copy: FeedPack = {
+        id: newPackId(),
+        name: `${src.name} copy`.slice(0, 48),
+        description: src.description,
+        columns: src.columns.map((c) => ({ ...c, id: generateId() })),
+        updatedAt: Date.now(),
+      }
+      this.packs.push(copy)
+      this.savePacks()
+      return copy.id
+    },
+
+    deletePack(packId: string) {
+      if (this.packs.length <= 1) return
+      const idx = this.packs.findIndex((p) => p.id === packId)
+      if (idx < 0) return
+      const wasActive = this.activePackId === packId
+      this.packs.splice(idx, 1)
+      if (wasActive) {
+        const next = this.packs[Math.max(0, idx - 1)] || this.packs[0]!
+        this.activePackId = next.id
+        this.columns = next.columns.map((c) => ({ ...c }))
+        this.focusedColumnId = null
+        this.saveDeskLayout()
+      }
+      this.persist()
+    },
+
+    installPack(pack: FeedPack, switchTo = true): string | null {
+      if (this.packs.length >= MAX_PACKS) return null
+      this.syncActivePackColumns()
+      const installed: FeedPack = {
+        ...pack,
+        id: pack.id || newPackId(),
+        columns: pack.columns.slice(0, MAX_COLUMNS).map((c) => ({
+          ...c,
+          id: generateId(),
+          viewMode: c.viewMode || 'flow',
+        })),
+        updatedAt: Date.now(),
+      }
+      this.packs.push(installed)
+      if (switchTo) {
+        this.activePackId = installed.id
+        this.columns = installed.columns.map((c) => ({ ...c }))
+        this.focusedColumnId = null
+        this.saveDeskLayout()
+      }
+      this.persist()
+      return installed.id
+    },
+
+    installStarterPack(starterId: string): string | null {
+      const template = STARTER_PACKS.find((s) => s.id === starterId)
+      if (!template) return null
+      return this.installPack(starterToPack(template), true)
     },
 
     saveDeskLayout() {
@@ -518,6 +773,9 @@ export const useColumnsStore = defineStore('columns', {
         }
         if (feedType === 'list') {
           return c.feedType === 'list' && c.listId === feedParam
+        }
+        if (feedType === 'rss') {
+          return c.feedType === 'rss' && c.rssUrl === feedParam
         }
         if (feedType === 'profile') return c.feedType === 'profile' && !c.profileAcct
         if (
@@ -609,6 +867,12 @@ export const useColumnsStore = defineStore('columns', {
         )
         if (existing) return existing.id
       }
+      if (feedType === 'rss' && feedParam) {
+        const existing = this.columns.find(
+          (c) => c.feedType === 'rss' && c.rssUrl === feedParam,
+        )
+        if (existing) return existing.id
+      }
       if (
         (feedType === 'local' || feedType === 'federated' || feedType === 'home') &&
         feedParam
@@ -627,6 +891,7 @@ export const useColumnsStore = defineStore('columns', {
       if (feedType === 'group' && feedParam) col.groupTag = feedParam
       if (feedType === 'algorithm' && feedParam) col.algorithmId = feedParam
       if (feedType === 'list' && feedParam) col.listId = feedParam
+      if (feedType === 'rss' && feedParam) col.rssUrl = feedParam
       if (
         (feedType === 'local' || feedType === 'federated' || feedType === 'home' ||
           feedType === 'favourites' ||
@@ -651,6 +916,24 @@ export const useColumnsStore = defineStore('columns', {
         this.persist()
       }
       return id
+    },
+
+    /** Open an RSS/Atom feed column, remembering its title for chrome. */
+    openRssColumn(rssUrl: string, title?: string): string | null {
+      const clean = rssUrl.trim()
+      if (!clean || !/^https?:\/\//i.test(clean)) return null
+      const id = this.ensureFocusedView('rss', clean)
+      if (!id) return id
+      if (title) this.setRssTitle(id, title)
+      return id
+    },
+
+    setRssTitle(columnId: string, title: string) {
+      const col = this.columns.find((c) => c.id === columnId)
+      const clean = title.trim().slice(0, 80)
+      if (!col || !clean || col.rssTitle === clean) return
+      col.rssTitle = clean
+      this.persist()
     },
 
     /**
@@ -830,7 +1113,7 @@ export const useColumnsStore = defineStore('columns', {
       columnId: string,
       feedType: ColumnFeedType,
       feedParam?: string,
-      opts?: { listTitle?: string },
+      opts?: { listTitle?: string; rssTitle?: string },
     ) {
       const column = this.columns.find((c) => c.id === columnId)
       if (column) {
@@ -843,6 +1126,13 @@ export const useColumnsStore = defineStore('columns', {
         } else {
           delete column.listId
           delete column.listTitle
+        }
+        if (feedType === 'rss' && feedParam) {
+          column.rssUrl = feedParam
+          if (opts?.rssTitle) column.rssTitle = opts.rssTitle
+        } else {
+          delete column.rssUrl
+          delete column.rssTitle
         }
         column.profileAcct = undefined
         column.returnFeed = undefined
@@ -866,6 +1156,7 @@ export const useColumnsStore = defineStore('columns', {
           groupTag: column.groupTag,
           algorithmId: column.algorithmId,
           listId: column.listId,
+          rssUrl: column.rssUrl,
         }
       }
       column.feedType = 'profile'
@@ -875,6 +1166,8 @@ export const useColumnsStore = defineStore('columns', {
       delete column.listId
       // keep listTitle only while on a list feed — drop on peek
       delete column.listTitle
+      delete column.rssUrl
+      delete column.rssTitle
       // Stay on the board: clear another column's focus so this peel is visible
       if (this.focusedColumnId && this.focusedColumnId !== columnId) {
         this.focusedColumnId = null
@@ -900,12 +1193,20 @@ export const useColumnsStore = defineStore('columns', {
           delete column.listId
           delete column.listTitle
         }
+        if (back.feedType === 'rss' && back.rssUrl) {
+          column.rssUrl = back.rssUrl
+        } else {
+          delete column.rssUrl
+          delete column.rssTitle
+        }
       } else {
         column.feedType = 'home'
         column.groupTag = undefined
         column.algorithmId = undefined
         delete column.listId
         delete column.listTitle
+        delete column.rssUrl
+        delete column.rssTitle
       }
       if (this.focusedColumnId === columnId) {
         this.focusedColumnId = null
@@ -966,11 +1267,20 @@ export const useColumnsStore = defineStore('columns', {
       const fromProfile = readColumnsFromFields(instancesStore.activeAccount?.user?.fields)
       const fromLocal = this.loadLocal(accountKey)
       const preferHome = instancesStore.hasAuthenticatedInstance
+      const packsBucket = readPacksBucket(accountKey)
 
       const previous = this.columns
       const prevFocused = previous.find((c) => c.id === this.focusedColumnId)
 
-      if (fromLocal?.dirty && fromLocal.columns.length) {
+      if (packsBucket) {
+        this.packs = packsBucket.packs
+        this.activePackId = packsBucket.activePackId
+        const active = this.packs.find((p) => p.id === this.activePackId) || this.packs[0]!
+        this.columns = active.columns.map((c) => ({ ...c }))
+        this.activePackId = active.id
+        this.layoutDirty = fromLocal?.dirty || false
+        this.layoutUpdatedAt = fromLocal?.updatedAt || active.updatedAt
+      } else if (fromLocal?.dirty && fromLocal.columns.length) {
         this.columns = fromLocal.columns
         this.layoutDirty = true
         this.layoutUpdatedAt = fromLocal.updatedAt
@@ -988,6 +1298,13 @@ export const useColumnsStore = defineStore('columns', {
         this.layoutDirty = false
         this.layoutUpdatedAt = Date.now()
         this.saveToStorage({ markDirty: false })
+      }
+
+      if (!this.packs.length) {
+        const daily = defaultDailyPack(this.columns.map((c) => ({ ...c })))
+        this.packs = [daily]
+        this.activePackId = daily.id
+        this.savePacks()
       }
 
       // Profile decode regenerates column ids — rematch focus by feed, don't drop it

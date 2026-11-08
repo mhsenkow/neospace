@@ -20,6 +20,7 @@ import {
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useSettingsStore } from '~/stores/settings'
+import { useToastStore } from '~/stores/toast'
 import { useConversationsStore } from '~/stores/conversations'
 import { useNotificationsStore, type ExtendedNotification } from '~/stores/notifications'
 import { THEME_OPTIONS, UI_OPTIONS, resolveTheme } from '~/utils/appearance'
@@ -36,6 +37,7 @@ const instancesStore = useInstancesStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
+const toastStore = useToastStore()
 const conversationsStore = useConversationsStore()
 const notificationsStore = useNotificationsStore()
 const { boardPortal, setBoardPortal } = useBoardPortal()
@@ -127,6 +129,9 @@ const columnTabLabels = computed(() =>
     }
     if (column.feedType === 'list') {
       return column.listTitle || 'List'
+    }
+    if (column.feedType === 'rss') {
+      return column.rssTitle || 'RSS'
     }
     if (column.feedType === 'local') {
       return `Local (${localHostLabel.value})`
@@ -301,14 +306,7 @@ const removeColumnAt = (columnId: string) => {
 
 const { lists: mastodonLists } = useMastodonLists()
 
-const addColumn = (feedType: ColumnFeedType, feedParam?: string) => {
-  let id: string | undefined | null
-  if (feedType === 'list' && feedParam) {
-    const title = mastodonLists.value.find((l) => l.id === feedParam)?.title
-    id = columnsStore.openListColumn(feedParam, title)
-  } else {
-    id = columnsStore.addColumn(feedType, feedParam)
-  }
+const parkNewColumn = (id: string | null | undefined) => {
   addMenuOpen.value = false
   addGroupQuery.value = ''
   nextTick(() => {
@@ -323,6 +321,44 @@ const addColumn = (feedType: ColumnFeedType, feedParam?: string) => {
     }
     scrollToColumn(idx)
   })
+}
+
+const addColumn = (feedType: ColumnFeedType, feedParam?: string) => {
+  let id: string | undefined | null
+  if (feedType === 'list' && feedParam) {
+    const title = mastodonLists.value.find((l) => l.id === feedParam)?.title
+    id = columnsStore.openListColumn(feedParam, title)
+  } else if (feedType === 'rss' && feedParam) {
+    id = columnsStore.openRssColumn(feedParam)
+  } else {
+    id = columnsStore.addColumn(feedType, feedParam)
+  }
+  parkNewColumn(id)
+}
+
+const promptAddRss = () => {
+  const raw = window.prompt(
+    'Paste an RSS or Atom feed URL\n(e.g. https://example.com/feed.xml or https://mastodon.social/@user.rss)',
+  )
+  if (!raw) return
+  const url = raw.trim()
+  if (!/^https?:\/\//i.test(url)) {
+    toastStore.show({ message: 'Feed URL must start with http:// or https://' })
+    return
+  }
+  const id = columnsStore.openRssColumn(url)
+  if (!id) {
+    toastStore.show({ message: 'Board is full — remove a feed first' })
+    return
+  }
+  parkNewColumn(id)
+  toastStore.show({ message: 'RSS feed added', duration: 2400 })
+}
+
+const onDeskPackChange = (event: Event) => {
+  const el = event.target as HTMLSelectElement | null
+  const id = el?.value
+  if (id) columnsStore.switchPack(id)
 }
 
 /** Joined first, then featured (News, etc.) — filterable so the list isn’t a dead end. */
@@ -1491,6 +1527,22 @@ useHead({ title: 'Home | NeoSpace' })
       class="desk-feed-tabs"
       aria-label="Feeds"
     >
+      <label v-if="columnsStore.packs.length > 1" class="desk-pack-switch">
+        <span class="sr-only">Active pack</span>
+        <select
+          class="desk-pack-switch__select"
+          :value="columnsStore.activePackId || ''"
+          @change="onDeskPackChange"
+        >
+          <option
+            v-for="pack in columnsStore.packs"
+            :key="pack.id"
+            :value="pack.id"
+          >
+            {{ pack.name }}
+          </option>
+        </select>
+      </label>
       <NeoTabs
         class="desk-feed-tabs__neo"
         :tabs="feedTabs"
@@ -1525,6 +1577,7 @@ useHead({ title: 'Home | NeoSpace' })
               compact-add
               @toggle-timelines="addAlgorithmsExpanded = !addAlgorithmsExpanded"
               @pick="addColumn"
+              @add-rss="promptAddRss"
               @create-algorithm="algorithmsStore.openEditor(); addMenuOpen = false"
             />
           </template>
@@ -1653,6 +1706,7 @@ useHead({ title: 'Home | NeoSpace' })
                 show-panel-feeds
                 @toggle-timelines="addAlgorithmsExpanded = !addAlgorithmsExpanded"
                 @pick="addColumn"
+                @add-rss="promptAddRss"
                 @create-algorithm="algorithmsStore.openEditor(); addMenuOpen = false"
               />
               <div class="add-column-menu__divider" role="separator" />
@@ -2091,6 +2145,7 @@ useHead({ title: 'Home | NeoSpace' })
             show-panel-feeds
             @toggle-timelines="addAlgorithmsExpanded = !addAlgorithmsExpanded"
             @pick="addColumn"
+            @add-rss="promptAddRss"
             @create-algorithm="algorithmsStore.openEditor(); addMenuOpen = false"
           />
           <div class="add-column-menu__divider" role="separator" />
@@ -2784,6 +2839,27 @@ useHead({ title: 'Home | NeoSpace' })
 // ========================================
 // Desktop focused-tab strip
 // ========================================
+.desk-pack-switch {
+  flex-shrink: 0;
+
+  &__select {
+    appearance: none;
+    max-width: 8.5rem;
+    padding: 0.35rem 1.5rem 0.35rem 0.55rem;
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 6px);
+    background:
+      linear-gradient(45deg, transparent 50%, var(--neo-text-muted) 50%) calc(100% - 12px) calc(50% - 2px) / 5px 5px no-repeat,
+      linear-gradient(135deg, var(--neo-text-muted) 50%, transparent 50%) calc(100% - 8px) calc(50% - 2px) / 5px 5px no-repeat,
+      var(--neo-bg-secondary);
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+}
+
 .desk-feed-tabs {
   display: none;
 

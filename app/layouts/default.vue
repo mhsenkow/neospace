@@ -430,7 +430,7 @@ watch(
         class="compose-fab"
         aria-label="New thread"
         title="New thread"
-        @click="openCompose"
+        @click="() => openCompose()"
       >
         <NeoIcon name="plus" :size="26" :stroke="2.25" />
       </button>

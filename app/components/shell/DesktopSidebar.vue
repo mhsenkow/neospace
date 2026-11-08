@@ -6,7 +6,9 @@ import { useConversationsStore } from '~/stores/conversations'
 import { useColumnsStore, type ColumnFeedType } from '~/stores/columns'
 import { useGroupsStore } from '~/stores/groups'
 import { useAlgorithmsStore } from '~/stores/algorithms'
+import { useToastStore } from '~/stores/toast'
 import { recipeTip } from '~/utils/algorithms'
+import { STARTER_PACKS, encodePackShare, buildPackShareUrl } from '~/utils/packs'
 import { useSettingsStore } from '~/stores/settings'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import {
@@ -21,6 +23,7 @@ const conversationsStore = useConversationsStore()
 const columnsStore = useColumnsStore()
 const groupsStore = useGroupsStore()
 const algorithmsStore = useAlgorithmsStore()
+const toastStore = useToastStore()
 const settingsStore = useSettingsStore()
 const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
@@ -57,6 +60,82 @@ const {
 const groupsShowAll = ref(false)
 const algorithmsShowAll = ref(false)
 const inboxMenuOpen = ref(false)
+const packMenuOpen = ref(false)
+
+const unusedStarters = computed(() => {
+  const names = new Set(columnsStore.packs.map((p) => p.name.toLowerCase()))
+  return STARTER_PACKS.filter((s) => !names.has(s.name.toLowerCase()))
+})
+
+const createPackFromSidebar = () => {
+  const name = window.prompt('Name this pack', `Pack ${columnsStore.packs.length + 1}`)
+  if (name === null) return
+  columnsStore.createPack(name.trim() || undefined)
+}
+
+const renameActivePack = () => {
+  const pack = columnsStore.activePack
+  if (!pack) return
+  const name = window.prompt('Rename pack', pack.name)
+  if (name === null) return
+  columnsStore.renamePack(pack.id, name)
+  packMenuOpen.value = false
+}
+
+const duplicateActivePack = () => {
+  const pack = columnsStore.activePack
+  if (!pack) return
+  const id = columnsStore.duplicatePack(pack.id)
+  if (!id) {
+    toastStore.show({ message: `You already have ${columnsStore.maxPacks} packs` })
+    return
+  }
+  columnsStore.switchPack(id)
+  packMenuOpen.value = false
+}
+
+const deleteActivePack = () => {
+  const pack = columnsStore.activePack
+  if (!pack || columnsStore.packs.length <= 1) return
+  if (!window.confirm(`Delete “${pack.name}”? This can’t be undone.`)) return
+  columnsStore.deletePack(pack.id)
+  packMenuOpen.value = false
+}
+
+const shareActivePack = async () => {
+  const pack = columnsStore.activePack
+  if (!pack) return
+  algorithmsStore.hydrate()
+  const active = instancesStore.activeAccount
+  const encoded = encodePackShare(pack, {
+    authorAcct: active?.user?.acct,
+    authorName: active?.user?.displayName || active?.user?.username,
+    algorithms: algorithmsStore.allRecipes,
+  })
+  const url = buildPackShareUrl(window.location.origin, encoded)
+  packMenuOpen.value = false
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: pack.name, url, text: `NeoSpace pack: ${pack.name}` })
+      return
+    }
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    toastStore.show({ message: 'Pack link copied' })
+  } catch {
+    toastStore.show({ message: 'Couldn’t copy pack link' })
+  }
+}
+
+const installStarter = (starterId: string) => {
+  const id = columnsStore.installStarterPack(starterId)
+  if (!id) {
+    toastStore.show({ message: `You already have ${columnsStore.maxPacks} packs` })
+  }
+}
 
 const sidebarJoinedGroups = computed(() => groupsStore.joinedGroups.slice(0, 12))
 const sidebarSuggestedGroups = computed(() => groupsStore.suggestedFeaturedGroups.slice(0, 6))
@@ -262,7 +341,7 @@ watch(
           class="sidebar__home-plus"
           title="New post"
           aria-label="New post"
-          @click="openCompose"
+          @click="() => openCompose()"
         >
           <NeoIcon name="plus" :size="sidebarRail ? 20 : 16" :stroke="2.25" />
         </button>
@@ -350,6 +429,86 @@ watch(
         <span class="sidebar__label">Profile</span>
       </button>
     </nav>
+
+    <section class="sidebar__section" aria-labelledby="sidebar-packs-title">
+      <div class="sidebar__section-head">
+        <h2 id="sidebar-packs-title" class="sidebar__section-title">Packs</h2>
+        <button
+          v-if="columnsStore.canAddPack"
+          type="button"
+          class="sidebar__section-action"
+          aria-label="New pack"
+          @click="createPackFromSidebar"
+        >
+          New
+        </button>
+      </div>
+      <ul class="sidebar__section-list">
+        <li v-for="pack in columnsStore.packs" :key="pack.id">
+          <button
+            type="button"
+            class="sidebar__row"
+            :class="{ 'sidebar__row--on': columnsStore.activePackId === pack.id }"
+            :aria-current="columnsStore.activePackId === pack.id ? 'true' : undefined"
+            :title="sidebarRail ? pack.name : pack.description || pack.name"
+            @click="columnsStore.switchPack(pack.id)"
+          >
+            <span class="sidebar__row-glyph" aria-hidden="true">
+              <NeoIcon name="bookmark" :size="18" :stroke="1.75" />
+            </span>
+            <span class="sidebar__label">{{ pack.name }}</span>
+          </button>
+        </li>
+      </ul>
+      <div class="sidebar__pack-actions">
+        <NeoMenu
+          v-model:open="packMenuOpen"
+          class="sidebar__pack-menu"
+          align="start"
+          :label="`Pack options for ${columnsStore.activePack?.name || 'active pack'}`"
+        >
+          <span class="sidebar__section-action">Manage</span>
+          <template #items>
+            <button type="button" role="menuitem" @click="renameActivePack">Rename</button>
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="!columnsStore.canAddPack"
+              @click="duplicateActivePack"
+            >
+              Duplicate
+            </button>
+            <button type="button" role="menuitem" @click="shareActivePack">Share link</button>
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="columnsStore.packs.length <= 1"
+              @click="deleteActivePack"
+            >
+              Delete
+            </button>
+          </template>
+        </NeoMenu>
+      </div>
+      <ul v-if="unusedStarters.length && columnsStore.canAddPack" class="sidebar__section-list">
+        <li class="sidebar__section-hint-li">
+          <p class="sidebar__section-hint">Starters</p>
+        </li>
+        <li v-for="starter in unusedStarters" :key="starter.id">
+          <button
+            type="button"
+            class="sidebar__row"
+            :title="starter.description"
+            @click="installStarter(starter.id)"
+          >
+            <span class="sidebar__row-glyph" aria-hidden="true">
+              <NeoIcon name="sparkle" :size="18" :stroke="1.75" />
+            </span>
+            <span class="sidebar__label">{{ starter.name }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
 
     <section class="sidebar__section" aria-labelledby="sidebar-algorithms-title">
       <div class="sidebar__section-head">
@@ -1092,6 +1251,20 @@ watch(
     margin: 0 0.75rem 0.15rem;
     font-size: 0.6875rem;
     color: var(--neo-text-muted);
+  }
+
+  &__pack-actions {
+    display: flex;
+    align-items: center;
+    padding: 0.15rem 0.35rem 0.35rem;
+
+    :deep(.neo-menu__trigger) {
+      border: none;
+      background: transparent;
+      padding: 0;
+      min-height: 0;
+      color: inherit;
+    }
   }
 
   &__section-list {

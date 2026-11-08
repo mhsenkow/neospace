@@ -23,6 +23,7 @@ const props = withDefaults(
     activeAlgorithmId?: string | null
     activeGroupTag?: string | null
     activeListId?: string | null
+    activeRssUrl?: string | null
     canShowHome?: boolean
     groupsExpanded?: boolean
     joinedGroups?: FeedMenuGroup[]
@@ -35,6 +36,7 @@ const props = withDefaults(
     activeAlgorithmId: null,
     activeGroupTag: null,
     activeListId: null,
+    activeRssUrl: null,
     canShowHome: false,
     groupsExpanded: false,
     joinedGroups: () => [],
@@ -49,6 +51,7 @@ const emit = defineEmits<{
   'toggle-groups': []
   'create-algorithm': []
   'edit-algorithm': [id: string]
+  'add-rss': []
 }>()
 
 const algorithmsStore = useAlgorithmsStore()
@@ -80,6 +83,7 @@ const isActive = (type: ColumnFeedType, param?: string) => {
   if (type === 'algorithm') return props.activeAlgorithmId === param
   if (type === 'group') return props.activeGroupTag === param
   if (type === 'list') return props.activeListId === param
+  if (type === 'rss') return props.activeRssUrl === param
   return true
 }
 
@@ -267,6 +271,17 @@ const onPick = (type: ColumnFeedType, param?: string) => emit('pick', type, para
         {{ list.title }}
       </button>
     </template>
+
+    <span :class="subheadClass">Open web</span>
+    <button
+      type="button"
+      role="menuitem"
+      :class="itemClass"
+      @click="emit('add-rss')"
+    >
+      <NeoIcon v-if="!compactAdd" name="globe" :size="16" :stroke="1.5" />
+      Add RSS feed…
+    </button>
   </template>
 
   <template v-if="isSwitch && joinedGroups.length > 0">

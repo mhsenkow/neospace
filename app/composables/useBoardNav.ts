@@ -49,6 +49,7 @@ export function useBoardNav() {
     if (feedType === 'group') return col.groupTag === feedParam
     if (feedType === 'algorithm') return col.algorithmId === feedParam
     if (feedType === 'list') return col.listId === feedParam
+    if (feedType === 'rss') return col.rssUrl === feedParam
     if (feedType === 'profile') return !col.profileAcct
     return true
   }

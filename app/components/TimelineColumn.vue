@@ -538,6 +538,9 @@ const feedLabel = computed(() => {
   if (props.column.feedType === 'list') {
     return props.column.listTitle || 'List'
   }
+  if (props.column.feedType === 'rss') {
+    return props.column.rssTitle || 'RSS'
+  }
   if (props.column.feedType === 'local') {
     return columnPinnedHost.value || columnPinnedInstanceId.value
       ? `Local (${browsingHost.value})`
@@ -691,9 +694,21 @@ const switchFeed = (type: ColumnFeedType, feedParam?: string) => {
     if (type === 'group' && feedParam === props.column.groupTag) return
     if (type === 'algorithm' && feedParam === props.column.algorithmId) return
     if (type === 'list' && feedParam === props.column.listId) return
-    if (type !== 'group' && type !== 'algorithm' && type !== 'list') return
+    if (type === 'rss' && feedParam === props.column.rssUrl) return
+    if (type !== 'group' && type !== 'algorithm' && type !== 'list' && type !== 'rss') return
   }
   emit('update-feed-type', type, feedParam)
+}
+
+const promptSwitchRss = () => {
+  feedMenuOpen.value = false
+  const raw = window.prompt(
+    'Paste an RSS or Atom feed URL\n(e.g. https://example.com/feed.xml)',
+  )
+  if (!raw) return
+  const url = raw.trim()
+  if (!/^https?:\/\//i.test(url)) return
+  emit('update-feed-type', 'rss', url)
 }
 
 /**
@@ -982,6 +997,15 @@ const loadTimelinePage = async (
     return withBrowseOrigin(
       await client.v1.timelines.list.$select(props.column.listId).list({ limit: 20 }),
     )
+  }
+  if (props.column.feedType === 'rss' && props.column.rssUrl) {
+    const { fetchRssFeed, rssFeedToStatuses } = await import('~/utils/rssToStatus')
+    const feed = await fetchRssFeed(props.column.rssUrl)
+    if (gen === fetchGen && feed.title) {
+      columnsStore.setRssTitle(props.column.id, feed.title)
+      hasMore.value = false
+    }
+    return rssFeedToStatuses(feed)
   }
   if (props.column.feedType === 'home') {
     if (!instancesStore.hasAuthenticatedInstance) return []
@@ -1398,11 +1422,11 @@ const fetchTimeline = async (refresh = false): Promise<boolean> => {
     if (result.length > 0) {
       maxId.value = statuses.value.at(-1)!.id
     }
-    // Algorithm sets hasMore inside loadTimelinePage; Liked / Saved follow the
+    // Algorithm / RSS set hasMore inside loadTimelinePage; Liked / Saved follow the
     // Link header; others use page size
     if (isSavedFeed(props.column.feedType)) {
       hasMore.value = result.length > 0 && !!savedCursor.value
-    } else if (props.column.feedType !== 'algorithm') {
+    } else if (props.column.feedType !== 'algorithm' && props.column.feedType !== 'rss') {
       hasMore.value = result.length >= 20
     }
     autoRetryAttempt = 0
@@ -1530,6 +1554,11 @@ const loadMore = async () => {
         }
         break
       }
+      case 'rss': {
+        // Single-shot feed fetch — no cursor paging
+        if (gen === fetchGen) hasMore.value = false
+        break
+      }
     }
 
     if (gen !== fetchGen) return
@@ -1545,7 +1574,7 @@ const loadMore = async () => {
     }
     if (isSavedFeed(props.column.feedType)) {
       hasMore.value = newStatuses.length > 0 && !!savedCursor.value
-    } else if (props.column.feedType !== 'algorithm') {
+    } else if (props.column.feedType !== 'algorithm' && props.column.feedType !== 'rss') {
       hasMore.value = newStatuses.length > 0
     }
 
@@ -1915,6 +1944,7 @@ onUnmounted(() => {
               :active-algorithm-id="column.algorithmId"
               :active-group-tag="column.groupTag"
               :active-list-id="column.listId"
+              :active-rss-url="column.rssUrl"
               :can-show-home="canShowHome"
               :groups-expanded="groupsExpanded"
               :joined-groups="joinedGroups"
@@ -1922,6 +1952,7 @@ onUnmounted(() => {
               @toggle-timelines="algorithmsExpanded = !algorithmsExpanded"
               @toggle-groups="groupsExpanded = !groupsExpanded"
               @pick="switchFeed"
+              @add-rss="promptSwitchRss"
               @create-algorithm="feedMenuOpen = false; algorithmsStore.openEditor()"
               @edit-algorithm="(id) => { feedMenuOpen = false; algorithmsStore.openEditor(id) }"
             />
