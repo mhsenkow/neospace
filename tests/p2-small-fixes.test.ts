@@ -27,6 +27,7 @@ describe('profile custom CSS field', () => {
 
   it('recognises the columns field regardless of punctuation', () => {
     expect(isColumnsField({ name: 'LoomSpace Columns' })).toBe(true)
+    expect(isColumnsField({ name: 'NeoSpace Columns' })).toBe(true)
     expect(isColumnsField({ name: 'Homepage' })).toBe(false)
   })
 })
