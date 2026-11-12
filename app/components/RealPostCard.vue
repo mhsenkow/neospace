@@ -34,6 +34,7 @@ import { useStatusStore } from '~/stores/status'
 import { supportsLegalReports } from '~/utils/serverCapabilities'
 import { mediaIsHidden } from '~/utils/readingPrefs'
 import { useInstancesStore, type ExtendedStatus } from '~/stores/instances'
+import { useColumnsStore } from '~/stores/columns'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeSheetStore, type ComposeContextPost } from '~/stores/composeSheet'
 import { useToastStore } from '~/stores/toast'
@@ -66,6 +67,7 @@ import {
 } from '~/utils/signalInspector'
 import { hostnameOf } from '~/utils/instances'
 import { formatCompactCount } from '~/utils/formatCount'
+import { fetchStatusTranslation, languagesDiffer } from '~/utils/statusTranslate'
 
 /** Reply couldn't import the post: say which server, and offer its own web page (does the import server-side) */
 const replyHandOff = (uri: string) => {
@@ -96,12 +98,17 @@ interface Props {
    * `top` connects into this card, `bottom` continues below, `both` does both.
    */
   threadConnect?: 'none' | 'top' | 'bottom' | 'both'
+  /** Thread focus post — show the whole body, no See more clamp */
+  forceExpanded?: boolean
+  /** Board column this card belongs to. Avatar taps peek in-column when the board has more than one column. */
+  columnId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   hideInlineReply: false,
   variant: 'flow',
   threadConnect: 'none',
+  forceExpanded: false,
 })
 const emit = defineEmits<{
   replied: [status: mastodon.v1.Status]
@@ -114,18 +121,27 @@ const emit = defineEmits<{
 
 const statusStore = useStatusStore()
 const instancesStore = useInstancesStore()
+const columnsStore = useColumnsStore()
 const settingsStore = useSettingsStore()
 const composeSheet = useComposeSheetStore()
 const toastStore = useToastStore()
 const overlayStore = useOverlayStore()
 const router = useRouter()
 
-/** Profiles always open the full /profile page — not a column peek. */
+/**
+ * Multi-column boards peel this column into a profile peek (back restores the feed).
+ * A single column, or a card with no column, still opens /profile.
+ */
 const openProfile = (acct: string | undefined | null, e?: Event) => {
   if (!acct) return
   if (e && typeof e.preventDefault === 'function') e.preventDefault()
   if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
-  router.push({ path: '/profile', query: { user: acct.replace(/^@/, '') } })
+  const handle = acct.replace(/^@/, '')
+  if (props.columnId && columnsStore.isMultiColumn && instancesStore.hasAuthenticatedInstance) {
+    columnsStore.peekProfileInColumn(props.columnId, handle)
+    return
+  }
+  router.push({ path: '/profile', query: { user: handle } })
 }
 
 const onHeaderProfileClick = (acct: string, e: MouseEvent) => {
@@ -261,7 +277,7 @@ const boostOpen = ref(false)
 const prefersReducedMotion = usePrefersReducedMotion()
 
 /** Long-post collapse — overflow-based toggle (not char-count only) */
-const contentExpanded = ref(false)
+const contentExpanded = ref(props.forceExpanded)
 const contentEl = ref<HTMLElement | null>(null)
 const contentOverflows = ref(false)
 /** CW / sensitive media revealed by the reader */
@@ -310,8 +326,11 @@ watch(
     // (usePostActions drops its resolved id/client on its own)
     mediaRevealed.value = false
     cwOpen.value = false
-    contentExpanded.value = false
+    contentExpanded.value = props.forceExpanded
     contentOverflows.value = false
+    showTranslation.value = false
+    translationHtml.value = null
+    translationFrom.value = ''
     rankXrayOpen.value = false
     inspectOpen.value = false
     applyReadingPrefs()
@@ -320,7 +339,7 @@ watch(
 
 const measureContentOverflow = () => {
   const el = contentEl.value
-  if (!el) {
+  if (!el || props.forceExpanded) {
     contentOverflows.value = false
     return
   }
@@ -334,7 +353,9 @@ const measureContentOverflow = () => {
   }
 }
 
-const showSeeMore = computed(() => contentOverflows.value || contentExpanded.value)
+const showSeeMore = computed(
+  () => !props.forceExpanded && (contentOverflows.value || contentExpanded.value),
+)
 
 // One app-wide observer; its initial callback on observe() is the mount-time
 // measure, and later callbacks cover width changes (viewport, column resize)
@@ -808,8 +829,8 @@ const onShareSelect = async (id: string) => {
         text: stripHtml(displayStatus.value.content).slice(0, 200),
         url,
       })
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') await copyLink()
+    } catch (e: unknown) {
+      if ((e as { name?: string })?.name !== 'AbortError') await copyLink()
     }
     return
   }
@@ -956,31 +977,26 @@ const handleReport = async () => {
       statusStore.listReportablePosts(reportedAccountId, {
         acct: reportFromActive() ? undefined : acct,
       }),
+    perform: async (report) => {
+      const ctx = await getActionContext()
+      const fromActive = reportFromActive()
+      await statusStore.reportStatus(
+        ctx?.id || displayStatus.value.id,
+        displayStatus.value.account.id,
+        report.comment || undefined,
+        {
+          statusUrl: statusUrl.value || undefined,
+          acct: fromActive ? undefined : acct,
+          category: report.category,
+          forward: report.forward,
+          extraStatusIds: report.extraStatusIds,
+        },
+      )
+    },
   })
+  isMenuOpen.value = false
   if (!payload) return
-
-  try {
-    const ctx = await getActionContext()
-    const fromActive = reportFromActive()
-    await statusStore.reportStatus(
-      ctx?.id || displayStatus.value.id,
-      displayStatus.value.account.id,
-      payload.comment || undefined,
-      {
-        statusUrl: statusUrl.value || undefined,
-        acct: fromActive ? undefined : acct,
-        category: payload.category,
-        forward: payload.forward,
-        extraStatusIds: payload.extraStatusIds,
-      },
-    )
-    toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
-  } catch (e) {
-    logError('Report error:', e)
-    toastStore.show({ message: 'Failed to submit report. Please try again.' })
-  } finally {
-    isMenuOpen.value = false
-  }
+  toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
 }
 
 // ── Own-post management ──

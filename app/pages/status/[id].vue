@@ -9,7 +9,7 @@ import type { mastodon } from 'masto'
 import { useStatusStore } from '~/stores/status'
 import { useInstancesStore } from '~/stores/instances'
 import { useConversationsStore } from '~/stores/conversations'
-import { dayKey, daySeparatorLabel, safeHttpUrl } from '~/utils/dmHelpers'
+import { dayKey, daySeparatorLabel, formatNameList, safeHttpUrl, shouldShowBubbleMeta } from '~/utils/dmHelpers'
 import { compareId } from '~/utils/compareId'
 import { findThreadConversation, threadNeedsRefetch } from '~/utils/dmThread'
 import { earlierPostMissing } from '~/utils/threadMerge'
@@ -498,14 +498,10 @@ const threadTitle = computed(() => {
   if (!focusStatus.value) return 'Thread'
   if (!isDirectThread.value) return 'Thread'
   const people = otherParticipants.value
-  if (!people.length) return 'Message'
-  if (people.length === 1) {
-    return people[0]!.displayName || people[0]!.username || people[0]!.acct || 'Message'
-  }
-  if (people.length === 2) {
-    return `${people[0]!.displayName || people[0]!.username} & ${people[1]!.displayName || people[1]!.username}`
-  }
-  return `${people[0]!.displayName || people[0]!.username} +${people.length - 1}`
+  if (!people.length) return 'Note to self'
+  return (
+    formatNameList(people.map((p) => p.displayName || p.username || p.acct)) || 'Message'
+  )
 })
 
 const threadSubtitle = computed(() => {
@@ -546,12 +542,19 @@ const dayLabelFor = (status: mastodon.v1.Status, index: number) => {
   return null
 }
 
-/** Show avatar/name when speaker changes */
+/** Show avatar/name when speaker changes, the day rolls over, or an hour+ passed */
 const showBubbleMeta = (status: mastodon.v1.Status, index: number) => {
-  if (isMine(status)) return false
-  if (index === 0) return true
   const prev = visibleChatMessages.value[index - 1]
-  return !prev || prev.account.id !== status.account.id
+  const gap = prev
+    ? new Date(status.createdAt).getTime() - new Date(prev.createdAt).getTime()
+    : 0
+  return shouldShowBubbleMeta({
+    mine: isMine(status),
+    isFirst: index === 0,
+    dayChanged: !!dayLabelFor(status, index),
+    prevSameSpeaker: !!prev && prev.account.id === status.account.id,
+    gapMs: gap,
+  })
 }
 
 /** Stamp the last bubble of a run, or any bubble followed by a >5 minute gap */
@@ -1016,7 +1019,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
         focusEl.value?.focus?.({ preventScroll: true })
       }
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (!ticket.isCurrent()) return
     if (!opts.quiet) {
       const friendly = mapErrorToMessage(e)
@@ -1233,7 +1236,8 @@ watch(showDmContextChrome, (show) => {
 useHead({
   title: computed(() => {
     if (!focusStatus.value) return 'Thread | LoomSpace'
-    if (isDirectThread.value) return `${threadTitle.value} | LoomSpace`
+    // DMs stay generic — names in the tab title leak into history / screen shares
+    if (isDirectThread.value) return 'Message | LoomSpace'
     return `Thread · @${focusStatus.value.account.acct} | LoomSpace`
   }),
 })
@@ -2141,7 +2145,7 @@ useHead({
     text-align: left;
     color: inherit;
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
     }
   }
@@ -2357,7 +2361,10 @@ useHead({
   color: var(--neo-text-muted);
   cursor: pointer;
 
-  &:hover,
+  @include hover {
+    color: var(--neo-text-primary);
+  }
+
   &:focus-visible,
   &[aria-expanded='true'] {
     color: var(--neo-text-primary);
@@ -2480,7 +2487,10 @@ useHead({
   color: var(--neo-accent);
   text-decoration: none;
 
-  &:hover,
+  @include hover {
+    text-decoration: underline;
+  }
+
   &:focus-visible {
     text-decoration: underline;
   }
@@ -2609,7 +2619,11 @@ useHead({
     color: var(--neo-text-secondary);
     cursor: pointer;
 
-    &:hover,
+    @include hover {
+      background: var(--neo-bg-hover);
+      color: var(--neo-text-primary);
+    }
+
     &:focus-visible {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);

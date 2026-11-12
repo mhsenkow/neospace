@@ -16,6 +16,7 @@ import { useToastStore } from '~/stores/toast'
 import { useSettingsStore } from '~/stores/settings'
 import { activeClient } from '~/composables/useMasto'
 import { mediaAttachmentLoupeMeta } from '~/utils/mediaLoupe'
+import { formatAbsoluteTime } from '~/utils/relativeTime'
 
 const props = defineProps<{
   status: mastodon.v1.Status
@@ -51,6 +52,7 @@ const menuRef = ref<HTMLElement | null>(null)
 const cwButtonRef = ref<HTMLButtonElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressOpened = false
 
 const isPending = computed(() => props.delivery === 'pending')
 const isFailed = computed(() => props.delivery === 'failed')
@@ -102,21 +104,23 @@ const hasText = computed(() =>
   bubbleHtml.value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().length > 0,
 )
 
-const isSensitive = computed(
-  () =>
-    !!props.status.sensitive ||
-    !!(props.status.spoilerText && props.status.spoilerText.trim()),
+const spoilerText = computed(() => props.status.spoilerText?.trim() || '')
+const hasSpoilerText = computed(() => !!spoilerText.value)
+/** `sensitive` with no CW only marks media — Mastodon still shows the text */
+const blurMediaOnly = computed(
+  () => !!props.status.sensitive && !hasSpoilerText.value && !revealed.value,
 )
-
-const showSpoilerGate = computed(() => isSensitive.value && !revealed.value)
+const showSpoilerGate = computed(() => hasSpoilerText.value && !revealed.value)
 
 const createdDate = computed(() => new Date(props.status.createdAt))
+
+const editedAt = computed(() => props.status.editedAt || '')
 
 const timeTitle = computed(() => {
   const date = createdDate.value
   const now = new Date()
   const sameYear = date.getFullYear() === now.getFullYear()
-  return date.toLocaleString(undefined, {
+  const sent = date.toLocaleString(undefined, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -124,6 +128,9 @@ const timeTitle = computed(() => {
     hour: 'numeric',
     minute: '2-digit',
   })
+  if (!editedAt.value) return sent
+  const edited = formatAbsoluteTime(editedAt.value)
+  return edited ? `${sent} · Edited ${edited}` : `${sent} · Edited`
 })
 
 const timeLabel = computed(() => {
@@ -177,14 +184,15 @@ const votePoll = async (choices: number[]) => {
   try {
     poll.value = await activeClient().v1.polls.$select(current.id).votes.create({ choices })
     toast.show({ message: 'Vote sent', duration: 2200 })
-  } catch (e: any) {
+  } catch (e: unknown) {
     // Already voted elsewhere / closed: show the real state instead of a vague failure
     try {
       poll.value = await activeClient().v1.polls.$select(current.id).fetch()
     } catch {
       /* keep what we have */
     }
-    toast.show({ message: e?.message ? `Couldn’t vote — ${e.message}` : 'Couldn’t vote' })
+    const msg = e instanceof Error ? e.message : ''
+    toast.show({ message: msg ? `Couldn’t vote — ${msg}` : 'Couldn’t vote' })
   } finally {
     isVoting.value = false
   }
@@ -196,23 +204,31 @@ const speakerLabel = computed(() => {
   return `${name} said`
 })
 
+const galleryMedia = computed(() =>
+  knownMedia.value.filter(
+    (m) => (m.type === 'image' || m.type === 'gifv') && !!(m.url || m.previewUrl),
+  ),
+)
+
 const openLightbox = (item: mastodon.v1.MediaAttachment) => {
-  const src = item.url || item.previewUrl
-  if (!src) return
-  const caption = item.description?.trim() || undefined
-  overlay.openLightbox({
-    src,
-    alt: caption || 'Image with no description',
-    items: [
-      {
-        src,
-        alt: caption || 'Image with no description',
-        caption,
-        preview: item.previewUrl && item.previewUrl !== item.url ? item.previewUrl : undefined,
-        meta: mediaAttachmentLoupeMeta(item),
-      },
-    ],
+  const images = galleryMedia.value
+  const items = images.map((m, i) => {
+    const src = (m.type === 'gifv' ? m.previewUrl || m.url : m.url || m.previewUrl)!
+    const caption = m.description?.trim() || undefined
+    return {
+      src,
+      alt:
+        caption ||
+        (images.length > 1 ? `Image ${i + 1} of ${images.length}` : 'Image with no description'),
+      caption,
+      preview: m.previewUrl && m.previewUrl !== m.url ? m.previewUrl : undefined,
+      meta: mediaAttachmentLoupeMeta(m),
+    }
   })
+  const index = images.findIndex((m) => m.id === item.id)
+  const current = items[index]
+  if (!current) return
+  overlay.openLightbox({ ...current, items, index })
 }
 
 const mediaButtonLabel = (item: mastodon.v1.MediaAttachment) => {
@@ -269,8 +285,10 @@ const deleteOwn = async () => {
     await statusStore.deleteStatus(props.status.id, accountId)
     emit('deleted', props.status.id)
     toast.show({ message: 'Message deleted', duration: 2500 })
-  } catch (e: any) {
-    toast.show({ message: e?.message || 'Couldn’t delete message' })
+  } catch (e: unknown) {
+    toast.show({
+      message: e instanceof Error && e.message ? e.message : 'Couldn’t delete message',
+    })
   }
 }
 
@@ -282,10 +300,18 @@ const openAsPost = () => {
 const onPointerDown = (e: PointerEvent) => {
   // Long-press is a touch gesture — a held mouse button is a text selection
   if (e.pointerType === 'mouse') return
+  longPressOpened = false
   if (longPressTimer) clearTimeout(longPressTimer)
   longPressTimer = setTimeout(() => {
     menuOpen.value = true
+    longPressOpened = true
   }, 550)
+}
+
+const onContextMenu = (e: Event) => {
+  if (!longPressOpened && !menuOpen.value) return
+  e.preventDefault()
+  longPressOpened = false
 }
 
 const onPointerUp = () => {
@@ -319,9 +345,8 @@ onBeforeUnmount(() => {
     @pointerup="onPointerUp"
     @pointerleave="onPointerUp"
     @pointercancel="onPointerUp"
+    @contextmenu="onContextMenu"
   >
-    <span class="sr-only">{{ speakerLabel }}</span>
-
     <div v-if="showMeta && !mine" class="msg-bubble__who">
       <img
         :src="status.account.avatar"
@@ -334,7 +359,7 @@ onBeforeUnmount(() => {
     <div class="msg-bubble__row">
       <div ref="menuRef" class="msg-bubble__stack">
         <button
-          v-if="showSpoilerGate"
+          v-if="hasSpoilerText"
           ref="cwButtonRef"
           type="button"
           class="msg-bubble__cw"
@@ -342,12 +367,12 @@ onBeforeUnmount(() => {
           @click="toggleReveal"
         >
           <NeoIcon name="eye-off" :size="14" :stroke="2" />
-          <span>{{ status.spoilerText?.trim() || 'Sensitive content' }}</span>
+          <span>{{ spoilerText || 'Sensitive content' }}</span>
           <span class="msg-bubble__cw-action">{{ revealed ? 'Hide' : 'Show' }}</span>
         </button>
 
         <div
-          v-else
+          v-if="!showSpoilerGate"
           ref="contentRef"
           class="msg-bubble__content"
           tabindex="-1"
@@ -359,7 +384,14 @@ onBeforeUnmount(() => {
             v-html="bubbleHtml"
           />
 
-          <div v-if="knownMedia.length || unknownMedia.length" class="msg-bubble__media">
+          <div
+            v-if="knownMedia.length || unknownMedia.length"
+            class="msg-bubble__media-wrap"
+          >
+            <div
+              class="msg-bubble__media"
+              :class="{ 'msg-bubble__media--cw': blurMediaOnly }"
+            >
             <template v-for="item in knownMedia" :key="item.id">
               <!-- GIFV is a looping muted mp4: play it inline, don't hand it to the image lightbox -->
               <video
@@ -418,6 +450,15 @@ onBeforeUnmount(() => {
               >open original</a>
               <span v-else>open original</span>
             </p>
+            </div>
+            <button
+              v-if="blurMediaOnly"
+              type="button"
+              class="msg-bubble__media-reveal"
+              @click="revealed = true"
+            >
+              Show media
+            </button>
           </div>
 
           <PostPoll
@@ -436,7 +477,7 @@ onBeforeUnmount(() => {
           class="msg-bubble__time"
           :datetime="status.createdAt"
           :title="timeTitle"
-        >{{ timeLabel }}</time>
+        >{{ timeLabel }}<template v-if="editedAt"> · Edited</template></time>
         <p v-else-if="isPending" class="msg-bubble__delivery" role="status">Sending…</p>
         <p v-else class="msg-bubble__delivery msg-bubble__delivery--failed">
           Not delivered ·
@@ -472,18 +513,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 /* Runs of messages from one sender: tighten the corners that touch their neighbours */
 .msg-bubble--theirs.msg-bubble--join-prev .msg-bubble__body {
   border-top-left-radius: 0.3rem;
@@ -586,15 +615,25 @@ onBeforeUnmount(() => {
       border-radius: 50%;
     }
 
-    .msg-bubble:hover &,
     .msg-bubble:focus-within &,
     .msg-bubble--menu & {
       opacity: 1;
     }
 
-    // Touch has no hover — keep the menu discoverable (long-press still works)
+    @media (hover: hover) {
+      .msg-bubble:hover & {
+        opacity: 1;
+      }
+    }
+
+    // Touch: long-press opens the same menu — hide the ⋯ until focus
     @media (hover: none), (pointer: coarse) {
-      opacity: 0.6;
+      opacity: 0;
+
+      .msg-bubble:focus-within &,
+      .msg-bubble--menu & {
+        opacity: 1;
+      }
 
       :deep(.neo-menu__trigger) {
         width: 36px;
@@ -657,10 +696,36 @@ onBeforeUnmount(() => {
     }
   }
 
+  &__media-wrap {
+    position: relative;
+  }
+
   &__media {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+
+    &--cw {
+      filter: blur(14px);
+      user-select: none;
+    }
+  }
+
+  &__media-reveal {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    border: none;
+    border-radius: var(--neo-radius-md, 0.85rem);
+    background: color-mix(in srgb, var(--neo-bg-primary) 55%, transparent);
+    color: var(--neo-text-primary);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   &__media-btn {

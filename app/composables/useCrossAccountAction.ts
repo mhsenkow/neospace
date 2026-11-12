@@ -13,9 +13,7 @@ import { clientFor } from '~/composables/useMasto'
 import { useInstancesStore, type ConnectedInstance } from '~/stores/instances'
 import { accountsMatch, hostOf } from '~/utils/federation'
 import { logWarn } from '~/utils/log'
-
-/** Account rows from a remote search/directory may carry where they were fetched */
-export type SourcedAccount = mastodon.v1.Account & { _sourceUrl?: string | null }
+import type { SourcedAccount } from '~/utils/searchMerge'
 
 const relCache = reactive(new Map<string, mastodon.v1.Relationship>())
 const pendingKeys = new Set<string>()

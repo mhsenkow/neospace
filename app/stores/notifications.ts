@@ -3,12 +3,14 @@ import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { activeClient, clientFor } from '~/composables/useMasto'
 import { logWarn, logError } from '~/utils/log'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 import { compareId, idGreater } from '~/utils/compareId'
 import {
   collapseConsecutiveNotifications,
   type CollapsedNotification,
 } from '~/utils/notifGroup'
 import { withinFrontier } from '~/utils/notifHelpers'
+import { localDayKey } from '~/utils/calendarDay'
 
 export type NotificationFilterType =
   | 'all'
@@ -56,6 +58,8 @@ interface NotificationsState {
   lastReadByInstance: Record<string, string>
   /** Hosts that failed during the last fetch (partial failure banner) */
   failedHosts: string[]
+  /** Local calendar day — groupedByTime rereads `new Date()` when this changes */
+  dayAnchor: string
 }
 
 const FILTER_TO_TYPES: Record<NotificationFilterType, string[] | undefined> = {
@@ -151,6 +155,7 @@ export const useNotificationsStore = defineStore('notifications', {
     badgeByInstance: {},
     lastReadByInstance: {},
     failedHosts: [],
+    dayAnchor: localDayKey(),
   }),
 
   getters: {
@@ -195,6 +200,7 @@ export const useNotificationsStore = defineStore('notifications', {
     },
 
     groupedByTime(): Record<string, CollapsedNotification<ExtendedNotification>[]> {
+      void this.dayAnchor
       const groups: Record<string, CollapsedNotification<ExtendedNotification>[]> = {}
       const now = new Date()
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -270,6 +276,10 @@ export const useNotificationsStore = defineStore('notifications', {
     persistLastRead(instanceId: string, id: string) {
       this.lastReadByInstance = { ...this.lastReadByInstance, [instanceId]: id }
       this.persistLastReadMap()
+    },
+
+    syncDayAnchor() {
+      this.dayAnchor = localDayKey()
     },
 
     recomputeUnread() {
@@ -460,9 +470,8 @@ export const useNotificationsStore = defineStore('notifications', {
               if (serverLast && (!localLast || idGreater(serverLast, localLast))) {
                 // Read elsewhere (another client / device) — don't show them as unread here
                 this.persistLastRead(inst.id, serverLast)
-              } else if (items.length && !localLast && this.filter === 'all') {
-                this.persistLastRead(inst.id, items[0]!.id)
               }
+              // No marker and no local value: leave unset so a new device still shows unread
               return {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
@@ -470,7 +479,7 @@ export const useNotificationsStore = defineStore('notifications', {
                 hasNext: linkHasNext(res.headers) || items.length >= 30,
                 ok: true as const,
               }
-            } catch (e: any) {
+            } catch (e: unknown) {
               logWarn(`Notifications fetch failed for ${inst.url}:`, e)
               return {
                 instanceId: inst.id,
@@ -522,9 +531,9 @@ export const useNotificationsStore = defineStore('notifications', {
         if (!anyOk && failed.length) {
           this.error = 'Couldn’t load notifications from any account'
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (gen === this.fetchGeneration) {
-          this.error = e.message || 'Failed to fetch notifications'
+          this.error = mapErrorToMessage(e).detail || 'Failed to fetch notifications'
           logError('Notifications fetch error:', e)
         }
       } finally {
@@ -616,7 +625,7 @@ export const useNotificationsStore = defineStore('notifications', {
         this.hasMore = anyHasNext && Object.keys(nextCursors).length > 0
         // Every new row landed below the frontier: keep paging so the reader isn't left at a dead end
         stalled = this.hasMore && this.filteredNotifications.length <= shownBefore
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (gen === this.fetchGeneration) logError('Load more notifications error:', e)
       } finally {
         this.isLoadingMore = false

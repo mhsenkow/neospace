@@ -9,7 +9,7 @@ import type { Group } from '~/stores/groups'
 import { useGroupsStore } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
-import { categoryColor, categoryTint } from '~/composables/useShellAppearance'
+import { categoryColor, categoryTint } from '~/utils/groupCategory'
 import { joinGroupFailure } from '~/utils/groupErrors'
 import { formatCountLabel } from '~/utils/searchQuery'
 

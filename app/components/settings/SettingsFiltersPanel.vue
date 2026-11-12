@@ -7,6 +7,7 @@ import type { SettingsTopic } from '~/utils/serverCapabilities'
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
+const signedIn = computed(() => instancesStore.isAuthenticated)
 const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
 
@@ -65,7 +66,13 @@ const createNewFilter = async () => {
   <section class="settings-section">
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
-    <div class="settings-group">
+    <SettingsSignedOut
+      v-if="!signedIn"
+      title="Filters live on your account"
+      body="Keyword filters sync to your Mastodon server so they follow you across clients."
+    />
+
+    <div v-else class="settings-group">
       <fieldset class="settings-fieldset">
         <legend class="settings-subheading">Create filter</legend>
         <form class="settings-filter-form" @submit.prevent="createNewFilter">
@@ -148,3 +155,9 @@ const createNewFilter = async () => {
     </div>
   </section>
 </template>
+
+<style lang="scss" scoped>
+@use '~/assets/css/settingsPanel' as panel;
+
+@include panel.shared;
+</style>

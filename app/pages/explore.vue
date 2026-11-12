@@ -13,7 +13,6 @@
 import type { mastodon } from 'masto'
 import { useCuratedInstances } from '~/composables/useCuratedInstances'
 import { useInstancesStore } from '~/stores/instances'
-import type { InstanceApiInfo } from '~/utils/instanceInfo'
 import { useGroupsStore } from '~/stores/groups'
 import { useFediverseSearch, ALL_PREVIEW, type ExploreSearchTab } from '~/composables/useFediverseSearch'
 import { useSearchDiscovery } from '~/composables/useSearchDiscovery'
@@ -26,13 +25,11 @@ import {
   emptyPostFilters,
   formatCount,
   highlightTerms,
-  hostSearchText,
   postOperatorTips,
   rankServers,
-  suggestTwinHost,
   type PostSince,
 } from '~/utils/searchQuery'
-import { useBoardNav } from '~/composables/useBoardNav'
+import { useExploreServers } from '~/composables/useExploreServers'
 import { useToastStore } from '~/stores/toast'
 import { useMobileViewport } from '~/composables/useBreakpoint'
 import { getMainScroller } from '~/utils/pageScroll'
@@ -67,7 +64,6 @@ const { categories, getByCategory, instances: curatedInstances, featured } = use
 const instancesStore = useInstancesStore()
 const groupsStore = useGroupsStore()
 const toastStore = useToastStore()
-const { openServerOnBoard } = useBoardNav()
 const router = useRouter()
 const route = useRoute()
 
@@ -133,103 +129,6 @@ const filteredInstances = computed(() =>
   hasQuery.value ? rankServers(curatedInstances, trimmedQuery.value) : getByCategory(selectedCategory.value),
 )
 const featuredServers = computed(() => featured.value.slice(0, 6))
-
-/** Live card for any hostname typed — no need to press "Look up" */
-const liveServer = ref<{ host: string; info: InstanceApiInfo | null; busy: boolean } | null>(null)
-let liveTimer: ReturnType<typeof setTimeout> | null = null
-
-const liveHostCandidate = computed(() => {
-  if (tab.value !== 'all' && tab.value !== 'servers') return null
-  const i = intent.value
-  if (i.kind === 'host') return i.host
-  if (tab.value === 'servers' && i.kind === 'url') return normalizeServer(i.url)?.replace(/^https:\/\//, '') ?? null
-  return null
-})
-
-watch(liveHostCandidate, (host) => {
-  if (liveTimer) clearTimeout(liveTimer)
-  if (!host) {
-    liveServer.value = null
-    return
-  }
-  liveServer.value = { host, info: null, busy: true }
-  liveTimer = setTimeout(async () => {
-    const info = await instancesStore.fetchInstanceInfo(host).catch(() => null)
-    if (liveHostCandidate.value !== host) return
-    liveServer.value = { host, info, busy: false }
-  }, 450)
-})
-
-const liveServerJoinUrl = computed(() => {
-  const s = liveServer.value
-  if (!s?.info?.registrations) return null
-  return s.info.registrationsUrl || `https://${s.host}/auth/sign_up`
-})
-
-/** Typed host unreachable / unknown — suggest swapped curated twin (lgbt.tech → tech.lgbt) */
-const twinSuggestion = computed(() => {
-  const host = liveHostCandidate.value
-  if (!host) return null
-  if (liveServer.value?.busy) return null
-  if (liveServer.value?.info) return null
-  return suggestTwinHost(curatedInstances, host)
-})
-
-const scopeChoices = computed(() => {
-  const rows: { id: string; label: string }[] = [{ id: 'everywhere', label: 'All my servers' }]
-  for (const inst of instancesStore.authenticatedInstances) {
-    const host = inst.url.replace(/^https?:\/\//, '').replace(/\/$/, '')
-    const acct = inst.user?.acct || inst.user?.username || host
-    rows.push({
-      id: inst.id,
-      label: acct.includes('@') ? `@${acct}` : `@${acct}@${host}`,
-    })
-  }
-  for (const inst of instancesStore.watchingInstances) {
-    const host = inst.url.replace(/^https?:\/\//, '').replace(/\/$/, '')
-    if (!rows.some((r) => r.label === host || r.id === `host:${host}`)) {
-      rows.push({ id: `host:${host}`, label: host })
-    }
-  }
-  return rows
-})
-
-const setSearchScope = (id: string) => {
-  searchScope.value = id
-}
-
-const addHostToBoard = async (host: string) => {
-  try {
-    if (!instancesStore.instances.some((i) => i.url.includes(host))) {
-      try {
-        await instancesStore.addInstance(`https://${host}`)
-        showToast(`Watching ${host} — browse public posts anytime`)
-      } catch {
-        /* still open the column */
-      }
-    }
-    await openServerOnBoard(host, 'local')
-    showToast(`Opened Local · ${host} on your board`)
-  } catch {
-    toastStore.show({ message: 'Couldn’t open that server on the board' })
-  }
-}
-
-const searchOnHost = (host: string) => {
-  searchScope.value = `host:${host}`
-  setTab('all')
-  if (!trimmedQuery.value || detectIntent(trimmedQuery.value).kind === 'host') {
-    // Keep domain tokens searchable as people/tags text
-    const text = hostSearchText(host)
-    if (text && text !== trimmedQuery.value) applyQuery(text)
-  }
-}
-
-const browsePeopleOnHost = (host: string) => {
-  searchScope.value = `host:${host}`
-  setTab('people')
-  if (!hasQuery.value) applyQuery(host.split('.')[0] || host, 'people')
-}
 
 // ── Topics / discovery ─────────────────────────────────────────────────────
 
@@ -503,6 +402,26 @@ const applyQuery = (q: string, nextTab?: ExploreTab) => {
   refocusSearch()
 }
 
+const {
+  liveServer,
+  liveServerJoinUrl,
+  twinSuggestion,
+  scopeChoices,
+  setSearchScope,
+  addHostToBoard,
+  searchOnHost,
+  browsePeopleOnHost,
+  disposeExploreServers,
+} = useExploreServers({
+  searchScope,
+  tab,
+  query,
+  curatedInstances: computed(() => curatedInstances),
+  setTab,
+  applyQuery,
+  trimmedQuery,
+})
+
 const applyTopic = (tag: string) => {
   recents.record(`#${tag}`, tab.value === 'servers' ? 'all' : tab.value)
   applyQuery(`#${tag}`)
@@ -709,8 +628,8 @@ useHead({
 })
 
 onUnmounted(() => {
+  disposeExploreServers()
   if (searchTimer) clearTimeout(searchTimer)
-  if (liveTimer) clearTimeout(liveTimer)
   loadMoreObserver?.disconnect()
   window.removeEventListener('keydown', onGlobalKeydown)
 })
@@ -1359,7 +1278,7 @@ onUnmounted(() => {
     white-space: nowrap;
     box-shadow: none;
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
       background: transparent;
     }
@@ -1532,7 +1451,7 @@ onUnmounted(() => {
   border-radius: 999px;
   cursor: pointer;
 
-  &:hover {
+  @include hover {
     border-color: var(--neo-accent);
     color: var(--neo-accent);
   }
@@ -1625,7 +1544,7 @@ onUnmounted(() => {
   text-decoration: none;
   cursor: pointer;
 
-  &:hover {
+  @include hover {
     border-color: var(--neo-accent);
   }
 }
@@ -1712,7 +1631,7 @@ onUnmounted(() => {
     font-weight: 600;
     text-decoration: none;
 
-    &:hover {
+    @include hover {
       text-decoration: underline;
     }
   }
@@ -1730,7 +1649,7 @@ onUnmounted(() => {
   cursor: pointer;
   text-decoration: none;
 
-  &:hover {
+  @include hover {
     text-decoration: underline;
   }
 }
@@ -1796,11 +1715,9 @@ onUnmounted(() => {
   color: var(--neo-text-muted);
   cursor: pointer;
 
-  @media (hover: hover) {
-    &:hover {
-      color: var(--neo-text-primary);
-      background: var(--neo-bg-tertiary);
-    }
+  @include hover {
+    color: var(--neo-text-primary);
+    background: var(--neo-bg-tertiary);
   }
 }
 
@@ -1842,11 +1759,9 @@ onUnmounted(() => {
   cursor: pointer;
   touch-action: manipulation;
 
-  @media (hover: hover) {
-    &:hover {
-      border-color: var(--neo-accent);
-      color: var(--neo-text-primary);
-    }
+  @include hover {
+    border-color: var(--neo-accent);
+    color: var(--neo-text-primary);
   }
 
   &[aria-pressed='true'],
@@ -1992,10 +1907,8 @@ onUnmounted(() => {
   color: var(--neo-text-muted);
   cursor: pointer;
 
-  @media (hover: hover) {
-    &:hover {
-      color: var(--neo-text-primary);
-    }
+  @include hover {
+    color: var(--neo-text-primary);
   }
 }
 
@@ -2022,10 +1935,8 @@ onUnmounted(() => {
   color: inherit;
   text-decoration: none;
 
-  @media (hover: hover) {
-    &:hover {
-      border-color: var(--neo-accent);
-    }
+  @include hover {
+    border-color: var(--neo-accent);
   }
 }
 
@@ -2080,10 +1991,8 @@ onUnmounted(() => {
     color: var(--neo-accent);
   }
 
-  @media (hover: hover) {
-    &:hover {
-      border-color: var(--neo-accent);
-    }
+  @include hover {
+    border-color: var(--neo-accent);
   }
 }
 

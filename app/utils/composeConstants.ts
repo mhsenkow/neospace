@@ -29,13 +29,6 @@ export function composeAttachmentIcon(mime: string): string {
   return '🎬'
 }
 
-export type { MediaUploadQuality } from '~/utils/prepareComposeImage'
-export {
-  formatByteSize,
-  normalizeMediaUploadQuality,
-  prepareComposeImage,
-} from '~/utils/prepareComposeImage'
-
 /** Scale upload timeout from file size (big videos need more than 25s). */
 export function uploadTimeoutForBytes(
   bytes: number,

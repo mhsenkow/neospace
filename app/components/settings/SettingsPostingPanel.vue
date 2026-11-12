@@ -202,3 +202,9 @@ const mediaQualityOptions = [
     </div>
   </section>
 </template>
+
+<style lang="scss" scoped>
+@use '~/assets/css/settingsPanel' as panel;
+
+@include panel.shared;
+</style>

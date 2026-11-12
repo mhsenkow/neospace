@@ -13,7 +13,7 @@ import { accountsMatch, hostOf } from '~/utils/federation'
 import { stripHtml } from '~/utils/stripHtml'
 import { profileFieldLimit } from '~/utils/profileSources'
 import { extractProfileCss } from '~/utils/profileCss'
-import { httpStatusFrom } from '~/utils/friendlyError'
+import { httpStatusFrom, mapErrorToMessage } from '~/utils/friendlyError'
 import {
   ACCOUNT_STATUS_PAGE_SIZE,
   accountStatusHasMore,
@@ -178,9 +178,10 @@ export const useProfileStore = defineStore('profile', {
           this.fetchPinnedStatuses(),
         ])
 
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (seq !== profileSeq) return
-        this.error = e.message || 'Failed to fetch profile'
+        const friendly = mapErrorToMessage(e)
+        this.error = friendly.detail || friendly.title || 'Failed to fetch profile'
         this.errorStatus = httpStatusFrom(e)
         logError('Profile fetch error:', e)
       } finally {
@@ -233,9 +234,10 @@ export const useProfileStore = defineStore('profile', {
           this.error = 'User not found'
           this.errorStatus = 404
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (seq !== profileSeq) return
-        this.error = e.message || 'Failed to find user'
+        const friendly = mapErrorToMessage(e)
+        this.error = friendly.detail || friendly.title || 'Failed to find user'
         this.errorStatus = httpStatusFrom(e)
         logError('Profile lookup error:', e)
       } finally {
@@ -280,7 +282,7 @@ export const useProfileStore = defineStore('profile', {
 
         this.hasMoreStatuses = accountStatusHasMore(statuses.length)
 
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (seq !== statusesSeq) return
         logError('Failed to fetch statuses:', e)
       } finally {
@@ -304,7 +306,7 @@ export const useProfileStore = defineStore('profile', {
         })
         if (seq !== pinnedSeq || this.viewedProfile?.id !== profileId) return
         this.pinnedStatuses = tagServingOrigin(pinned)
-      } catch (e: any) {
+      } catch (e: unknown) {
         logError('Failed to fetch pinned statuses:', e)
       }
     },
@@ -420,8 +422,9 @@ export const useProfileStore = defineStore('profile', {
 
         return updated
 
-      } catch (e: any) {
-        this.saveError = e.message || 'Failed to update profile'
+      } catch (e: unknown) {
+        const friendly = mapErrorToMessage(e)
+        this.saveError = friendly.detail || friendly.title || 'Failed to update profile'
         logError('Profile update error:', e)
         throw e
       } finally {
@@ -450,7 +453,7 @@ export const useProfileStore = defineStore('profile', {
         }
 
         return relationship
-      } catch (e: any) {
+      } catch (e: unknown) {
         logError('Follow error:', e)
         throw e
       }
@@ -476,7 +479,7 @@ export const useProfileStore = defineStore('profile', {
         }
 
         return relationship
-      } catch (e: any) {
+      } catch (e: unknown) {
         logError('Unfollow error:', e)
         throw e
       }
@@ -522,7 +525,7 @@ export const useProfileStore = defineStore('profile', {
           id: [this.viewedProfile.id],
         })
         return relationships[0] || null
-      } catch (e: any) {
+      } catch (e: unknown) {
         logError('Relationship fetch error:', e)
         return null
       }

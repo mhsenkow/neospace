@@ -60,9 +60,12 @@ export const ICONS = {
     h('polyline', { points: '7 23 3 19 7 15' }),
     h('path', { d: 'M21 13v2a4 4 0 01-4 4H3' }),
   ],
-  user: () => [
-    h('path', { d: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2' }),
-    h('circle', { cx: 12, cy: 7, r: 4 }),
+  user: ({ filled }: IconCtx) => [
+    h('path', {
+      d: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2',
+      fill: filled ? 'currentColor' : 'none',
+    }),
+    h('circle', { cx: 12, cy: 7, r: 4, fill: filled ? 'currentColor' : 'none' }),
   ],
   lock: () => [
     h('rect', { x: 3, y: 11, width: 18, height: 11, rx: 2, ry: 2 }),

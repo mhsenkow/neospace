@@ -4248,11 +4248,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/stores/theme.ts:30,39-43,97-107,120-123` — `safeCustomCSS` (identity getter), `toggleMode`, `setProfileCssDisabled` and `loadUserTheme` have no callers. `setProfileCssDisabled` claims to be the "escape hatch from Settings" but no Settings UI exists, so `?safe=1` is the only way out of a broken skin.
   - **Provenance:** [October 9 candidate, line 676](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:676); explicit source files unchanged at review time.
 
-- [ ] **NS-615 · P3 · CODE · A · S — Drop the inline property from the generator (the html[data-rail] selector already covers it).**
+- [x] **NS-615 · P3 · CODE · A · S — Drop the inline property from the generator (the html[data-rail] selector already covers it).**
   - **Target:** [public/boot/prepaint.js:39](/Users/powerox/neospace/public/boot/prepaint.js:39). **Area:** Pre-paint (`public/boot/prepaint.js`, `scripts/build-prepaint.mjs`).
   - **Change:** Drop the inline property from the generator (the `html[data-rail]` selector already covers it).
   - **Prior observation to check:** `public/boot/prepaint.js:39-42` + `app/composables/useShellAppearance.ts:28-31` — Prepaint writes an inline `--neo-sidebar-width: 68px` on `<html>`. `syncRailAttr` only toggles the `data-rail` attribute and never removes that inline property, and `.neo-layout` redefines the variable anyway (`default.vue:316,357`). The property does nothing inside the layout and stays stale on `<html>` after the rail is turned off.
   - **Provenance:** [October 9 candidate, line 682](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:682); explicit source files unchanged at review time.
+  - **Done:** prepaint.js no longer writes `--neo-sidebar-width`; `html[data-rail]` covers rail width (`tests/p3-tail.test.ts`).
 
 ## Remaining candidates: Threads, notifications & direct messages
 
@@ -4619,131 +4620,152 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 999](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:999); explicit source files unchanged at review time.
   - **Done:** Passed `focus.visibility` directly in `expandDockToSheet` and the reply dock (`app/pages/status/[id].vue`).
 
-- [ ] **NS-669 · P3 · UX · A · S — Share one helper built on Intl.ListFormat.**
+- [x] **NS-669 · P3 · UX · A · S — Share one helper built on Intl.ListFormat.**
   - **Target:** [app/pages/status/[id].vue:394](/Users/powerox/neospace/app/pages/status/[id].vue:394). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Share one helper built on `Intl.ListFormat`.
   - **Prior observation to check:** `app/pages/status/[id].vue:394-406` — The thread title joins names with "&" and "+N" in English and duplicates `participantLabel` (`dmHelpers.ts:54-62`).
   - **Provenance:** [October 9 candidate, line 1000](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1000); explicit source files unchanged at review time.
+  - **Done:** `formatNameList` (`Intl.ListFormat`) shared by `threadTitle` and `participantLabel`.
 
-- [ ] **NS-670 · P3 · SEC · A · S — Decide whether DM titles should be a generic "Message | NeoSpace".**
+- [x] **NS-670 · P3 · SEC · A · S — Decide whether DM titles should be a generic "Message | NeoSpace".**
   - **Target:** [app/pages/status/[id].vue:832](/Users/powerox/neospace/app/pages/status/[id].vue:832). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Decide whether DM titles should be a generic "Message | NeoSpace".
   - **Prior observation to check:** `app/pages/status/[id].vue:832-838` — DM participants' names go into `document.title`, so they show up in browser history, tab switchers and screen shares.
   - **Provenance:** [October 9 candidate, line 1001](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1001); explicit source files unchanged at review time.
+  - **Done:** DM `document.title` is generic `Message | LoomSpace` (header still uses participant names).
 
-- [ ] **NS-671 · P3 · UX · A · S — Also show meta when dayLabelFor(...) is set or the gap is over 1h.**
+- [x] **NS-671 · P3 · UX · A · S — Also show meta when dayLabelFor(...) is set or the gap is over 1h.**
   - **Target:** [app/pages/status/[id].vue:437](/Users/powerox/neospace/app/pages/status/[id].vue:437). **Area:** app/components/MessageBubble.vue.
   - **Change:** Also show meta when `dayLabelFor(...)` is set or the gap is over 1h.
   - **Prior observation to check:** `app/pages/status/[id].vue:437-442` — The sender's name and avatar only reappear when the speaker changes. After a day separator or a gap of several hours, the same person's next message has no header.
   - **Provenance:** [October 9 candidate, line 1011](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1011); explicit source files unchanged at review time.
+  - **Done:** `shouldShowBubbleMeta` also true after a day separator or a 1h+ gap.
 
-- [ ] **NS-672 · P3 · UX · A · S — Use the full gate only when spoilerText is set; otherwise blur just the media.**
+- [x] **NS-672 · P3 · UX · A · S — Use the full gate only when spoilerText is set; otherwise blur just the media.**
   - **Target:** [app/components/MessageBubble.vue:60](/Users/powerox/neospace/app/components/MessageBubble.vue:60). **Area:** app/components/MessageBubble.vue.
   - **Change:** Use the full gate only when `spoilerText` is set; otherwise blur just the media.
   - **Prior observation to check:** `app/components/MessageBubble.vue:60-66,240-251` — `sensitive` with no spoiler text hides the message text as well. In Mastodon, `sensitive` only marks the media.
   - **Provenance:** [October 9 candidate, line 1012](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1012); explicit source files unchanged at review time.
+  - **Done:** `sensitive` without `spoilerText` blurs media only; message text stays visible.
 
-- [ ] **NS-673 · P3 · UX · A · S — Keep a toggle above the content once revealed.**
+- [x] **NS-673 · P3 · UX · A · S — Keep a toggle above the content once revealed.**
   - **Target:** [app/components/MessageBubble.vue:241](/Users/powerox/neospace/app/components/MessageBubble.vue:241). **Area:** app/components/MessageBubble.vue.
   - **Change:** Keep a toggle above the content once revealed.
   - **Prior observation to check:** `app/components/MessageBubble.vue:241,250` — The CW button switches to "Hide" when revealed, but it is `v-if="showSpoilerGate"`, so it disappears and a revealed CW can't be hidden again.
   - **Provenance:** [October 9 candidate, line 1013](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1013); explicit source files unchanged at review time.
+  - **Done:** CW button stays mounted after reveal so Hide works.
 
-- [ ] **NS-674 · P3 · UX · A · S — Append "· Edited" with the edit time in the title.**
+- [x] **NS-674 · P3 · UX · A · S — Append "· Edited" with the edit time in the title.**
   - **Target:** [app/components/MessageBubble.vue:313](/Users/powerox/neospace/app/components/MessageBubble.vue:313). **Area:** app/components/MessageBubble.vue.
   - **Change:** Append "· Edited" with the edit time in the title.
   - **Prior observation to check:** `app/components/MessageBubble.vue:313-318` — Edited DMs aren't marked; `status.editedAt` is ignored.
   - **Provenance:** [October 9 candidate, line 1014](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1014); explicit source files unchanged at review time.
+  - **Done:** Edited DMs append `· Edited`; full edit time is in the timestamp title.
 
-- [ ] **NS-675 · P3 · UX · A · S — Pass every image/gifv in knownMedia as items along with the start index.**
+- [x] **NS-675 · P3 · UX · A · S — Pass every image/gifv in knownMedia as items along with the start index.**
   - **Target:** [app/components/MessageBubble.vue:120](/Users/powerox/neospace/app/components/MessageBubble.vue:120). **Area:** app/components/MessageBubble.vue.
   - **Change:** Pass every image/gifv in `knownMedia` as `items` along with the start index.
   - **Prior observation to check:** `app/components/MessageBubble.vue:120-129` — The lightbox only gets the tapped image, so a DM with 4 photos can't be swiped through.
   - **Provenance:** [October 9 candidate, line 1015](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1015); explicit source files unchanged at review time.
+  - **Done:** Lightbox receives every image/gifv in the bubble plus the start index.
 
-- [ ] **NS-676 · P3 · A11Y · A · S — Keep one of them.**
+- [x] **NS-676 · P3 · A11Y · A · S — Keep one of them.**
   - **Target:** [app/components/MessageBubble.vue:220](/Users/powerox/neospace/app/components/MessageBubble.vue:220). **Area:** app/components/MessageBubble.vue.
   - **Change:** Keep one of them.
   - **Prior observation to check:** `app/components/MessageBubble.vue:220,227` — The speaker is announced twice: the article's `aria-label` starts with `speakerLabel`, and the sr-only span repeats it.
   - **Provenance:** [October 9 candidate, line 1016](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1016); explicit source files unchanged at review time.
+  - **Done:** Dropped the duplicate sr-only speaker span; article `aria-label` remains.
 
-- [ ] **NS-677 · P3 · UX · A · S — preventDefault the contextmenu that follows a long-press that opened the menu.**
+- [x] **NS-677 · P3 · UX · A · S — preventDefault the contextmenu that follows a long-press that opened the menu.**
   - **Target:** [app/components/MessageBubble.vue:188](/Users/powerox/neospace/app/components/MessageBubble.vue:188). **Area:** app/components/MessageBubble.vue.
   - **Change:** `preventDefault` the `contextmenu` that follows a long-press that opened the menu.
   - **Prior observation to check:** `app/components/MessageBubble.vue:188-195` — Long-press doesn't suppress the native `contextmenu`/selection on Android, so selection handles and our menu both appear.
   - **Provenance:** [October 9 candidate, line 1017](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1017); explicit source files unchanged at review time.
+  - **Done:** `contextmenu` is `preventDefault`ed after a long-press opens the menu.
 
-- [ ] **NS-678 · P3 · DESIGN · A · S — Decide whether to hide it on coarse pointers and show it only on focus.**
+- [x] **NS-678 · P3 · DESIGN · A · S — Decide whether to hide it on coarse pointers and show it only on focus.**
   - **Target:** [app/components/MessageBubble.vue:433](/Users/powerox/neospace/app/components/MessageBubble.vue:433). **Area:** app/components/MessageBubble.vue.
   - **Change:** Decide whether to hide it on coarse pointers and show it only on focus.
   - **Prior observation to check:** `app/components/MessageBubble.vue:433-440` — On touch, every bubble has a permanently visible 36px ⋯ button at 0.6 opacity even though long-press opens the same menu, which doubles the chat clutter.
   - **Provenance:** [October 9 candidate, line 1018](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1018); explicit source files unchanged at review time.
+  - **Done:** ⋯ hidden on coarse pointers except `:focus-within` / open menu.
 
-- [ ] **NS-679 · P3 · CODE · A · S — Delete it.**
+- [x] **NS-679 · P3 · CODE · A · S — Delete it.**
   - **Target:** [app/components/MessageBubble.vue:348](/Users/powerox/neospace/app/components/MessageBubble.vue:348). **Area:** app/components/MessageBubble.vue.
   - **Change:** Delete it.
   - **Prior observation to check:** `app/components/MessageBubble.vue:348-358` — There is a scoped copy of `.sr-only` even though the global utility exists.
   - **Provenance:** [October 9 candidate, line 1019](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1019); explicit source files unchanged at review time.
+  - **Done:** Removed the scoped `.sr-only` copy.
 
-- [ ] **NS-680 · P3 · UX · A · S — Fill both selected states, or add tiny text labels.**
+- [x] **NS-680 · P3 · UX · A · S — Fill both selected states, or add tiny text labels.**
   - **Target:** [app/components/DmContextFooter.vue:71](/Users/powerox/neospace/app/components/DmContextFooter.vue:71). **Area:** app/components/DmContextFooter.vue.
   - **Change:** Fill both selected states, or add tiny text labels.
   - **Prior observation to check:** `app/components/DmContextFooter.vue:71-81` — The tabs are icon-only and rely on `title` tooltips, which don't exist on touch. The selected Profile icon isn't filled (only Chat fills), so the current state is hard to read.
   - **Provenance:** [October 9 candidate, line 1036](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1036); explicit source files unchanged at review time.
+  - **Done:** Chat and Profile both fill when selected; tiny text labels on the tabs.
 
-- [ ] **NS-681 · P3 · UX · A · S — Open the indicator only for refreshes started by a pull.**
+- [x] **NS-681 · P3 · UX · A · S — Open the indicator only for refreshes started by a pull.**
   - **Target:** [app/pages/messages.vue:383](/Users/powerox/neospace/app/pages/messages.vue:383). **Area:** app/pages/messages.vue, app/stores/conversations.ts, app/utils/dmHelpers.ts.
   - **Change:** Open the indicator only for refreshes started by a pull.
   - **Prior observation to check:** `app/pages/messages.vue:383-384` — The 64px pull indicator opens whenever `isRefreshing` is true. That also happens for the header Refresh button, account switches (236) and `afterMessagePosted` (82), so ordinary refreshes push the list down and show a second spinner.
   - **Provenance:** [October 9 candidate, line 1045](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1045); explicit source files unchanged at review time.
+  - **Done:** The 64px pull indicator only opens for pull-to-refresh, not header Refresh.
 
-- [ ] **NS-682 · P3 · UX · A · S — Keep one control.**
+- [x] **NS-682 · P3 · UX · A · S — Keep one control.**
   - **Target:** [app/pages/messages.vue:464](/Users/powerox/neospace/app/pages/messages.vue:464). **Area:** app/pages/messages.vue, app/stores/conversations.ts, app/utils/dmHelpers.ts.
   - **Change:** Keep one control.
   - **Prior observation to check:** `app/pages/messages.vue:464-484` — After a load-more failure, both the "Load more" button and an inline "Retry" link are shown, and they do the same thing.
   - **Provenance:** [October 9 candidate, line 1046](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1046); explicit source files unchanged at review time.
+  - **Done:** Load more becomes Retry on error; the extra Retry link is gone.
 
-- [ ] **NS-683 · P3 · UX · A · S — Add one line of guidance and use "Find people to message".**
+- [x] **NS-683 · P3 · UX · A · S — Add one line of guidance and use "Find people to message".**
   - **Target:** [app/pages/messages.vue:338](/Users/powerox/neospace/app/pages/messages.vue:338). **Area:** app/pages/messages.vue, app/stores/conversations.ts, app/utils/dmHelpers.ts.
   - **Change:** Add one line of guidance and use "Find people to message".
   - **Prior observation to check:** `app/pages/messages.vue:338-347` — The empty inbox says only "No messages" with no explanation, and the secondary link is labelled just "People".
   - **Provenance:** [October 9 candidate, line 1047](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1047); explicit source files unchanged at review time.
+  - **Done:** Empty inbox explains DMs and uses “Find people to message”.
 
-- [ ] **NS-684 · P3 · UX · A · S — Show your own avatar and "Note to self".**
+- [x] **NS-684 · P3 · UX · A · S — Show your own avatar and "Note to self".**
   - **Target:** [app/pages/messages.vue:406](/Users/powerox/neospace/app/pages/messages.vue:406). **Area:** app/pages/messages.vue, app/stores/conversations.ts, app/utils/dmHelpers.ts.
   - **Change:** Show your own avatar and "Note to self".
   - **Prior observation to check:** `app/pages/messages.vue:406-420` — A DM to yourself (`accounts: []`) shows no avatar (an empty 48px gap) and the label "Direct message".
   - **Provenance:** [October 9 candidate, line 1048](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1048); explicit source files unchanged at review time.
+  - **Done:** Empty `accounts` is “Note to self” with the viewer’s avatar.
 
-- [ ] **NS-685 · P3 · CODE · A · S — Use one helper with Intl.ListFormat.**
+- [x] **NS-685 · P3 · CODE · A · S — Use one helper with Intl.ListFormat.**
   - **Target:** [app/utils/dmHelpers.ts:54](/Users/powerox/neospace/app/utils/dmHelpers.ts:54). **Area:** app/pages/messages.vue, app/stores/conversations.ts, app/utils/dmHelpers.ts.
   - **Change:** Use one helper with `Intl.ListFormat`.
   - **Prior observation to check:** `app/utils/dmHelpers.ts:54-62` — `participantLabel` builds "A & B" and "A +2" with English concatenation; the same logic is duplicated in `status/[id].vue:394-406`.
   - **Provenance:** [October 9 candidate, line 1050](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1050); explicit source files unchanged at review time.
+  - **Done:** Same `formatNameList` helper as NS-669.
 
-- [ ] **NS-686 · P3 · UX · A · S — Also collapse consecutive follow rows from the same instance.**
+- [x] **NS-686 · P3 · UX · A · S — Also collapse consecutive follow rows from the same instance.**
   - **Target:** [app/utils/notifGroup.ts:33](/Users/powerox/neospace/app/utils/notifGroup.ts:33). **Area:** app/pages/notifications.vue, app/stores/notifications.ts, app/utils/notifHelpers.ts, app/utils/notifGroup.ts.
   - **Change:** Also collapse consecutive `follow` rows from the same instance.
   - **Prior observation to check:** `app/utils/notifGroup.ts:33-38` — Follows are never collapsed because they have no status, so 5 new followers make 5 rows. Mastodon groups them.
   - **Provenance:** [October 9 candidate, line 1073](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1073); explicit source files unchanged at review time.
+  - **Done:** Consecutive `follow` / `follow_request` rows from the same instance collapse.
 
-- [ ] **NS-687 · P3 · UX · A · S — Leave it unset (treat as unread) and rely on the server marker.**
+- [x] **NS-687 · P3 · UX · A · S — Leave it unset (treat as unread) and rely on the server marker.**
   - **Target:** [app/stores/notifications.ts:301](/Users/powerox/neospace/app/stores/notifications.ts:301). **Area:** app/pages/notifications.vue, app/stores/notifications.ts, app/utils/notifHelpers.ts, app/utils/notifGroup.ts.
   - **Change:** Leave it unset (treat as unread) and rely on the server marker.
   - **Prior observation to check:** `app/stores/notifications.ts:301-302` — With no server marker and no local value, the first load saves `items[0]` as read. On a new device, or a server without markers, nothing ever shows as unread.
   - **Provenance:** [October 9 candidate, line 1077](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1077); explicit source files unchanged at review time.
+  - **Done:** First load with no server marker leaves last-read unset (rows stay unread).
 
-- [ ] **NS-688 · P3 · UX · A · S — Depend on a shared minute or day tick.**
+- [x] **NS-688 · P3 · UX · A · S — Depend on a shared minute or day tick.**
   - **Target:** [app/stores/notifications.ts:147](/Users/powerox/neospace/app/stores/notifications.ts:147). **Area:** app/pages/notifications.vue, app/stores/notifications.ts, app/utils/notifHelpers.ts, app/utils/notifGroup.ts.
   - **Change:** Depend on a shared minute or day tick.
   - **Prior observation to check:** `app/stores/notifications.ts:147-150` — Today/Yesterday buckets use `new Date()` captured when the getter runs, so a page left open past midnight never re-buckets.
   - **Provenance:** [October 9 candidate, line 1078](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1078); explicit source files unchanged at review time.
+  - **Done:** `groupedByTime` depends on `dayAnchor`; the Activity page ticks it at midnight.
 
-- [ ] **NS-689 · P3 · UX · A · S — Add "edited a post you quoted".**
+- [x] **NS-689 · P3 · UX · A · S — Add "edited a post you quoted".**
   - **Target:** [app/utils/notifHelpers.ts:5](/Users/powerox/neospace/app/utils/notifHelpers.ts:5). **Area:** app/pages/notifications.vue, app/stores/notifications.ts, app/utils/notifHelpers.ts, app/utils/notifGroup.ts.
   - **Change:** Add "edited a post you quoted".
   - **Prior observation to check:** `app/utils/notifHelpers.ts:5-43` — Mastodon 4.5's `quoted_update` type isn't handled and falls back to "notification" with a bell icon.
   - **Provenance:** [October 9 candidate, line 1079](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1079); explicit source files unchanged at review time.
+  - **Done:** `quoted_update` → “edited a post you quoted” (edit icon).
 
 - [ ] **NS-690 · P3 · PERF · A · M — Decide whether to adopt v2 with a v1 fallback.**
   - **Target:** [app/stores/notifications.ts:289](/Users/powerox/neospace/app/stores/notifications.ts:289). **Area:** app/pages/notifications.vue, app/stores/notifications.ts, app/utils/notifHelpers.ts, app/utils/notifGroup.ts.
@@ -4751,17 +4773,19 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/stores/notifications.ts:289,525-527` — This uses v1 notifications, so a viral post fills 30-row pages with likes, and dismissing a grouped row sends N requests. Mastodon 4.3+ offers `/api/v2/notifications` (grouped) and group dismiss.
   - **Provenance:** [October 9 candidate, line 1080](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1080); explicit source files unchanged at review time.
 
-- [ ] **NS-691 · P3 · UX · A · S — Keep the dialog open with a busy state and show the error inline.**
+- [x] **NS-691 · P3 · UX · A · S — Keep the dialog open with a busy state and show the error inline.**
   - **Target:** [app/components/NeoReport.vue:95](/Users/powerox/neospace/app/components/NeoReport.vue:95). **Area:** app/components/NeoReport.vue.
   - **Change:** Keep the dialog open with a busy state and show the error inline.
   - **Prior observation to check:** `app/components/NeoReport.vue:95-105` — Submit closes the dialog immediately. Resolving the remote status or account and the API call happen afterwards, so a failure is only a toast and the typed comment is lost.
   - **Provenance:** [October 9 candidate, line 1088](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1088); explicit source files unchanged at review time.
+  - **Done:** Report dialog stays open with a busy state; `perform()` errors render inline.
 
-- [ ] **NS-692 · P3 · UX · A · S — Ignore backdrop clicks while the comment isn't empty.**
+- [x] **NS-692 · P3 · UX · A · S — Ignore backdrop clicks while the comment isn't empty.**
   - **Target:** [app/components/NeoReport.vue:34](/Users/powerox/neospace/app/components/NeoReport.vue:34). **Area:** app/components/NeoReport.vue.
   - **Change:** Ignore backdrop clicks while the comment isn't empty.
   - **Prior observation to check:** `app/components/NeoReport.vue:34` — Clicking the backdrop cancels and throws away the typed details without asking.
   - **Provenance:** [October 9 candidate, line 1089](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1089); explicit source files unchanged at review time.
+  - **Done:** Backdrop clicks ignored while the comment isn’t empty (and while submitting).
 
 - [x] **NS-693 · P3 · UX · A · S — Raise it to 1000.**
   - **Target:** [app/components/NeoReport.vue:77](/Users/powerox/neospace/app/components/NeoReport.vue:77). **Area:** app/components/NeoReport.vue.
@@ -4811,14 +4835,16 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Prior observation to check:** `app/components/RecipientPicker.vue:112-117` — Only one recipient can be picked, so there's no way to start a group DM.
   - **Provenance:** [October 9 candidate, line 1098](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1098); explicit source files unchanged at review time.
 
-- [ ] **NS-700 · P3 · TOOLING · A · S — Add cases next to the existing store tests.**
+- [x] **NS-700 · P3 · TOOLING · A · S — Add cases next to the existing store tests.**
   - **Target:** [tests/inbox.test.ts:111](/Users/powerox/neospace/tests/inbox.test.ts:111). **Area:** tests/inbox.test.ts (gaps).
   - **Change:** Add cases next to the existing store tests.
   - **Prior observation to check:** `tests/inbox.test.ts:111-176` — Notification tests don't cover `groupedByTime` with `sortOrder: 'oldest'`, `clearAll` partial failure, `fetchNotifications` marker sync on first load, or `notifLabel` for the self-account types.
   - **Provenance:** [October 9 candidate, line 1102](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1102); explicit source files unchanged at review time.
+  - **Done:** `tests/p3-tail.test.ts` covers groupedByTime oldest, first-load markers, `notifLabel`, plus follow collapse in `inbox.test.ts`.
 
 ## Review boundaries
 
 This queue spans feature completeness, federation correctness, board behavior, composing, messages/activity, accounts/authentication, discovery/ranking, Edward/GPU work, settings/appearance, accessibility, security, performance, testing, documentation, hosting, and operations. It is finite and prioritized so it can drive useful work; do not interpret small visual cleanups as equal in urgency to account safety or content-warning failures.
 
 Production deployment state, Turnstile secrets, actual third-party server compatibility, real account workflows, Safari behavior, and physical-device keyboard/touch behavior were not validated. Operational and server-dependent candidates remain conditional until checked.
+  - **Done:** `tests/p3-tail.test.ts` covers groupedByTime oldest, first-load markers, `notifLabel`, plus follow collapse in `inbox.test.ts`.

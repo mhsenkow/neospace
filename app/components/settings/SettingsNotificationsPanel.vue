@@ -32,6 +32,12 @@ const togglePush = async () => {
   <section class="settings-section">
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
+    <SettingsSignedOut
+      v-if="!instancesStore.hasAuthenticatedInstance"
+      title="Notifications follow your account"
+      body="Sign in to manage Activity push and open your server’s notification settings."
+    />
+
     <div
       v-if="instancesStore.hasAuthenticatedInstance && supported"
       class="settings-group"
@@ -66,7 +72,7 @@ const togglePush = async () => {
       </p>
     </div>
 
-    <div class="settings-group">
+    <div v-if="instancesStore.hasAuthenticatedInstance" class="settings-group">
       <p class="settings-hint">
         Fine-grained filters (who can notify you, email digests) still live on your instance.
       </p>
@@ -86,3 +92,9 @@ const togglePush = async () => {
     </div>
   </section>
 </template>
+
+<style lang="scss" scoped>
+@use '~/assets/css/settingsPanel' as panel;
+
+@include panel.shared;
+</style>

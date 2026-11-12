@@ -226,11 +226,12 @@ watch(
                 </div>
               </Transition>
 
-              <!-- Error message -->
+              <!-- Error message — never hide the panel behind it (guest auth and
+                   a failed mute list used to blank Appearance / Profile). -->
               <div v-if="settingsStore.error" class="settings-error" role="alert">
                 <span aria-hidden="true">⚠️</span> {{ settingsStore.error }}
                 <button
-                  v-if="!settingsStore.account && !settingsStore.isLoading"
+                  v-if="instancesStore.isAuthenticated && !settingsStore.account && !settingsStore.isLoading"
                   type="button"
                   class="settings-btn settings-btn--small settings-btn--ghost settings-error__retry"
                   @click="settingsStore.loadSettings()"
@@ -239,9 +240,6 @@ watch(
                 </button>
               </div>
 
-              <!-- A failed save keeps the panel (and the user's edits) visible; only a
-                   failed load hides it, so empty forms can't be saved over the account -->
-              <template v-if="!settingsStore.error || settingsStore.account">
               <SettingsWhatsNew v-if="settingsStore.activeCategory === 'whats-new'" />
 
               <SettingsProfilePanel
@@ -272,7 +270,6 @@ watch(
               <SettingsAccountPanel v-if="settingsStore.activeCategory === 'account'" />
 
               <SettingsHumansPanel v-if="settingsStore.activeCategory === 'humans'" />
-              </template>
             </div>
           </div>
         </div>
@@ -418,7 +415,7 @@ watch(
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
     border-color: var(--neo-border-color-dark);
   }
@@ -485,15 +482,20 @@ watch(
     white-space: nowrap;
   }
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
     color: var(--neo-text-primary);
   }
 
   &.active {
-    background: var(--neo-accent);
-    border-color: var(--neo-accent);
-    color: var(--neo-text-on-accent);
+    background: color-mix(in srgb, var(--neo-accent) 14%, var(--neo-bg-primary));
+    border-color: transparent;
+    color: var(--neo-text-primary);
+    box-shadow: inset 2px 0 0 var(--neo-accent);
+
+    @include hover {
+      background: color-mix(in srgb, var(--neo-accent) 20%, var(--neo-bg-primary));
+    }
   }
 }
 

@@ -117,8 +117,15 @@ const clearDeviceData = async () => {
   <section class="settings-section">
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
+    <SettingsSignedOut
+      v-if="!linkedAccounts.length"
+      title="No account on this device"
+      body="Sign in to a Mastodon server to sync profile, privacy, and posting defaults."
+    />
+
     <div class="settings-group">
-      <h3 class="settings-subheading">Connected Account</h3>
+      <template v-if="linkedAccounts.length">
+      <h3 class="settings-subheading">Connected account</h3>
 
       <div v-if="settingsStore.account" class="settings-account-card">
         <img :src="settingsStore.account.avatar" alt="" class="settings-account-card__avatar" />
@@ -206,7 +213,6 @@ const clearDeviceData = async () => {
           >Main</span>
         </li>
       </ul>
-      <p v-else class="settings-hint">No signed-in accounts.</p>
       <button
         type="button"
         class="settings-btn settings-btn--ghost"
@@ -216,6 +222,7 @@ const clearDeviceData = async () => {
       </button>
 
       <div class="settings-divider" />
+      </template>
 
       <h3 class="settings-subheading">Install app</h3>
       <p v-if="alreadyInstalled" class="settings-hint">
@@ -254,6 +261,7 @@ const clearDeviceData = async () => {
 
       <div class="settings-divider" />
 
+      <template v-if="linkedAccounts.length">
       <h3 class="settings-subheading">Sign out</h3>
       <p class="settings-hint">Revoke tokens and leave LoomSpace on this device.</p>
       <button
@@ -263,6 +271,7 @@ const clearDeviceData = async () => {
       >
         Sign out all accounts
       </button>
+      </template>
       <button
         type="button"
         class="settings-btn settings-btn--danger"
@@ -271,6 +280,7 @@ const clearDeviceData = async () => {
         Clear data on this device
       </button>
 
+      <template v-if="linkedAccounts.length">
       <div class="settings-divider" />
 
       <h3 class="settings-subheading">Instance Settings</h3>
@@ -309,6 +319,13 @@ const clearDeviceData = async () => {
       >
         Export Data →
       </a>
+      </template>
     </div>
   </section>
 </template>
+
+<style lang="scss" scoped>
+@use '~/assets/css/settingsPanel' as panel;
+
+@include panel.shared;
+</style>

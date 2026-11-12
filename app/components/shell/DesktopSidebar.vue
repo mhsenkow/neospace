@@ -11,11 +11,10 @@ import { recipeTip } from '~/utils/algorithms'
 import { STARTER_PACKS, encodePackShare, buildPackShareUrl } from '~/utils/packs'
 import { useSettingsStore } from '~/stores/settings'
 import { useAccountsManager } from '~/composables/useAccountsManager'
-import {
-  useShellAppearance,
-  categoryTint,
-} from '~/composables/useShellAppearance'
+import { useShellAppearance } from '~/composables/useShellAppearance'
+import { categoryTint } from '~/utils/groupCategory'
 import { hostnameOf, resolvePublicInstanceUrl } from '~/utils/instances'
+import { SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
 
 const instancesStore = useInstancesStore()
 const notificationsStore = useNotificationsStore()
@@ -29,6 +28,13 @@ const { open: openAccounts } = useAccountsManager()
 const { show: openFeedback } = useFeedbackNotes()
 const route = useRoute()
 const { openFeedOrRoute, openBoardFeed, openGroup, boardColumnIs, goHome, openCompose } = useBoardNav()
+const isDesk = useDeskViewport()
+/** Tablet sidebar (≤1023): suite tools live here so the corner waffle can stay off the feed. */
+const suiteToolGroups = useSuiteGroups()
+const suiteTools = computed(() => suiteToolGroups.value.flatMap((group) => group.tools))
+const runSuiteTool = (tool: SuiteTool) => {
+  tool.action?.()
+}
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 const isHome = computed(() => path.value === '/' && !columnsStore.focusedColumnId)
 const { isActivity, isMentions } = useActivityNav()
@@ -429,6 +435,47 @@ watch(
         <span class="sidebar__label">Profile</span>
       </button>
     </nav>
+
+    <section v-if="!isDesk" class="sidebar__section" aria-labelledby="sidebar-tools-title">
+      <div class="sidebar__section-head">
+        <h2 id="sidebar-tools-title" class="sidebar__section-title">Tools</h2>
+        <a
+          class="sidebar__section-action"
+          :href="SUITE_TOOLS_MAP"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          All
+        </a>
+      </div>
+      <ul class="sidebar__section-list">
+        <li v-for="tool in suiteTools" :key="tool.id">
+          <button
+            v-if="tool.action"
+            type="button"
+            class="sidebar__row"
+            :title="`${tool.label} — ${tool.blurb}`"
+            :aria-pressed="tool.current ? 'true' : 'false'"
+            @click="runSuiteTool(tool)"
+          >
+            <span class="sidebar__row-glyph" aria-hidden="true">{{ tool.label.slice(0, 1) }}</span>
+            <span class="sidebar__label">{{ tool.label }}</span>
+          </button>
+          <a
+            v-else
+            class="sidebar__row"
+            :href="tool.href"
+            :title="`${tool.label} — ${tool.blurb}`"
+            :aria-current="tool.current ? 'page' : undefined"
+            :target="tool.current ? undefined : '_blank'"
+            :rel="tool.current ? undefined : 'noopener noreferrer'"
+          >
+            <span class="sidebar__row-glyph" aria-hidden="true">{{ tool.label.slice(0, 1) }}</span>
+            <span class="sidebar__label">{{ tool.label }}</span>
+          </a>
+        </li>
+      </ul>
+    </section>
 
     <section class="sidebar__section" aria-labelledby="sidebar-packs-title">
       <div class="sidebar__section-head">

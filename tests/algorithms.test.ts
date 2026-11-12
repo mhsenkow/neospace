@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { mastodon } from 'masto'
 import {
-  decodeEntities,
   keywordMatches,
   normalizeTagList,
   parseAlgorithmSentence,
@@ -12,6 +11,7 @@ import {
   type AlgorithmRecipe,
   type AlgorithmSharePayload,
 } from '../app/utils/algorithms'
+import { decodeEntities } from '../app/utils/decodeEntities'
 import { MAX_CUSTOM, useAlgorithmsStore } from '../app/stores/algorithms'
 
 const status = (over: Record<string, unknown> = {}) =>

@@ -15,6 +15,7 @@ import { guessCategory as guessCategoryUtil } from '~/utils/guessCategory'
 import { normalizeHashtagInput, tagHistorySummary, tagKey } from '~/utils/hashtag'
 import { resolvePublicInstanceUrl } from '~/utils/instances'
 import { logWarn, logError } from '~/utils/log'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 import { cursorPage, nextMaxIdFromLink } from '~/utils/linkHeader'
 import { formatTagAsName as formatTagName } from '~/utils/tagName'
 import { tagIsFiltered } from '~/utils/tagFilters'
@@ -682,8 +683,9 @@ export const useGroupsStore = defineStore('groups', {
           this.dedupeGroups()
           groupsInitializedAt = Date.now()
           groupsInitializedFor = accountKey
-        } catch (e: any) {
-          this.error = e.message || 'Failed to initialize groups'
+        } catch (e: unknown) {
+          const friendly = mapErrorToMessage(e)
+          this.error = friendly.detail || friendly.title || 'Failed to initialize groups'
           logError('Groups init error:', e)
         } finally {
           this.isLoading = false
@@ -845,8 +847,9 @@ export const useGroupsStore = defineStore('groups', {
           const key = g.tag.toLowerCase()
           return g.trending || g.featured || g.isMember || !!this.pendingTags[key] || !wasTrending.has(key)
         })
-      } catch (e: any) {
-        logWarn('Trending tags unavailable:', e?.message || e)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        logWarn('Trending tags unavailable:', msg)
       }
     },
 
@@ -907,8 +910,9 @@ export const useGroupsStore = defineStore('groups', {
             })
           }
         }
-      } catch (e: any) {
-        this.followedTagsError = e.message || 'Failed to load joined groups'
+      } catch (e: unknown) {
+        const friendly = mapErrorToMessage(e)
+        this.followedTagsError = friendly.detail || friendly.title || 'Failed to load joined groups'
         logError('Failed to fetch followed tags:', e)
       }
     },
@@ -962,7 +966,7 @@ export const useGroupsStore = defineStore('groups', {
         }
 
         return result
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (isLatestIntent(key, intent)) {
           const current = findGroup()
           if (current) current.isMember = wasMember
@@ -999,7 +1003,7 @@ export const useGroupsStore = defineStore('groups', {
 
       try {
         await serializeTag(key, () => this.getClient().v1.tags.$select(tagPath(tag)).unfollow())
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (isLatestIntent(key, intent)) {
           const current = findGroup()
           if (current) current.isMember = wasMember
@@ -1057,9 +1061,10 @@ export const useGroupsStore = defineStore('groups', {
         
         this.maxId = page.nextMaxId
         this.hasMore = page.nextMaxId !== null
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (requestId !== timelineRequestId) return
-        this.timelineError = e.message || 'Failed to fetch group timeline'
+        const friendly = mapErrorToMessage(e)
+        this.timelineError = friendly.detail || friendly.title || 'Failed to fetch group timeline'
         logError('Group timeline error:', e)
       } finally {
         if (requestId === timelineRequestId) this.isLoadingTimeline = false
@@ -1106,7 +1111,7 @@ export const useGroupsStore = defineStore('groups', {
         }
         this.maxId = page.nextMaxId
         this.hasMore = page.nextMaxId !== null
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (requestId !== timelineRequestId) return
         logError('Load more error:', e)
         throw e

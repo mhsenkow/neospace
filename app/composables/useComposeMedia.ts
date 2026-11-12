@@ -8,11 +8,13 @@ import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import {
   COMPOSE_IMAGE_ACCEPT,
+  uploadTimeoutForBytes,
+} from '~/utils/composeConstants'
+import {
   formatByteSize,
   normalizeMediaUploadQuality,
   prepareComposeImage,
-  uploadTimeoutForBytes,
-} from '~/utils/composeConstants'
+} from '~/utils/prepareComposeImage'
 import { PEERTUBE_JOIN_URL } from '~/utils/peertube'
 import {
   isUploadCancelled,

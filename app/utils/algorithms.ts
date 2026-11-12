@@ -7,8 +7,6 @@ import type { mastodon } from 'masto'
 import { decodeEntities } from '~/utils/decodeEntities'
 import { RANKERS, type RankerId } from '~/utils/rankers'
 
-export { decodeEntities } from '~/utils/decodeEntities'
-
 /** Max tags or keywords stored per recipe (share payload and editor). */
 export const ALGORITHM_LIST_MAX = 12
 export const ALGORITHM_KEYWORD_MAX_LEN = 64

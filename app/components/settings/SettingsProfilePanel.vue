@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { useSettingsStore } from '~/stores/settings'
+import { useInstancesStore } from '~/stores/instances'
 import { stripHtml } from '~/utils/stripHtml'
 
 const emit = defineEmits<{ 'update:dirty': [boolean] }>()
 const settingsStore = useSettingsStore()
+const instancesStore = useInstancesStore()
+const signedIn = computed(() => instancesStore.isAuthenticated && !!settingsStore.account)
 
 const DISPLAY_NAME_MAX = 30
 const NOTE_MAX = 500
@@ -78,84 +81,102 @@ const saveProfile = async () => {
   <section class="settings-section">
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
-    <div class="settings-group">
-      <fieldset class="settings-fieldset">
-        <legend class="settings-subheading">Profile details</legend>
-        <label class="settings-label">
-          <span class="settings-label__text">Display Name</span>
-          <input
-            v-model="profileForm.displayName"
-            type="text"
-            class="settings-input"
-            placeholder="Your display name"
-            :maxlength="DISPLAY_NAME_MAX"
-            :aria-invalid="displayNameInvalid || undefined"
-            aria-describedby="settings-display-name-hint settings-display-name-error"
-          />
-          <span id="settings-display-name-hint" class="settings-field-hint">
-            {{ profileForm.displayName.length }}/{{ DISPLAY_NAME_MAX }}
-          </span>
-          <span
-            v-if="displayNameInvalid"
-            id="settings-display-name-error"
-            class="settings-field-error"
-            role="alert"
-          >Display name must be {{ DISPLAY_NAME_MAX }} characters or fewer.</span>
-        </label>
+    <SettingsSignedOut
+      v-if="!signedIn"
+      title="Your profile lives on your server"
+      body="Sign in to edit your display name, bio, and whether people can find you."
+    />
 
-        <label class="settings-label">
-          <span class="settings-label__text">Bio</span>
-          <textarea
-            v-model="profileForm.note"
-            class="settings-textarea"
-            placeholder="Tell the world about yourself..."
-            rows="4"
-            :maxlength="NOTE_MAX"
-            :aria-invalid="noteInvalid || undefined"
-            aria-describedby="settings-note-hint settings-note-error"
-          />
-          <span id="settings-note-hint" class="settings-field-hint">
-            {{ profileForm.note.length }}/{{ NOTE_MAX }}
-          </span>
-          <span
-            v-if="noteInvalid"
-            id="settings-note-error"
-            class="settings-field-error"
-            role="alert"
-          >Bio must be {{ NOTE_MAX }} characters or fewer.</span>
-        </label>
-      </fieldset>
+    <template v-else>
+      <div class="settings-group">
+        <fieldset class="settings-fieldset">
+          <legend class="settings-subheading">Profile details</legend>
+          <label class="settings-label">
+            <span class="settings-label__row">
+              <span class="settings-label__text">Display name</span>
+              <span id="settings-display-name-hint" class="settings-field-hint">
+                {{ profileForm.displayName.length }}/{{ DISPLAY_NAME_MAX }}
+              </span>
+            </span>
+            <input
+              v-model="profileForm.displayName"
+              type="text"
+              class="settings-input"
+              placeholder="Your display name"
+              :maxlength="DISPLAY_NAME_MAX"
+              :aria-invalid="displayNameInvalid || undefined"
+              aria-describedby="settings-display-name-hint settings-display-name-error"
+            />
+            <span
+              v-if="displayNameInvalid"
+              id="settings-display-name-error"
+              class="settings-field-error"
+              role="alert"
+            >Display name must be {{ DISPLAY_NAME_MAX }} characters or fewer.</span>
+          </label>
 
-      <div class="settings-divider" />
+          <label class="settings-label">
+            <span class="settings-label__row">
+              <span class="settings-label__text">Bio</span>
+              <span id="settings-note-hint" class="settings-field-hint">
+                {{ profileForm.note.length }}/{{ NOTE_MAX }}
+              </span>
+            </span>
+            <textarea
+              v-model="profileForm.note"
+              class="settings-textarea"
+              placeholder="Tell the world about yourself…"
+              rows="4"
+              :maxlength="NOTE_MAX"
+              :aria-invalid="noteInvalid || undefined"
+              aria-describedby="settings-note-hint settings-note-error"
+            />
+            <span
+              v-if="noteInvalid"
+              id="settings-note-error"
+              class="settings-field-error"
+              role="alert"
+            >Bio must be {{ NOTE_MAX }} characters or fewer.</span>
+          </label>
+        </fieldset>
 
-      <fieldset class="settings-fieldset">
-        <legend class="settings-subheading">Account flags</legend>
-        <label class="settings-toggle">
-          <div class="settings-toggle__info">
-            <span class="settings-toggle__label">Discoverable</span>
-            <span class="settings-toggle__desc">Allow your account to be found in search results and profile directories</span>
-          </div>
-          <input v-model="profileForm.discoverable" type="checkbox" class="settings-checkbox" />
-        </label>
+        <div class="settings-divider" />
 
-        <label class="settings-toggle">
-          <div class="settings-toggle__info">
-            <span class="settings-toggle__label">🤖 This is a bot account</span>
-            <span class="settings-toggle__desc">Mark this account as automated</span>
-          </div>
-          <input v-model="profileForm.bot" type="checkbox" class="settings-checkbox" />
-        </label>
-      </fieldset>
-    </div>
+        <fieldset class="settings-fieldset">
+          <legend class="settings-subheading">Discovery</legend>
+          <label class="settings-toggle">
+            <div class="settings-toggle__info">
+              <span class="settings-toggle__label">Discoverable</span>
+              <span class="settings-toggle__desc">Allow your account to be found in search results and profile directories</span>
+            </div>
+            <input v-model="profileForm.discoverable" type="checkbox" class="settings-checkbox" />
+          </label>
 
-    <div class="settings-actions">
-      <button
-        class="settings-btn settings-btn--primary"
-        :disabled="settingsStore.isSaving || profileFormInvalid || !profileDirty || !settingsStore.account"
-        @click="saveProfile"
-      >
-        {{ settingsStore.isSaving ? 'Saving...' : 'Save Changes' }}
-      </button>
-    </div>
+          <label class="settings-toggle">
+            <div class="settings-toggle__info">
+              <span class="settings-toggle__label">This is a bot account</span>
+              <span class="settings-toggle__desc">Mark this account as automated</span>
+            </div>
+            <input v-model="profileForm.bot" type="checkbox" class="settings-checkbox" />
+          </label>
+        </fieldset>
+      </div>
+
+      <div class="settings-actions">
+        <button
+          class="settings-btn settings-btn--primary"
+          :disabled="settingsStore.isSaving || profileFormInvalid || !profileDirty || !settingsStore.account"
+          @click="saveProfile"
+        >
+          {{ settingsStore.isSaving ? 'Saving…' : 'Save changes' }}
+        </button>
+      </div>
+    </template>
   </section>
 </template>
+
+<style lang="scss" scoped>
+@use '~/assets/css/settingsPanel' as panel;
+
+@include panel.shared;
+</style>

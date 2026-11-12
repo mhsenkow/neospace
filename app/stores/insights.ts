@@ -257,12 +257,13 @@ export const useInsightsStore = defineStore('insights', {
           fetchedAt: Date.now(),
           windowDays: fullDays,
         })
-      } catch (e: any) {
-        if (e?.name === 'AbortError' || gen !== fetchGen) return
+      } catch (e: unknown) {
+        const err = e as { name?: string; message?: string }
+        if (err?.name === 'AbortError' || gen !== fetchGen) return
         logError('Insights fetch failed:', e)
         // A failed backfill after a good first paint keeps what's on screen
         if (!this.report) {
-          this.error = e?.message || 'Could not load insights'
+          this.error = err?.message || 'Could not load insights'
           this.report = null
           this.exportReport = null
         }

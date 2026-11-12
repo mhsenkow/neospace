@@ -18,9 +18,12 @@ export type CollapsedNotification<T extends GroupableNotification = GroupableNot
   _groupedKeys: string[]
 }
 
+const ACTOR_ONLY_TYPES = new Set(['follow', 'follow_request'])
+
 /**
  * Collapse consecutive notifications that share type + status id (+ instance).
- * Follow/follow_request without a status are not grouped by status.
+ * Follow / follow_request have no status — consecutive rows from the same
+ * instance still fold into one, matching Mastodon's grouped inbox.
  */
 export function collapseConsecutiveNotifications<T extends GroupableNotification>(
   items: T[],
@@ -29,14 +32,17 @@ export function collapseConsecutiveNotifications<T extends GroupableNotification
   for (const n of items) {
     const statusId = n.status?.id || null
     const prev = out[out.length - 1]
-    const canGroup =
-      !!statusId &&
-      !!prev &&
-      prev.type === n.type &&
-      prev.status?.id === statusId &&
-      (prev._instanceId || '') === (n._instanceId || '')
+    const sameInstance = !!prev && (prev._instanceId || '') === (n._instanceId || '')
+    const sameType = !!prev && prev.type === n.type
+    const canGroupByStatus = !!statusId && sameType && sameInstance && prev.status?.id === statusId
+    const canGroupFollows =
+      !statusId &&
+      sameType &&
+      sameInstance &&
+      ACTOR_ONLY_TYPES.has(n.type) &&
+      !prev.status?.id
 
-    if (canGroup && prev) {
+    if ((canGroupByStatus || canGroupFollows) && prev) {
       prev._groupCount += 1
       if (n._key) prev._groupedKeys.push(n._key)
       continue

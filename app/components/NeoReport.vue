@@ -23,8 +23,20 @@ const onPostsToggle = (e: Event) => {
   if (postsOpen.value) void overlay.loadReportPosts()
 }
 
+const commentDirty = computed(() => overlay.report.comment.trim().length > 0)
+
+const dismiss = () => {
+  if (overlay.report.submitting) return
+  overlay.cancelReport()
+}
+
+const onBackdrop = () => {
+  if (commentDirty.value) return
+  dismiss()
+}
+
 useFocusTrap(dialogRef, isOpen, {
-  onEscape: () => overlay.resolveReport(null),
+  onEscape: dismiss,
   // The checked radio — `.neo-report__category` is a <label>, which can't take focus
   initialFocus: '.neo-report__category input:checked',
 })
@@ -50,7 +62,7 @@ watch(
     <div
       v-if="overlay.report.open"
       class="neo-report-root"
-      @click.self="overlay.resolveReport(null)"
+      @click.self="onBackdrop"
     >
       <div
         ref="dialogRef"
@@ -79,6 +91,7 @@ watch(
               type="radio"
               name="report-category"
               :value="cat.id"
+              :disabled="overlay.report.submitting"
             />
             <span class="neo-report__category-text">
               <strong>{{ cat.label }}</strong>
@@ -95,8 +108,13 @@ watch(
             rows="3"
             maxlength="1000"
             placeholder="Describe what happened…"
+            :disabled="overlay.report.submitting"
           />
         </label>
+
+        <p v-if="overlay.report.submitError" class="neo-report__error" role="alert">
+          {{ overlay.report.submitError }}
+        </p>
 
         <!-- Optional: attach more of the account's recent posts as evidence -->
         <details v-if="overlay.report.canAddPosts" class="neo-report__posts" @toggle="onPostsToggle">
@@ -131,21 +149,19 @@ watch(
           <button
             type="button"
             class="neo-btn neo-btn--secondary"
-            @click="overlay.resolveReport(null)"
+            :disabled="overlay.report.submitting"
+            @click="dismiss"
           >
             Cancel
           </button>
           <button
             type="button"
             class="neo-btn neo-btn--danger"
-            @click="overlay.resolveReport({
-              category: overlay.report.category,
-              comment: overlay.report.comment.trim(),
-              forward: overlay.report.forward,
-              extraStatusIds: [...overlay.report.extraStatusIds],
-            })"
+            :disabled="overlay.report.submitting"
+            :aria-busy="overlay.report.submitting || undefined"
+            @click="overlay.submitReport()"
           >
-            Submit report
+            {{ overlay.report.submitting ? 'Submitting…' : 'Submit report' }}
           </button>
         </div>
       </div>
@@ -240,6 +256,12 @@ watch(
   font-size: var(--neo-font-size-sm);
   font-weight: 600;
   color: var(--neo-text-primary);
+}
+
+.neo-report__error {
+  margin: 0 0 var(--neo-spacing-3, 0.5rem);
+  font-size: var(--neo-font-size-sm);
+  color: var(--neo-danger, #c44);
 }
 
 .neo-report__posts {

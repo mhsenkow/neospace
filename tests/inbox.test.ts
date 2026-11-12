@@ -99,12 +99,13 @@ describe('notification grouping across pages', () => {
     const page1 = [n('120', 'favourite', '9'), n('119', 'favourite', '9')]
     const page2 = [n('99', 'favourite', '9'), n('98', 'follow', null), n('97', 'follow', null)]
     const rows = collapseConsecutiveNotifications([...page1, ...page2])
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(2)
     expect(rows[0]!._groupCount).toBe(3)
     expect(rows[0]!._groupedKeys).toEqual(['i:119', 'i:99'])
-    // Follows have no status — never folded together
-    expect(rows[1]!._groupCount).toBe(1)
-    expect(rows[2]!._groupCount).toBe(1)
+    // Consecutive follows from the same instance fold together
+    expect(rows[1]!.type).toBe('follow')
+    expect(rows[1]!._groupCount).toBe(2)
+    expect(rows[1]!._groupedKeys).toEqual(['i:97'])
   })
 })
 

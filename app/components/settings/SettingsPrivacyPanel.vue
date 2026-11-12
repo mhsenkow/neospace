@@ -27,6 +27,7 @@ watch(privacyDirty, (dirty) => emit('update:dirty', dirty), { immediate: true })
 const privacyListsLoaded = ref(false)
 
 const loadLists = async () => {
+  if (!instancesStore.isAuthenticated) return
   if (privacyListsLoaded.value) return
   privacyListsLoaded.value = true
   await Promise.all([
@@ -98,30 +99,13 @@ const submitBlockDomain = async () => {
   <section class="settings-section">
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
+    <SettingsSignedOut
+      v-if="!instancesStore.isAuthenticated"
+      title="Privacy tools need a signed-in account"
+      body="Mute, block, and follow approval sync to your Mastodon server."
+    />
+
     <div class="settings-group">
-      <fieldset class="settings-fieldset">
-        <legend class="settings-subheading">Post Privacy</legend>
-        <label class="settings-toggle">
-          <div class="settings-toggle__info">
-            <span class="settings-toggle__label">Require follow approval</span>
-            <span class="settings-toggle__desc">New followers must be approved</span>
-          </div>
-          <input v-model="locked" type="checkbox" class="settings-checkbox" />
-        </label>
-
-        <div class="settings-actions" style="margin-top: 1rem;">
-          <button
-            class="settings-btn settings-btn--primary"
-            :disabled="settingsStore.isSaving || !privacyDirty || !settingsStore.account"
-            @click="savePrivacy"
-          >
-            {{ settingsStore.isSaving ? 'Saving...' : 'Save Privacy' }}
-          </button>
-        </div>
-      </fieldset>
-
-      <div class="settings-divider" />
-
       <fieldset class="settings-fieldset">
         <legend class="settings-subheading">Explore</legend>
         <label class="settings-toggle">
@@ -136,6 +120,29 @@ const submitBlockDomain = async () => {
             @change="onRememberSearchesChange"
           />
         </label>
+      </fieldset>
+    </div>
+
+    <div v-if="instancesStore.isAuthenticated" class="settings-group">
+      <fieldset class="settings-fieldset">
+        <legend class="settings-subheading">Post privacy</legend>
+        <label class="settings-toggle">
+          <div class="settings-toggle__info">
+            <span class="settings-toggle__label">Require follow approval</span>
+            <span class="settings-toggle__desc">New followers must be approved</span>
+          </div>
+          <input v-model="locked" type="checkbox" class="settings-checkbox" />
+        </label>
+
+        <div class="settings-actions" style="margin-top: 1rem;">
+          <button
+            class="settings-btn settings-btn--primary"
+            :disabled="settingsStore.isSaving || !privacyDirty || !settingsStore.account"
+            @click="savePrivacy"
+          >
+            {{ settingsStore.isSaving ? 'Saving…' : 'Save privacy' }}
+          </button>
+        </div>
       </fieldset>
 
       <div class="settings-divider" />
@@ -278,3 +285,13 @@ const submitBlockDomain = async () => {
     </div>
   </section>
 </template>
+
+<style lang="scss" scoped>
+@use '~/assets/css/settingsPanel' as panel;
+
+@include panel.shared;
+
+.settings-group + .settings-group {
+  margin-top: 0.85rem;
+}
+</style>

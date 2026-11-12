@@ -210,5 +210,3 @@ export function useShellAppearance() {
     densityLabel,
   }
 }
-
-export { categoryColor, categoryTint } from '~/utils/groupCategory'

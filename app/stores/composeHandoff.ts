@@ -310,8 +310,8 @@ export const useComposeHandoffStore = defineStore('composeHandoff', {
           files.length > 0,
         )
         return true
-      } catch (e: any) {
-        const msg = e?.message || 'Failed to load Loom share'
+      } catch (e: unknown) {
+        const msg = e instanceof Error && e.message ? e.message : 'Failed to load Loom share'
         this.error = msg
         this._setStoryState(key, { phase: 'error', error: msg })
         return false

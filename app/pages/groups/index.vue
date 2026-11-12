@@ -6,7 +6,7 @@
 
 import { useGroupsStore, GROUP_CATEGORIES } from '~/stores/groups'
 import { useInstancesStore } from '~/stores/instances'
-import { categoryTint } from '~/composables/useShellAppearance'
+import { categoryTint } from '~/utils/groupCategory'
 import { useHorizontalRail } from '~/composables/useHorizontalRail'
 import { useGroupSearch } from '~/composables/useGroupSearch'
 

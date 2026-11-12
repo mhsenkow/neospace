@@ -10,6 +10,7 @@ import { useOverlayStore } from '~/stores/overlay'
 import { useToastStore } from '~/stores/toast'
 import { useAccountSearch } from '~/composables/useAccountSearch'
 import {
+  isNoteToSelf,
   openOrComposeDirect,
   participantAccts,
   participantLabel,
@@ -28,6 +29,7 @@ const canView = computed(() => instancesStore.hasAuthenticatedInstance)
 const searchQuery = ref('')
 const pullDist = ref(0)
 const pulling = ref(false)
+const pullRefreshing = ref(false)
 const listEl = ref<HTMLElement | null>(null)
 let pullStartY = 0
 let pullActive = false
@@ -165,7 +167,13 @@ const onTouchEnd = async () => {
   if (!pullActive) return
   const shouldRefresh = pullDist.value > 52
   resetPull()
-  if (shouldRefresh) await refreshInbox()
+  if (!shouldRefresh) return
+  pullRefreshing.value = true
+  try {
+    await refreshInbox()
+  } finally {
+    pullRefreshing.value = false
+  }
 }
 
 const onTouchCancel = () => {
@@ -344,11 +352,14 @@ useHead(() => ({ title: pageTitle.value }))
       <div class="messages-state">
         <span class="messages-state__icon"><NeoIcon name="message" :size="32" :stroke="1.5" /></span>
         <p class="messages-state__title">No messages</p>
+        <p>Start a private conversation with someone you follow, or find people to message.</p>
         <div class="messages-empty__actions">
           <button type="button" class="neo-btn neo-btn--primary neo-btn--sm" @click="startNewMessage">
             New message
           </button>
-          <NuxtLink to="/explore?tab=people" class="neo-btn neo-btn--ghost neo-btn--sm">People</NuxtLink>
+          <NuxtLink to="/explore?tab=people" class="neo-btn neo-btn--ghost neo-btn--sm">
+            Find people to message
+          </NuxtLink>
         </div>
       </div>
 
@@ -385,11 +396,11 @@ useHead(() => ({ title: pageTitle.value }))
       >
         <div
           class="messages-pull"
-          :class="{ 'messages-pull--on': pulling || conversationsStore.isRefreshing }"
-          :style="{ height: `${pulling ? pullDist : conversationsStore.isRefreshing ? 64 : 0}px` }"
+          :class="{ 'messages-pull--on': pulling || pullRefreshing }"
+          :style="{ height: `${pulling ? pullDist : pullRefreshing ? 64 : 0}px` }"
           aria-hidden="true"
         >
-          <FunLoader v-if="pulling || conversationsStore.isRefreshing" variant="pull" />
+          <FunLoader v-if="pulling || pullRefreshing" variant="pull" />
         </div>
 
         <ul class="messages-list">
@@ -410,15 +421,25 @@ useHead(() => ({ title: pageTitle.value }))
               >
                 <div class="messages-row__avatars">
                   <img
-                    v-for="(acct, i) in (c.accounts || []).slice(0, 2)"
-                    :key="acct.id"
-                    :src="acct.avatar"
+                    v-if="isNoteToSelf(c)"
+                    :src="instancesStore.currentUser?.avatar"
                     alt=""
                     loading="lazy"
                     decoding="async"
                     class="messages-row__avatar"
-                    :class="{ 'messages-row__avatar--stack': i > 0 }"
                   />
+                  <template v-else>
+                    <img
+                      v-for="(acct, i) in (c.accounts || []).slice(0, 2)"
+                      :key="acct.id"
+                      :src="acct.avatar"
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      class="messages-row__avatar"
+                      :class="{ 'messages-row__avatar--stack': i > 0 }"
+                    />
+                  </template>
                 </div>
                 <div class="messages-row__body">
                   <div class="messages-row__top">
@@ -479,13 +500,11 @@ useHead(() => ({ title: pageTitle.value }))
               :size="28"
               label="Loading"
             />
+            <span v-else-if="conversationsStore.loadMoreError">Retry</span>
             <span v-else>Load more</span>
           </button>
           <p v-if="conversationsStore.loadMoreError" class="messages-more__error" role="alert">
             {{ conversationsStore.loadMoreError }}
-            <button type="button" class="messages-more__retry" @click="conversationsStore.loadMore()">
-              Retry
-            </button>
           </p>
         </div>
 
@@ -719,7 +738,11 @@ useHead(() => ({ title: pageTitle.value }))
     color: inherit;
     text-align: center;
 
-    &:hover,
+    @include hover {
+      border-color: var(--neo-accent);
+      background: var(--neo-accent-soft);
+    }
+
     &:active {
       border-color: var(--neo-accent);
       background: var(--neo-accent-soft);
@@ -794,7 +817,7 @@ useHead(() => ({ title: pageTitle.value }))
       object-fit: cover;
     }
 
-    &:hover {
+    @include hover {
       border-color: var(--neo-accent);
       background: var(--neo-accent-soft);
     }
@@ -882,7 +905,10 @@ useHead(() => ({ title: pageTitle.value }))
     cursor: pointer;
     border-radius: 0;
 
-    &:hover:not(:disabled),
+    @include hover(':not(:disabled)') {
+      background: var(--neo-bg-tertiary);
+    }
+
     &:active:not(:disabled) {
       background: var(--neo-bg-tertiary);
     }
@@ -905,7 +931,7 @@ useHead(() => ({ title: pageTitle.value }))
     color: var(--neo-text-tertiary);
     cursor: pointer;
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
       background: var(--neo-bg-tertiary);
     }

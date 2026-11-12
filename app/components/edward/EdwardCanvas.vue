@@ -33,7 +33,12 @@ import {
   speedMeta,
 } from '~/utils/edwardPace'
 import { formatCount } from '~/utils/searchQuery'
-
+import {
+  EDWARD_STREAM_BOTTOM,
+  EDWARD_STREAM_SPAN,
+  EDWARD_STREAM_TOP,
+  integrateEdwardBubblePhysics,
+} from '~/utils/edwardSim'
 const props = withDefaults(
   defineProps<{
     /** Measured `.edward-mode__header` height (px) — open stage top inset */
@@ -232,9 +237,9 @@ type BallRuntime = {
   reasons: EdwardReason[]
 }
 
-const STREAM_BOTTOM = -18
-const STREAM_TOP = 18
-const STREAM_SPAN = STREAM_TOP - STREAM_BOTTOM
+const STREAM_BOTTOM = EDWARD_STREAM_BOTTOM
+const STREAM_TOP = EDWARD_STREAM_TOP
+const STREAM_SPAN = EDWARD_STREAM_SPAN
 const isCompact = edwardIsCompact
 const maxBalls = edwardBallCap
 /** DPR 2 + transmission glass melts phone GPUs — 1.5 still looks crisp */
@@ -1000,12 +1005,7 @@ const ballWorldPos = (b: BallRuntime, _t?: number) => ({
   z: b.z,
 })
 
-/**
- * Light bubble dynamics — springs + buoyancy every frame,
- * soft collide only every few ticks (keeps foam feel without melting the CPU).
- */
 /** Tour subject glides to just in front of the stage center (where the lens is) */
-const TOUR_PULL = 9
 const tourTarget = { x: 0, y: 0, z: 0 }
 
 /**
@@ -1013,96 +1013,20 @@ const tourTarget = { x: 0, y: 0, z: 0 }
  * `realDt` drives the toured post's glide so a frozen stream can still be toured.
  */
 const integrateBubblePhysics = (t: number, dt: number, realDt = dt) => {
-  const n = balls.length
-  if (!n) return
-  physicsTick++
-  const tourId = edward.touring ? edward.focusedIdentity : null
-  if (tourId && camera) {
-    const c = camera.position
-    const len = Math.hypot(c.x, c.y, c.z) || 1
-    tourTarget.x = (c.x / len) * 4
-    tourTarget.y = (c.y / len) * 4
-    tourTarget.z = (c.z / len) * 4
-  }
-
-  // Reduced motion: a still field — no rising, no drift. Bubbles settle into
-  // their lane; ones spawned off-stage get a fixed slot. Only user scrubs move them.
-  if (reducedMotion) {
-    for (const b of balls) {
-      b.x += (b.homeX - b.x) * 0.12
-      b.z += (b.homeZ - b.z) * 0.12
-      b.vx = 0
-      b.vy = 0
-      b.vz = 0
-      if (b.y < STREAM_BOTTOM || b.y > STREAM_TOP) {
-        b.y = STREAM_BOTTOM + 1 + hash01(b.identity + ':still') * (STREAM_SPAN - 2)
-      }
-    }
-    return
-  }
-
-  // Integrate motion cheaply
-  const damp = Math.exp(-2.2 * dt)
-  const tourDamp = Math.exp(-6 * realDt)
-  for (let i = 0; i < n; i++) {
-    const b = balls[i]!
-    if (b.identity === tourId) {
-      b.vx = (b.vx + (tourTarget.x - b.x) * TOUR_PULL * realDt) * tourDamp
-      b.vy = (b.vy + (tourTarget.y - b.y) * TOUR_PULL * realDt) * tourDamp
-      b.vz = (b.vz + (tourTarget.z - b.z) * TOUR_PULL * realDt) * tourDamp
-      b.x += b.vx * realDt
-      b.y += b.vy * realDt
-      b.z += b.vz * realDt
-      continue
-    }
-    const ax =
-      (b.homeX - b.x) * 2.1 + Math.sin(t * b.speed * 0.85 + b.phase) * 0.28
-    const az =
-      (b.homeZ - b.z) * 2.1 + Math.cos(t * b.speed * 0.7 + b.phase * 1.2) * 0.22
-    const ay = 0.85 + b.speed * 0.5 - b.size * 0.06 + Math.sin(t * 1.5 + b.phase) * 0.12
-    b.vx = (b.vx + ax * dt) * damp
-    b.vy = (b.vy + ay * dt) * damp
-    b.vz = (b.vz + az * dt) * damp
-    b.x += b.vx * dt
-    b.y += b.vy * dt
-    b.z += b.vz * dt
-    if (b.y > STREAM_TOP + 2) {
-      b.y = STREAM_BOTTOM - hash01(b.identity + String(Math.floor(t))) * 2.2
-      b.vy = 0.5 + hash01(b.identity + ':re') * 0.35
-      b.x = b.homeX + (hash01(b.identity + ':rx') - 0.5)
-      b.z = b.homeZ + (hash01(b.identity + ':rz') - 0.5)
-    }
-  }
-
-  // Soft collide every 3rd frame — positional push only
-  if (physicsTick % 3 !== 0) return
-  for (let i = 0; i < n; i++) {
-    const A = balls[i]!
-    const rA = A.size * 0.95
-    for (let j = i + 1; j < n; j++) {
-      const B = balls[j]!
-      const dx = B.x - A.x
-      const dy = B.y - A.y
-      const dz = B.z - A.z
-      const minDist = rA + B.size * 0.95
-      const distSq = dx * dx + dy * dy + dz * dz
-      if (distSq >= minDist * minDist || distSq < 1e-6) continue
-      const dist = Math.sqrt(distSq)
-      const push = ((minDist - dist) / dist) * 0.32
-      A.x -= dx * push
-      A.y -= dy * push
-      A.z -= dz * push
-      B.x += dx * push
-      B.y += dy * push
-      B.z += dz * push
-      A.vx *= 0.9
-      A.vy *= 0.9
-      A.vz *= 0.9
-      B.vx *= 0.9
-      B.vy *= 0.9
-      B.vz *= 0.9
-    }
-  }
+  physicsTick = integrateEdwardBubblePhysics({
+    balls,
+    physicsTick,
+    reducedMotion,
+    tourId: edward.touring ? edward.focusedIdentity : null,
+    tourTarget,
+    camera: camera
+      ? { x: camera.position.x, y: camera.position.y, z: camera.position.z }
+      : null,
+    t,
+    dt,
+    realDt,
+    hash01,
+  })
 }
 
 /** Catch-lights + one caustic hitch — no per-frame material thrash */

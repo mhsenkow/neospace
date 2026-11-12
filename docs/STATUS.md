@@ -80,7 +80,7 @@ From [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md), in **suggested priority
 
 | # | Epic | Size | Why it matters |
 |---|------|------|----------------|
-| 5 | Trusted Types + token isolation + CSP | L | Highest remaining risk among product work |
+| 5 | Drop CSP `unsafe-inline` (Trusted Types + token vault already shipped) | L | Remaining CSP work after Trusted Types |
 | 6 | Split `instances` store (further) | L | Auth helpers extracted; timeline merge still large |
 | 9 | Split SettingsModal (further panels) | L | Appearance + section header extracted; more panels remain |
 | — | **(Ops) Turnstile keys** | — | Widget + server verify plumbed; keys not set |
@@ -92,7 +92,7 @@ From [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md), in **suggested priority
 - [x] Compose upload progress + cancel UI
 - [x] Compose scheduling (`scheduledAt` picker) + scheduled queue
 - [x] Compose polls
-- [ ] Trusted Types + token isolation + CSP harden
+- [x] Trusted Types + token isolation + CSP harden (script `unsafe-inline` still required for Nuxt SPA + Turnstile)
 - [x] Split `instances` store (oauth/instanceInfo helpers extracted; more possible)
 - [x] Settings mobile drill-down
 - [x] Settings fork-specific paths (via serverCapabilities)
@@ -147,6 +147,6 @@ Docker serves the static SPA only — **no `/api/feedback`**. Use Cloudflare Pag
 
 - **Ops:** Turnstile site/secret keys and a Cloudflare WAF rate limit on `POST /api/feedback` are not set in production yet (code is ready; isolate-local rate limit still applies)
 - **CSP:** script `unsafe-inline` remains for Nuxt SPA + Turnstile; Trusted Types (`require-trusted-types-for 'script'`) and token vault isolation shipped
-- **Partial refactors:** further god-file thinning still valuable (`TimelineColumn` feed logic, Edward canvas) after the Nov hog-wild splits
+- **Partial refactors:** TimelineColumn fetch/poll lives in `useTimelineColumn.ts`; Edward HUD/sim extracted; profile edit + explore servers thinned. EdwardCanvas WebGL loop and `status/[id].vue` are still large.
 - Appearance fonts are self-hosted (fontsource); compose has `#`/`:` autocomplete, upload progress/cancel, polls, and a scheduled queue
 - Settings deep links use `serverCapabilities` for fork-aware paths; some forks may still diverge

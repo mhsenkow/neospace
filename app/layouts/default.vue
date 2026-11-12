@@ -20,6 +20,7 @@ import { useAlgorithmsStore } from '~/stores/algorithms'
 import { useAccountsManager } from '~/composables/useAccountsManager'
 import { useShellAppearance } from '~/composables/useShellAppearance'
 import { useLoomHandoff } from '~/composables/useLoomHandoff'
+import { useShareTarget } from '~/composables/useShareTarget'
 import { useDeskViewport, usePhoneLandscape, useSidebarShell } from '~/composables/useBreakpoint'
 import { useStandaloneShell } from '~/composables/useStandaloneShell'
 import DesktopSidebar from '~/components/shell/DesktopSidebar.vue'
@@ -95,6 +96,7 @@ const { sidebarRail, loadSidebarRail, applyTheme, lookAnnounce } = useShellAppea
 // Recipe list feeds the sidebar, drawer and board — hydrate once here, not per shell component
 algorithmsStore.hydrate()
 const { registerLoomListeners, bootLoomHandoff } = useLoomHandoff()
+const { consumeShareTarget } = useShareTarget()
 const isDesk = useDeskViewport()
 /** Tablet portrait+ — DesktopSidebar rail instead of phone header/tabs */
 const isSidebarShell = useSidebarShell()
@@ -140,7 +142,7 @@ const navChromeHidden = useNavChromeHidden()
 /** Desktop dock: post from most surfaces; skip thread focus and the DM inbox. */
 const showComposeFab = computed(
   () =>
-    isSidebarShell.value &&
+    isDesk.value &&
     instancesStore.hasAuthenticatedInstance &&
     !composeSheet.open &&
     !isThreadRoute.value &&
@@ -285,6 +287,7 @@ onMounted(async () => {
   }
 
   await bootLoomHandoff()
+  await consumeShareTarget()
 })
 
 // Switching accounts: memberships and followed tags belong to the previous account
@@ -401,6 +404,12 @@ watch(
       </div>
     </div>
 
+    <!-- Narrow shells: install promo in the column, not a card over post actions.
+         Phone landscape hides it — vertical room is the reading surface. -->
+    <div v-if="!isDesk" class="neo-install-slot">
+      <InstallAppBanner placement="inline" />
+    </div>
+
     <main id="main-content" class="main-content" tabindex="-1">
       <slot />
     </main>
@@ -417,8 +426,10 @@ watch(
     <LazySettingsModal v-if="mounted.settings" />
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
     <!-- Hide while compose is open so the waffle never fights the soft keyboard / Post bar -->
+    <!-- Desk only. ≤1023px: tools live in the drawer (phone) or sidebar (tablet),
+         and the install strip sits above the feed so nothing floats over actions. -->
     <div
-      v-show="!composeSheet.open"
+      v-show="!composeSheet.open && isDesk"
       class="neo-bottom-dock"
       :class="{
         'neo-bottom-dock--subview': isMobileSubview && !isTabRoute,
@@ -436,8 +447,7 @@ watch(
       >
         <NeoIcon name="plus" :size="26" :stroke="2.25" />
       </button>
-      <!-- Phones get the same tools inside the drawer (Menu → Tools) instead of a floating waffle -->
-      <SuiteMenu v-if="isSidebarShell" />
+      <SuiteMenu />
     </div>
     <!-- Outside the dock so auto-hide translate doesn't carry it off-screen -->
     <Transition name="compose-peek">
@@ -532,6 +542,21 @@ watch(
   &:hover {
     background: var(--neo-bg-hover);
   }
+}
+
+.neo-install-slot {
+  flex-shrink: 0;
+  width: 100%;
+
+  @media (min-width: 768px) {
+    flex: 0 0 calc(100% - var(--neo-sidebar-width, 248px));
+    width: auto;
+    margin-left: var(--neo-sidebar-width, 248px);
+  }
+}
+
+.neo-layout--phone-landscape .neo-install-slot {
+  display: none;
 }
 
 .neo-auth-notice__dismiss {

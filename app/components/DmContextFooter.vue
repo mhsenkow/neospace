@@ -77,8 +77,9 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
         :name="tab.icon"
         :size="12"
         :stroke="1.75"
-        :filled="tab.id === pane && tab.id === 'chat'"
+        :filled="tab.id === pane"
       />
+      <span class="dm-context-footer__label">{{ tab.label }}</span>
     </button>
   </div>
 </template>
@@ -93,11 +94,13 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
 
 .dm-context-footer__tab {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  min-width: 22px;
   height: 22px;
-  padding: 0;
+  padding: 0 0.35rem;
   border: none;
   border-radius: 5px;
   background: transparent;
@@ -105,7 +108,7 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
   color: var(--neo-text-secondary);
   cursor: pointer;
 
-  // Touch target: 44px tall without growing the 22px visual chip
+  // Touch target: 44px tall without growing the visual chip
   &::before {
     content: '';
     position: absolute;
@@ -117,7 +120,7 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
     background: color-mix(in srgb, var(--neo-text-primary) 10%, transparent);
   }
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
   }
 
@@ -125,5 +128,12 @@ const onKeydown = (e: KeyboardEvent, index: number) => {
     outline: 2px solid var(--neo-focus, var(--neo-accent));
     outline-offset: 2px;
   }
+}
+
+.dm-context-footer__label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 </style>

@@ -4,6 +4,7 @@
 
 import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 
 /** Optional attachment metadata for the lightbox loupe / analytical HUD */
 export type LightboxMediaMeta = {
@@ -68,6 +69,8 @@ export type ReportState = {
   postsError: string | null
   /** Ids of the extra posts the reporter ticked */
   extraStatusIds: string[]
+  submitting: boolean
+  submitError: string | null
 }
 
 export type ReportPayload = {
@@ -80,10 +83,12 @@ export type ReportPayload = {
 
 type ConfirmResolver = (choice: ConfirmChoice) => void
 type ReportResolver = (payload: ReportPayload | null) => void
+type ReportPerform = (payload: ReportPayload) => Promise<void>
 
 let confirmResolve: ConfirmResolver | null = null
 let reportResolve: ReportResolver | null = null
 let reportLoadPosts: (() => Promise<ReportPost[]>) | null = null
+let reportPerform: ReportPerform | null = null
 
 export type AccountSwitcherState = {
   open: boolean
@@ -140,6 +145,8 @@ export const useOverlayStore = defineStore('overlay', {
       postsLoading: false,
       postsError: null,
       extraStatusIds: [],
+      submitting: false,
+      submitError: null,
     } as ReportState,
   }),
 
@@ -262,12 +269,15 @@ export const useOverlayStore = defineStore('overlay', {
       allowLegal?: boolean
       /** Loads the account's recent posts (local ids) for the optional "Add more posts" step */
       loadPosts?: () => Promise<ReportPost[]>
+      /** Runs while the dialog stays open; failures stay inline instead of toasting after close */
+      perform?: ReportPerform
     }): Promise<ReportPayload | null> {
       if (reportResolve) {
         reportResolve(null)
         reportResolve = null
       }
       reportLoadPosts = opts.loadPosts ?? null
+      reportPerform = opts.perform ?? null
       this.report = {
         open: true,
         accountAcct: opts.accountAcct,
@@ -280,6 +290,8 @@ export const useOverlayStore = defineStore('overlay', {
         postsLoading: false,
         postsError: null,
         extraStatusIds: [],
+        submitting: false,
+        submitError: null,
       }
       return new Promise<ReportPayload | null>((resolve) => {
         reportResolve = resolve
@@ -302,11 +314,48 @@ export const useOverlayStore = defineStore('overlay', {
       }
     },
 
-    resolveReport(payload: ReportPayload | null) {
+    cancelReport() {
+      if (this.report.submitting) return
       this.report.open = false
       const resolve = reportResolve
       reportResolve = null
-      resolve?.(payload)
+      reportPerform = null
+      reportLoadPosts = null
+      resolve?.(null)
+    },
+
+    async submitReport() {
+      if (this.report.submitting) return
+      const payload: ReportPayload = {
+        category: this.report.category,
+        comment: this.report.comment.trim(),
+        forward: this.report.forward,
+        extraStatusIds: [...this.report.extraStatusIds],
+      }
+      this.report.submitting = true
+      this.report.submitError = null
+      try {
+        if (reportPerform) await reportPerform(payload)
+        this.report.open = false
+        const resolve = reportResolve
+        reportResolve = null
+        reportPerform = null
+        reportLoadPosts = null
+        resolve?.(payload)
+      } catch (e: unknown) {
+        this.report.submitError =
+          mapErrorToMessage(e).detail || 'Failed to submit report. Please try again.'
+      } finally {
+        this.report.submitting = false
+      }
+    },
+
+    resolveReport(payload: ReportPayload | null) {
+      if (payload) {
+        void this.submitReport()
+        return
+      }
+      this.cancelReport()
     },
   },
 })

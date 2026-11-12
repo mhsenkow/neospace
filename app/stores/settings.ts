@@ -731,9 +731,9 @@ export const useSettingsStore = defineStore('settings', {
         // Also load local preferences
         this.loadLocalPreferences()
         
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (seq !== settingsLoadSeq) return
-        this.error = e?.message || 'Failed to load settings'
+        this.error = e instanceof Error && e.message ? e.message : 'Failed to load settings'
         logError('Settings load error:', e)
       } finally {
         if (seq === settingsLoadSeq) this.isLoading = false
@@ -805,6 +805,10 @@ export const useSettingsStore = defineStore('settings', {
      * Load muted accounts
      */
     async loadMutedAccounts(opts?: { more?: boolean }) {
+      if (!useInstancesStore().isAuthenticated) {
+        this.hasMoreMuted = false
+        return
+      }
       if (this.isLoadingMuted) return
       if (opts?.more && !moderationCursor.muted) {
         this.hasMoreMuted = false
@@ -847,6 +851,10 @@ export const useSettingsStore = defineStore('settings', {
      * Load blocked accounts
      */
     async loadBlockedAccounts(opts?: { more?: boolean }) {
+      if (!useInstancesStore().isAuthenticated) {
+        this.hasMoreBlocked = false
+        return
+      }
       if (this.isLoadingBlocked) return
       if (opts?.more && !moderationCursor.blocked) {
         this.hasMoreBlocked = false
@@ -889,6 +897,7 @@ export const useSettingsStore = defineStore('settings', {
      * Load blocked domains
      */
     async loadBlockedDomains() {
+      if (!useInstancesStore().isAuthenticated) return
       const epoch = moderationEpoch
       const accountId = useInstancesStore().activeAccountId
       try {
@@ -967,8 +976,8 @@ export const useSettingsStore = defineStore('settings', {
         this.saveSuccess = true
         
         return updated
-      } catch (e: any) {
-        this.error = e.message || 'Failed to update profile'
+      } catch (e: unknown) {
+        this.error = e instanceof Error && e.message ? e.message : 'Failed to update profile'
         throw e
       } finally {
         this.isSaving = false
@@ -1008,7 +1017,7 @@ export const useSettingsStore = defineStore('settings', {
       if (data.sensitive !== undefined) source.sensitive = data.sensitive
       if (data.language !== undefined) source.language = data.language
 
-      if (Object.keys(source).length) {
+      if (Object.keys(source).length && useInstancesStore().isAuthenticated) {
         try {
           const client = this.getClient()
           await client.v1.accounts.updateCredentials({ source })
@@ -1161,8 +1170,8 @@ export const useSettingsStore = defineStore('settings', {
         this.saveSuccess = true
         
         return filter
-      } catch (e: any) {
-        this.error = e.message || 'Failed to create filter'
+      } catch (e: unknown) {
+        this.error = e instanceof Error && e.message ? e.message : 'Failed to create filter'
         throw e
       } finally {
         this.isSaving = false

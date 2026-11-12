@@ -62,6 +62,39 @@ export default defineNuxtConfig({
       id: '/',
       lang: 'en',
       categories: ['social', 'news'],
+      // OS share sheet → New thread. GET keeps this a static SPA (no share POST worker).
+      share_target: {
+        action: '/?compose=share',
+        method: 'GET',
+        params: {
+          title: 'title',
+          text: 'text',
+          url: 'url',
+        },
+      },
+      shortcuts: [
+        {
+          name: 'New thread',
+          short_name: 'Compose',
+          description: 'Start a new post',
+          url: '/?compose=1',
+          icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+        },
+        {
+          name: 'Activity',
+          short_name: 'Activity',
+          description: 'Mentions, likes, and follows',
+          url: '/notifications',
+          icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+        },
+        {
+          name: 'Messages',
+          short_name: 'Messages',
+          description: 'Direct messages',
+          url: '/messages',
+          icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+        },
+      ],
       icons: [
         {
           src: '/icons/icon-192.png',

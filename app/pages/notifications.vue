@@ -17,6 +17,7 @@ import type { NeoIconName } from '~/utils/neoIcons'
 const notificationsStore = useNotificationsStore()
 const instancesStore = useInstancesStore()
 const toastStore = useToastStore()
+const calendarDay = useCalendarDayTick()
 const route = useRoute()
 const router = useRouter()
 
@@ -89,6 +90,7 @@ const sortOptions: { key: SortOrder; label: string }[] = [
   { key: 'oldest', label: 'Oldest first' },
 ]
 
+watch(calendarDay, () => notificationsStore.syncDayAnchor(), { immediate: true })
 const grouped = computed(() => notificationsStore.groupedByTime)
 const GROUP_ORDER = ['Today', 'Yesterday', 'This Week', 'Older']
 // Oldest first reads Older → Today, not just reversed rows inside Today-first buckets
@@ -899,7 +901,7 @@ const chromeTitle = computed(() => {
     color: var(--neo-text-primary);
     cursor: pointer;
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);
     }
@@ -930,7 +932,7 @@ const chromeTitle = computed(() => {
   cursor: pointer;
   transition: background-color 0.15s;
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
   }
 
@@ -943,7 +945,7 @@ const chromeTitle = computed(() => {
 .actions-menu__item--danger {
   color: var(--neo-danger);
 
-  &:hover {
+  @include hover {
     background: var(--neo-danger-soft);
   }
 }
@@ -995,7 +997,7 @@ const chromeTitle = computed(() => {
       color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
       transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
 
-    &:hover {
+    @include hover {
       border-color: var(--neo-border-color-dark);
       background: var(--neo-bg-secondary);
       color: var(--neo-text-primary);
@@ -1125,7 +1127,7 @@ const chromeTitle = computed(() => {
     font-weight: 600;
     cursor: pointer;
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
     }
   }
@@ -1173,7 +1175,7 @@ const chromeTitle = computed(() => {
     font-size: 0.875rem;
     text-decoration: none;
 
-    &:hover {
+    @include hover {
       background: var(--neo-accent-hover);
     }
   }
@@ -1243,7 +1245,7 @@ const chromeTitle = computed(() => {
     vertical-align: middle;
   }
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
 
     .notif-item__dismiss {
@@ -1375,7 +1377,7 @@ const chromeTitle = computed(() => {
     text-align: left;
     -webkit-tap-highlight-color: transparent;
 
-    &:hover {
+    @include hover {
       text-decoration: underline;
       color: var(--neo-accent);
     }
@@ -1411,7 +1413,12 @@ const chromeTitle = computed(() => {
     cursor: pointer;
     text-align: left;
 
-    &:hover .notif-item__action,
+    @include hover {
+      .notif-item__action {
+        text-decoration: underline;
+      }
+    }
+
     &:focus-visible .notif-item__action {
       text-decoration: underline;
     }
@@ -1519,7 +1526,13 @@ const chromeTitle = computed(() => {
     transition: opacity 0.15s, background-color 0.15s, color 0.15s, border-color 0.15s;
     -webkit-tap-highlight-color: transparent;
 
-    &:hover,
+    @include hover {
+      opacity: 1;
+      background: var(--neo-danger-soft);
+      border-color: var(--neo-danger);
+      color: var(--neo-danger);
+    }
+
     &:focus-visible {
       opacity: 1;
       background: var(--neo-danger-soft);
@@ -1533,8 +1546,10 @@ const chromeTitle = computed(() => {
     }
   }
 
-  &:hover &__dismiss {
-    opacity: 1;
+  @include hover {
+    .notif-item__dismiss {
+      opacity: 1;
+    }
   }
 }
 

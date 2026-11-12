@@ -53,14 +53,30 @@ export async function openOrComposeDirect(
   return 'compose' as const
 }
 
+/** Locale-aware "A & B"; 3+ stays compact ("A +2") so chat headers don't wrap. */
+export function formatNameList(names: readonly string[]): string {
+  const cleaned = names.map((n) => n.trim()).filter(Boolean)
+  if (!cleaned.length) return ''
+  if (cleaned.length === 1) return cleaned[0]!
+  if (cleaned.length >= 3) return `${cleaned[0]} +${cleaned.length - 1}`
+  try {
+    return new Intl.ListFormat(undefined, { style: 'short', type: 'conjunction' }).format(cleaned)
+  } catch {
+    return `${cleaned[0]} & ${cleaned[1]}`
+  }
+}
+
+/** Empty `accounts` is Mastodon's note-to-self conversation. */
+export function isNoteToSelf(c: { accounts?: unknown[] | null }): boolean {
+  return !(c.accounts || []).length
+}
+
 export function participantLabel(c: mastodon.v1.Conversation): string {
+  if (isNoteToSelf(c)) return 'Note to self'
   const names = (c.accounts || [])
     .map((a) => a.displayName || a.username)
     .filter(Boolean)
-  if (!names.length) return 'Direct message'
-  if (names.length === 1) return names[0]!
-  if (names.length === 2) return `${names[0]} & ${names[1]}`
-  return `${names[0]} +${names.length - 1}`
+  return formatNameList(names) || 'Direct message'
 }
 
 export function participantAccts(c: mastodon.v1.Conversation): string {
@@ -166,6 +182,21 @@ export function safeHttpUrl(url: string | null | undefined): string | null {
 }
 
 /** Day key for chat separators (local calendar day) */
+/** Re-show sender name/avatar after a day break or a 1h+ gap (same speaker). */
+export const BUBBLE_META_GAP_MS = 60 * 60_000
+
+export function shouldShowBubbleMeta(opts: {
+  mine: boolean
+  isFirst: boolean
+  dayChanged: boolean
+  prevSameSpeaker: boolean
+  gapMs: number
+}): boolean {
+  if (opts.mine) return false
+  if (opts.isFirst || opts.dayChanged || !opts.prevSameSpeaker) return true
+  return opts.gapMs > BUBBLE_META_GAP_MS
+}
+
 export function dayKey(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`

@@ -7,12 +7,11 @@
  * Now supports multi-instance - view all your connected accounts!
  */
 
+import { useProfileEdit } from '~/composables/useProfileEdit'
 import { useProfileStore } from '~/stores/profile'
 import { useInsightsStore } from '~/stores/insights'
 import { useInstancesStore } from '~/stores/instances'
 import { useThemeStore } from '~/stores/theme'
-import { onBeforeRouteLeave } from 'vue-router'
-import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import { inAppLinkFor } from '~/utils/richTextLinks'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import type { mastodon } from 'masto'
@@ -24,14 +23,7 @@ import { stripHtml } from '~/utils/stripHtml'
 import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { emojiUrlSet, emojify } from '~/utils/emojify'
-import {
-  resolvePresence,
-  extractHttpUrl,
-  isPresenceField,
-  mergePresenceIntoFields,
-  profileFieldLimit,
-  readPresenceDraft,
-} from '~/utils/profileSources'
+import { resolvePresence, extractHttpUrl } from '~/utils/profileSources'
 import { isColumnsField, isProfileCssField } from '~/utils/profileCss'
 import { createRaceGuard } from '~/composables/useRace'
 import { onDeletedStatus } from '~/composables/useDeletedStatus'
@@ -54,6 +46,30 @@ const instancesStore = useInstancesStore()
 const themeStore = useThemeStore()
 const composeSheet = useComposeSheetStore()
 const toastStore = useToastStore()
+
+const {
+  presenceDraft,
+  syncPresenceDraft,
+  startEdit,
+  cancelEdit,
+  presenceSlotsUsed,
+  maxProfileFields,
+  canAddCustomField,
+  fieldLimitMessage,
+  profileHeaderUrl,
+  profileHeaderStyle,
+  profileAvatarUrl,
+  avatarInput,
+  headerInput,
+  handleAvatarChange,
+  handleHeaderChange,
+  handleSaveProfile,
+  profileErrorFriendly,
+  triggerAvatarUpload,
+  triggerHeaderUpload,
+  onProfileUnmountCleanup,
+} = useProfileEdit()
+
 const { open: openAccountSwitcher } = useAccountSwitcher()
 const route = useRoute()
 const router = useRouter()
@@ -178,107 +194,6 @@ const instanceHost = computed(() => {
 const identityPresenceLinks = computed(() =>
   presenceLinks.value.filter((l) => l.kind !== 'mastodon'),
 )
-
-/** Dedicated cross-network inputs while editing (saved as Mastodon fields). */
-const presenceDraft = ref({ bluesky: '', seenu: '', website: '' })
-
-const syncPresenceDraft = () => {
-  presenceDraft.value = readPresenceDraft(profileStore.editForm.fields)
-}
-
-/** What the form looked like when editing began — leaving with a different one asks first */
-let editBaseline = ''
-const editSnapshot = () => {
-  const f = profileStore.editForm
-  return JSON.stringify([f.displayName, f.note, f.fields, f.locked, f.bot, f.discoverable, presenceDraft.value])
-}
-const hasUnsavedEdits = () =>
-  profileStore.isEditing &&
-  (editSnapshot() !== editBaseline ||
-    !!profileStore.editForm.avatar ||
-    !!profileStore.editForm.header)
-
-onBeforeRouteLeave(async () => {
-  if (!hasUnsavedEdits()) return true
-  return await useOverlayStore().openConfirm({
-    title: 'Discard unsaved changes?',
-    body: 'Your profile edits haven’t been saved.',
-    confirmLabel: 'Discard',
-    danger: true,
-  })
-})
-
-const startEdit = () => {
-  profileStore.toggleEditMode()
-  if (profileStore.isEditing) {
-    syncPresenceDraft()
-    // Presence lives in dedicated inputs; keep other fields editable
-    profileStore.editForm.fields = profileStore.editForm.fields.filter((f) => !isPresenceField(f))
-    editBaseline = editSnapshot()
-  }
-}
-
-const cancelEdit = () => {
-  profileStore.cancelEdit()
-  presenceDraft.value = { bluesky: '', seenu: '', website: '' }
-  clearImagePreviews()
-}
-
-const presenceSlotsUsed = computed(
-  () =>
-    [presenceDraft.value.bluesky, presenceDraft.value.seenu, presenceDraft.value.website].filter(
-      (v) => v.trim(),
-    ).length,
-)
-
-const maxProfileFields = computed(() =>
-  profileFieldLimit(instancesStore.activeAccount?.instanceInfo?.maxProfileFields),
-)
-
-const canAddCustomField = computed(
-  () => profileStore.editForm.fields.length + presenceSlotsUsed.value < maxProfileFields.value,
-)
-
-const fieldLimitMessage = computed(() => {
-  const cap = maxProfileFields.value
-  const used = profileStore.editForm.fields.length + presenceSlotsUsed.value
-  if (used <= cap) return ''
-  return `Your server allows ${cap} profile fields — remove ${used - cap} to save.`
-})
-
-/** blob: previews for not-yet-saved avatar / header picks (revoked on replace/clear) */
-const headerPreviewUrl = ref<string | null>(null)
-const avatarPreviewUrl = ref<string | null>(null)
-
-const clearImagePreviews = () => {
-  if (headerPreviewUrl.value) URL.revokeObjectURL(headerPreviewUrl.value)
-  if (avatarPreviewUrl.value) URL.revokeObjectURL(avatarPreviewUrl.value)
-  headerPreviewUrl.value = null
-  avatarPreviewUrl.value = null
-}
-
-/** Animated headers / avatars hold still under Reduce motion (app setting or OS preference) */
-const reduceMotion = usePrefersReducedMotion()
-
-const profileHeaderUrl = computed(() => {
-  if (headerPreviewUrl.value) return headerPreviewUrl.value
-  const p = profileStore.viewedProfile
-  if (reduceMotion.value) return p?.headerStatic || p?.header || null
-  return p?.header || p?.headerStatic || null
-})
-
-/** Quoted + escaped so a header URL with `)`, quotes or spaces can't break the declaration */
-const profileHeaderStyle = computed(() =>
-  profileHeaderUrl.value
-    ? { backgroundImage: `url(${JSON.stringify(profileHeaderUrl.value)})` }
-    : undefined,
-)
-
-const profileAvatarUrl = computed(() => {
-  if (avatarPreviewUrl.value) return avatarPreviewUrl.value
-  const p = profileStore.viewedProfile
-  return (reduceMotion.value ? p?.avatarStatic || p?.avatar : p?.avatar) || ''
-})
 
 const SOFTWARE_NAMES: Record<string, string> = {
   mastodon: 'Mastodon',
@@ -453,19 +368,19 @@ const reportProfile = async () => {
   const payload = await useOverlayStore().openReport({
     accountAcct: p.acct,
     allowLegal: supportsLegalReports(instancesStore.serverCapabilities),
+    perform: async (report) => {
+      if (profileStore.viewedProfile?.id !== p.id) {
+        throw new Error('That profile is no longer open.')
+      }
+      await profileStore.reportViewedAccount({
+        comment: report.comment || undefined,
+        category: report.category,
+        forward: report.forward,
+      })
+    },
   })
-  if (!payload || profileStore.viewedProfile?.id !== p.id) return
-  try {
-    await profileStore.reportViewedAccount({
-      comment: payload.comment || undefined,
-      category: payload.category,
-      forward: payload.forward,
-    })
-    toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
-  } catch (e) {
-    logError('Report error:', e)
-    toastStore.show({ message: 'Failed to submit report. Please try again.' })
-  }
+  if (!payload) return
+  toastStore.show({ message: 'Report submitted. Thank you for helping keep the community safe.' })
 }
 
 /** @mentions and #hashtags in a bio open in-app, not the remote server in a new tab */
@@ -516,10 +431,6 @@ const profileTabDefs = computed(() =>
     ? [...BASE_PROFILE_TABS, { id: 'insights', label: 'Insights' }]
     : BASE_PROFILE_TABS.filter((t) => t.id !== 'human'),
 )
-
-// File input refs
-const avatarInput = ref<HTMLInputElement | null>(null)
-const headerInput = ref<HTMLInputElement | null>(null)
 
 const formatCount = (n: number) => formatCompact(n)
 
@@ -731,7 +642,7 @@ async function loadProfileFromRoute() {
   // First page of Posts can be thin (self-replies are filtered client-side) — top it up
   void fillTabPages(statusesRace.next())
   // An unsaved header/avatar pick belongs to the profile it was made on
-  if (!profileStore.isEditing) clearImagePreviews()
+  if (!profileStore.isEditing) onProfileUnmountCleanup()
   syncProfileCss()
 
   if (!profileStore.isOwnProfile) {
@@ -793,7 +704,7 @@ watch(
 onUnmounted(() => {
   profileRace.abort()
   statusesRace.abort()
-  clearImagePreviews()
+  onProfileUnmountCleanup()
   // Leave with the viewer's own skin, whichever profile was being worn
   if (themeStore.isChaosMode) themeStore.setUserCustomCSS(instancesStore.userCustomCSS)
   profileStore.clear()
@@ -855,81 +766,6 @@ const handleFollow = async () => {
   } finally {
     isFollowLoading.value = false
   }
-}
-
-const PROFILE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
-
-/** Read + validate the picked image; resets the input so re-picking the same file fires change. */
-const takeProfileImage = (event: Event, what: 'Avatar' | 'Header'): File | null => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0] || null
-  input.value = ''
-  if (!file) return null
-  if (!file.type.startsWith('image/')) {
-    toastStore.show({ message: `${what} must be an image file` })
-    return null
-  }
-  if (file.size > PROFILE_IMAGE_MAX_BYTES) {
-    toastStore.show({ message: `${what} image must be under 8 MB` })
-    return null
-  }
-  return file
-}
-
-const handleAvatarChange = (event: Event) => {
-  const file = takeProfileImage(event, 'Avatar')
-  if (!file) return
-  if (avatarPreviewUrl.value) URL.revokeObjectURL(avatarPreviewUrl.value)
-  avatarPreviewUrl.value = URL.createObjectURL(file)
-  profileStore.editForm.avatar = file
-}
-
-const handleHeaderChange = (event: Event) => {
-  const file = takeProfileImage(event, 'Header')
-  if (!file) return
-  if (headerPreviewUrl.value) URL.revokeObjectURL(headerPreviewUrl.value)
-  headerPreviewUrl.value = URL.createObjectURL(file)
-  profileStore.editForm.header = file
-}
-
-const handleSaveProfile = async () => {
-  const prevFields = profileStore.editForm.fields.map((f) => ({ ...f }))
-  try {
-    profileStore.editForm.fields = mergePresenceIntoFields(
-      prevFields,
-      presenceDraft.value,
-      maxProfileFields.value,
-    )
-    await profileStore.updateProfile()
-    // Saved — the server's avatar/header URLs replace the local previews
-    clearImagePreviews()
-    editBaseline = ''
-    toastStore.show({ message: 'Profile saved' })
-  } catch {
-    profileStore.editForm.fields = prevFields
-    // saveError is set in the store — keep the form open
-  }
-}
-
-const profileErrorFriendly = computed(() => {
-  if (!profileStore.error) return null
-  // The store keeps the HTTP status: a 404 is a missing account, not a transient failure
-  if (profileStore.errorStatus === 404) {
-    return {
-      title: 'Account not found',
-      detail: 'This account doesn’t exist, or it was moved or deleted.',
-      retryable: false,
-    }
-  }
-  return mapErrorToMessage(new Error(profileStore.error))
-})
-
-const triggerAvatarUpload = () => {
-  avatarInput.value?.click()
-}
-
-const triggerHeaderUpload = () => {
-  headerInput.value?.click()
 }
 
 useHead({
@@ -1746,7 +1582,7 @@ useHead({
   overflow-wrap: anywhere;
   cursor: pointer;
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
     text-decoration: underline;
   }
@@ -1801,7 +1637,7 @@ useHead({
   color: var(--neo-text-primary);
   cursor: pointer;
 
-  &:hover {
+  @include hover {
     text-decoration: underline;
   }
 }
@@ -1996,7 +1832,12 @@ useHead({
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
 
-    &:hover .profile-name__chevron,
+    @include hover {
+      .profile-name__chevron {
+        color: var(--neo-text-primary);
+      }
+    }
+
     &:focus-visible .profile-name__chevron {
       color: var(--neo-text-primary);
     }
@@ -2118,7 +1959,7 @@ useHead({
     color: var(--neo-accent);
     border-color: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
 
-    &:hover {
+    @include hover {
       background: color-mix(in srgb, var(--neo-accent) 10%, var(--neo-bg-secondary, var(--neo-bg-tertiary)));
     }
   }
@@ -2204,7 +2045,7 @@ useHead({
     white-space: nowrap;
   }
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
     background: color-mix(in srgb, var(--neo-accent-soft, var(--neo-bg-tertiary)) 70%, var(--neo-bg-tertiary));
   }
@@ -2220,7 +2061,7 @@ useHead({
     border-radius: 999px;
     color: var(--neo-text-primary);
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover, var(--neo-bg-tertiary));
     }
   }
@@ -2305,7 +2146,7 @@ useHead({
   cursor: pointer;
   text-align: left;
 
-  &:hover {
+  @include hover {
     background: color-mix(in srgb, var(--neo-text-primary) 3%, transparent);
   }
 
@@ -2515,7 +2356,7 @@ useHead({
       box-shadow: none;
     }
 
-    &:hover:not([aria-selected='true']) {
+    @include hover(':not([aria-selected=\'true\'])') {
       color: var(--neo-text-secondary);
       background: transparent;
     }

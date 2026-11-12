@@ -11,16 +11,16 @@
     background: var(--neo-bg-primary);
     border: var(--neo-border-width, 1px) solid var(--neo-border-color);
     border-radius: var(--neo-radius-sm, 4px);
-    padding: 1.25rem;
+    padding: 1.15rem 1.25rem 1.25rem;
   }
 
   .settings-subheading {
     margin: 0 0 0.5rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--neo-text-secondary);
+    font-size: 0.6875rem;
+    font-weight: 650;
+    color: var(--neo-text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
 
     &--tight {
       margin-top: 0.85rem;
@@ -38,7 +38,7 @@
   .settings-divider {
     height: 1px;
     background: var(--neo-border-color);
-    margin: 1.25rem 0;
+    margin: 1.15rem 0;
   }
 
   .settings-toggle {
@@ -46,7 +46,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.75rem 0;
+    padding: 0.7rem 0;
     cursor: pointer;
 
     & + & {
@@ -56,7 +56,8 @@
     &__info {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.2rem;
+      min-width: 0;
     }
 
     &__label {
@@ -68,12 +69,15 @@
     &__desc {
       font-size: 0.8125rem;
       color: var(--neo-text-muted);
+      line-height: 1.4;
     }
   }
 
   .settings-checkbox {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
+    margin-top: 0.15rem;
+    flex-shrink: 0;
     accent-color: var(--neo-accent);
     cursor: pointer;
   }
@@ -128,13 +132,13 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.75rem 1.5rem;
-    font-size: 0.9375rem;
+    padding: 0.65rem 1.15rem;
+    font-size: 0.875rem;
     font-weight: 600;
     border: none;
     border-radius: var(--neo-radius-sm, 8px);
     cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease, filter 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, filter 0.15s ease, border-color 0.15s ease;
     text-decoration: none;
     text-transform: none;
     letter-spacing: normal;
@@ -143,18 +147,23 @@
       background: var(--neo-accent);
       color: var(--neo-text-on-accent);
 
-      &:hover:not(:disabled) {
-        background: var(--neo-accent-hover);
+      @media (hover: hover) {
+        &:hover:not(:disabled) {
+          background: var(--neo-accent-hover);
+        }
       }
     }
 
-    &--ghost {
+    &--ghost,
+    &--secondary {
       background: var(--neo-bg-primary);
       color: var(--neo-text-primary);
       border: 1px solid var(--neo-border-color);
 
-      &:hover {
-        background: var(--neo-bg-tertiary);
+      @media (hover: hover) {
+        &:hover:not(:disabled) {
+          background: var(--neo-bg-tertiary);
+        }
       }
     }
 
@@ -162,49 +171,93 @@
       background: var(--neo-danger);
       color: var(--neo-text-on-accent, #fff);
 
-      &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--neo-danger) 85%, var(--neo-text-primary));
+      @media (hover: hover) {
+        &:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--neo-danger) 85%, var(--neo-text-primary));
+        }
       }
     }
 
     &--small {
-      padding: 0.5rem 1rem;
+      padding: 0.4rem 0.8rem;
       font-size: 0.8125rem;
     }
 
     &:disabled {
-      opacity: 0.6;
+      opacity: 0.55;
       cursor: not-allowed;
     }
   }
 
   .settings-actions {
-    margin-top: 1.5rem;
+    margin-top: 1.25rem;
     display: flex;
     gap: 0.75rem;
   }
 
-  .settings-input {
+  .settings-input,
+  .settings-textarea {
+    display: block;
     width: 100%;
-    padding: 0.75rem 1rem;
-    font-size: 1rem;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 0.7rem 0.85rem;
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    font-family: inherit;
     background: var(--neo-bg-secondary);
     border: 1px solid var(--neo-border-color);
-    border-radius: 8px;
+    border-radius: var(--neo-radius-sm, 8px);
     color: var(--neo-text-primary);
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
     &:focus {
       outline: none;
       border-color: var(--neo-accent);
       box-shadow: 0 0 0 3px var(--neo-accent-soft);
     }
+
+    &[aria-invalid='true'] {
+      border-color: var(--neo-danger);
+    }
   }
 
+  .settings-textarea {
+    resize: vertical;
+    min-height: 6.5rem;
+  }
+
+  .settings-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0 0 1rem;
+    min-width: 0;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    &__row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    &__text {
+      font-size: 0.8125rem;
+      font-weight: 650;
+      color: var(--neo-text-primary);
+    }
+  }
 
   .settings-field-hint {
     font-size: 0.75rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
     color: var(--neo-text-muted);
+    white-space: nowrap;
   }
 
   .settings-field-error {
@@ -212,15 +265,382 @@
     color: var(--neo-danger);
   }
 
+  .settings-empty {
+    padding: 1rem 0.15rem;
+    color: var(--neo-text-muted);
+    font-size: 0.875rem;
+    line-height: 1.4;
+  }
+
+  .settings-signed-out {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 1.15rem 1.2rem;
+    background: var(--neo-bg-primary);
+    border: var(--neo-border-width, 1px) solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 4px);
+    max-width: 36rem;
+
+    &__title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 650;
+      color: var(--neo-text-primary);
+    }
+
+    &__body {
+      margin: 0;
+      font-size: 0.875rem;
+      line-height: 1.45;
+      color: var(--neo-text-secondary);
+      max-width: 42ch;
+    }
+
+    & + .settings-group,
+    & + .settings-signed-out {
+      margin-top: 0.85rem;
+    }
+  }
+
+  .settings-group + .settings-group {
+    margin-top: 0.85rem;
+  }
+
+  .settings-inline-form,
+  .settings-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: flex-end;
+
+    .settings-input {
+      flex: 1 1 12rem;
+      min-width: 0;
+    }
+  }
+
+  .settings-filter-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-option-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .settings-option-row {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.85rem 0.9rem;
+    background: var(--neo-bg-secondary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-sm, 8px);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+
+    @media (hover: hover) {
+      &:hover {
+        border-color: var(--neo-border-color-dark);
+      }
+    }
+
+    &.active {
+      border-color: var(--neo-accent);
+      background: var(--neo-accent-soft);
+    }
+
+    &__icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.75rem;
+      height: 1.75rem;
+      color: var(--neo-text-secondary);
+      flex-shrink: 0;
+    }
+
+    &__text {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.125rem;
+      min-width: 0;
+    }
+
+    &__label {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--neo-text-primary);
+    }
+
+    &__desc {
+      font-size: 0.8125rem;
+      color: var(--neo-text-muted);
+      line-height: 1.35;
+    }
+
+    &__check {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--neo-accent);
+    }
+  }
+
+  .settings-account-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .settings-account-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 0.75rem;
+    background: var(--neo-bg-secondary);
+    border-radius: var(--neo-radius-sm, 8px);
+  }
+
+  .settings-account-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .settings-account-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .settings-account-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-account-handle {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-account-card {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.9rem 1rem;
+    background: var(--neo-bg-secondary);
+    border-radius: var(--neo-radius-sm, 10px);
+    margin-bottom: 1rem;
+
+    &__avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+    }
+
+    &__info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      min-width: 0;
+    }
+
+    &__name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--neo-text-primary);
+    }
+
+    &__handle,
+    &__instance {
+      font-size: 0.8125rem;
+      color: var(--neo-text-muted);
+    }
+  }
+
+  .settings-linked-list {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .settings-linked-item {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    background: var(--neo-bg-secondary);
+
+    &__avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    &__info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    &__name {
+      font-weight: 600;
+      color: var(--neo-text-primary);
+      font-size: 0.875rem;
+    }
+
+    &__handle {
+      font-size: 0.75rem;
+      color: var(--neo-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &__badge {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      color: var(--neo-accent);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      align-self: flex-start;
+
+      &--main {
+        color: var(--neo-text-secondary);
+      }
+
+      &--expired {
+        color: var(--neo-warning);
+      }
+    }
+
+    &__actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0.55rem;
+      margin-top: 0.35rem;
+    }
+
+    &__action {
+      border: none;
+      background: transparent;
+      padding: 0;
+      font: inherit;
+      font-size: 0.75rem;
+      font-weight: 650;
+      color: var(--neo-accent);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+
+      @media (hover: hover) {
+        &:hover:not(:disabled) {
+          color: var(--neo-accent-hover, var(--neo-accent));
+        }
+      }
+
+      &:disabled {
+        opacity: 0.65;
+        cursor: progress;
+      }
+    }
+  }
+
+  .settings-filter-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .settings-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--neo-bg-secondary);
+    border-radius: 8px;
+  }
+
+  .settings-filter-info {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .settings-filter-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--neo-text-primary);
+  }
+
+  .settings-filter-keywords {
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+    font-family: var(--neo-font-mono, ui-monospace, monospace);
+  }
+
+  .settings-filter-action {
+    font-size: 0.75rem;
+    color: var(--neo-text-muted);
+  }
+
+  .settings-install-steps {
+    margin: 0 0 0.875rem;
+    padding: 0 0 0 1.15rem;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--neo-text-secondary);
+    max-width: 52ch;
+
+    li + li {
+      margin-top: 0.3rem;
+    }
+
+    strong {
+      color: var(--neo-text-primary);
+      font-weight: 650;
+    }
+  }
+
   @media (max-width: 768px) {
     .settings-toggle {
       flex-wrap: wrap;
       gap: 0.75rem;
     }
+
+    .settings-account-item {
+      flex-wrap: wrap;
+    }
   }
 
   @media (max-width: 480px) {
-    .settings-group {
+    .settings-group,
+    .settings-signed-out {
       padding: 1rem;
       border-radius: var(--neo-radius-sm, 4px);
     }
@@ -228,12 +648,15 @@
     .settings-btn {
       padding: 0.625rem 1rem;
       font-size: 0.875rem;
-      width: 100%;
     }
 
     .settings-actions {
       flex-direction: column;
       margin-top: 1.25rem;
+
+      .settings-btn {
+        width: 100%;
+      }
     }
   }
 }
