@@ -35,7 +35,7 @@
     "ios:xcode": "npm run ios:sync && npx cap open ios",
     "ios:shots": "node scripts/capture-ios-store-screenshots.mjs",
     "ios:previews": "node scripts/build-app-previews.mjs",
-    "ios:store-media": "npm run ios:shots && npm run ios:previews && node scripts/upload-store-media.mjs --ios-only --replace-ios"
+    "ios:store-media": "npm run ios:shots && npm run ios:previews && node scripts/upload-store-media.mjs --replace-ios --replace-mac"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.2",

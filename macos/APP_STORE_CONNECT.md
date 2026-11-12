@@ -9,8 +9,13 @@ ASC also has a separate `MAC_OS` 1.0 version shell for desktop screenshots / pre
 | iOS version (submittable) | `8ef48a06-ade5-43c1-a964-d1159f84338d` |
 | Mac version (media only until native Mac binary) | `6a28f14f-1d4e-4aba-b951-c34590144f99` |
 | Mac localization | `48c1df54-7b57-4264-9a47-7f38d946cab5` |
+| Mac TestFlight binary | Same as iOS — attach the latest iOS build (currently **7**) |
 
 ## Store media
+
+```bash
+npm run ios:store-media   # iPhone + iPad + Mac screenshots, App Previews, ASC upload
+```
 
 ```
 macos/store/screenshots/mac16x10/   # 2560×1600 PNG screenshots
@@ -37,8 +42,8 @@ App Privacy nutrition labels are **not** in the public ASC API. Publish them in 
 - Worldwide availability  
 - Review contact + notes (iOS + Mac)  
 - iOS screenshots + previews COMPLETE  
-- Mac screenshots + preview uploaded  
-- iOS build 2 attached to iOS 1.0  
+- Mac screenshots + preview COMPLETE  
+- iOS build **7** attached to iOS 1.0 (powers Mac TestFlight)
 
 ## Note on Mac review
 

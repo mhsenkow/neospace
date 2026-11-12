@@ -42,6 +42,21 @@ const JOBS = [
       '06-algorithms.png',
     ],
   },
+  {
+    name: 'mac16x10',
+    dir: 'macos/store/screenshots/mac16x10',
+    out: 'macos/store/preview-mac.mp4',
+    w: 1920,
+    h: 1080,
+    files: [
+      '01-home.png',
+      '02-explore.png',
+      '03-groups.png',
+      '04-login.png',
+      '05-privacy.png',
+      '06-algorithms.png',
+    ],
+  },
 ]
 
 function run(cmd, args) {
@@ -114,7 +129,7 @@ function buildJob(job) {
 function main() {
   for (const job of JOBS) buildJob(job)
   console.log('\nPreviews ready. Upload with:')
-  console.log('  node scripts/upload-store-media.mjs --ios-only --replace-ios')
+  console.log('  node scripts/upload-store-media.mjs --replace-ios --replace-mac')
 }
 
 main()

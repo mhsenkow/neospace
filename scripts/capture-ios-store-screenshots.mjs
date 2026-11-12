@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Capture App Store screenshots for LoomSpace at Apple device sizes.
+ * Capture App Store screenshots for LoomSpace at Apple device sizes
+ * (iPhone 6.7", iPad 13", Mac 16:10).
  *
  * Usage:
  *   node scripts/capture-ios-store-screenshots.mjs
@@ -33,6 +34,15 @@ const DEVICES = {
     hasTouch: true,
     userAgent:
       'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  },
+  mac16x10: {
+    dir: path.join(ROOT, 'macos/store/screenshots/mac16x10'),
+    viewport: { width: 1280, height: 800 },
+    deviceScaleFactor: 2,
+    isMobile: false,
+    hasTouch: false,
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
   },
 }
 
@@ -108,9 +118,9 @@ async function main() {
   for (const [name, cfg] of Object.entries(DEVICES)) {
     await captureDevice(name, cfg)
   }
-  console.log('\nDone. Review PNGs under ios/store/screenshots/')
+  console.log('\nDone. Review PNGs under ios/store/screenshots/ and macos/store/screenshots/')
   console.log('  node scripts/build-app-previews.mjs')
-  console.log('  node scripts/upload-store-media.mjs --ios-only --replace-ios')
+  console.log('  node scripts/upload-store-media.mjs --replace-ios --replace-mac')
 }
 
 main().catch((e) => {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Upload LoomSpace App Store screenshots + preview videos (iOS).
- * Requires the iOS version to be in PREPARE_FOR_SUBMISSION / DEVELOPER_REJECTED.
+ * Upload LoomSpace App Store screenshots + preview videos (iOS + Mac).
+ * Requires the versions to be in PREPARE_FOR_SUBMISSION / DEVELOPER_REJECTED.
  */
 
 import crypto from 'node:crypto'
@@ -19,8 +19,19 @@ const KEY = fs.readFileSync(
 
 /** en-US localization for iOS 1.0 (io.ibm.neospace / loomspace) */
 const IOS_LOC = process.env.ASC_IOS_LOC || '85a84060-04a1-4be6-b0a0-de804c3f45ff'
+/** en-US localization for Mac 1.0 media shell */
+const MAC_LOC = process.env.ASC_MAC_LOC || '48c1df54-7b57-4264-9a47-7f38d946cab5'
 
 const SHOT_FILES = [
+  '01-home.png',
+  '02-explore.png',
+  '03-groups.png',
+  '04-login.png',
+  '05-privacy.png',
+  '06-algorithms.png',
+]
+
+const MAC_SHOT_FILES = [
   '01-home.png',
   '02-explore.png',
   '03-groups.png',
@@ -258,43 +269,63 @@ No LoomSpace account. You approve access on your chosen server (OAuth). Tokens s
   ok('Patch en-US listing copy', r)
 }
 
+async function clearPreviews(setId) {
+  const have = await existingNames(setId, 'preview')
+  for (const [file, row] of have) {
+    await api('DELETE', `/v1/appPreviews/${row.id}`)
+    console.log(`deleted preview ${file}`)
+  }
+}
+
 async function main() {
   const args = new Set(process.argv.slice(2))
+  const iosOnly = args.has('--ios-only')
+  const macOnly = args.has('--mac-only')
+  const doIos = !macOnly
+  const doMac = !iosOnly
   const replaceIos = args.has('--replace-ios')
-  const replacePreviews = args.has('--replace-previews') || replaceIos
+  const replaceMac = args.has('--replace-mac')
+  const replacePreviews =
+    args.has('--replace-previews') || replaceIos || replaceMac
 
-  if (!args.has('--media-only')) await patchLocalization()
+  if (doIos && !args.has('--media-only')) await patchLocalization()
 
-  const iphoneSet = await ensureScreenshotSet(IOS_LOC, 'APP_IPHONE_67')
-  await uploadMissingShots(
-    iphoneSet,
-    path.join(ROOT, 'ios/store/screenshots/iphone67'),
-    SHOT_FILES,
-    { replace: replaceIos },
-  )
-  const iphonePrev = await ensurePreviewSet(IOS_LOC, 'IPHONE_67')
-  if (replacePreviews) {
-    const have = await existingNames(iphonePrev, 'preview')
-    for (const [file, row] of have) {
-      await api('DELETE', `/v1/appPreviews/${row.id}`)
-      console.log(`deleted preview ${file}`)
-    }
+  if (doIos) {
+    console.log('\n=== iOS screenshots + previews ===')
+    const iphoneSet = await ensureScreenshotSet(IOS_LOC, 'APP_IPHONE_67')
+    await uploadMissingShots(
+      iphoneSet,
+      path.join(ROOT, 'ios/store/screenshots/iphone67'),
+      SHOT_FILES,
+      { replace: replaceIos },
+    )
+    const iphonePrev = await ensurePreviewSet(IOS_LOC, 'IPHONE_67')
+    if (replacePreviews) await clearPreviews(iphonePrev)
+    await uploadPreview(iphonePrev, path.join(ROOT, 'ios/store/preview-iphone67.mp4'))
+
+    const ipadSet = await ensureScreenshotSet(IOS_LOC, 'APP_IPAD_PRO_3GEN_129')
+    await uploadMissingShots(
+      ipadSet,
+      path.join(ROOT, 'ios/store/screenshots/ipad13'),
+      SHOT_FILES,
+      { replace: replaceIos },
+    )
+    const ipadPrev = await ensurePreviewSet(IOS_LOC, 'IPAD_PRO_3GEN_129')
+    if (replacePreviews) await clearPreviews(ipadPrev)
+    await uploadPreview(ipadPrev, path.join(ROOT, 'ios/store/preview-ipad13.mp4'))
   }
-  await uploadPreview(iphonePrev, path.join(ROOT, 'ios/store/preview-iphone67.mp4'))
 
-  const ipadSet = await ensureScreenshotSet(IOS_LOC, 'APP_IPAD_PRO_3GEN_129')
-  await uploadMissingShots(ipadSet, path.join(ROOT, 'ios/store/screenshots/ipad13'), SHOT_FILES, {
-    replace: replaceIos,
-  })
-  const ipadPrev = await ensurePreviewSet(IOS_LOC, 'IPAD_PRO_3GEN_129')
-  if (replacePreviews) {
-    const have = await existingNames(ipadPrev, 'preview')
-    for (const [file, row] of have) {
-      await api('DELETE', `/v1/appPreviews/${row.id}`)
-      console.log(`deleted preview ${file}`)
-    }
+  if (doMac) {
+    console.log('\n=== Mac screenshots + preview ===')
+    const macDir = path.join(ROOT, 'macos/store/screenshots/mac16x10')
+    const macFiles = MAC_SHOT_FILES.filter((f) => fs.existsSync(path.join(macDir, f)))
+    if (macFiles.length < 3) throw new Error(`Need ≥3 Mac screenshots in ${macDir}`)
+    const macSet = await ensureScreenshotSet(MAC_LOC, 'APP_DESKTOP')
+    await uploadMissingShots(macSet, macDir, macFiles, { replace: replaceMac })
+    const macPrev = await ensurePreviewSet(MAC_LOC, 'DESKTOP')
+    if (replacePreviews) await clearPreviews(macPrev)
+    await uploadPreview(macPrev, path.join(ROOT, 'macos/store/preview-mac.mp4'))
   }
-  await uploadPreview(ipadPrev, path.join(ROOT, 'ios/store/preview-ipad13.mp4'))
 
   console.log('\nMedia upload pass complete. Poll ASC for COMPLETE states before submit.')
 }

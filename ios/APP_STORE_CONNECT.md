@@ -56,15 +56,14 @@ Demo: any public Mastodon account the reviewer owns. No LoomSpace credentials.
 Privacy: https://neospace.ibm.io/privacy
 
 ## Build / encryption
-- Marketing version **1.0**, build **4** (bump `CURRENT_PROJECT_VERSION` in Xcode)  
+- Marketing version **1.0**, build **7** (bump `CURRENT_PROJECT_VERSION` in Xcode)  
 - `ITSAppUsesNonExemptEncryption` = false (HTTPS only)
 - Microphone / Photos usage strings are set for voice notes and media attachments
+- Mac TestFlight uses this same iOS IPA (`isIosBuildMacAppStoreCompatible`)
 
 ## Store media
 ```bash
-node scripts/capture-ios-store-screenshots.mjs
-node scripts/build-app-previews.mjs
-node scripts/upload-store-media.mjs --ios-only --replace-ios
+npm run ios:store-media   # iPhone + iPad + Mac screenshots, App Previews, ASC upload
 ```
 
 ## One-time portal setup
