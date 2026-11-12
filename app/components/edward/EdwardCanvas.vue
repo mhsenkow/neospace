@@ -20,6 +20,8 @@ import {
   edgeCueVisible,
   edgeDwellStep,
   edgeScrubGain,
+  FrameGate,
+  hashToNumber,
   renderIntervalMs,
 } from '~/utils/edwardRender'
 import {
@@ -183,6 +185,11 @@ type BallRuntime = {
   spark: InstanceType<ThreeMod['Mesh']>
   ring: InstanceType<ThreeMod['Mesh']> | null
   texture: InstanceType<ThreeMod['CanvasTexture']>
+  /** Key into faceTexCache (refcounted) */
+  texKey: string
+  /** Shell material cache inputs — lets a quality-tier switch re-point live balls */
+  shellTint: string
+  shellFill: string
   phase: number
   speed: number
   size: number
@@ -459,11 +466,106 @@ const paintSourceBadge = (ctx: CanvasRenderingContext2D, d: EdwardBallDescriptor
   ctx.restore()
 }
 
-const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTexture']> => {
+/** Face art is authored on a 512² grid; the backing canvas shrinks per tier and the ctx is scaled to match */
+const FACE_ART = 512
+
+/**
+ * Backing-canvas edge for new face textures. A 512² RGBA texture + mips is ~1.4 MB of GPU memory
+ * per ball (≈140 MB for a full swarm) — phones and the lean tier get 384² / 256² (~0.8 / 0.35 MB).
+ * Only newly painted faces pick up a tier change; already uploaded ones keep their size.
+ */
+const faceTexSize = () => (shellQuality === 'lean' ? 256 : isCompact() ? 384 : 512)
+
+/**
+ * Face texture cache (NS-321, step 2 of 3).
+ *  - Done: textures are keyed by everything that shapes the painted face (+ size tier) and
+ *    refcounted, so a post that scrolls out and comes back re-uses its upload instead of
+ *    re-painting a canvas and re-uploading it; evicted-but-recent textures idle in a small pool.
+ *  - Done: resolution tiers above.
+ *  - Remaining: one shared atlas texture (single bind for every face) — needs per-ball UV
+ *    sub-rects on a per-ball CircleGeometry (or an instanced face mesh), mip bleed padding between
+ *    cells, and slot recycling. Face materials are still per ball because `map` differs per face.
+ */
+type FaceTexEntry = {
+  tex: InstanceType<ThreeMod['CanvasTexture']>
+  refs: number
+}
+const faceTexCache = new Map<string, FaceTexEntry>()
+const FACE_TEX_IDLE_MAX = 32
+
+const faceTexKey = (d: EdwardBallDescriptor, size: number) =>
+  [
+    size,
+    d.identity,
+    d.instanceHost || '',
+    d.kind,
+    d.badges.join(','),
+    d.engagement,
+    d.hasCard ? 1 : 0,
+    d.isBot ? 1 : 0,
+    d.label,
+    d.preview,
+    d.topTag || '',
+    d.source || '',
+    d.affinity > 0.35 ? 1 : 0,
+    d.counts ? `${d.counts.fav}/${d.counts.boost}` : '',
+    d.mediaUrl || '',
+  ].join('\u0001')
+
+const trimIdleFaceTextures = () => {
+  let idle = 0
+  for (const e of faceTexCache.values()) if (e.refs <= 0) idle++
+  if (idle <= FACE_TEX_IDLE_MAX) return
+  for (const [key, e] of faceTexCache) {
+    if (idle <= FACE_TEX_IDLE_MAX) break
+    if (e.refs > 0) continue
+    e.tex.dispose()
+    faceTexCache.delete(key)
+    idle--
+  }
+}
+
+const releaseFaceTexture = (key: string) => {
+  const e = faceTexCache.get(key)
+  if (!e) return
+  e.refs--
+  if (e.refs > 0) return
+  // Re-insert so idle entries stay oldest-first for eviction
+  faceTexCache.delete(key)
+  faceTexCache.set(key, e)
+  trimIdleFaceTextures()
+}
+
+const disposeFaceTextures = () => {
+  for (const e of faceTexCache.values()) e.tex.dispose()
+  faceTexCache.clear()
+}
+
+const acquireFaceTexture = (
+  d: EdwardBallDescriptor,
+): { tex: InstanceType<ThreeMod['CanvasTexture']>; key: string } => {
+  const size = faceTexSize()
+  const key = faceTexKey(d, size)
+  const hit = faceTexCache.get(key)
+  if (hit) {
+    hit.refs++
+    return { tex: hit.tex, key }
+  }
+  const tex = paintFaceTexture(d, size, key)
+  faceTexCache.set(key, { tex, refs: 1 })
+  return { tex, key }
+}
+
+const paintFaceTexture = (
+  d: EdwardBallDescriptor,
+  size: number,
+  key: string,
+): InstanceType<ThreeMod['CanvasTexture']> => {
   const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 512
+  canvas.width = size
+  canvas.height = size
   const ctx = canvas.getContext('2d')!
+  ctx.scale(size / FACE_ART, size / FACE_ART)
   const spec = faceSpecFor({
     kind: d.kind,
     badges: d.badges,
@@ -474,16 +576,20 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
   })
   const dialect = dialectForHost(d.instanceHost)
   const seed = hash01(d.identity)
-  drawEmoticoin(ctx, spec, seed)
-  paintServerDialect(ctx, dialect, seed)
-  paintRimText(ctx, d)
-  paintPips(ctx, d)
-  paintSourceBadge(ctx, d)
-  paintAuthorChip(ctx, d)
+  const paintAll = (img?: HTMLImageElement) => {
+    drawEmoticoin(ctx, spec, seed)
+    paintServerDialect(ctx, dialect, seed)
+    paintRimText(ctx, d)
+    if (img) paintMediaPeek(ctx, img)
+    paintPips(ctx, d)
+    paintSourceBadge(ctx, d)
+    paintAuthorChip(ctx, d)
+  }
+  paintAll()
 
   const tex = new THREE!.CanvasTexture(canvas)
   tex.colorSpace = THREE!.SRGBColorSpace
-  tex.anisotropy = 4
+  tex.anisotropy = size >= 512 ? 4 : 2
   tex.needsUpdate = true
 
   if (d.mediaUrl && !d.badges.includes('cw')) {
@@ -491,16 +597,11 @@ const buildTexture = (d: EdwardBallDescriptor): InstanceType<ThreeMod['CanvasTex
     img.crossOrigin = 'anonymous'
     img.decoding = 'async'
     img.onload = () => {
-      // Ball evicted (or scene torn down) while the image was in flight
-      if (disposed || identityToBall.get(d.identity)?.texture !== tex) return
-      drawEmoticoin(ctx, spec, seed)
-      paintServerDialect(ctx, dialect, seed)
-      paintRimText(ctx, d)
-      paintMediaPeek(ctx, img)
-      paintPips(ctx, d)
-      paintSourceBadge(ctx, d)
-      paintAuthorChip(ctx, d)
+      // Scene torn down, or the texture was evicted from the cache while the image was in flight
+      if (disposed || faceTexCache.get(key)?.tex !== tex) return
+      paintAll(img)
       tex.needsUpdate = true
+      frameGate.invalidate()
     }
     img.src = d.mediaUrl
   }
@@ -552,11 +653,10 @@ let lastExploreKey = ''
 const disposeBall = (b: BallRuntime) => {
   ballGroup?.remove(b.root)
   ;(b.face.material as { dispose: () => void }).dispose()
-  // Shell material is shared per dialect / quality tier
-  b.texture.dispose()
-  if (b.ring) {
-    ;(b.ring.material as { dispose: () => void }).dispose()
-  }
+  // Shell + ring materials are shared (per tint / quality tier) and owned by their caches;
+  // the face texture is refcounted in faceTexCache
+  releaseFaceTexture(b.texKey)
+  frameGate.invalidate()
 }
 
 /** Bubbles evicted by a newer post shrink away instead of popping out of existence mid-screen */
@@ -588,9 +688,34 @@ const tickLeaving = (now: number) => {
   }
 }
 
+/** Lean is sticky for the session (until restart): flipping back would thrash materials on a borderline GPU */
 let shellQuality: 'full' | 'lean' = 'full'
 let qualitySlowStreak = 0
 const shellMatCache = new Map<string, InstanceType<ThreeMod['MeshPhysicalMaterial']>>()
+const ringMatCache = new Map<string, InstanceType<ThreeMod['MeshPhysicalMaterial']>>()
+/** Frame-skip gate (NS-320) — see frame() */
+const frameGate = new FrameGate()
+
+/** One ring material per colour (rings used to allocate a fresh MeshPhysicalMaterial per ball) */
+const ringMaterialFor = (hex: string): InstanceType<ThreeMod['MeshPhysicalMaterial']> | null => {
+  if (!THREE) return null
+  const cached = ringMatCache.get(hex)
+  if (cached) return cached
+  const ringMat = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(hex),
+    metalness: 0.55,
+    roughness: 0.22,
+    clearcoat: 0.9,
+    transparent: true,
+    opacity: 0.9,
+    emissive: new THREE.Color(hex),
+    emissiveIntensity: 0.4,
+    envMapIntensity: 1.2,
+  })
+  if (envMap) ringMat.envMap = envMap
+  ringMatCache.set(hex, ringMat)
+  return ringMat
+}
 
 const shellMaterialFor = (
   tintHex: string,
@@ -628,6 +753,20 @@ const shellMaterialFor = (
   return shellMat
 }
 
+/** Drop to the lean glass tier: live balls are re-pointed at lean materials, the full ones freed */
+const downgradeShellQuality = () => {
+  if (shellQuality === 'lean') return
+  const stale = [...shellMatCache.values()]
+  shellQuality = 'lean'
+  shellMatCache.clear()
+  for (const b of [...balls, ...leaving.map((l) => l.b)]) {
+    const mat = shellMaterialFor(b.shellTint, b.shellFill)
+    if (mat) b.shell.material = mat
+  }
+  for (const m of stale) m.dispose()
+  frameGate.invalidate()
+}
+
 const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null => {
   if (
     !THREE ||
@@ -641,7 +780,7 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     return null
   }
 
-  const texture = buildTexture(d)
+  const { tex: texture, key: texKey } = acquireFaceTexture(d)
   const spec = faceSpecFor({
     kind: d.kind,
     badges: d.badges,
@@ -662,7 +801,10 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
   root.userData.identity = d.identity
 
   const shellMat = shellMaterialFor(shellTint, spec.fill)
-  if (!shellMat) return null
+  if (!shellMat) {
+    releaseFaceTexture(texKey)
+    return null
+  }
   // Per-ball colors for caustics / runtime tint (materials are shared by tint+fill)
   const atten = new THREE.Color(spec.fill)
   const tintColor = new THREE.Color(shellTint)
@@ -704,18 +846,11 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
       d.kind === 'reply' ||
       d.kind === 'boost')
   if (wantRing && torusGeo) {
-    const ringMat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : shellTint),
-      metalness: 0.55,
-      roughness: 0.22,
-      clearcoat: 0.9,
-      transparent: true,
-      opacity: 0.9,
-      emissive: new THREE.Color(d.affinity > 0.4 ? '#ff7eb3' : shellTint),
-      emissiveIntensity: 0.4,
-      envMapIntensity: 1.2,
-    })
-    if (envMap) ringMat.envMap = envMap
+    const ringMat = ringMaterialFor(d.affinity > 0.4 ? '#ff7eb3' : shellTint)
+    if (!ringMat) {
+      releaseFaceTexture(texKey)
+      return null
+    }
     ring = new THREE.Mesh(torusGeo, ringMat)
     ring.scale.setScalar(1.08)
     ring.raycast = () => {}
@@ -738,6 +873,9 @@ const createBall = (d: EdwardBallDescriptor, ySeed: number): BallRuntime | null 
     spark,
     ring,
     texture,
+    texKey,
+    shellTint,
+    shellFill: spec.fill,
     phase: hash01(d.identity) * Math.PI * 2,
     speed: 0.65 + hash01(d.identity + ':s') * 0.95 - d.affinity * 0.12,
     size,
@@ -853,6 +991,7 @@ const syncBallsFromStore = () => {
   balls = [...identityToBall.values()]
   pickMeshes = balls.flatMap((b) => [b.shell, b.face])
   rebuildFilaments()
+  frameGate.invalidate()
 }
 
 const ballWorldPos = (b: BallRuntime, _t?: number) => ({
@@ -1291,7 +1430,7 @@ const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
   const captionCands: { b: BallRuntime; x: number; y: number; r: number }[] = []
 
   integrateBubblePhysics(simT, simDt, dt)
-  updateBubbleOptics(t)
+  updateBubbleOptics(simT)
 
   for (const b of balls) {
     const p = ballWorldPos(b, t)
@@ -1299,9 +1438,9 @@ const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
 
     // Shell barely breathes — keep the orb round; light does the work
     if (!reducedMotion) {
-      const breathe = 1 + Math.sin(t * 1.1 + b.phase) * 0.018
+      const breathe = 1 + Math.sin(simT * 1.1 + b.phase) * 0.018
       b.shell.scale.setScalar(breathe)
-      b.shell.rotation.y = t * b.spin * 0.12 + b.phase * 0.2
+      b.shell.rotation.y = simT * b.spin * 0.12 + b.phase * 0.2
     }
 
     // Face stays flat + readable — always toward camera
@@ -1309,15 +1448,15 @@ const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
     if (!reducedMotion) {
       const e = (_wobbleQ.e ||= new THREE.Euler())
       const q = (_wobbleQ.q ||= new THREE.Quaternion())
-      e.set(0, 0, Math.sin(t * b.spin * 0.8 + b.phase) * 0.08)
+      e.set(0, 0, Math.sin(simT * b.spin * 0.8 + b.phase) * 0.08)
       b.face.quaternion.multiply(q.setFromEuler(e))
     }
 
     b.spark.quaternion.copy(camera.quaternion)
 
     if (b.ring && !reducedMotion) {
-      b.ring.rotation.x = Math.PI / 2.4 + Math.sin(t * 0.5 + b.phase) * 0.12
-      b.ring.rotation.z = t * 0.55 + b.phase
+      b.ring.rotation.x = Math.PI / 2.4 + Math.sin(simT * 0.5 + b.phase) * 0.12
+      b.ring.rotation.z = simT * 0.55 + b.phase
     }
 
     const screen = projectScreen(p.x, p.y, p.z)
@@ -1679,6 +1818,7 @@ const onResize = () => {
   camera.updateProjectionMatrix()
   renderer.setSize(w, h, false)
   renderer.setPixelRatio(pixelRatio())
+  frameGate.invalidate()
   // Rotation / fold: refit the stream, move the lens, re-apply the ball budget
   applyCamera()
   measureLens()
@@ -1691,6 +1831,57 @@ let filamentTick = 0
 let simT = 0
 
 let lastRenderAt = 0
+
+const _sig: number[] = []
+/**
+ * Everything that can change the drawn picture, as a flat number list (NS-320). Compared exactly
+ * with the last drawn frame by FrameGate. The sim clock is left out under reduced motion — nothing
+ * is time-driven there, so a settled field stops redrawing entirely.
+ */
+const sceneSignature = (): number[] => {
+  const sig = _sig
+  sig.length = 0
+  const cam = camera!
+  sig.push(
+    cam.position.x,
+    cam.position.y,
+    cam.position.z,
+    viewShift.x,
+    viewShift.y,
+    viewShift.w,
+    viewShift.h,
+    hostW,
+    hostH,
+    reducedMotion ? 0 : simT,
+    reducedMotion ? 1 : 0,
+    dragging ? 1 : 0,
+    hashToNumber(hoverIdentity),
+    hashToNumber(edward.focusedIdentity),
+    balls.length,
+    leaving.length,
+  )
+  // Ball transforms folded into two position-weighted sums (+ count above): any move changes them
+  let a = 0
+  let b = 0
+  for (let i = 0; i < balls.length; i++) {
+    const r = balls[i]!.root
+    const w = i + 1
+    a += (r.position.x + r.position.y * 1.7 + r.position.z * 2.3) * w
+    b += r.scale.x * w
+  }
+  for (let i = 0; i < leaving.length; i++) b += leaving[i]!.b.root.scale.x * (i + 7)
+  sig.push(a, b)
+  if (causticLight) {
+    sig.push(
+      causticLight.position.x,
+      causticLight.position.y,
+      causticLight.position.z,
+      causticLight.intensity,
+      causticLight.distance,
+    )
+  }
+  return sig
+}
 
 const frame = () => {
   if (disposed || !renderer || !scene || !camera) return
@@ -1733,20 +1924,23 @@ const frame = () => {
     else hoverCard.value = null
   }
 
-  if (stars) stars.rotation.y = reducedMotion ? 0 : t * 0.008
+  // Ambient motion rides the sim clock, so "still" (and reduced motion) really are still
+  if (stars) stars.rotation.y = reducedMotion ? 0 : simT * 0.008
 
   if (leaving.length) tickLeaving(now)
+
+  // NS-320: nothing that can change a pixel moved (still speed with no drag / hover, settled
+  // reduced-motion field, …) → keep the last drawn frame instead of re-running the glass shaders.
+  if (!frameGate.shouldDraw(sceneSignature(), now)) {
+    raf = requestAnimationFrame(frame)
+    return
+  }
   const renderT0 = performance.now()
   renderer.render(scene, camera)
   const renderMs = performance.now() - renderT0
   if (renderMs > 20) qualitySlowStreak = Math.min(12, qualitySlowStreak + 1)
   else qualitySlowStreak = Math.max(0, qualitySlowStreak - 1)
-  const nextQuality = qualitySlowStreak >= 6 ? 'lean' : 'full'
-  if (nextQuality !== shellQuality) {
-    shellQuality = nextQuality
-    for (const m of shellMatCache.values()) m.dispose()
-    shellMatCache.clear()
-  }
+  if (qualitySlowStreak >= 6) downgradeShellQuality()
   raf = requestAnimationFrame(frame)
 }
 
@@ -1758,6 +1952,7 @@ const onVisibility = () => {
     return
   }
   if (!raf && !contextLost && renderer && scene && camera) {
+    frameGate.invalidate()
     lastFrameT = performance.now()
     raf = requestAnimationFrame(frame)
   }
@@ -1815,14 +2010,12 @@ const rebuildEnvMap = () => {
   envRt = null
   envMap = null
   buildEnvMap()
-  for (const b of balls) {
-    for (const mesh of [b.shell, b.ring]) {
-      if (!mesh) continue
-      const mat = mesh.material as InstanceType<ThreeMod['MeshPhysicalMaterial']>
-      mat.envMap = envMap
-      mat.needsUpdate = true
-    }
+  // Shell / ring materials are shared per tint, so walk the caches (not every ball)
+  for (const mat of [...shellMatCache.values(), ...ringMatCache.values()]) {
+    mat.envMap = envMap
+    mat.needsUpdate = true
   }
+  frameGate.invalidate()
 }
 
 /** Host box, not window: catches orientation settles + any layout change */
@@ -1851,6 +2044,12 @@ const disposeScene = () => {
   identityToBall.clear()
   for (const m of shellMatCache.values()) m.dispose()
   shellMatCache.clear()
+  for (const m of ringMatCache.values()) m.dispose()
+  ringMatCache.clear()
+  disposeFaceTextures()
+  shellQuality = 'full'
+  qualitySlowStreak = 0
+  frameGate.invalidate()
   bubbleDom.clear()
   captionDom.clear()
   bubbleLayer.value?.replaceChildren()
@@ -2077,6 +2276,7 @@ const init = async () => {
 
   clockStart = performance.now()
   lastFrameT = clockStart
+  frameGate.invalidate()
   syncBallsFromStore()
 
   hostEl.value.addEventListener('pointerdown', onPointerDown)

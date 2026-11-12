@@ -73,11 +73,12 @@ const loadThread = async () => {
   replies.value = []
   replyId.value = null
   try {
-    const resolved = await statusStore.resolveThreadId({
+    const resolvedThread = await statusStore.resolveThread({
       id: s.id,
       url: s.url || s.uri || null,
     })
     if (!overlay.threadPeek.open || overlay.threadPeek.status?.id !== s.id) return
+    const resolved = resolvedThread?.id ?? null
     if (!resolved) {
       // Fall back to reply-id resolution for posting even if context fails
       const forReply = await statusStore.resolveReplyId({
@@ -91,7 +92,7 @@ const loadThread = async () => {
       return
     }
     replyId.value = resolved
-    const thread = await statusStore.fetchThread(resolved)
+    const thread = await statusStore.fetchThread(resolved, resolvedThread?.status)
     if (!overlay.threadPeek.open || overlay.threadPeek.status?.id !== s.id) return
     replies.value = thread.descendants || []
   } catch (e) {

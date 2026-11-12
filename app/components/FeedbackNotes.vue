@@ -219,7 +219,8 @@ watch(open, async (isOpen) => {
     turnstileWidgetId.value = null
     turnstileToken.value = null
   }
-})
+  // immediate: the layout lazy-mounts this panel on the first open, so it arrives already open
+}, { immediate: true })
 
 onUnmounted(() => {
   if (toastTimer) clearTimeout(toastTimer)
@@ -425,7 +426,7 @@ onUnmounted(() => {
     border-color var(--neo-transition-fast),
     translate 240ms cubic-bezier(0.22, 1, 0.36, 1);
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
     border-color: color-mix(in srgb, var(--neo-accent) 50%, var(--neo-border-color));
   }
@@ -508,7 +509,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   touch-action: manipulation;
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
     background: var(--neo-bg-hover);
   }
@@ -707,7 +708,7 @@ onUnmounted(() => {
   border-radius: 4px;
   cursor: pointer;
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
     background: var(--neo-bg-hover);
   }
@@ -723,7 +724,7 @@ onUnmounted(() => {
   border-radius: 4px;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
+  @include hover(':not(:disabled)') {
     background: var(--neo-accent-hover);
   }
 

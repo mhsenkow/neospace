@@ -3,6 +3,9 @@
  * Settings → What's new — short TLDR of shipped updates.
  */
 import { CHANGELOG } from '~/utils/changelog'
+import { useSettingsStore } from '~/stores/settings'
+
+const settingsStore = useSettingsStore()
 
 const formatDate = (iso: string) => {
   try {
@@ -18,28 +21,32 @@ const formatDate = (iso: string) => {
 </script>
 
 <template>
-  <div class="settings-group settings-whats-new">
-    <p class="settings-hint">
-      Short notes on what changed in LoomSpace. Full engineering checklists live in the repo docs.
-    </p>
+  <section class="settings-section">
+    <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
-    <article
-      v-for="entry in CHANGELOG"
-      :key="entry.date + entry.title"
-      class="settings-whats-new__entry"
-    >
-      <header class="settings-whats-new__head">
-        <h3 class="settings-whats-new__title">{{ entry.title }}</h3>
-        <time class="settings-whats-new__date" :datetime="entry.date">
-          {{ formatDate(entry.date) }}
-        </time>
-      </header>
-      <p class="settings-whats-new__summary">{{ entry.summary }}</p>
-      <ul class="settings-whats-new__list">
-        <li v-for="(line, i) in entry.highlights" :key="i">{{ line }}</li>
-      </ul>
-    </article>
-  </div>
+    <div class="settings-group settings-whats-new">
+      <p class="settings-hint">
+        Short notes on what changed in LoomSpace. Full engineering checklists live in the repo docs.
+      </p>
+
+      <article
+        v-for="entry in CHANGELOG"
+        :key="entry.date + entry.title"
+        class="settings-whats-new__entry"
+      >
+        <header class="settings-whats-new__head">
+          <h3 class="settings-whats-new__title">{{ entry.title }}</h3>
+          <time class="settings-whats-new__date" :datetime="entry.date">
+            {{ formatDate(entry.date) }}
+          </time>
+        </header>
+        <p class="settings-whats-new__summary">{{ entry.summary }}</p>
+        <ul class="settings-whats-new__list">
+          <li v-for="(line, i) in entry.highlights" :key="i">{{ line }}</li>
+        </ul>
+      </article>
+    </div>
+  </section>
 </template>
 
 <style lang="scss" scoped>

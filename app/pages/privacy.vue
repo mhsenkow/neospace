@@ -20,7 +20,7 @@ definePageMeta({
 <template>
   <main class="privacy">
     <header class="privacy__head">
-      <NuxtLink to="/" class="privacy__mark" aria-label="LoomSpace home">NS</NuxtLink>
+      <NuxtLink to="/" class="privacy__mark" aria-label="LoomSpace home">LS</NuxtLink>
       <h1>Privacy</h1>
       <p class="privacy__lede">
         LoomSpace is a Fediverse client. Your posts and identity live on the Mastodon (or
@@ -67,6 +67,15 @@ definePageMeta({
     </section>
 
     <section class="privacy__section">
+      <h2>Retention &amp; deletion</h2>
+      <p>
+        Device-local data (tokens, drafts, boards) stays until you sign out, clear site data, or
+        delete the app. Server-side posts, media, and follows are controlled by your Mastodon (or
+        compatible) account — delete them there, or close the account on that server.
+      </p>
+    </section>
+
+    <section class="privacy__section">
       <h2>Contact</h2>
       <p>
         Questions:
@@ -76,7 +85,7 @@ definePageMeta({
       </p>
     </section>
 
-    <p class="privacy__updated">Last updated 2026-10-13</p>
+    <p class="privacy__updated">Last updated 2026-11-07</p>
   </main>
 </template>
 

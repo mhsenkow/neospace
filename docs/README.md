@@ -9,8 +9,10 @@ Documentation for the LoomSpace Fediverse client. Start with the [project README
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Nuxt SPA structure, Pinia stores, data flows, key files |
 | [STATUS.md](./STATUS.md) | Current state, audit outcomes, deferred roadmap, ops checklist |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Dev setup, scripts, conventions, PR expectations |
-| [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md) | 10 remaining large epics + Turnstile ops from the Oct 2026 audit |
+| [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md) | Remaining open/partial epics + Turnstile ops (live backlog) |
+| [IMPROVEMENTS.md](./IMPROVEMENTS.md) | Nov 2026 product polish tracker (all 20 shipped) |
 | [AUDIT-2026-10.md](./AUDIT-2026-10.md) | Full holistic audit — 744 items with file:line citations |
+| [AUDIT-2026-10-09.md](./AUDIT-2026-10-09.md) | Round-2 audit — **frozen historical** work order |
 | [screenshots/](./screenshots/) | UI screenshots referenced by the README |
 
 ## Reading order

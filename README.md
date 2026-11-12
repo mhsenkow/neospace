@@ -30,22 +30,15 @@ It is part of the [ibm.io](https://ibm.io/) tool suite (alongside [Loom](https:/
 
 A holistic UX / design / a11y / security audit ([744 items](docs/AUDIT-2026-10.md)) is **largely complete: ~733/744 addressed**. Critical bugs (CW handling, OAuth token revoke, DM safety, sanitizer holes, contrast, focus traps, CI) were fixed in the Oct 2026 pass.
 
-**11 items remain** as larger epics — tracked in [docs/PLAN-DEFERRED-AUDIT.md](docs/PLAN-DEFERRED-AUDIT.md):
+Most deferred epics are **done**. What remains is tracked in [docs/PLAN-DEFERRED-AUDIT.md](docs/PLAN-DEFERRED-AUDIT.md):
 
-| Priority | Epic |
-|----------|------|
-| 1 | Settings mobile drill-down nav |
-| 2 | Compose upload progress + cancel |
-| 3–4 | Compose `#`/`:emoji:` autocomplete; polls (scheduling done) |
-| 5 | Split `SettingsModal` into panels |
-| 6 | Split `instances` store |
-| 7 | Self-host Google Fonts |
-| 8 | Trusted Types + token isolation + CSP harden |
-| 9 | Settings fork-specific paths (GoToSocial/Akkoma) |
-| 10 | Playwright + axe CI |
-| Ops | Turnstile keys (plumbed, needs env) |
+| Status | Epic |
+|--------|------|
+| Done | Trusted Types + token isolation + CSP harden (script `unsafe-inline` kept for Nuxt/Turnstile) |
+| Partial | Further god-file thinning after Nov splits |
+| Ops | Turnstile keys + edge WAF on `/api/feedback` (code plumbed; needs Cloudflare env) |
 
-See [docs/STATUS.md](docs/STATUS.md) for the full picture.
+Live backlog signal: [docs/PLAN-DEFERRED-AUDIT.md](docs/PLAN-DEFERRED-AUDIT.md) · [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md) · [docs/STATUS.md](docs/STATUS.md).
 
 ---
 

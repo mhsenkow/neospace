@@ -1,6 +1,6 @@
 # LoomSpace status
 
-_Last updated: Oct 2026_
+_Last updated: Nov 2026_
 
 Where the project stands, what's live, what's deferred, and how to pick up the next slice of work.
 
@@ -139,15 +139,14 @@ Docker serves the static SPA only — **no `/api/feedback`**. Use Cloudflare Pag
 3. **Refactors when touching the file anyway** — SettingsModal split (#9) after mobile nav; instances split (#6) when adding account features.
 4. **Security hardening last** — Trusted Types (#5) touches CSP, sanitizers, and token storage; plan as one focused project.
 5. **Use the audit as a work order** — [AUDIT-2026-10.md](./AUDIT-2026-10.md) items are checkbox-ready with `file:line` citations. Deferred epics link back to specific audit refs in [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-AUDIT.md).
-6. **CI gate today** — `npm run check` (typecheck + vitest) and `npm run generate` must pass. Playwright (#10) would extend this.
+6. **CI gate today** — `npm run check` (eslint + typechecks + vitest), `npm run generate`, precache budget, and Playwright + axe (`npm run check:full` / CI `e2e` job).
 
 ---
 
 ## Known limitations (honest)
 
-- Fonts load from Google at runtime (deferred #1)
-- Compose lacks hashtag/emoji autocomplete, upload progress, polls (scheduling ships; no scheduled-list UI yet)
-- Settings deep links assume Mastodon web UI paths
-- `npm run typecheck:app` has pre-existing masto typing gaps — CI uses `generate` as the main app gate
-- No automated axe/Playwright CI yet
-- Turnstile enforcement requires manual key setup
+- **Ops:** Turnstile site/secret keys and a Cloudflare WAF rate limit on `POST /api/feedback` are not set in production yet (code is ready; isolate-local rate limit still applies)
+- **CSP:** script `unsafe-inline` remains for Nuxt SPA + Turnstile; Trusted Types (`require-trusted-types-for 'script'`) and token vault isolation shipped
+- **Partial refactors:** further god-file thinning still valuable (`TimelineColumn` feed logic, Edward canvas) after the Nov hog-wild splits
+- Appearance fonts are self-hosted (fontsource); compose has `#`/`:` autocomplete, upload progress/cancel, polls, and a scheduled queue
+- Settings deep links use `serverCapabilities` for fork-aware paths; some forks may still diverge

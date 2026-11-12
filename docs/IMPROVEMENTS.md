@@ -54,6 +54,7 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 
 | Date | Shipped | Commit / notes |
 |------|---------|----------------|
+| 2026-11-12 | Holistic hog-wild | Quality gates (sanitize/rss/stores/prepaint tests, CI coverage, Dependabot npm, inbox e2e); mega splits (PostCard/ComposeBox/index/ColumnChrome/Settings/instances); Edward NS-320/321 + P3 thread/DM polish; Trusted Types + token vault + CSP |
 | 2026-11-04 | Tracker + batch 1 | Voice notes, poll drafts, Messages long-press, portal Home, sparse skips, chat filter label |
 | 2026-11-04 | Batch 2 (edit) | Real post Edit in more-menu; compose sheet editStatusId; timeline patch on edit |
 | 2026-11-04 | Batch 3 (lists) | `list` feed type, drawer + FeedMenu, openListColumn, timeline paging |

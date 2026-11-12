@@ -40,3 +40,14 @@ export function clipGraphemes(text: string, max: number): string {
   }
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
+
+/** First user-perceived character (uppercased) — `slice(0, 1)` splits emoji surrogate pairs. */
+export function firstGrapheme(text: string | null | undefined): string {
+  const t = (text || '').trim()
+  if (!t) return ''
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    segmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    for (const part of segmenter.segment(t)) return part.segment.toUpperCase()
+  }
+  return (Array.from(t)[0] || '').toUpperCase()
+}

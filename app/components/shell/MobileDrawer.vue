@@ -23,6 +23,8 @@ import { useMastodonLists } from '~/composables/useMastodonLists'
 import { SUITE_TOOLS_MAP, type SuiteTool } from '~/utils/suiteCatalog'
 import type { NeoIconName } from '~/utils/neoIcons'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
+import { isNativeShell } from '~/utils/nativeShell'
+import { useToastStore } from '~/stores/toast'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -270,6 +272,10 @@ const addRssFromDrawer = async () => {
   if (!raw) return
   const url = raw.trim()
   if (!/^https?:\/\//i.test(url)) return
+  if (isNativeShell() && /^http:\/\//i.test(url)) {
+    useToastStore().show({ message: 'On iOS, feed URLs must use https://' })
+    return
+  }
   await openBoardFeed('rss', url)
   columnsStore.openRssColumn(url)
 }

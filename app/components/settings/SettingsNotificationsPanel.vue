@@ -4,12 +4,14 @@ import { useInstancesStore } from '~/stores/instances'
 import { useToastStore } from '~/stores/toast'
 import type { SettingsTopic } from '~/utils/serverCapabilities'
 import { useWebPush } from '~/composables/useWebPush'
+import { isNativeShell } from '~/utils/nativeShell'
 
 const settingsStore = useSettingsStore()
 const instancesStore = useInstancesStore()
 const toastStore = useToastStore()
 const serverLink = (topic: SettingsTopic) => instancesStore.serverSettingsLink(topic)
 const { supported, enabled, busy, error, enable, disable, refreshSupport } = useWebPush()
+const nativeShell = isNativeShell()
 
 onMounted(() => refreshSupport())
 
@@ -53,7 +55,14 @@ const togglePush = async () => {
       class="settings-group"
     >
       <p class="settings-hint">
-        This browser can’t receive web push. Try installing LoomSpace as an app, or use Chrome / Edge / Firefox.
+        <template v-if="nativeShell">
+          Activity push isn’t available in the App Store build yet — check Notifications on your Mastodon
+          server, or use LoomSpace in a desktop browser for web push.
+        </template>
+        <template v-else>
+          This browser can’t receive web push. Try installing LoomSpace as an app, or use Chrome / Edge /
+          Firefox.
+        </template>
       </p>
     </div>
 

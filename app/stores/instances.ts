@@ -33,14 +33,8 @@ import {
   mapV2InstanceInfo,
   pollLimitsFrom,
   type PollLimits,
-  type ConnectedInstanceInfo,
   type InstanceApiInfo,
 } from '~/utils/instanceInfo'
-import {
-  DEFAULT_MAX_ATTACHMENTS,
-  DEFAULT_MAX_FILE_BYTES,
-  MEDIA_ALT_MAX,
-} from '~/utils/composeConstants'
 import {
   clearCachedOAuthApp,
   OAUTH_FETCH_TIMEOUT_MS,
@@ -68,106 +62,61 @@ import {
   readerForUrl,
 } from '~/composables/useMasto'
 
-export interface ConnectedInstance {
-  id: string
-  url: string
-  name: string
-  accessToken: string | null
-  clientId: string | null
-  clientSecret: string | null
-  user: mastodon.v1.Account | null
-  instanceInfo: ConnectedInstanceInfo | null
-  isConnecting: boolean
-  error: string | null
-  lastFetched: string | null
-  /** Token revoked/expired — keep profile under Signed in until user re-auths */
-  sessionExpired?: boolean
-}
+import type { ConnectedInstance, ExtendedStatus, MultiInstanceState } from './instances/types'
+import {
+  dedupeLoadedInstances,
+  dedupeRemoteInstances,
+  LEGACY_AUTH_KEY,
+  mergeRemoteInstances,
+  readStoredPayload,
+  sanitizeStoredInstances,
+  serializeInstancesPayload,
+  tokensFromInstances,
+  clearLocalDeviceStorage,
+  SESSION_STARTED_KEY,
+  STORAGE_KEY,
+  launchAccountId,
+} from './instances/persistence'
+import { composeMediaLimitsFrom } from './instances/composeLimits'
+import {
+  INSTANCE_INFO_FAIL_TTL_MS,
+  INSTANCE_INFO_TTL_MS,
+  PEEK_TIMEOUT_MS,
+  readRemoteInstanceInfo,
+  rememberPreviewInfo,
+  rememberRemoteInstanceInfo,
+} from './instances/directory'
+import {
+  hydrateInstancesWithTokens,
+  loadTokens,
+  migrateTokensFromInstances,
+  saveTokens,
+} from '~/utils/tokenVault'
+import {
+  APP_NAME,
+  classifyVerifyFailure,
+  messageOf,
+  RECENT_VERIFY_MS,
+  recentlyVerified,
+  revokeAccessToken,
+  SCOPES,
+} from './instances/session'
+import {
+  cursorParams,
+  LOGIN_REQUIRED_TIMELINE_MESSAGE,
+  mergedTimelineFailureMessage,
+  sortStatusesNewestFirst,
+  tagStatuses,
+} from './instances/timeline'
 
-export interface ExtendedStatus extends mastodon.v1.Status {
-  _instanceId: string
-  _instanceUrl: string
-}
-
-interface MultiInstanceState {
-  instances: ConnectedInstance[]
-  activeAccountId: string | null
-  /** First / home identity for this LoomSpace session — other logins hang off it */
-  primaryAccountId: string | null
-  activeInstanceFilter: string | null
-  isLoading: boolean
-  isInitialized: boolean
-  previewingInstance: string | null
-  previewLoading: boolean
-  previewError: string | null
-  previewTimeline: mastodon.v1.Status[]
-  previewInstanceInfo: Record<string, InstanceApiInfo>
-  /** Shown when the active account changes after a token dies */
-  authNotice: string | null
-}
-
-const STORAGE_KEY = 'neospace_instances'
-const LEGACY_AUTH_KEY = 'neospace_auth'
-const STORAGE_VERSION = 1
-const APP_NAME = 'LoomSpace'
-const SCOPES = 'read write follow push'
-/** Directory / preview / add-server probes — masto has no default timeout */
-const PEEK_TIMEOUT_MS = 8_000
-
-/** sessionStorage flag: this tab/window already chose its posting account for the session */
-const SESSION_STARTED_KEY = 'neospace_session_started'
-
-/**
- * "Main" account semantics: a fresh launch (new tab / PWA start — no session flag yet) posts as
- * the main account; later reloads in the same session keep whatever the user switched to.
- */
-export function launchAccountId(opts: {
-  activeId: string | null
-  primaryId: string | null
-  authenticatedIds: string[]
-  sessionStarted: boolean
-}): string | null {
-  if (opts.sessionStarted) return opts.activeId
-  if (opts.primaryId && opts.authenticatedIds.includes(opts.primaryId)) return opts.primaryId
-  return opts.activeId
-}
-
-/** Accept raw blobs or `{ v: 1, ... }` wrappers */
-function unwrapStoragePayload(data: unknown): Record<string, unknown> | null {
-  if (!data || typeof data !== 'object') return null
-  const obj = data as Record<string, unknown>
-  if (typeof obj.v === 'number' && obj.v >= 1) {
-    const { v: _v, ...rest } = obj
-    return rest
-  }
-  return obj
-}
+// Public API stays importable from `~/stores/instances`
+export type { ConnectedInstance, ExtendedStatus } from './instances/types'
+export { launchAccountId }
 
 let storageListenerBound = false
-/** Tokens verified by completeAuth moments ago — the OAuth callback's follow-up initialize() skips them */
-const RECENT_VERIFY_MS = 60_000
-const recentlyVerified = new Map<string, { token: string; at: number }>()
 /** Coalesces concurrent initialize() callers (layout + notifications cold load, etc.) */
 let initPromise: Promise<void> | null = null
 let storageReloadTimer: ReturnType<typeof setTimeout> | null = null
-
-const INSTANCE_INFO_TTL_MS = 10 * 60_000
-const INSTANCE_INFO_FAIL_TTL_MS = 120_000
-type InstanceInfoCacheEntry = { at: number; ok: boolean; value: InstanceApiInfo | null }
-const instanceInfoRemoteCache = new Map<string, InstanceInfoCacheEntry>()
-/** Explore / directory browsing can touch hundreds of hosts — keep both caches bounded */
-const INSTANCE_INFO_CACHE_MAX = 200
-const PREVIEW_INFO_MAX = 60
-
-function rememberRemoteInstanceInfo(key: string, entry: InstanceInfoCacheEntry) {
-  instanceInfoRemoteCache.delete(key)
-  instanceInfoRemoteCache.set(key, entry)
-  while (instanceInfoRemoteCache.size > INSTANCE_INFO_CACHE_MAX) {
-    const oldest = instanceInfoRemoteCache.keys().next().value
-    if (oldest === undefined) break
-    instanceInfoRemoteCache.delete(oldest)
-  }
-}
 
 const getRedirectUri = () => oauthRedirectUri()
 
@@ -285,28 +234,7 @@ export const useInstancesStore = defineStore('instances', {
       maxFileBytes: number
       altMax: number
     } {
-      const info = this.activeAccount?.instanceInfo
-      const maxAttachments =
-        typeof info?.maxMediaAttachments === 'number' &&
-        info.maxMediaAttachments >= 1 &&
-        info.maxMediaAttachments <= 20
-          ? info.maxMediaAttachments
-          : DEFAULT_MAX_ATTACHMENTS
-      const imageLimit =
-        typeof info?.imageSizeLimit === 'number' && info.imageSizeLimit > 0
-          ? info.imageSizeLimit
-          : DEFAULT_MAX_FILE_BYTES
-      const videoLimit =
-        typeof info?.videoSizeLimit === 'number' && info.videoSizeLimit > 0
-          ? info.videoSizeLimit
-          : imageLimit
-      const maxFileBytes = Math.max(imageLimit, videoLimit)
-      const altMax =
-        typeof info?.mediaDescriptionLimit === 'number' &&
-        info.mediaDescriptionLimit >= 100
-          ? info.mediaDescriptionLimit
-          : MEDIA_ALT_MAX
-      return { maxAttachments, maxFileBytes, altMax }
+      return composeMediaLimitsFrom(this.activeAccount?.instanceInfo)
     },
 
     /** Software + feature flags for the active posting account (unknown until probed). */
@@ -353,60 +281,32 @@ export const useInstancesStore = defineStore('instances', {
       if (typeof window === 'undefined') return
 
       try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        if (saved) {
-          const data = unwrapStoragePayload(JSON.parse(saved))
-          if (!data) return
-          const raw = ((data.instances as ConnectedInstance[]) || []).map((i: ConnectedInstance) => ({
-            ...i,
-            clientSecret: null,
-            isConnecting: false,
-            error: null,
-          })) as ConnectedInstance[]
-          // Keep multiple accounts on the same server; only collapse empty duplicates
-          const seen = new Map<string, ConnectedInstance>()
-          const kept: ConnectedInstance[] = []
-          for (const inst of raw) {
-            const urlKey = (inst.url || '').replace(/\/+$/, '').toLowerCase()
-            if (!urlKey) continue
-            const userKey = inst.user?.id || inst.id
-            const key = `${urlKey}::${userKey}`
-            const prev = seen.get(key)
-            if (!prev) {
-              seen.set(key, inst)
-              kept.push(inst)
-              continue
-            }
-            // Same slot — prefer authenticated + richer user
-            if (!!inst.accessToken && !prev.accessToken) {
-              const idx = kept.indexOf(prev)
-              if (idx !== -1) {
-                kept[idx] = { ...inst, id: prev.id, url: prev.url }
-                seen.set(key, kept[idx]!)
-              }
-            } else if (!!inst.user && !prev.user && !prev.accessToken) {
-              const idx = kept.indexOf(prev)
-              if (idx !== -1) {
-                kept[idx] = { ...inst, id: prev.id, url: prev.url }
-                seen.set(key, kept[idx]!)
-              }
-            }
-          }
-          this.instances = kept
-          this.activeInstanceFilter = (data.activeInstanceFilter as string | null) || null
-          this.activeAccountId = (data.activeAccountId as string | null) || null
-          this.primaryAccountId = (data.primaryAccountId as string | null) || null
-          // Stale filter id → empty target list → blank Local/Federated with no error
-          if (
-            this.activeInstanceFilter &&
-            !this.instances.some((i) => i.id === this.activeInstanceFilter)
-          ) {
-            this.activeInstanceFilter = null
-          }
-          this.ensurePrimaryAccount()
-          this.applyLaunchAccount()
-          clearClientCache()
+        const data = readStoredPayload()
+        if (!data) return
+        // Keep multiple accounts on the same server; only collapse empty duplicates
+        let loaded = dedupeLoadedInstances(sanitizeStoredInstances(data))
+        // Migrate legacy blobs that still embed accessToken into the token vault
+        const migration = migrateTokensFromInstances(loaded)
+        loaded = hydrateInstancesWithTokens(migration.instances, {
+          ...migration.tokens,
+          ...loadTokens(),
+        })
+        this.instances = loaded
+        this.activeInstanceFilter = (data.activeInstanceFilter as string | null) || null
+        this.activeAccountId = (data.activeAccountId as string | null) || null
+        this.primaryAccountId = (data.primaryAccountId as string | null) || null
+        // Stale filter id → empty target list → blank Local/Federated with no error
+        if (
+          this.activeInstanceFilter &&
+          !this.instances.some((i) => i.id === this.activeInstanceFilter)
+        ) {
+          this.activeInstanceFilter = null
         }
+        this.ensurePrimaryAccount()
+        this.applyLaunchAccount()
+        clearClientCache()
+        // Rewrite blob without tokens after a legacy migration
+        if (migration.migrated) this.saveToStorage()
       } catch (e) {
         logError('Failed to load instances from storage:', e)
       }
@@ -416,20 +316,8 @@ export const useInstancesStore = defineStore('instances', {
       if (typeof window === 'undefined') return
 
       try {
-        // Never persist clientSecret — XSS would steal revoke ability + app credentials
-        const toSave = {
-          v: STORAGE_VERSION,
-          instances: this.instances.map((i) => ({
-            ...i,
-            clientSecret: null,
-            isConnecting: false,
-            error: null,
-          })),
-          activeInstanceFilter: this.activeInstanceFilter,
-          activeAccountId: this.activeAccountId,
-          primaryAccountId: this.primaryAccountId,
-        }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+        saveTokens(tokensFromInstances(this.instances))
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeInstancesPayload(this)))
       } catch (e) {
         logError('Failed to save instances to storage:', e)
       }
@@ -443,61 +331,14 @@ export const useInstancesStore = defineStore('instances', {
       if (typeof window === 'undefined') return
 
       try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        if (!saved) return
-        const data = unwrapStoragePayload(JSON.parse(saved))
+        const data = readStoredPayload()
         if (!data) return
 
-        const raw = ((data.instances as ConnectedInstance[]) || []).map((i: ConnectedInstance) => ({
-          ...i,
-          clientSecret: null,
-          isConnecting: false,
-          error: null,
-        })) as ConnectedInstance[]
-
-        const seen = new Map<string, ConnectedInstance>()
-        const remoteKept: ConnectedInstance[] = []
-        for (const inst of raw) {
-          const urlKey = (inst.url || '').replace(/\/+$/, '').toLowerCase()
-          if (!urlKey) continue
-          const userKey = inst.user?.id || inst.id
-          const key = `${urlKey}::${userKey}`
-          const prev = seen.get(key)
-          if (!prev) {
-            seen.set(key, inst)
-            remoteKept.push(inst)
-            continue
-          }
-          if (
-            (!!inst.accessToken && !prev.accessToken) ||
-            (!!inst.user && !prev.user)
-          ) {
-            const idx = remoteKept.indexOf(prev)
-            if (idx !== -1) {
-              remoteKept[idx] = { ...prev, ...inst, url: prev.url, id: prev.id }
-              seen.set(key, remoteKept[idx]!)
-            }
-          }
-        }
-
-        const localById = new Map(this.instances.map((i) => [i.id, i]))
-        const merged: ConnectedInstance[] = []
-        for (const remote of remoteKept) {
-          const local = localById.get(remote.id)
-          if (local) {
-            merged.push({
-              ...remote,
-              // Keep tab-local ephemeral / session-only fields
-              isConnecting: local.isConnecting,
-              error: local.isConnecting ? local.error : remote.error,
-              clientSecret: local.clientSecret ?? remote.clientSecret,
-            })
-          } else {
-            merged.push(remote)
-          }
-        }
-
-        this.instances = merged
+        const remoteKept = dedupeRemoteInstances(sanitizeStoredInstances(data))
+        this.instances = hydrateInstancesWithTokens(
+          mergeRemoteInstances(remoteKept, this.instances),
+          loadTokens(),
+        )
 
         const remoteFilter = (data.activeInstanceFilter as string | null) || null
         const remoteActive = (data.activeAccountId as string | null) || null
@@ -706,8 +547,8 @@ export const useInstancesStore = defineStore('instances', {
         this.instances.push(instance)
         this.saveToStorage()
         return instance
-      } catch (e: any) {
-        throw new Error(e?.message || 'Failed to connect')
+      } catch (e: unknown) {
+        throw new Error(messageOf(e) || 'Failed to connect')
       }
     },
 
@@ -808,8 +649,8 @@ export const useInstancesStore = defineStore('instances', {
         })
 
         return `${instance.url}/oauth/authorize?${params.toString()}`
-      } catch (e: any) {
-        instance.error = e.message || 'Failed to start auth'
+      } catch (e: unknown) {
+        instance.error = messageOf(e) || 'Failed to start auth'
         instance.isConnecting = false
         throw e
       }
@@ -885,15 +726,7 @@ export const useInstancesStore = defineStore('instances', {
         const previousToken = instance.accessToken
         if (previousToken && previousToken !== data.access_token && instance.clientId) {
           try {
-            await oauthFetch(`${instance.url}/oauth/revoke`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                client_id: instance.clientId,
-                client_secret: clientSecret,
-                token: previousToken,
-              }),
-            })
+            await revokeAccessToken(instance.url, instance.clientId, clientSecret, previousToken)
           } catch {
             /* still replace local session */
           }
@@ -931,8 +764,8 @@ export const useInstancesStore = defineStore('instances', {
 
         this.saveToStorage()
         return { instance, pending: challenge.pending ?? null }
-      } catch (e: any) {
-        instance.error = e.message || 'Authentication failed'
+      } catch (e: unknown) {
+        instance.error = messageOf(e) || 'Authentication failed'
         instance.isConnecting = false
         if (!hadTokenBefore && !instance.accessToken) {
           this.removeInstance(instanceId)
@@ -950,15 +783,7 @@ export const useInstancesStore = defineStore('instances', {
       const clientSecret = instance.clientSecret || readClientSecret(instanceId)
       if (instance.accessToken && instance.clientId && clientSecret) {
         try {
-          await oauthFetch(`${instance.url}/oauth/revoke`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              client_id: instance.clientId,
-              client_secret: clientSecret,
-              token: instance.accessToken,
-            }),
-          })
+          await revokeAccessToken(instance.url, instance.clientId, clientSecret, instance.accessToken)
         } catch {
           // Ignore — still clear local session
         }
@@ -1014,18 +839,7 @@ export const useInstancesStore = defineStore('instances', {
      * Does not revoke remote tokens — call logoutAll first if needed.
      */
     clearLocalDeviceData() {
-      if (typeof localStorage === 'undefined') return
-      const keys: string[] = []
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i)
-        if (k && (k.startsWith('neospace') || k.startsWith('neo_'))) keys.push(k)
-      }
-      for (const k of keys) localStorage.removeItem(k)
-      try {
-        sessionStorage.clear()
-      } catch {
-        /* ignore */
-      }
+      clearLocalDeviceStorage()
     },
 
     /** Refresh cached server limits/branding for one account (non-fatal, not awaited at startup). */
@@ -1065,19 +879,13 @@ export const useInstancesStore = defineStore('instances', {
             instance.error = null
             // Full verify always re-probes instance metadata (limits + capabilities).
             void this.refreshInstanceInfo(instance.id, client)
-          } catch (e: any) {
-            const status = e?.status ?? e?.statusCode
-            if (status === 401 || status === 403) {
+          } catch (e: unknown) {
+            const failure = classifyVerifyFailure(e)
+            if (failure.expired) {
               instance.accessToken = null
               instance.sessionExpired = true
-              instance.error = 'Session expired — sign in again'
-            } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
-              instance.error = 'Offline — couldn’t verify your session'
-            } else if (status >= 500) {
-              instance.error = 'Server error — try again later'
-            } else {
-              instance.error = 'Couldn’t verify your session'
             }
+            instance.error = failure.message
           }
         })
 
@@ -1216,11 +1024,7 @@ export const useInstancesStore = defineStore('instances', {
           limit,
           ...(maxId ? { maxId } : {}),
         })
-        return statuses.map((s) => ({
-          ...s,
-          _instanceId: `public:${hostnameOf(url) || 'fallback'}`,
-          _instanceUrl: url,
-        }))
+        return tagStatuses(statuses, `public:${hostnameOf(url) || 'fallback'}`, url)
       } catch (e) {
         logWarn('Public timeline fallback failed:', e)
         return []
@@ -1260,17 +1064,13 @@ export const useInstancesStore = defineStore('instances', {
           const statuses = await client.v1.timelines.public.list({
             local: type === 'local',
             limit,
-            ...(cursor ? (opts?.since ? { sinceId: cursor } : { maxId: cursor }) : {}),
+            ...cursorParams(cursor, opts?.since),
           })
 
-          return statuses.map((s) => ({
-            ...s,
-            _instanceId: instance.id,
-            _instanceUrl: instance.url,
-          }))
-        } catch (e: any) {
+          return tagStatuses(statuses, instance.id, instance.url)
+        } catch (e: unknown) {
           notePublicTimelineAuthFailure(instance.url, e, { authenticated: !!instance.accessToken })
-          const message = e?.message || 'Failed to fetch'
+          const message = messageOf(e) || 'Failed to fetch'
           logWarn(`Failed to fetch from ${instance.url}:`, e)
           errors.push(`${instance.name}: ${message}`)
           return []
@@ -1286,19 +1086,11 @@ export const useInstancesStore = defineStore('instances', {
         if (fallback.length) return fallback
 
         if (errors.length > 0) {
-          throw new Error(
-            errors[0]?.includes('requires login') ||
-              errors[0]?.includes('authenticated') ||
-              errors[0]?.includes('authenticated user')
-              ? 'This instance requires login to view timelines. Connect an account or add a different instance.'
-              : errors[0] || 'Failed to fetch timeline',
-          )
+          throw new Error(mergedTimelineFailureMessage(errors[0]))
         }
       }
 
-      allStatuses.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )
+      sortStatusesNewestFirst(allStatuses)
 
       return dedupeStatusesByIdentity(allStatuses).slice(0, limit)
     },
@@ -1331,14 +1123,10 @@ export const useInstancesStore = defineStore('instances', {
           const cursor = cursors?.[instance.id]
           const statuses = await client.v1.timelines.home.list({
             limit,
-            ...(cursor ? (opts?.since ? { sinceId: cursor } : { maxId: cursor }) : {}),
+            ...cursorParams(cursor, opts?.since),
           })
 
-          return statuses.map((s) => ({
-            ...s,
-            _instanceId: instance.id,
-            _instanceUrl: instance.url,
-          }))
+          return tagStatuses(statuses, instance.id, instance.url)
         } catch (e) {
           logWarn(`Failed to fetch home from ${instance.url}:`, e)
           failures.push(e)
@@ -1353,9 +1141,7 @@ export const useInstancesStore = defineStore('instances', {
       }
       results.forEach((statuses) => allStatuses.push(...statuses))
 
-      allStatuses.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )
+      sortStatusesNewestFirst(allStatuses)
 
       return dedupeStatusesByIdentity(allStatuses).slice(0, Math.max(limit, limit * Math.max(1, authInstances.length)))
     },
@@ -1374,7 +1160,7 @@ export const useInstancesStore = defineStore('instances', {
       if (!clean) return []
       const url = `https://${clean}`
       if (!this.instances.some((i) => i.accessToken) && isAuthGatedPublicHost(url)) {
-        throw new Error('This instance requires login to view timelines. Connect an account or add a different instance.')
+        throw new Error(LOGIN_REQUIRED_TIMELINE_MESSAGE)
       }
       try {
         const client = publicClient(url)
@@ -1383,11 +1169,7 @@ export const useInstancesStore = defineStore('instances', {
           limit,
           ...(maxId ? { maxId } : {}),
         })
-        return statuses.map((s) => ({
-          ...s,
-          _instanceId: `host:${clean}`,
-          _instanceUrl: url,
-        }))
+        return tagStatuses(statuses, `host:${clean}`, url)
       } catch (e) {
         notePublicTimelineAuthFailure(url, e, {
           authenticated: !!readerForUrl(url)?.accessToken,
@@ -1398,11 +1180,7 @@ export const useInstancesStore = defineStore('instances', {
 
     /** Insert into the reactive preview map, evicting the oldest hosts past the cap */
     _rememberPreviewInfo(key: string, info: InstanceApiInfo) {
-      const map = this.previewInstanceInfo
-      delete map[key]
-      map[key] = info
-      const keys = Object.keys(map)
-      for (let i = 0; i < keys.length - PREVIEW_INFO_MAX; i++) delete map[keys[i]!]
+      rememberPreviewInfo(this.previewInstanceInfo, key, info)
     },
 
     /**
@@ -1419,7 +1197,7 @@ export const useInstancesStore = defineStore('instances', {
         return this.previewInstanceInfo[key]
       }
 
-      const cached = instanceInfoRemoteCache.get(key)
+      const cached = readRemoteInstanceInfo(key)
       if (cached) {
         const ttl = cached.ok ? INSTANCE_INFO_TTL_MS : INSTANCE_INFO_FAIL_TTL_MS
         if (Date.now() - cached.at < ttl) {
@@ -1473,7 +1251,7 @@ export const useInstancesStore = defineStore('instances', {
           // Auth-gated public timelines — preview still shows instance info
           if (this.previewingInstance === ticket) this.previewTimeline = []
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (this.previewingInstance === ticket) {
           this.previewError = friendlyServerError(e)
         }

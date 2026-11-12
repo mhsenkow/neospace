@@ -29,7 +29,7 @@ import { plainTextOf } from '~/utils/plainText'
 import { useDebouncedValue } from '~/composables/useDebouncedValue'
 import { getMainScroller, getPageScrollTop, scrollPageTo } from '~/utils/pageScroll'
 import { useComposeSheetStore } from '~/stores/composeSheet'
-import { stripHtml } from '~/utils/stripHtml'
+import { firstGrapheme, stripHtml } from '~/utils/stripHtml'
 import {
   computeThreadAnatomy,
   formatDurationShort,
@@ -126,6 +126,33 @@ const statusMatchesQuery = (s: mastodon.v1.Status, q: string) => {
   return hay.includes(q)
 }
 
+/**
+ * Announcements stay off while a find query filters the log, and come back one tick after the
+ * query clears — otherwise re-inserting every filtered-out bubble is read out as "new" messages.
+ */
+const chatLiveSuspended = ref(false)
+let chatLiveTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => !!threadFindQuery.value.trim(),
+  (filtering) => {
+    if (chatLiveTimer) clearTimeout(chatLiveTimer)
+    chatLiveTimer = null
+    if (filtering) {
+      chatLiveSuspended.value = true
+      return
+    }
+    void nextTick(() => {
+      chatLiveTimer = setTimeout(() => {
+        chatLiveTimer = null
+        chatLiveSuspended.value = false
+      }, 0)
+    })
+  },
+)
+onBeforeUnmount(() => {
+  if (chatLiveTimer) clearTimeout(chatLiveTimer)
+})
+
 /** Filtered chat stream (client-side find-in-conversation) */
 const visibleChatMessages = computed(() => {
   const q = threadFindQuery.value.trim().toLowerCase()
@@ -170,6 +197,11 @@ type ChatPerson = {
   statusesCount?: number | null
 }
 
+/** Mentioned-only participants, hydrated from the API (a mention carries no avatar / display name) */
+const hydratedAccounts = ref<Record<string, mastodon.v1.Account>>({})
+const hydrateRequested = new Set<string>()
+let hydrateEpoch = 0
+
 /**
  * All other people in this DM (group-aware). Only direct posts define the
  * audience — a public ancestor's author (DM started as a private reply to a
@@ -199,12 +231,15 @@ const otherParticipants = computed((): ChatPerson[] => {
       if (!m.id || m.id === myId.value) continue
       if (m.acct?.toLowerCase() === myAcct.value) continue
       if (byId.has(m.id)) continue
+      const hydrated = hydratedAccounts.value[m.id]
       byId.set(m.id, {
         id: m.id,
         acct: m.acct,
         username: m.username,
-        displayName: m.username,
-        avatar: null,
+        displayName: hydrated?.displayName || m.username,
+        avatar: hydrated?.avatar || null,
+        followersCount: hydrated?.followersCount,
+        statusesCount: hydrated?.statusesCount,
       })
     }
   }
@@ -212,6 +247,30 @@ const otherParticipants = computed((): ChatPerson[] => {
 })
 
 const otherParticipant = computed((): ChatPerson | null => otherParticipants.value[0] || null)
+
+/** Fill in people who've only been mentioned — same fetch the profile peek pane uses */
+watch(
+  () => otherParticipants.value.filter((p) => p.id && !p.avatar).map((p) => p.id as string),
+  (ids) => {
+    if (!instancesStore.isAuthenticated) return
+    const epoch = hydrateEpoch
+    for (const id of ids) {
+      if (hydrateRequested.has(id)) continue
+      hydrateRequested.add(id)
+      void activeClient()
+        .v1.accounts.$select(id)
+        .fetch()
+        .then((account) => {
+          if (epoch !== hydrateEpoch) return
+          hydratedAccounts.value = { ...hydratedAccounts.value, [id]: account }
+        })
+        .catch(() => {
+          /* keep the handle + letter placeholder */
+        })
+    }
+  },
+  { immediate: true },
+)
 
 /** Mobile DM: Sniffies-style chat ↔ profile flip under the composer */
 const isMobile = useMobileViewport()
@@ -289,7 +348,7 @@ const loadPeekStatuses = async (refresh = false) => {
     peekHasMore.value = page.length === 20
   } catch (e: unknown) {
     if (!ticket.isCurrent()) return
-    peekStatusesError.value = e instanceof Error ? e.message : 'Couldn’t load posts'
+    peekStatusesError.value = mapErrorToMessage(e).detail || 'Couldn’t load posts'
   } finally {
     if (ticket.isCurrent()) peekStatusesLoading.value = false
   }
@@ -335,7 +394,7 @@ const loadPeekAccount = async () => {
     void loadPeekStatuses(true)
   } catch (e: unknown) {
     if (!ticket.isCurrent()) return
-    peekError.value = e instanceof Error ? e.message : 'Couldn’t load profile'
+    peekError.value = mapErrorToMessage(e).detail || 'Couldn’t load profile'
     peekAccount.value = null
   } finally {
     if (ticket.isCurrent()) peekLoading.value = false
@@ -419,10 +478,21 @@ const bubbleMentionAccts = computed(() =>
 /** Stable per conversation — re-keying on every new message wiped the draft and focus */
 const chatThreadKey = computed(() => chatMessages.value[0]?.id || focusStatus.value?.id || '')
 
+/**
+ * The context endpoint caps ancestors at 40; only warn when we hit that cap and the oldest
+ * loaded message still replies to something we don't have.
+ */
+const ancestorsMaybeTruncated = computed(
+  () => ancestors.value.length === 40 && !!ancestors.value[0]?.inReplyToId,
+)
+
 /** Same slot for the desktop and mobile composers, and across Chat ↔ Profile flips */
 const chatDraftSlot = computed(() =>
   chatThreadKey.value ? `${CHAT_DRAFT_PREFIX}${chatThreadKey.value}` : undefined,
 )
+
+/** One avatar slot per visible participant — a missing avatar gets its own letter placeholder */
+const headerAvatarPeople = computed(() => otherParticipants.value.slice(0, 2))
 
 const threadTitle = computed(() => {
   if (!focusStatus.value) return 'Thread'
@@ -541,7 +611,14 @@ watch(
 )
 
 /** Flat reply list with depth from inReplyToId (root = focus post) */
-type ReplyNode = { status: mastodon.v1.Status; depth: number }
+type ReplyNode = {
+  status: mastodon.v1.Status
+  depth: number
+  /** Replies below this node that aren't rendered because the indent cap was reached */
+  hiddenReplies?: number
+}
+/** Deeper replies would all share one indent — past this, link to that reply's own thread */
+const MAX_REPLY_DEPTH = 6
 
 const replyTree = computed((): ReplyNode[] => {
   const focusId = focusStatus.value?.id
@@ -557,13 +634,29 @@ const replyTree = computed((): ReplyNode[] => {
 
   const out: ReplyNode[] = []
   const seen = new Set<string>()
+  /** Marks a whole subtree as handled (so it isn't re-added as orphans) and counts it */
+  const swallow = (parentId: string): number => {
+    let n = 0
+    for (const kid of byParent.get(parentId) || []) {
+      if (seen.has(kid.id)) continue
+      seen.add(kid.id)
+      n += 1 + swallow(kid.id)
+    }
+    return n
+  }
   const walk = (parentId: string, depth: number) => {
     const kids = byParent.get(parentId) || []
     for (const kid of kids) {
       if (seen.has(kid.id)) continue
       seen.add(kid.id)
-      out.push({ status: kid, depth: Math.min(depth, 6) })
-      walk(kid.id, depth + 1)
+      const node: ReplyNode = { status: kid, depth }
+      out.push(node)
+      if (depth >= MAX_REPLY_DEPTH) {
+        const hidden = swallow(kid.id)
+        if (hidden) node.hiddenReplies = hidden
+      } else {
+        walk(kid.id, depth + 1)
+      }
     }
   }
   walk(focusId, 0)
@@ -651,7 +744,7 @@ const expandDockToSheet = (seedText = '') => {
     initialText: seedText,
     inReplyToId: publicReplyId.value || focus.id,
     mentionAccts: replyMentionAccts.value,
-    visibility: focus.visibility === 'direct' ? 'direct' : focus.visibility,
+    visibility: focus.visibility,
     contextPost: {
       id: focus.id,
       name: focus.account.displayName || focus.account.username,
@@ -690,6 +783,15 @@ const replyContextLabel = (node: ReplyNode) => {
   const parent = parentId ? threadStatusById.value.get(parentId) : undefined
   const who = parent?.account?.acct ? ` to @${parent.account.acct}` : ''
   return `Reply${who}, level ${node.depth + 1}`
+}
+
+/** "Continue thread" target — keeps the read-account override */
+const continueThreadTo = (node: ReplyNode) => {
+  const account = route.query.account
+  return {
+    path: `/status/${node.status.id}`,
+    query: typeof account === 'string' ? { account } : {},
+  }
 }
 
 const visibleReplyTree = computed(() => {
@@ -822,6 +924,9 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     resolvedThreadId = null
     threadQuery.value = ''
     pendingThread.value = null
+    hydrateEpoch++
+    hydrateRequested.clear()
+    hydratedAccounts.value = {}
   } else {
     isRefreshing.value = true
   }
@@ -832,11 +937,15 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     if (!ticket.isCurrent()) return
 
     let resolvedId = resolvedThreadId
+    // The status resolveThread already fetched — reused so the focus post isn't fetched twice
+    let resolvedStatus: mastodon.v1.Status | null = null
     if (!resolvedId || !opts.quiet) {
-      resolvedId = await statusStore.resolveThreadId({
+      const resolved = await statusStore.resolveThread({
         id: paramId.value,
         url: queryUrl.value,
       })
+      resolvedId = resolved?.id ?? null
+      resolvedStatus = resolved?.status ?? null
     }
     if (!ticket.isCurrent()) return
 
@@ -859,7 +968,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
       if (!ticket.isCurrent()) return
     }
 
-    const thread = await statusStore.fetchThread(resolvedId)
+    const thread = await statusStore.fetchThread(resolvedId, resolvedStatus)
     if (!ticket.isCurrent()) return
     // Background refresh: follow new messages only if the reader is already at the end
     const followNew =
@@ -911,7 +1020,7 @@ const loadThread = async (opts: { quiet?: boolean } = {}) => {
     if (!ticket.isCurrent()) return
     if (!opts.quiet) {
       const friendly = mapErrorToMessage(e)
-      error.value = friendly.detail || friendly.title || e?.message || 'Failed to load thread'
+      error.value = friendly.detail || friendly.title || 'Failed to load thread'
     }
   } finally {
     if (ticket.isCurrent()) {
@@ -925,10 +1034,16 @@ const onReplyPosted = async (status: mastodon.v1.Status) => {
   if (!descendants.value.some((s) => s.id === status.id)) {
     descendants.value = [...descendants.value, status]
   }
-  if (focusStatus.value) {
+  // Only a direct reply to the focus post bumps its count (not an ancestor's or a nested card's)
+  const focus = focusStatus.value
+  if (
+    focus &&
+    status.inReplyToId &&
+    (status.inReplyToId === focus.id || status.inReplyToId === publicReplyId.value)
+  ) {
     focusStatus.value = {
-      ...focusStatus.value,
-      repliesCount: (focusStatus.value.repliesCount || 0) + 1,
+      ...focus,
+      repliesCount: (focus.repliesCount || 0) + 1,
     }
   }
   // Land on the new reply immediately — don't wait on a quiet reload
@@ -1154,21 +1269,30 @@ useHead({
           <h1 class="sr-only">Conversation with {{ threadTitle }}</h1>
           <button type="button" class="chat-header__person" @click="goProfile">
             <div class="chat-header__avatars">
-              <img
-                v-for="(p, i) in otherParticipants.slice(0, 2)"
-                :key="p.id || p.acct"
-                v-show="p.avatar"
-                :src="p.avatar || undefined"
-                alt=""
-                class="chat-header__avatar"
-                :class="{ 'chat-header__avatar--stack': i > 0 }"
-              />
+              <template v-for="(p, i) in headerAvatarPeople" :key="p.id || p.acct">
+                <img
+                  v-if="p.avatar"
+                  :src="p.avatar"
+                  alt=""
+                  class="chat-header__avatar"
+                  :class="{ 'chat-header__avatar--stack': i > 0 }"
+                  decoding="async"
+                />
+                <span
+                  v-else
+                  class="chat-header__avatar chat-header__avatar--placeholder"
+                  :class="{ 'chat-header__avatar--stack': i > 0 }"
+                  aria-hidden="true"
+                >
+                  {{ firstGrapheme(p.displayName || p.username || p.acct) || '?' }}
+                </span>
+              </template>
               <span
-                v-if="!otherParticipants.some((p) => p.avatar)"
+                v-if="!headerAvatarPeople.length"
                 class="chat-header__avatar chat-header__avatar--placeholder"
                 aria-hidden="true"
               >
-                {{ (threadTitle || '?').slice(0, 1).toUpperCase() }}
+                {{ firstGrapheme(threadTitle) || '?' }}
               </span>
             </div>
             <span class="chat-header__text">
@@ -1249,7 +1373,7 @@ useHead({
     </div>
 
     <div v-if="isLoading" class="thread-loading" aria-busy="true">
-      <FunLoader variant="region" :label="isDirectThread ? 'Loading messages' : 'Loading conversation'" />
+      <FunLoader variant="region" label="Loading conversation" />
     </div>
 
     <div v-else-if="error" class="thread-state thread-state--error" role="alert">
@@ -1282,9 +1406,7 @@ useHead({
           :class="{ 'dm-pane-enter': dmPaneAnimating && dmPane === 'chat' }"
           role="log"
           :aria-live="
-            threadFindQuery.trim() || (showDmContextChrome && dmPane === 'profile')
-              ? 'off'
-              : 'polite'
+            chatLiveSuspended || (showDmContextChrome && dmPane === 'profile') ? 'off' : 'polite'
           "
           aria-relevant="additions"
           aria-label="Conversation messages"
@@ -1293,7 +1415,7 @@ useHead({
             Private conversation — everyone mentioned can see these messages.
           </p>
           <p
-            v-else-if="!threadFindQuery.trim() && chatMessages.length >= 40"
+            v-else-if="!threadFindQuery.trim() && ancestorsMaybeTruncated"
             class="chat-empty chat-empty--soft"
           >
             Older messages may be truncated by your server’s context limit.
@@ -1329,6 +1451,7 @@ useHead({
         <div
           v-show="showDmContextChrome && dmPane === 'profile'"
           class="dm-profile-peek"
+          role="region"
           :class="{ 'dm-pane-enter': dmPaneAnimating && dmPane === 'profile' }"
           :aria-label="
             peekSeed
@@ -1363,7 +1486,7 @@ useHead({
                 class="dm-profile-peek__chip-avatar dm-profile-peek__chip-avatar--placeholder"
                 aria-hidden="true"
               >
-                {{ (p.displayName || p.username || p.acct || '?').slice(0, 1).toUpperCase() }}
+                {{ firstGrapheme(p.displayName || p.username || p.acct) || '?' }}
               </span>
               <span class="dm-profile-peek__chip-name">
                 {{ p.displayName || p.username || p.acct }}
@@ -1622,6 +1745,14 @@ useHead({
             :style="{ '--thread-depth': String(node.depth) }"
             @replied="onReplyPosted"
           />
+          <NuxtLink
+            v-if="node.hiddenReplies"
+            :to="continueThreadTo(node)"
+            class="thread-continue"
+            :style="{ '--thread-depth': String(node.depth) }"
+          >
+            Continue thread ({{ node.hiddenReplies }} more {{ node.hiddenReplies === 1 ? 'reply' : 'replies' }}) →
+          </NuxtLink>
         </template>
 
         <p
@@ -1630,8 +1761,8 @@ useHead({
         >
           No posts match “{{ threadFindQuery.trim() }}”.
         </p>
-        <p v-else-if="!threadFindQuery.trim() && !descendants.length && !ancestors.length && !unseenReplyCount" class="thread-lonely">
-          No replies yet — be the first.
+        <p v-else-if="!threadFindQuery.trim() && !descendants.length && !unseenReplyCount" class="thread-lonely">
+          {{ canReply ? 'No replies yet — be the first.' : 'No replies yet.' }}
         </p>
         <p v-if="unseenReplyCount && !threadFindQuery.trim()" class="thread-gap" role="note">
           {{ unseenReplyCount }} {{ unseenReplyCount === 1 ? 'reply isn’t' : 'replies aren’t' }} shown — hidden, blocked, or not on your server yet.
@@ -1664,7 +1795,7 @@ useHead({
             :disabled="replyResolving || !publicReplyId"
             :in-reply-to-id="publicReplyId || focusStatus.id"
             :mention-accts="replyMentionAccts"
-            :initial-visibility="focusStatus.visibility === 'direct' ? 'direct' : focusStatus.visibility"
+            :initial-visibility="focusStatus.visibility"
             :placeholder="`Reply to @${focusStatus.account.acct}…`"
             title="Reply"
             @posted="onReplyPosted"
@@ -2338,6 +2469,24 @@ useHead({
   a {
     color: var(--neo-accent);
     font-weight: 600;
+  }
+}
+
+.thread-continue {
+  align-self: flex-start;
+  margin: 0.1rem 0 0.35rem calc(var(--thread-depth, 0) * 0.85rem + 0.5rem);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--neo-accent);
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+
+  @media (max-width: 480px) {
+    margin-left: calc(var(--thread-depth, 0) * 0.4rem + 0.5rem);
   }
 }
 

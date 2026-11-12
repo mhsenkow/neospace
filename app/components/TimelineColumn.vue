@@ -272,7 +272,8 @@ const emit = defineEmits<{
   focus: []
 }>()
 
-const { onColumnDragStart, onColumnDragEnd, onColumnDragOver, onColumnDrop } = useColumnDnd(
+// Drop target for the whole column; the drag handle itself lives in ColumnChrome
+const { onColumnDragOver, onColumnDrop } = useColumnDnd(
   () => props.column.id,
   emit,
   () => props.canReorder,
@@ -1589,28 +1590,27 @@ const loadMore = async () => {
       sparseSkipStreak.value = 0
       lastLoadAddedNothing.value = false
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (gen !== fetchGen) return
     logError('Load more error:', e)
     const friendly = mapErrorToMessage(e)
     loadMoreError.value = friendly.detail || friendly.title || 'Couldn’t load more'
   } finally {
-    if (gen !== fetchGen) return
-    isLoadingMore.value = false
-    // A short page can leave the sentinel in view, and IntersectionObserver only
-    // fires on change — re-arm it. Empty-add pages auto-continue a few times
-    // (quiet "Looking further…") then pause for a manual Look further.
-    if (!hasMore.value) return
-    if (added > 0) {
-      rearmInfiniteObserver()
-      return
+    if (gen === fetchGen) {
+      isLoadingMore.value = false
+      // A short page can leave the sentinel in view, and IntersectionObserver only
+      // fires on change — re-arm it. Empty-add pages auto-continue a few times
+      // (quiet "Looking further…") then pause for a manual Look further.
+      if (hasMore.value) {
+        if (added > 0) {
+          rearmInfiniteObserver()
+        } else if (sparseSkipStreak.value < AUTO_SPARSE_SKIPS && !loadMoreError.value) {
+          // Call immediately so isLoadingMore flips true again before paint
+          void loadMore()
+        }
+        // else: paused for a manual Look further — do not re-arm (would loop forever)
+      }
     }
-    if (sparseSkipStreak.value < AUTO_SPARSE_SKIPS && !loadMoreError.value) {
-      // Call immediately so isLoadingMore flips true again before paint
-      void loadMore()
-      return
-    }
-    // Paused for a manual Look further — do not re-arm (would loop forever)
   }
 }
 
@@ -1792,55 +1792,130 @@ onUnmounted(() => {
   >
     <h2 class="column-title">{{ feedLabel }}</h2>
 
-    <!-- Column Header -->
-    <div class="column-header">
-      <button
-        v-if="canReorder"
-        type="button"
-        class="neo-chrome-btn column-drag-handle"
-        draggable="true"
-        aria-label="Reorder column — drag, or press Left / Right arrow"
-        aria-keyshortcuts="ArrowLeft ArrowRight"
-        @click.stop
-        @keydown.left.prevent="!isFirst && emit('move-left')"
-        @keydown.right.prevent="!isLast && emit('move-right')"
-        @dragstart="onColumnDragStart"
-        @dragend="onColumnDragEnd"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="9" cy="6" r="1.5" />
-          <circle cx="15" cy="6" r="1.5" />
-          <circle cx="9" cy="12" r="1.5" />
-          <circle cx="15" cy="12" r="1.5" />
-          <circle cx="9" cy="18" r="1.5" />
-          <circle cx="15" cy="18" r="1.5" />
-        </svg>
-      </button>
-
-      <div class="column-feed-select">
-        <button
-          type="button"
-          class="column-feed-title"
-          :aria-label="`${feedLabel}. Scroll to top`"
-          @click.stop="onFeedTitleClick"
-        >
-          <span class="column-feed-label">{{ feedLabel }}</span>
-        </button>
-        <NeoMenu
-          v-if="canSwitchPublicServer"
-          v-model:open="serverFilterMenuOpen"
-          class="column-server-menu"
-          align="start"
-          :label="`Browse ${feedLabel} on ${browsingHost}`"
-          @pointerdown.stop
-        >
-          <span class="column-server-pill">
-            <span class="column-server-pill__host">{{ browsingHost }}</span>
+    <!-- Column Header — drag handle, reorder arrows and close live in ColumnChrome -->
+    <ColumnChrome
+      :column-id="column.id"
+      :can-reorder="canReorder"
+      :is-first="isFirst"
+      :is-last="isLast"
+      @column-drag-start="emit('column-drag-start', $event)"
+      @column-drag-end="emit('column-drag-end')"
+      @column-drag-over="emit('column-drag-over', $event)"
+      @column-drop="emit('column-drop', $event)"
+      @move-left="emit('move-left')"
+      @move-right="emit('move-right')"
+    >
+      <template #title>
+        <div class="column-feed-select">
+          <button
+            type="button"
+            class="column-feed-title"
+            :aria-label="`${feedLabel}. Scroll to top`"
+            @click.stop="onFeedTitleClick"
+          >
+            <span class="column-feed-label">{{ feedLabel }}</span>
+          </button>
+          <NeoMenu
+            v-if="canSwitchPublicServer"
+            v-model:open="serverFilterMenuOpen"
+            class="column-server-menu"
+            align="start"
+            :label="`Browse ${feedLabel} on ${browsingHost}`"
+            @pointerdown.stop
+          >
+            <span class="column-server-pill">
+              <span class="column-server-pill__host">{{ browsingHost }}</span>
+              <svg
+                class="column-server-pill__chevron"
+                :class="{ 'column-server-pill__chevron--open': serverFilterMenuOpen }"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </span>
+            <template #items>
+              <button
+                v-for="server in publicServerChoices"
+                :key="server.id"
+                type="button"
+                role="menuitemradio"
+                class="feed-dropdown__item"
+                :class="{ 'feed-dropdown__item--on': isPublicServerSelected(server.id) }"
+                :aria-checked="isPublicServerSelected(server.id)"
+                @click="pickPublicServer(server.id)"
+              >
+                <span class="column-server-choice">
+                  <span class="column-server-choice__host">{{ server.host }}</span>
+                  <span
+                    v-if="server.kind === 'watching'"
+                    class="column-server-choice__tag"
+                  >Watching</span>
+                  <span
+                    v-else-if="server.kind === 'expired'"
+                    class="column-server-choice__tag column-server-choice__tag--warn"
+                  >Expired</span>
+                </span>
+                <NeoIcon
+                  v-if="isPublicServerSelected(server.id)"
+                  name="check"
+                  :size="16"
+                  :stroke="2.5"
+                />
+              </button>
+              <div class="feed-dropdown__divider" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                class="feed-dropdown__item"
+                @click="openAddOrWatchServer"
+              >
+                Add / watch server…
+              </button>
+            </template>
+          </NeoMenu>
+          <div
+            v-if="column.feedType === 'home' && canShowHome"
+            class="column-home-mode"
+            role="group"
+            aria-label="Home feed ranking"
+            @pointerdown.stop
+          >
+            <button
+              type="button"
+              class="column-home-mode__opt"
+              :class="{ 'is-on': homeFeedMode === 'forYou' }"
+              :aria-pressed="homeFeedMode === 'forYou'"
+              @click.stop="setHomeFeedMode('forYou')"
+            >
+              For you
+            </button>
+            <button
+              type="button"
+              class="column-home-mode__opt"
+              :class="{ 'is-on': homeFeedMode === 'following' }"
+              :aria-pressed="homeFeedMode === 'following'"
+              @click.stop="setHomeFeedMode('following')"
+            >
+              Following
+            </button>
+          </div>
+          <NeoMenu
+            v-model:open="feedMenuOpen"
+            class="column-feed-menu"
+            align="start"
+            :label="`Switch feed (${feedLabel})`"
+          >
             <svg
-              class="column-server-pill__chevron"
-              :class="{ 'column-server-pill__chevron--open': serverFilterMenuOpen }"
-              width="12"
-              height="12"
+              class="column-feed-chevron"
+              :class="{ 'column-feed-chevron--open': feedMenuOpen }"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -1849,229 +1924,118 @@ onUnmounted(() => {
             >
               <polyline points="6 9 12 15 18 9" />
             </svg>
-          </span>
-          <template #items>
-            <button
-              v-for="server in publicServerChoices"
-              :key="server.id"
-              type="button"
-              role="menuitemradio"
-              class="feed-dropdown__item"
-              :class="{ 'feed-dropdown__item--on': isPublicServerSelected(server.id) }"
-              :aria-checked="isPublicServerSelected(server.id)"
-              @click="pickPublicServer(server.id)"
-            >
-              <span class="column-server-choice">
-                <span class="column-server-choice__host">{{ server.host }}</span>
-                <span
-                  v-if="server.kind === 'watching'"
-                  class="column-server-choice__tag"
-                >Watching</span>
-                <span
-                  v-else-if="server.kind === 'expired'"
-                  class="column-server-choice__tag column-server-choice__tag--warn"
-                >Expired</span>
-              </span>
-              <NeoIcon
-                v-if="isPublicServerSelected(server.id)"
-                name="check"
-                :size="16"
-                :stroke="2.5"
+            <template #items>
+              <FeedMenuItems
+                variant="switch"
+                :timelines-expanded="algorithmsExpanded"
+                local-host-label=""
+                :active-feed-type="column.feedType"
+                :active-algorithm-id="column.algorithmId"
+                :active-group-tag="column.groupTag"
+                :active-list-id="column.listId"
+                :active-rss-url="column.rssUrl"
+                :can-show-home="canShowHome"
+                :groups-expanded="groupsExpanded"
+                :joined-groups="joinedGroups"
+                show-panel-feeds
+                @toggle-timelines="algorithmsExpanded = !algorithmsExpanded"
+                @toggle-groups="groupsExpanded = !groupsExpanded"
+                @pick="switchFeed"
+                @add-rss="promptSwitchRss"
+                @create-algorithm="feedMenuOpen = false; algorithmsStore.openEditor()"
+                @edit-algorithm="(id) => { feedMenuOpen = false; algorithmsStore.openEditor(id) }"
               />
-            </button>
-            <div class="feed-dropdown__divider" role="separator" />
-            <button
-              type="button"
-              role="menuitem"
-              class="feed-dropdown__item"
-              @click="openAddOrWatchServer"
-            >
-              Add / watch server…
-            </button>
-          </template>
-        </NeoMenu>
+              <div class="feed-dropdown__divider" role="separator" />
+              <NuxtLink
+                to="/groups"
+                role="menuitem"
+                class="feed-dropdown__item feed-dropdown__item--link"
+                @click="feedMenuOpen = false"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 00-3-3.87" />
+                  <path d="M16 3.13a4 4 0 010 7.75" />
+                </svg>
+                Browse Groups
+              </NuxtLink>
+            </template>
+          </NeoMenu>
+        </div>
+      </template>
+      <template #actions>
         <div
-          v-if="column.feedType === 'home' && canShowHome"
-          class="column-home-mode"
+          v-if="showModeSwitch"
+          class="column-mode"
           role="group"
-          aria-label="Home feed ranking"
+          aria-label="How to move through this feed"
           @pointerdown.stop
         >
           <button
             type="button"
-            class="column-home-mode__opt"
-            :class="{ 'is-on': homeFeedMode === 'forYou' }"
-            :aria-pressed="homeFeedMode === 'forYou'"
-            @click.stop="setHomeFeedMode('forYou')"
+            class="column-mode__opt"
+            :class="{ 'is-on': !isFlip }"
+            :aria-pressed="!isFlip"
+            title="Feed — scroll a list"
+            @click.stop="setViewMode('flow')"
           >
-            For you
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
+            Feed
           </button>
           <button
             type="button"
-            class="column-home-mode__opt"
-            :class="{ 'is-on': homeFeedMode === 'following' }"
-            :aria-pressed="homeFeedMode === 'following'"
-            @click.stop="setHomeFeedMode('following')"
+            class="column-mode__opt"
+            :class="{ 'is-on': isFlip }"
+            :aria-pressed="isFlip"
+            title="Flick — one post at a time (j / k, wheel, or arrows)"
+            @click.stop="setViewMode('flip')"
           >
-            Following
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <rect x="6" y="3" width="12" height="18" rx="2" />
+              <polyline points="9 10 12 7 15 10" />
+            </svg>
+            Flick
           </button>
         </div>
-        <NeoMenu
-          v-model:open="feedMenuOpen"
-          class="column-feed-menu"
-          align="start"
-          :label="`Switch feed (${feedLabel})`"
-        >
-          <svg
-            class="column-feed-chevron"
-            :class="{ 'column-feed-chevron--open': feedMenuOpen }"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            aria-hidden="true"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-          <template #items>
-            <FeedMenuItems
-              variant="switch"
-              :timelines-expanded="algorithmsExpanded"
-              local-host-label=""
-              :active-feed-type="column.feedType"
-              :active-algorithm-id="column.algorithmId"
-              :active-group-tag="column.groupTag"
-              :active-list-id="column.listId"
-              :active-rss-url="column.rssUrl"
-              :can-show-home="canShowHome"
-              :groups-expanded="groupsExpanded"
-              :joined-groups="joinedGroups"
-              show-panel-feeds
-              @toggle-timelines="algorithmsExpanded = !algorithmsExpanded"
-              @toggle-groups="groupsExpanded = !groupsExpanded"
-              @pick="switchFeed"
-              @add-rss="promptSwitchRss"
-              @create-algorithm="feedMenuOpen = false; algorithmsStore.openEditor()"
-              @edit-algorithm="(id) => { feedMenuOpen = false; algorithmsStore.openEditor(id) }"
-            />
-            <div class="feed-dropdown__divider" role="separator" />
-            <NuxtLink
-              to="/groups"
-              role="menuitem"
-              class="feed-dropdown__item feed-dropdown__item--link"
-              @click="feedMenuOpen = false"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 00-3-3.87" />
-                <path d="M16 3.13a4 4 0 010 7.75" />
-              </svg>
-              Browse Groups
-            </NuxtLink>
-          </template>
-        </NeoMenu>
-      </div>
 
-      <div v-if="canReorder" class="column-reorder">
         <button
           type="button"
-          class="neo-chrome-btn"
-          aria-label="Move column left"
-          :disabled="isFirst"
+          class="neo-chrome-btn column-focus"
+          :class="{ 'column-focus--push': !canReorder && !showModeSwitch, 'neo-chrome-btn--on': focused }"
+          :aria-label="focused ? 'Show all views' : 'Focus this view'"
+          :aria-pressed="focused"
           @pointerdown.stop
-          @click.stop="emit('move-left')"
+          @click.stop="emit('focus')"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="15 18 9 12 15 6" />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="15 3 21 3 21 9" />
+            <polyline points="9 21 3 21 3 15" />
+            <line x1="21" y1="3" x2="14" y2="10" />
+            <line x1="3" y1="21" x2="10" y2="14" />
           </svg>
         </button>
+      </template>
+      <template #close>
         <button
+          v-if="canRemove"
           type="button"
-          class="neo-chrome-btn"
-          aria-label="Move column right"
-          :disabled="isLast"
+          class="neo-chrome-btn neo-chrome-btn--danger column-close"
+          aria-label="Remove column"
           @pointerdown.stop
-          @click.stop="emit('move-right')"
+          @click.stop="emit('remove')"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="9 18 15 12 9 6" />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
-      </div>
-
-      <div
-        v-if="showModeSwitch"
-        class="column-mode"
-        role="group"
-        aria-label="How to move through this feed"
-        @pointerdown.stop
-      >
-        <button
-          type="button"
-          class="column-mode__opt"
-          :class="{ 'is-on': !isFlip }"
-          :aria-pressed="!isFlip"
-          title="Feed — scroll a list"
-          @click.stop="setViewMode('flow')"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <line x1="4" y1="6" x2="20" y2="6" />
-            <line x1="4" y1="12" x2="20" y2="12" />
-            <line x1="4" y1="18" x2="20" y2="18" />
-          </svg>
-          Feed
-        </button>
-        <button
-          type="button"
-          class="column-mode__opt"
-          :class="{ 'is-on': isFlip }"
-          :aria-pressed="isFlip"
-          title="Flick — one post at a time (j / k, wheel, or arrows)"
-          @click.stop="setViewMode('flip')"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <rect x="6" y="3" width="12" height="18" rx="2" />
-            <polyline points="9 10 12 7 15 10" />
-          </svg>
-          Flick
-        </button>
-      </div>
-
-      <button
-        type="button"
-        class="neo-chrome-btn column-focus"
-        :class="{ 'column-focus--push': !canReorder && !showModeSwitch, 'neo-chrome-btn--on': focused }"
-        :aria-label="focused ? 'Show all views' : 'Focus this view'"
-        :aria-pressed="focused"
-        @pointerdown.stop
-        @click.stop="emit('focus')"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <polyline points="15 3 21 3 21 9" />
-          <polyline points="9 21 3 21 3 15" />
-          <line x1="21" y1="3" x2="14" y2="10" />
-          <line x1="3" y1="21" x2="10" y2="14" />
-        </svg>
-      </button>
-
-      <button
-        v-if="canRemove"
-        type="button"
-        class="neo-chrome-btn neo-chrome-btn--danger column-close"
-        aria-label="Remove column"
-        @pointerdown.stop
-        @click.stop="emit('remove')"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-
-    </div>
+      </template>
+    </ColumnChrome>
 
     <!-- Mobile: column header is hidden — keep For you / Following reachable -->
     <div
@@ -2388,22 +2352,6 @@ onUnmounted(() => {
   }
 }
 
-.column-drag-handle {
-  cursor: grab;
-  touch-action: none;
-
-  &:active {
-    cursor: grabbing;
-  }
-}
-
-.column-reorder {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  gap: 0.125rem;
-}
-
 .column-focus--push {
   margin-left: auto;
 }
@@ -2451,7 +2399,7 @@ onUnmounted(() => {
       transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring),
       box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
     }
 
@@ -2509,7 +2457,7 @@ onUnmounted(() => {
       transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring),
       box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
     }
 
@@ -2592,7 +2540,7 @@ onUnmounted(() => {
     background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
     box-shadow var(--neo-dur-quick, 160ms) var(--neo-ease-out);
 
-  &:hover {
+  @include hover {
     background: var(--neo-accent-hover);
     transform: translateY(var(--neo-hover-lift, -2px));
     box-shadow: 0 5px 14px color-mix(in srgb, var(--neo-accent) 36%, transparent);
@@ -2646,7 +2594,7 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background-color var(--neo-transition-fast);
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-tertiary);
   }
 }
@@ -2659,7 +2607,7 @@ onUnmounted(() => {
     border-radius: var(--neo-radius-md);
     color: var(--neo-chrome-fg);
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-tertiary);
     }
   }
@@ -2776,7 +2724,7 @@ onUnmounted(() => {
     transition: background-color 0.12s ease, color 0.12s ease;
     text-decoration: none;
 
-    &:hover:not(:disabled) {
+    @include hover(':not(:disabled)') {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-primary);
     }
@@ -2871,7 +2819,7 @@ onUnmounted(() => {
     border-radius: var(--neo-radius-lg);
     transition: background-color 0.12s ease, color 0.12s ease;
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-tertiary);
       color: var(--neo-text-secondary);
     }
@@ -2968,7 +2916,7 @@ onUnmounted(() => {
   &::-webkit-scrollbar-thumb {
     background: var(--neo-text-muted);
     border-radius: 3px;
-    &:hover {
+    @include hover {
       background: var(--neo-text-secondary);
     }
   }
@@ -2994,8 +2942,12 @@ onUnmounted(() => {
   text-align: left;
   touch-action: manipulation;
 
-  &:hover,
   &:focus-visible {
+    background: var(--neo-bg-hover);
+    color: var(--neo-text-secondary);
+  }
+
+  @include hover {
     background: var(--neo-bg-hover);
     color: var(--neo-text-secondary);
   }
@@ -3087,7 +3039,7 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
     color: var(--neo-text-primary);
   }
@@ -3096,7 +3048,7 @@ onUnmounted(() => {
     color: var(--neo-text-on-accent, #fff);
     background: var(--neo-accent);
 
-    &:hover {
+    @include hover {
       background: var(--neo-accent-hover, var(--neo-accent));
       color: var(--neo-text-on-accent, #fff);
     }
@@ -3165,7 +3117,7 @@ onUnmounted(() => {
     border-radius: var(--neo-radius-md);
     transition: border-color var(--neo-transition-fast);
 
-    &:hover {
+    @include hover {
       border-color: var(--neo-border-color-dark);
     }
   }
@@ -3182,7 +3134,7 @@ onUnmounted(() => {
       min-height: var(--flip-port, 100%);
       max-height: var(--flip-port, 100%);
 
-      &:hover {
+      @include hover {
         border-color: transparent;
       }
     }

@@ -27,8 +27,11 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Dependency audit (prod high+)
+        # Soft gate: report highs without failing the build while Dependabot catches up
+        run: npm audit --omit=dev --audit-level=high || true
       - run: npm run check
-      # check = lint rules + functions typecheck + full app typecheck (vue-tsc) + vitest
+      # check = lint rules + functions/e2e/app typecheck + vitest with coverage thresholds
       - run: npm run generate
       # Install-time download budget: no font faces in the precache, entries/bytes under the recorded ceiling
       - run: npm run budget

@@ -3,6 +3,7 @@
  * Requires OAuth `push` scope (already in SCOPES) and a registered service worker.
  */
 import { useInstancesStore } from '~/stores/instances'
+import { isNativeShell } from '~/utils/nativeShell'
 
 const STORAGE_KEY = 'neo-web-push-enabled'
 
@@ -32,6 +33,12 @@ export function useWebPush() {
 
   const refreshSupport = () => {
     if (!import.meta.client) return
+    // Capacitor WKWebView has no usable web-push path (needs APNs separately)
+    if (isNativeShell()) {
+      supported.value = false
+      enabled.value = false
+      return
+    }
     supported.value =
       'serviceWorker' in navigator &&
       'PushManager' in window &&

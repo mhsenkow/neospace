@@ -1148,7 +1148,7 @@ onUnmounted(() => {
     color: var(--neo-text-quaternary);
     cursor: pointer;
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
       background: var(--neo-bg-tertiary);
     }
@@ -1301,7 +1301,7 @@ onUnmounted(() => {
     pointer-events: none;
   }
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
   }
 }
@@ -1320,14 +1320,14 @@ onUnmounted(() => {
   cursor: pointer;
   border-radius: 6px;
 
-  &:hover {
+  @include hover {
     background: var(--neo-bg-hover);
   }
 
   &--split {
     cursor: default;
 
-    &:hover {
+    @include hover {
       background: transparent;
     }
   }
@@ -1375,7 +1375,7 @@ onUnmounted(() => {
     cursor: pointer;
     border-radius: 4px;
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
     }
 
@@ -1392,7 +1392,7 @@ onUnmounted(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
 
-    &:hover {
+    @include hover {
       color: var(--neo-accent);
       text-decoration: underline;
     }
@@ -1485,7 +1485,7 @@ onUnmounted(() => {
   border-radius: 0.65rem;
   transition: color 0.15s ease, background-color 0.15s ease;
 
-  &:hover {
+  @include hover {
     color: var(--neo-text-primary);
     background: color-mix(in srgb, var(--neo-text-primary) 5%, transparent);
   }

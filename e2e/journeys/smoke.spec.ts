@@ -81,10 +81,13 @@ test.describe('critical journeys', () => {
     expect(verify[0]!.authorization).toBe(`Bearer ${oauthToken.access_token}`)
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('neospace_instances')!))
     expect(stored.activeAccountId).toBe('local-1')
+    // Tokens live in the dedicated vault — the instances blob must not keep them
     expect(stored.instances[0]).toMatchObject({
-      accessToken: oauthToken.access_token,
+      accessToken: null,
       user: { username: 'neo' },
     })
+    const vault = await page.evaluate(() => JSON.parse(localStorage.getItem('neospace_tokens')!))
+    expect(vault.tokens['local-1']).toBe(oauthToken.access_token)
     expect(await page.evaluate(() => localStorage.getItem('neospace_pending_auth'))).toBeNull()
   })
 
@@ -136,7 +139,8 @@ test.describe('critical journeys', () => {
     await page.goto('/explore')
 
     await expect(page.getByRole('heading', { level: 1, name: 'Search' })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('searchbox', { name: 'Search' })).toBeVisible()
+    // Explore search is a combobox (typeahead), not a plain searchbox
+    await expect(page.getByRole('combobox', { name: 'Search' })).toBeVisible()
     await expect(page.getByRole('tablist', { name: 'Search in' })).toBeVisible()
     await expect(page).toHaveURL(/\/explore/)
   })

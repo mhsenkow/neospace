@@ -9,6 +9,7 @@ import { defineStore } from 'pinia'
 import type { mastodon } from 'masto'
 import { useInstancesStore } from './instances'
 import { logError } from '~/utils/log'
+import { isNativeShell } from '~/utils/nativeShell'
 import {
   MAX_PACKS,
   PACKS_STORAGE_KEY,
@@ -922,6 +923,8 @@ export const useColumnsStore = defineStore('columns', {
     openRssColumn(rssUrl: string, title?: string): string | null {
       const clean = rssUrl.trim()
       if (!clean || !/^https?:\/\//i.test(clean)) return null
+      // ATS blocks cleartext HTTP in the Cap shell
+      if (isNativeShell() && /^http:\/\//i.test(clean)) return null
       const id = this.ensureFocusedView('rss', clean)
       if (!id) return id
       if (title) this.setRssTitle(id, title)

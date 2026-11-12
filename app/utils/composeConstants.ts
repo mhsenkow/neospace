@@ -44,3 +44,27 @@ export function uploadTimeoutForBytes(
   const mb = Math.max(0, bytes) / (1024 * 1024)
   return Math.min(MAX_UPLOAD_TIMEOUT_MS, baseMs + Math.ceil(mb) * UPLOAD_TIMEOUT_MS_PER_MB)
 }
+
+export const COMPOSE_VISIBILITY_OPTIONS = [
+  { value: 'public', label: 'Public', icon: '🌐' },
+  { value: 'unlisted', label: 'Unlisted', icon: '🔓' },
+  { value: 'private', label: 'Followers only', icon: '🔒' },
+  { value: 'direct', label: 'Direct', icon: '✉️' },
+] as const
+
+export const COMPOSE_BASE_LANGUAGE_OPTIONS = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'fr', label: 'French' },
+  { code: 'de', label: 'German' },
+  { code: 'it', label: 'Italian' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh', label: 'Chinese' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'pl', label: 'Polish' },
+  { code: 'ru', label: 'Russian' },
+] as const
+
+export type ComposeLanguageOption = { code: string; label: string }

@@ -86,8 +86,14 @@ const OPTIONAL_PROBES: Record<string, Json> = {
   '/api/v1/trends/tags': [],
   '/api/v1/trends/links': [],
   '/api/v1/followed_tags': [],
+  '/api/v1/lists': [],
+  '/api/v1/markers': {},
   '/api/v1/notifications': [],
   '/api/v1/notifications/unread_count': { count: 0 },
+  '/api/v2/filters': [],
+  // Recipient picker / messages may probe the active account's following graph
+  '/api/v1/accounts/1/following': [],
+  '/api/v1/accounts/2/following': [],
   // Post cards read the reading prefs (expand media / spoilers, autoplay GIFs) at boot
   '/api/v1/preferences': {
     'posting:default:visibility': 'public',

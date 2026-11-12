@@ -1,6 +1,10 @@
 /**
  * Sanitize untrusted HTML from Mastodon (status content, display names, profile fields).
  * Federated HTML is only as safe as the remote instance — always purify client-side.
+ *
+ * When Trusted Types are available, DOMPurify returns TrustedHTML; we coerce to string
+ * for Vue/`filterEmojiImgs` consumers while still going through the Trusted Types sink
+ * path inside DOMPurify.
  */
 
 import DOMPurify from 'dompurify'
@@ -33,6 +37,10 @@ const SAFE_EMOJI_CLASSES = new Set([
 
 let hooksInstalled = false
 
+function trustedTypesAvailable(): boolean {
+  return typeof window !== 'undefined' && !!(window as Window & { trustedTypes?: unknown }).trustedTypes
+}
+
 function ensureHooks() {
   if (hooksInstalled || typeof window === 'undefined') return
   hooksInstalled = true
@@ -53,24 +61,32 @@ function ensureHooks() {
   })
 }
 
+function asString(cleaned: string | { toString(): string }): string {
+  return typeof cleaned === 'string' ? cleaned : String(cleaned)
+}
+
 function purifyWithSafeClasses(dirty: string, tags: string[], attr: string[]): string {
   if (!dirty || typeof dirty !== 'string') return ''
   if (typeof window === 'undefined') {
     return dirty.replace(/<[^>]*>/g, '')
   }
   ensureHooks()
-  return DOMPurify.sanitize(dirty, {
+  const opts: Record<string, unknown> = {
     ALLOWED_TAGS: tags,
     ALLOWED_ATTR: [...attr, 'class'],
     ALLOW_DATA_ATTR: false,
     ADD_ATTR: ['target', 'rel', 'start', 'reversed', 'value'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-  })
+  }
+  // Prefer TrustedHTML from DOMPurify when the browser enforces Trusted Types
+  if (trustedTypesAvailable()) opts.RETURN_TRUSTED_TYPE = true
+  return asString(DOMPurify.sanitize(dirty, opts as never))
 }
 
 /**
  * Keep only <img class="emoji"> whose src is in the account/status emoji allowlist.
- * Without an allowlist, all imgs are stripped (blocks tracking pixels).
+ * Done via DOMParser (not regex surgery on the purified string) so class filtering
+ * inside <code> text cannot be re-broken.
  */
 function filterEmojiImgs(html: string, allowedUrls?: Iterable<string> | null): string {
   if (!html) return ''

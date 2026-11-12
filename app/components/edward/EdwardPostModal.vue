@@ -273,7 +273,50 @@ const syncJoined = () => {
 // Keep Tab inside the peek; Edward's own key handler owns Escape
 useFocusTrap(panelEl, ref(true), { initialFocus: '.edward-modal__x' })
 
+// ── React toolbar roving tabindex: one Tab stop, arrows move between buttons ──
+const reactEl = ref<HTMLElement | null>(null)
+let rovingBtn: HTMLButtonElement | null = null
+
+const reactButtons = () =>
+  Array.from(reactEl.value?.querySelectorAll<HTMLButtonElement>('.edward-modal__react-btn') ?? [])
+
+const setRoving = (btn: HTMLButtonElement | null) => {
+  rovingBtn = btn
+  for (const b of reactButtons()) b.tabIndex = b === btn ? 0 : -1
+}
+
+/** Keep exactly one enabled button tabbable (heart / boost / … disable while a request is in flight) */
+const syncRoving = () => {
+  const enabled = reactButtons().filter((b) => !b.disabled)
+  setRoving(rovingBtn && enabled.includes(rovingBtn) ? rovingBtn : enabled[0] ?? null)
+}
+
+onUpdated(syncRoving)
+
+const onReactFocusin = (e: FocusEvent) => {
+  const btn = (e.target as HTMLElement | null)?.closest?.('.edward-modal__react-btn')
+  if (btn instanceof HTMLButtonElement) setRoving(btn)
+}
+
+const onReactKeydown = (e: KeyboardEvent) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+  const enabled = reactButtons().filter((b) => !b.disabled)
+  if (!enabled.length) return
+  const cur = enabled.indexOf(document.activeElement as HTMLButtonElement)
+  let i: number
+  if (e.key === 'Home') i = 0
+  else if (e.key === 'End') i = enabled.length - 1
+  else if (e.key === 'ArrowRight') i = (cur + 1) % enabled.length
+  else i = (cur - 1 + enabled.length) % enabled.length
+  // EdwardMode's global handler already yields arrows to [role="toolbar"]
+  e.preventDefault()
+  const target = enabled[i]!
+  setRoving(target)
+  target.focus()
+}
+
 onMounted(() => {
+  syncRoving()
   void refreshRelationship()
   syncJoined()
 })
@@ -376,7 +419,15 @@ watch(
       </div>
 
       <!-- Primary reaction row -->
-      <div class="edward-modal__react" role="toolbar" aria-label="React">
+      <div
+        ref="reactEl"
+        class="edward-modal__react"
+        role="toolbar"
+        aria-orientation="horizontal"
+        aria-label="React"
+        @focusin="onReactFocusin"
+        @keydown="onReactKeydown"
+      >
         <button
           type="button"
           class="edward-modal__react-btn"
@@ -537,8 +588,11 @@ watch(
   cursor: pointer;
   border-radius: 2px;
 
-  &:hover .edward-modal__name,
   &:focus-visible .edward-modal__name {
+    color: #ffe566;
+  }
+
+  @include hover(' .edward-modal__name') {
     color: #ffe566;
   }
 
@@ -619,8 +673,12 @@ watch(
   line-height: 1;
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
+    color: #ffe566;
+    background: color-mix(in srgb, #fff 8%, transparent);
+  }
+
+  @include hover {
     color: #ffe566;
     background: color-mix(in srgb, #fff 8%, transparent);
   }
@@ -659,8 +717,12 @@ watch(
   text-transform: lowercase;
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
+    background: #f2ad52;
+    color: #1a1420;
+  }
+
+  @include hover {
     background: #f2ad52;
     color: #1a1420;
   }
@@ -740,8 +802,12 @@ watch(
     opacity: 0.75;
   }
 
-  &:hover:not(:disabled),
   &:focus-visible {
+    border-color: #ffe566;
+    color: #fff;
+  }
+
+  @include hover(':not(:disabled)') {
     border-color: #ffe566;
     color: #fff;
   }
@@ -801,8 +867,12 @@ watch(
   max-width: 100%;
   overflow-wrap: anywhere;
 
-  &:hover:not(:disabled),
   &:focus-visible {
+    border-color: #59d1e0;
+    color: #fff;
+  }
+
+  @include hover(':not(:disabled)') {
     border-color: #59d1e0;
     color: #fff;
   }

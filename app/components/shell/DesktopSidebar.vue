@@ -941,7 +941,7 @@ watch(
     min-width: 0;
     transition: opacity var(--neo-transition-fast);
 
-    &:hover {
+    @include hover {
       opacity: 0.8;
     }
   }
@@ -961,7 +961,7 @@ watch(
     cursor: pointer;
     text-decoration: none;
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);
     }
@@ -1046,7 +1046,7 @@ watch(
     cursor: pointer;
     z-index: 1;
 
-    &:hover {
+    @include hover {
       border-color: var(--neo-accent);
       color: var(--neo-accent);
       background: var(--neo-accent-soft);
@@ -1064,7 +1064,7 @@ watch(
     background: transparent;
     color: var(--neo-text-secondary);
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);
       border-color: transparent;
@@ -1120,7 +1120,7 @@ watch(
       transition: transform var(--neo-dur-normal, 240ms) var(--neo-ease-spring);
     }
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);
 
@@ -1242,7 +1242,7 @@ watch(
     text-decoration: none;
     border-radius: var(--neo-radius-sm, 4px);
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
     }
   }
@@ -1320,7 +1320,7 @@ watch(
     font-size: 0.8125rem;
     cursor: pointer;
 
-    &:hover {
+    @include hover {
       color: var(--neo-text-primary);
     }
   }
@@ -1437,7 +1437,7 @@ watch(
       background-color var(--neo-transition-fast),
       color var(--neo-transition-fast);
 
-    &:hover {
+    @include hover {
       background: var(--neo-bg-hover);
       color: var(--neo-text-primary);
     }

@@ -1,6 +1,6 @@
 /**
- * Capacitor deep-link handler: Mastodon redirects to https://neospace.ibm.io/auth/callback
- * (Universal Link) or neospace://auth/callback — route into the existing callback page.
+ * Capacitor deep-link handler: Mastodon redirects to loomspace://auth/callback
+ * (or legacy https / neospace://) — route into the existing callback page.
  */
 import { App } from '@capacitor/app'
 import { closeOAuthBrowser } from '~/utils/nativeAuth'

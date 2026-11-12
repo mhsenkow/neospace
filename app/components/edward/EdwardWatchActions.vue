@@ -423,8 +423,13 @@ const onToolbarKeydown = (e: KeyboardEvent) => {
     border-color 0.12s ease,
     transform 0.12s ease;
 
-  &:hover:not(:disabled),
   &:focus-visible:not(:disabled) {
+    border-color: #ffe566;
+    color: #ffe566;
+    background: color-mix(in srgb, #ffe566 14%, #1a1420);
+  }
+
+  @include hover(':not(:disabled)') {
     border-color: #ffe566;
     color: #ffe566;
     background: color-mix(in srgb, #ffe566 14%, #1a1420);

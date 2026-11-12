@@ -437,8 +437,12 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
 
-  &:hover:not(:disabled),
   &:focus-visible {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  @include hover(':not(:disabled)') {
     border-color: var(--neo-accent);
     background: var(--neo-accent-soft);
   }
@@ -477,8 +481,12 @@ onUnmounted(() => {
   cursor: pointer;
   transition: border-color var(--neo-transition-fast), background-color var(--neo-transition-fast);
 
-  &:hover,
   &:focus-visible {
+    border-color: var(--neo-accent);
+    background: var(--neo-accent-soft);
+  }
+
+  @include hover {
     border-color: var(--neo-accent);
     background: var(--neo-accent-soft);
   }
@@ -660,7 +668,7 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
+  @include hover(':not(:disabled)') {
     border-color: var(--neo-accent);
     background: var(--neo-accent-soft);
   }
@@ -698,7 +706,7 @@ onUnmounted(() => {
     border-bottom: none;
   }
 
-  &:hover {
+  @include hover {
     background: var(--neo-accent-soft);
   }
 }
@@ -721,7 +729,7 @@ onUnmounted(() => {
   border-radius: 4px;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
+  @include hover(':not(:disabled)') {
     background: var(--neo-accent-hover);
   }
 
@@ -742,7 +750,7 @@ onUnmounted(() => {
     color: var(--neo-accent);
     text-decoration: none;
 
-    &:hover {
+    @include hover {
       text-decoration: underline;
     }
   }

@@ -46,17 +46,19 @@ https://neospace.ibm.io/privacy
 Disclose network activity to third-party Mastodon servers the user chooses. No advertising SDK.
 
 ## Review notes
-1. Launch → Sign in → enter a Mastodon host (e.g. fosstodon.org) → Approve LoomSpace.  
-2. OAuth returns into the app → Home board.  
-3. Open Menu → Packs (or Add feed → RSS) without requiring a post.  
+1. Launch → Sign in → enter a Mastodon host (e.g. fosstodon.org).  
+2. Approve the OAuth app named **LoomSpace** on that server.  
+3. Mastodon redirects to `loomspace://auth/callback` — the system returns into the LoomSpace app (Capacitor Browser closes).  
+4. Home board loads. Open Menu → Packs (or Add feed → RSS https URL) without requiring a post.  
 
 Demo: any public Mastodon account the reviewer owns. No LoomSpace credentials.
 
 Privacy: https://neospace.ibm.io/privacy
 
 ## Build / encryption
-- Marketing version **1.0**, build **2** (bump `CURRENT_PROJECT_VERSION` in Xcode)  
+- Marketing version **1.0**, build **4** (bump `CURRENT_PROJECT_VERSION` in Xcode)  
 - `ITSAppUsesNonExemptEncryption` = false (HTTPS only)
+- Microphone / Photos usage strings are set for voice notes and media attachments
 
 ## Store media
 ```bash

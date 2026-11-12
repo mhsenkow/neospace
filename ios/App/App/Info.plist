@@ -36,6 +36,10 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>LoomSpace records voice notes you attach to posts and messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>LoomSpace lets you attach photos and videos from your library to posts and messages.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

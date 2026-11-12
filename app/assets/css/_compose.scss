@@ -1,0 +1,214 @@
+// ============================================
+// Compose — rules shared by RealComposeBox and its compose/ children.
+// Scoped SFC styles can't cross component boundaries, so any rule needed by
+// more than one component is included from here (verbatim, no restyling).
+// ============================================
+
+@mixin compose-input-wrap {
+  .compose-input-wrap {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+}
+
+@mixin compose-input {
+  .compose-input {
+    resize: none;
+    flex: 1;
+    min-height: 8rem;
+    max-height: none;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    border: none;
+    background: transparent;
+    /* Horizontal inset so text clears rounded corners / bubble radius */
+    padding: 0.45rem 0.65rem;
+    border-radius: 10px;
+    font-size: 1.0625rem;
+    line-height: 1.45;
+    field-sizing: content;
+
+    &:focus {
+      outline: none;
+      box-shadow: none;
+      border: none;
+    }
+
+    &::placeholder {
+      color: var(--neo-text-secondary);
+    }
+  }
+}
+
+@mixin compose-file {
+  .compose-file {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+}
+
+@mixin compose-tool {
+  .compose-tool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.25rem;
+    height: 2.25rem;
+    padding: 0 0.5rem;
+    font-family: var(--neo-font-family-ui);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--neo-text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
+    cursor: pointer;
+    transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
+
+    &:hover:not(:disabled) {
+      color: var(--neo-accent);
+      background-color: var(--neo-accent-soft);
+    }
+
+    &:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    &--active {
+      color: var(--neo-text-primary);
+      background-color: color-mix(in srgb, var(--neo-warning) 35%, transparent);
+    }
+
+    &--recording {
+      color: var(--neo-danger, #dc2626);
+      background-color: color-mix(in srgb, var(--neo-danger, #dc2626) 16%, transparent);
+    }
+  }
+}
+
+@mixin compose-counter {
+  .compose-counter {
+    font-size: 0.8125rem;
+    color: var(--neo-text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+
+    &--warning {
+      color: var(--neo-warning);
+    }
+
+    &--error {
+      color: var(--neo-danger);
+      font-weight: 600;
+    }
+
+    /* Quiet until you're near the limit — less chrome in reply docks / sheet footers */
+    &--quiet {
+      opacity: 0.55;
+    }
+  }
+}
+
+@mixin compose-visibility-select {
+  .compose-visibility-select {
+    padding: 0.35rem 0.45rem;
+    font-family: var(--neo-font-family-ui);
+    font-size: 0.75rem;
+    background-color: var(--neo-bg-tertiary);
+    color: var(--neo-text-primary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: var(--neo-accent);
+    }
+  }
+}
+
+@mixin compose-language-select {
+  .compose-language-select {
+    min-height: 24px;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.35rem;
+    border-radius: var(--neo-radius-sm, 6px);
+    border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-secondary);
+    color: var(--neo-text-secondary);
+  }
+}
+
+@mixin compose-schedule {
+  .compose-schedule {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    margin-left: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .compose-schedule-input {
+    max-width: 11.5rem;
+    padding: 0.3rem 0.35rem;
+    font-family: var(--neo-font-family-ui);
+    font-size: 0.6875rem;
+    background-color: var(--neo-bg-tertiary);
+    color: var(--neo-text-primary);
+    border: 1px solid var(--neo-border-color);
+    border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
+    color-scheme: inherit;
+
+    &:focus {
+      outline: none;
+      border-color: var(--neo-accent);
+    }
+
+    &:not(:placeholder-shown),
+    &:valid:not([value='']) {
+      border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
+    }
+  }
+
+  .compose-schedule__zone {
+    font-size: 0.6875rem;
+    color: var(--neo-text-muted);
+    align-self: center;
+  }
+
+  .compose-schedule__clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: none;
+    border-radius: var(--neo-radius-sm);
+    background: transparent;
+    color: var(--neo-text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--neo-text-primary);
+      background: var(--neo-bg-tertiary);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}

@@ -23,74 +23,6 @@ function unobserveContentSize(el: Element) {
   contentSizeCallbacks.delete(el)
   contentSizeObserver?.unobserve(el)
 }
-
-/**
- * gifv autoplay — one shared IntersectionObserver plays loops only while on
- * screen (and never under reduced motion). A bare `autoplay` attribute kept
- * every gifv in a long feed downloading and decoding offscreen.
- */
-const gifvVisible = new Set<HTMLVideoElement>()
-let gifvObserver: IntersectionObserver | null = null
-let gifvMotionWatched = false
-
-function syncGifv(video: HTMLVideoElement) {
-  if (gifvVisible.has(video) && !usePrefersReducedMotion().value) {
-    void video.play().catch(() => {})
-  } else if (!video.paused) {
-    video.pause()
-  }
-}
-
-/** `v-gifv-autoplay="isGifv"` — a false value leaves the video alone (controls stay available) */
-function attachGifv(video: HTMLVideoElement) {
-  if (!gifvMotionWatched) {
-    gifvMotionWatched = true
-    // App-lifetime watcher: pause/resume visible loops when the setting flips
-    watch(usePrefersReducedMotion(), () => gifvVisible.forEach(syncGifv))
-  }
-  if (typeof IntersectionObserver === 'undefined') {
-    gifvVisible.add(video)
-    syncGifv(video)
-    return
-  }
-  gifvObserver ??= new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        const video = entry.target as HTMLVideoElement
-        if (entry.isIntersecting) gifvVisible.add(video)
-        else gifvVisible.delete(video)
-        syncGifv(video)
-      }
-    },
-    { threshold: 0.25 },
-  )
-  gifvObserver.observe(video)
-}
-
-function detachGifv(video: HTMLVideoElement) {
-  gifvVisible.delete(video)
-  gifvObserver?.unobserve(video)
-}
-
-const gifvAutoplay = {
-  mounted(video: HTMLVideoElement, binding: { value?: boolean }) {
-    if (binding.value === false) return
-    attachGifv(video)
-  },
-  // The "autoplay GIFs" server preference can arrive after the card mounted
-  updated(video: HTMLVideoElement, binding: { value?: boolean; oldValue?: boolean }) {
-    if (binding.value === binding.oldValue) return
-    if (binding.value === false) {
-      detachGifv(video)
-      if (!video.paused) video.pause()
-    } else {
-      attachGifv(video)
-    }
-  },
-  beforeUnmount(video: HTMLVideoElement) {
-    detachGifv(video)
-  },
-}
 </script>
 
 <script setup lang="ts">
@@ -128,12 +60,12 @@ import { logError } from '~/utils/log'
 import { mediaAttachmentLoupeMeta } from '~/utils/mediaLoupe'
 import type { RankBreakdown } from '~/utils/rankers'
 import {
-  formatSignalNumber,
   inspectStatusSignals,
   signalsToJsonSummary,
   type StatusSignals,
 } from '~/utils/signalInspector'
 import { hostnameOf } from '~/utils/instances'
+import { formatCompactCount } from '~/utils/formatCount'
 
 /** Reply couldn't import the post: say which server, and offer its own web page (does the import server-side) */
 const replyHandOff = (uri: string) => {
@@ -261,16 +193,6 @@ const rankBreakdown = computed(
   () => (props.status as { _rankBreakdown?: RankBreakdown })._rankBreakdown || null,
 )
 const rankXrayOpen = ref(false)
-const rankTermMax = computed(() => {
-  const terms = rankBreakdown.value?.terms || []
-  return Math.max(0.001, ...terms.map((t) => Math.abs(t.contribution)))
-})
-const formatRankScore = (n: number) => {
-  if (!Number.isFinite(n)) return '0'
-  if (Math.abs(n) >= 100) return n.toFixed(1)
-  if (Math.abs(n) >= 10) return n.toFixed(2)
-  return n.toFixed(3)
-}
 
 const inspectOpen = ref(false)
 const inspectCopied = ref('')
@@ -337,7 +259,6 @@ const shareOpen = ref(false)
 const boostOpen = ref(false)
 
 const prefersReducedMotion = usePrefersReducedMotion()
-const vGifvAutoplay = gifvAutoplay
 
 /** Long-post collapse — overflow-based toggle (not char-count only) */
 const contentExpanded = ref(false)
@@ -438,18 +359,6 @@ watch(safeContent, () => nextTick(measureContentOverflow))
 onUnmounted(() => {
   if (contentEl.value) unobserveContentSize(contentEl.value)
 })
-
-type MediaSize = { width?: number | null; height?: number | null }
-/** Reserve the box before the image loads: original → small → 16:9 default. */
-const mediaAspectRatio = (media: mastodon.v1.MediaAttachment) => {
-  const meta = media.meta as { original?: MediaSize; small?: MediaSize } | null | undefined
-  for (const size of [meta?.original, meta?.small]) {
-    const w = size?.width
-    const h = size?.height
-    if (w && h && w > 0 && h > 0) return `${w} / ${h}`
-  }
-  return '16 / 9'
-}
 
 const hasReplies = computed(() => (displayStatus.value.repliesCount || 0) > 0)
 const showThreadLineTop = computed(
@@ -685,11 +594,7 @@ const rebloggerProfileTo = computed(() => {
   return { path: '/profile', query: { user: reblogger.value.acct } }
 })
 
-const formatNumber = (num: number) => {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
-  return num.toString()
-}
+const formatNumber = formatCompactCount
 
 const requireAuth = () => {
   if (canInteract.value) return true
@@ -1528,75 +1433,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       <NeoIcon :name="swipeIntent === 'like' ? 'heart' : 'message'" :size="22" :stroke="1.5" :filled="swipeIntent === 'like'" />
     </div>
     <!-- Ranked algorithm feeds / For You — tap for score X-Ray -->
-    <div v-if="rankWhy && !isFlip" class="status-rank">
-      <button
-        type="button"
-        class="status-rank-why"
-        :aria-expanded="rankXrayOpen"
-        :aria-controls="rankBreakdown ? `rank-xray-${cardLabelId}` : undefined"
-        @click.stop="rankBreakdown && (rankXrayOpen = !rankXrayOpen)"
-      >
-        <NeoIcon name="sort" :size="12" :stroke="1.85" />
-        <span>{{ rankWhy }}</span>
-        <svg
-          v-if="rankBreakdown"
-          class="status-rank-why__chevron"
-          :class="{ 'status-rank-why__chevron--open': rankXrayOpen }"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-          aria-hidden="true"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-      <div
-        v-if="rankBreakdown && rankXrayOpen"
-        :id="`rank-xray-${cardLabelId}`"
-        class="status-rank-xray"
-        role="region"
-        aria-label="Ranking score breakdown"
-      >
-        <p class="status-rank-xray__head">
-          <strong>{{ formatRankScore(rankBreakdown.finalScore) }}</strong>
-          <span>
-            {{ rankBreakdown.ranker === 'home' ? 'For You' : `${rankBreakdown.ranker}-style` }}
-            · {{ rankBreakdown.source }}
-            · reach {{ formatRankScore(rankBreakdown.reach) }}
-            · age {{ formatRankScore(rankBreakdown.ageHours) }}h
-          </span>
-        </p>
-        <ul class="status-rank-xray__terms">
-          <li v-for="term in rankBreakdown.terms" :key="term.label">
-            <div class="status-rank-xray__term-head">
-              <span>{{ term.label }}</span>
-              <span class="status-rank-xray__term-val">{{ formatRankScore(term.contribution) }}</span>
-            </div>
-            <div class="status-rank-xray__bar" aria-hidden="true">
-              <span
-                class="status-rank-xray__bar-fill"
-                :class="{ 'status-rank-xray__bar-fill--neg': term.contribution < 0 }"
-                :style="{
-                  width: `${Math.min(100, (Math.abs(term.contribution) / rankTermMax) * 100)}%`,
-                }"
-              />
-            </div>
-            <p class="status-rank-xray__raw">{{ term.rawSignal }} · w={{ term.weight }}</p>
-          </li>
-        </ul>
-        <p class="status-rank-xray__mods">
-          Recency ×{{ formatRankScore(rankBreakdown.recencyMultiplier) }}
-          · Network ×{{ formatRankScore(rankBreakdown.networkMultiplier) }}
-          · Diversity ×{{ formatRankScore(rankBreakdown.diversityMultiplier) }}
-          <template v-if="rankBreakdown.interestMultiplier != null">
-            · Interest ×{{ formatRankScore(rankBreakdown.interestMultiplier) }}
-          </template>
-        </p>
-      </div>
-    </div>
+    <PostRankXray
+      v-if="rankWhy && !isFlip"
+      v-model:open="rankXrayOpen"
+      :rank-why="rankWhy"
+      :rank-breakdown="rankBreakdown"
+      :card-label-id="cardLabelId"
+    />
 
     <!-- Reblog indicator -->
     <div v-if="isReblog && !isFlip" class="status-reblog">
@@ -1698,142 +1541,30 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               </svg>
             </span>
             <template #items>
-              <button
-                v-if="canInteract"
-                type="button"
-                role="menuitem"
-                class="status-dropdown-item"
-                :disabled="isBookmarking"
-                @click="handleBookmark"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
-                </svg>
-                <span>{{ displayStatus.bookmarked ? 'Unsave' : 'Save' }}</span>
-              </button>
-              <button type="button" role="menuitem" class="status-dropdown-item" @click="handleCopyLink">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-                </svg>
-                <span>Copy link</span>
-              </button>
-              <template v-if="canInteract && !isOwnPost">
-                <div class="status-dropdown-divider" role="separator" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item"
-                  :disabled="isMuting"
-                  @click="handleMute"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                    <line x1="23" y1="9" x2="17" y2="15" />
-                    <line x1="17" y1="9" x2="23" y2="15" />
-                  </svg>
-                  <span>Mute @{{ displayStatus.account.username }}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  :disabled="isBlocking"
-                  @click="handleBlock"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-                  </svg>
-                  <span>Block @{{ displayStatus.account.username }}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  @click="handleReport"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span>Report</span>
-                </button>
-              </template>
-              <button type="button" role="menuitem" class="status-dropdown-item" @click="handleOpenOriginal">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-                <span>Open original</span>
-              </button>
-              <button type="button" role="menuitem" class="status-dropdown-item" @click="toggleInspect">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                  <circle cx="11" cy="11" r="7" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <span>{{ inspectOpen ? 'Hide signals' : 'Inspect signals' }}</span>
-              </button>
-              <template v-if="canManageOwn">
-                <div class="status-dropdown-divider" role="separator" />
-                <button
-                  v-if="canPin"
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item"
-                  :disabled="isPinning"
-                  @click="handleTogglePin"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M12 17v5" />
-                    <path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7z" />
-                  </svg>
-                  <span>{{ displayStatus.pinned ? 'Unpin from profile' : 'Pin to profile' }}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item"
-                  :disabled="isDeleting"
-                  @click="handleEdit"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
-                  </svg>
-                  <span>Edit</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item"
-                  :disabled="isDeleting"
-                  @click="handleRedraft"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
-                  </svg>
-                  <span>Delete &amp; redraft</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="status-dropdown-item status-dropdown-item--danger"
-                  :disabled="isDeleting"
-                  @click="handleDelete"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                    <path d="M10 11v6M14 11v6" />
-                    <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-                  </svg>
-                  <span>Delete</span>
-                </button>
-              </template>
+              <PostMenuItems
+                :status="displayStatus"
+                :can-interact="canInteract"
+                :is-own-post="isOwnPost"
+                :can-manage-own="canManageOwn"
+                :can-pin="canPin"
+                :is-bookmarking="isBookmarking"
+                :is-muting="isMuting"
+                :is-blocking="isBlocking"
+                :is-deleting="isDeleting"
+                :is-pinning="isPinning"
+                :inspect-open="inspectOpen"
+                @bookmark="handleBookmark"
+                @copy-link="handleCopyLink"
+                @mute="handleMute"
+                @block="handleBlock"
+                @report="handleReport"
+                @open-original="handleOpenOriginal"
+                @toggle-inspect="toggleInspect"
+                @toggle-pin="handleTogglePin"
+                @edit="handleEdit"
+                @redraft="handleRedraft"
+                @delete="handleDelete"
+              />
             </template>
           </NeoMenu>
         </PostHeader>
@@ -1853,56 +1584,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
             @click="onContentClick"
           />
           <PreviewCard v-if="linkCard && !isFlip && cwOpen" :card="linkCard" />
-          <div v-if="displayStatus.mediaAttachments?.length && cwOpen" class="status-media">
-            <template v-for="(media, mediaIdx) in displayStatus.mediaAttachments" :key="media.id">
-              <button
-                v-if="media.type === 'image'"
-                type="button"
-                class="status-media-hit"
-                :aria-label="media.description || (displayStatus.mediaAttachments.length > 1 ? `View image ${mediaIdx + 1} of ${displayStatus.mediaAttachments.length}` : 'View image')"
-                @click.stop="openLightbox(media)"
-              >
-                <img
-                  :src="media.previewUrl ?? media.url ?? undefined"
-                  :alt="media.description || ''"
-                  class="status-media-image"
-                  :style="{ aspectRatio: mediaAspectRatio(media) }"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <span
-                  v-if="media.description?.trim()"
-                  class="status-media-alt-badge"
-                  title="Has alt text"
-                >ALT</span>
-                <span
-                  v-else
-                  class="status-media-alt-badge status-media-alt-badge--missing"
-                  title="No description"
-                >No description</span>
-              </button>
-              <video
-                v-else-if="media.type === 'video' || media.type === 'gifv'"
-                :src="media.url ?? undefined"
-                :poster="media.previewUrl ?? undefined"
-                controls
-                preload="none"
-                v-gifv-autoplay="media.type === 'gifv' && readingPrefs.autoplayGifs"
-                :loop="media.type === 'gifv'"
-                :muted="media.type === 'gifv'"
-                playsinline
-                :aria-label="media.description?.trim() || (media.type === 'gifv' ? 'Animated image' : 'Video attachment')"
-                class="status-media-video"
-              />
-              <audio
-                v-else-if="media.type === 'audio'"
-                :src="media.url ?? undefined"
-                controls
-                :aria-label="media.description?.trim() || 'Audio attachment'"
-                class="status-media-audio"
-              />
-            </template>
-          </div>
+          <PostMedia
+            v-if="displayStatus.mediaAttachments?.length && cwOpen"
+            plain
+            :items="displayStatus.mediaAttachments"
+            :autoplay-gifs="readingPrefs.autoplayGifs"
+            @open="openLightbox"
+          />
           <PostPoll
             v-if="displayStatus.poll && cwOpen"
             :poll="displayStatus.poll"
@@ -1940,106 +1628,25 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           </div>
 
           <!-- Incoming quote embed -->
-          <button
+          <PostQuoteCard
             v-if="quotedStatus && !isFlip"
-            type="button"
-            class="status-quote-card"
-            :aria-label="`Quoted post by @${quotedStatus.handle}`"
-            @click.stop="quotedStatus.url ? openQuoted(quotedStatus) : openThread()"
-          >
-            <img
-              v-if="quotedStatus.avatar"
-              :src="quotedStatus.avatar"
-              alt=""
-              class="status-quote-card__avatar"
-              loading="lazy"
-              decoding="async"
-            />
-            <span class="status-quote-card__body">
-              <span class="status-quote-card__meta">
-                <strong>{{ quotedStatus.name }}</strong>
-                <span>@{{ quotedStatus.handle }}</span>
-              </span>
-              <span class="status-quote-card__text">{{ quotedStatus.text }}</span>
-            </span>
-          </button>
+            :quote="quotedStatus"
+            @open="quotedStatus.url ? openQuoted(quotedStatus) : openThread()"
+          />
 
           <!-- Link preview -->
           <PreviewCard v-if="linkCard && !isFlip" :card="linkCard" />
 
           <!-- Media: gated behind sensitive flag -->
-          <div
+          <PostMedia
             v-if="mediaList.length"
-            class="status-media"
-            :class="{ 'status-media--carousel': useMediaCarousel && !mediaHidden }"
-          >
-            <button
-              v-if="mediaHidden"
-              type="button"
-              class="status-media-cw"
-              @click.stop="revealMedia"
-            >
-              <span>Sensitive media</span>
-              <span class="status-media-cw__hint">Tap to reveal</span>
-            </button>
-            <template v-else>
-              <div :class="useMediaCarousel ? 'status-media__track' : 'status-media__grid'">
-                <template v-for="(media, mediaIdx) in mediaList" :key="media.id">
-                  <button
-                    v-if="media.type === 'image'"
-                    type="button"
-                    class="status-media-hit"
-                    :aria-label="media.description || (mediaList.length > 1 ? `View image ${mediaIdx + 1} of ${mediaList.length}` : 'View image')"
-                    @click.stop="openLightbox(media)"
-                  >
-                    <img
-                      :src="media.previewUrl ?? media.url ?? undefined"
-                      :alt="media.description || ''"
-                      class="status-media-image"
-                      :style="useMediaCarousel ? undefined : { aspectRatio: mediaAspectRatio(media) }"
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <span
-                      v-if="media.description?.trim()"
-                      class="status-media-alt-badge"
-                      title="Has alt text"
-                    >ALT</span>
-                    <span
-                      v-else
-                      class="status-media-alt-badge status-media-alt-badge--missing"
-                      title="No description"
-                    >No description</span>
-                    <span
-                      v-if="useMediaCarousel"
-                      class="status-media__index"
-                      aria-hidden="true"
-                    >{{ mediaIdx + 1 }}/{{ mediaList.length }}</span>
-                  </button>
-                  <video
-                    v-else-if="media.type === 'video' || media.type === 'gifv'"
-                    :src="media.url ?? undefined"
-                    :poster="media.previewUrl ?? undefined"
-                    controls
-                    preload="none"
-                    v-gifv-autoplay="media.type === 'gifv' && readingPrefs.autoplayGifs"
-                    :loop="media.type === 'gifv'"
-                    :muted="media.type === 'gifv'"
-                    playsinline
-                    :aria-label="media.description?.trim() || (media.type === 'gifv' ? 'Animated image' : 'Video attachment')"
-                    class="status-media-video"
-                  />
-                  <audio
-                    v-else-if="media.type === 'audio'"
-                    :src="media.url ?? undefined"
-                    controls
-                    :aria-label="media.description?.trim() || 'Audio attachment'"
-                    class="status-media-audio"
-                  />
-                </template>
-              </div>
-            </template>
-          </div>
+            :items="mediaList"
+            :hidden="mediaHidden"
+            :carousel="useMediaCarousel"
+            :autoplay-gifs="readingPrefs.autoplayGifs"
+            @open="openLightbox"
+            @reveal="revealMedia"
+          />
 
           <!-- Poll -->
           <PostPoll
@@ -2054,73 +1661,23 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
         </template>
 
         <!-- Threads order: Like · Reply · Repost · Share + trailing Save -->
-        <footer class="status-actions" @pointerenter="prewarm" @focusin="prewarm">
-          <button
-            class="status-action status-action--like"
-            :class="{
-              'status-action--liked': displayStatus.favourited,
-              'status-action--pop': likePop,
-            }"
-            :aria-disabled="isFavouriting || undefined"
-            :aria-label="(displayStatus.favouritesCount ?? 0) > 0 ? `Like, ${formatNumber(displayStatus.favouritesCount)}` : 'Like'"
-            :aria-pressed="!!displayStatus.favourited"
-            @click.stop="!isFavouriting && handleFavourite()"
-          >
-            <NeoIcon name="heart" :size="20" :stroke="1.5" :filled="!!displayStatus.favourited" />
-            <span v-if="(displayStatus.favouritesCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.favouritesCount) }}</span>
-          </button>
-
-          <button
-            class="status-action status-action--reply"
-            :aria-label="(displayStatus.repliesCount ?? 0) > 0 ? `Reply, ${formatNumber(displayStatus.repliesCount)}` : 'Reply'"
-            :disabled="isOpeningReply"
-            @click.stop="handleReply"
-          >
-            <NeoIcon name="message" :size="20" :stroke="1.5" />
-            <span v-if="(displayStatus.repliesCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.repliesCount) }}</span>
-          </button>
-
-          <button
-            class="status-action status-action--boost"
-            :class="{
-              'status-action--boosted': displayStatus.reblogged,
-              'status-action--boost-pop': boostPop,
-            }"
-            :aria-disabled="isBoosting || undefined"
-            :aria-label="(displayStatus.reblogsCount ?? 0) > 0 ? `Repost, ${formatNumber(displayStatus.reblogsCount)}` : 'Repost'"
-            :aria-haspopup="canInteract && !displayStatus.reblogged ? 'dialog' : undefined"
-            :aria-pressed="!!displayStatus.reblogged"
-            @click.stop="!isBoosting && handleBoost()"
-          >
-            <NeoIcon name="reblog" :size="20" :stroke="1.5" />
-            <span v-if="(displayStatus.reblogsCount ?? 0) > 0" class="status-action__count">{{ formatNumber(displayStatus.reblogsCount) }}</span>
-          </button>
-
-          <button
-            class="status-action status-action--share"
-            aria-label="Share"
-            aria-haspopup="dialog"
-            @click.stop="handleShare"
-          >
-            <NeoIcon name="share" :size="20" :stroke="1.5" />
-          </button>
-
-          <button
-            class="status-action status-action--bookmark"
-            :class="{
-              'status-action--bookmarked': displayStatus.bookmarked,
-              'status-action--bookmark-pop': bookmarkPop,
-            }"
-            :aria-disabled="isBookmarking || undefined"
-            aria-label="Bookmark"
-            :aria-pressed="!!displayStatus.bookmarked"
-            @click.stop="!isBookmarking && handleBookmark()"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" :fill="displayStatus.bookmarked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
-            </svg>
-          </button>
-        </footer>
+        <PostActionBar
+          :status="displayStatus"
+          :can-interact="canInteract"
+          :is-favouriting="isFavouriting"
+          :is-boosting="isBoosting"
+          :is-bookmarking="isBookmarking"
+          :is-opening-reply="isOpeningReply"
+          :like-pop="likePop"
+          :boost-pop="boostPop"
+          :bookmark-pop="bookmarkPop"
+          @favourite="handleFavourite"
+          @reply="handleReply"
+          @boost="handleBoost"
+          @share="handleShare"
+          @bookmark="handleBookmark"
+          @prewarm="prewarm"
+        />
 
         <!-- Engagement summary / thread teaser -->
         <div v-if="(engagementSummary || hasReplies) && !hideInlineReply" class="status-footer-row">
@@ -2137,81 +1694,13 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           </button>
         </div>
 
-        <aside v-if="inspectOpen" class="status-inspector" aria-label="Post signal inspector">
-          <header class="status-inspector__head">
-            <strong>Signals</strong>
-            <button type="button" class="status-inspector__copy" @click="copyInspectJson">
-              {{ inspectCopied || 'Copy JSON' }}
-            </button>
-            <button type="button" class="status-inspector__close" aria-label="Close inspector" @click="inspectOpen = false">
-              ×
-            </button>
-          </header>
-          <dl class="status-inspector__grid">
-            <div>
-              <dt>Local id</dt>
-              <dd>{{ statusSignals.localId }}</dd>
-            </div>
-            <div>
-              <dt>Origin</dt>
-              <dd>{{ statusSignals.originHost || '—' }}</dd>
-            </div>
-            <div>
-              <dt>Browsing</dt>
-              <dd>{{ statusSignals.browsingHint || '—' }}</dd>
-            </div>
-            <div>
-              <dt>Client</dt>
-              <dd>{{ statusSignals.application || '—' }}</dd>
-            </div>
-            <div>
-              <dt>Language</dt>
-              <dd>{{ statusSignals.language || '—' }}</dd>
-            </div>
-            <div>
-              <dt>Visibility</dt>
-              <dd>{{ statusSignals.visibility }}</dd>
-            </div>
-            <div>
-              <dt>Length</dt>
-              <dd>{{ statusSignals.charCount }} chars · {{ statusSignals.wordCount }} words · ~{{ formatSignalNumber(statusSignals.readingMinutes, 1) }} min</dd>
-            </div>
-            <div>
-              <dt>Density</dt>
-              <dd>
-                {{ statusSignals.tagCount }} tags · {{ statusSignals.mentionCount }} mentions ·
-                {{ statusSignals.linkCount }} links
-                <template v-if="statusSignals.hasCard"> · card</template>
-                <template v-if="statusSignals.hasCw"> · CW</template>
-              </dd>
-            </div>
-            <div>
-              <dt>Snowflake</dt>
-              <dd>
-                {{ statusSignals.snowflakeIso || '—' }}
-                <template v-if="statusSignals.snowflakeDeltaMs != null">
-                  · Δ {{ statusSignals.snowflakeDeltaMs }} ms
-                </template>
-              </dd>
-            </div>
-            <div>
-              <dt>createdAt</dt>
-              <dd>{{ statusSignals.createdAtIso }}</dd>
-            </div>
-            <div v-if="statusSignals.media.length">
-              <dt>Media</dt>
-              <dd>{{ statusSignals.media.map((m) => `${m.count}× ${m.type}`).join(', ') }}</dd>
-            </div>
-            <div>
-              <dt>Engagement</dt>
-              <dd>
-                {{ statusSignals.engagement.favs }} fav ·
-                {{ statusSignals.engagement.boosts }} boost ·
-                {{ statusSignals.engagement.replies }} reply
-              </dd>
-            </div>
-          </dl>
-        </aside>
+        <PostInspector
+          v-if="inspectOpen"
+          :signals="statusSignals"
+          :copied="inspectCopied"
+          @copy="copyInspectJson"
+          @close="inspectOpen = false"
+        />
       </div>
     </div>
 
@@ -2342,7 +1831,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       -webkit-line-clamp: 5;
     }
 
-    .status-media {
+    :deep(.status-media) {
       order: 1;
       flex: 1 1 auto;
       min-height: 48%;
@@ -2352,14 +1841,14 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       background: var(--neo-bg-secondary);
     }
 
-    .status-media-hit {
+    :deep(.status-media-hit) {
       width: 100%;
       height: 100%;
       cursor: zoom-in;
     }
 
-    .status-media-image,
-    .status-media-video {
+    :deep(.status-media-image),
+    :deep(.status-media-video) {
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -2396,7 +1885,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
         ),
         var(--neo-bg-primary);
 
-      .status-media {
+      :deep(.status-media) {
         display: none;
       }
 
@@ -2577,19 +2066,19 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       -webkit-backdrop-filter: blur(10px);
     }
 
-    .status-action {
+    :deep(.status-action) {
       margin-left: 0 !important;
       min-width: 48px;
       min-height: 48px;
       color: var(--neo-text-secondary);
-
-      &__count {
-        font-size: 0.6875rem;
-        font-weight: 600;
-      }
     }
 
-    .status-media--carousel {
+    :deep(.status-action__count) {
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    :deep(.status-media--carousel) {
       position: relative;
       overflow: hidden;
 
@@ -2631,209 +2120,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     .status-see-more {
       color: var(--neo-accent);
     }
-  }
-}
-
-.status-rank {
-  margin: 0 0 0.45rem;
-  min-width: 0;
-}
-
-.status-rank-why {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  max-width: 100%;
-  margin: 0;
-  padding: 0.15rem 0.45rem 0.15rem 0.35rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  font: inherit;
-  font-size: 0.75rem;
-  color: var(--neo-text-tertiary);
-  cursor: pointer;
-  text-align: left;
-
-  &:hover,
-  &[aria-expanded='true'] {
-    color: var(--neo-text-secondary);
-    background: color-mix(in srgb, var(--neo-text-primary) 5%, transparent);
-    border-color: var(--neo-border-color);
-  }
-
-  span {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  &__chevron {
-    flex-shrink: 0;
-    transition: transform var(--neo-dur-quick, 160ms) var(--neo-ease-out);
-
-    &--open {
-      transform: rotate(180deg);
-    }
-  }
-}
-
-.status-rank-xray {
-  margin: 0.4rem 0 0.15rem;
-  padding: 0.65rem 0.7rem;
-  border: 1px solid var(--neo-border-color);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--neo-bg-secondary) 88%, var(--neo-accent) 12%);
-}
-
-.status-rank-xray__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 0.65rem;
-  margin: 0 0 0.55rem;
-  font-size: 0.75rem;
-  color: var(--neo-text-muted);
-
-  strong {
-    font-size: 0.9375rem;
-    font-variant-numeric: tabular-nums;
-    color: var(--neo-text-primary);
-  }
-}
-
-.status-rank-xray__terms {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.status-rank-xray__term-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--neo-text-secondary);
-}
-
-.status-rank-xray__term-val {
-  font-variant-numeric: tabular-nums;
-  color: var(--neo-text-primary);
-}
-
-.status-rank-xray__bar {
-  height: 0.35rem;
-  margin-top: 0.2rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--neo-text-primary) 8%, transparent);
-  overflow: hidden;
-}
-
-.status-rank-xray__bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--neo-accent);
-
-  &--neg {
-    background: var(--neo-danger, #e11d48);
-  }
-}
-
-.status-rank-xray__raw {
-  margin: 0.15rem 0 0;
-  font-size: 0.6875rem;
-  color: var(--neo-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-rank-xray__mods {
-  margin: 0.55rem 0 0;
-  font-size: 0.6875rem;
-  line-height: 1.4;
-  color: var(--neo-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.status-inspector {
-  margin: 0.55rem 0 0.15rem;
-  padding: 0.65rem 0.7rem;
-  border: 1px solid var(--neo-border-color);
-  border-radius: 10px;
-  background: var(--neo-bg-secondary);
-}
-
-.status-inspector__head {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-bottom: 0.5rem;
-
-  strong {
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--neo-text-muted);
-  }
-}
-
-.status-inspector__copy,
-.status-inspector__close {
-  border: 1px solid var(--neo-border-color);
-  border-radius: 999px;
-  background: var(--neo-bg-primary);
-  color: var(--neo-text-secondary);
-  font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.status-inspector__copy {
-  margin-left: auto;
-  padding: 0.2rem 0.55rem;
-}
-
-.status-inspector__close {
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.status-inspector__grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.4rem;
-  margin: 0;
-
-  div {
-    display: grid;
-    grid-template-columns: 5.5rem 1fr;
-    gap: 0.4rem;
-    min-width: 0;
-  }
-
-  dt {
-    margin: 0;
-    font-size: 0.6875rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    color: var(--neo-text-tertiary);
-  }
-
-  dd {
-    margin: 0;
-    font-size: 0.75rem;
-    color: var(--neo-text-secondary);
-    overflow-wrap: anywhere;
-    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -3129,61 +2415,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   justify-content: center;
 }
 
-.status-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  padding: 0.625rem 0.75rem;
-  font-size: 0.875rem;
-  color: var(--neo-text-primary);
-  background: transparent;
-  border: none;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 8px;
-  transition: background-color 0.12s ease;
-
-  svg {
-    flex-shrink: 0;
-    color: var(--neo-text-secondary);
-  }
-
-  span {
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &:hover:not(:disabled) {
-    background: var(--neo-bg-tertiary);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  &--danger {
-    color: var(--neo-danger);
-
-    svg {
-      color: var(--neo-danger);
-    }
-
-    &:hover:not(:disabled) {
-      background: var(--neo-danger-soft);
-    }
-  }
-}
-
-.status-dropdown-divider {
-  height: 1px;
-  background: var(--neo-border-color);
-  margin: 0.25rem 0.5rem;
-}
-
 .menu-fade-enter-active,
 .menu-fade-leave-active {
   transition: opacity 0.12s ease, transform 0.12s ease;
@@ -3274,176 +2505,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
-.status-quote-card {
-  display: flex;
-  gap: 0.55rem;
-  width: 100%;
-  margin-top: 0.45rem;
-  padding: 0.65rem 0.7rem;
-  border: 1px solid var(--neo-border-color);
-  border-radius: 12px;
-  background: var(--neo-bg-secondary);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--neo-bg-hover);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--neo-accent);
-    outline-offset: 2px;
-  }
-
-  &__avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-  }
-
-  &__body {
-    min-width: 0;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-  }
-
-  &__meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    font-size: 0.8125rem;
-    color: var(--neo-text-muted);
-
-    strong {
-      color: var(--neo-text-primary);
-      font-weight: 600;
-    }
-  }
-
-  &__text {
-    font-size: 0.875rem;
-    line-height: 1.35;
-    color: var(--neo-text-secondary);
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    overflow-wrap: anywhere;
-  }
-}
-
-// Media
-.status-media {
-  position: relative;
-  margin-top: 0.5rem;
-  border-radius: 12px;
-  overflow: hidden;
-  max-width: 100%;
-
-  &__grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.375rem;
-
-    &:has(> *:nth-child(2)) {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  &--carousel {
-    overflow: visible;
-  }
-
-  &__track {
-    display: flex;
-    gap: 0.5rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x mandatory;
-    scroll-padding-inline: 0;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 0.15rem;
-    scrollbar-width: thin;
-
-    .status-media-hit,
-    .status-media-video,
-    .status-media-audio {
-      flex: 0 0 85%;
-      max-width: 85%;
-      scroll-snap-align: start;
-      border-radius: 12px;
-      overflow: hidden;
-      background: var(--neo-bg-tertiary);
-    }
-
-    .status-media-image,
-    .status-media-video {
-      width: 100%;
-      height: min(52vw, 22rem);
-      object-fit: cover;
-      aspect-ratio: auto;
-    }
-  }
-
-  &__index {
-    position: absolute;
-    top: 0.45rem;
-    right: 0.45rem;
-    padding: 0.15rem 0.4rem;
-    border-radius: 999px;
-    background: color-mix(in srgb, #000 55%, transparent);
-    color: #fff;
-    font-size: 0.6875rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-}
-
-.status-media-hit {
-  position: relative;
-}
-
-.status-media-cw {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  min-height: 140px;
-  padding: 1rem;
-  border: 1px dashed var(--neo-border-color);
-  border-radius: 12px;
-  background: var(--neo-bg-secondary);
-  color: var(--neo-text-secondary);
-  font: inherit;
-  cursor: pointer;
-  text-align: center;
-
-  &__hint {
-    font-size: 0.8em;
-    color: var(--neo-text-muted);
-  }
-}
-
-.status-media-hit {
-  display: block;
-  padding: 0;
-  margin: 0;
-  border: none;
-  background: none;
-  cursor: zoom-in;
-  overflow: hidden;
-  max-width: 100%;
-}
-
 .status-heart-burst {
   position: absolute;
   inset: 0;
@@ -3524,90 +2585,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
-@keyframes like-pop {
-  0% {
-    transform: scale(1) rotate(0deg);
-  }
-  18% {
-    /* Principle 2: Anticipation dip & wind-back */
-    transform: translateY(var(--neo-anticipate-y, 2px)) scale3d(1.12, 0.78, 1) rotate(-10deg);
-  }
-  52% {
-    /* Principle 1, 7 & 10: Stretch along upward arc with overshoot */
-    transform: translate(calc(var(--neo-arc-x, 8px) * 0.25), calc(var(--neo-arc-y, -10px) * 0.45))
-      scale3d(calc(var(--neo-overshoot-scale, 1.2) * 0.96), var(--neo-overshoot-scale, 1.2), 1)
-      rotate(7deg);
-  }
-  78% {
-    /* Principle 5: Follow-through settle */
-    transform: translateY(1px) scale3d(1.04, 0.95, 1) rotate(-2deg);
-  }
-  100% {
-    transform: scale(1) translateY(0) rotate(0deg);
-  }
-}
-
-@keyframes repost-spin {
-  0% {
-    transform: rotate(0deg) scale(1);
-  }
-  18% {
-    /* Principle 2: Anticipation wind-back */
-    transform: rotate(-22deg) scale3d(1.08, 0.88, 1);
-  }
-  58% {
-    /* Principle 10: Overshoot spin */
-    transform: rotate(196deg) scale(var(--neo-overshoot-scale, 1.18));
-  }
-  82% {
-    transform: rotate(175deg) scale(0.97);
-  }
-  100% {
-    transform: rotate(180deg) scale(1);
-  }
-}
-
-@keyframes bookmark-snap {
-  0% {
-    transform: scale3d(1, 1, 1) translateY(0);
-  }
-  20% {
-    /* Pull-down stretch */
-    transform: scale3d(0.86, 1.28, 1) translateY(3px);
-  }
-  56% {
-    /* Elastic upward snap */
-    transform: scale3d(1.1, 0.88, 1) translateY(-2.5px);
-  }
-  80% {
-    transform: scale3d(0.97, 1.04, 1) translateY(0.5px);
-  }
-  100% {
-    transform: scale3d(1, 1, 1) translateY(0);
-  }
-}
-
-@keyframes count-tick-pop {
-  0% {
-    transform: translateY(3px) scale(0.88);
-    opacity: 0.65;
-  }
-  55% {
-    transform: translateY(-2px) scale(1.1);
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .status-action--pop .neo-icon,
-  .status-action--pop svg,
-  .status-action--boost-pop .neo-icon,
-  .status-action--boost-pop svg,
-  .status-action--bookmark-pop svg,
   .status-follow-badge--done,
   .status-follow-badge--done::after {
     animation: none !important;
@@ -3615,270 +2593,9 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
 }
 
 .status-card--reduce-motion {
-  .status-action,
-  .status-see-more,
-  .status-media-image,
-  .status-dropdown-item {
+  .status-see-more {
     transition: none !important;
     animation: none !important;
-  }
-
-  .status-action--pop .neo-icon,
-  .status-action--pop svg {
-    animation: none !important;
-  }
-}
-
-.status-media-hit {
-  position: relative;
-}
-
-.status-media-alt-badge {
-  position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
-  padding: 0.125rem 0.375rem;
-  border-radius: var(--neo-radius-xs, 2px);
-  background: color-mix(in srgb, var(--neo-bg-primary) 82%, transparent);
-  color: var(--neo-text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  pointer-events: none;
-
-  &--missing {
-    font-weight: 600;
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--neo-text-muted);
-  }
-}
-
-.status-media-image {
-  width: 100%;
-  max-width: 100%;
-  height: auto;
-  max-height: min(68dvh, 520px);
-  object-fit: cover;
-  border-radius: var(--neo-radius-md, 8px);
-  display: block;
-  cursor: pointer;
-  transition: opacity var(--neo-transition-fast, 0.15s ease);
-  background: var(--neo-bg-tertiary);
-
-  @media (max-height: 500px) and (orientation: landscape) {
-    max-height: calc(100dvh - 4.5rem);
-  }
-
-  &:hover { opacity: 0.95; }
-}
-
-.status-media-video,
-.status-media-audio {
-  width: 100%;
-  max-width: 100%;
-  border-radius: var(--neo-radius-md, 8px);
-  display: block;
-}
-
-.status-media-video {
-  max-height: min(68dvh, 560px);
-  object-fit: contain;
-  background: #000;
-
-  @media (max-height: 500px) and (orientation: landscape) {
-    max-height: calc(100dvh - 4.5rem);
-  }
-}
-
-// ========================================
-// Actions - pill-shaped buttons with proper sizing
-// ========================================
-.status-actions {
-  overflow: visible;
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 0.15rem;
-  margin-top: 0.5rem;
-  margin-left: -0.35rem;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.status-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.45rem 0.5rem;
-  min-height: 40px;
-  min-width: 40px;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition:
-    background-color var(--neo-dur-instant, 90ms) var(--neo-ease-out),
-    color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
-    transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
-  line-height: 1;
-  -webkit-tap-highlight-color: transparent;
-
-  svg,
-  .neo-icon {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    transform-origin: center;
-    transition: transform var(--neo-dur-quick, 160ms) var(--neo-ease-spring);
-  }
-
-  @include hover(':not(:disabled)') {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
-  }
-
-  &:active:not(:disabled) {
-    transition-duration: var(--neo-dur-instant, 90ms);
-    transform: translateY(var(--neo-anticipate-y, 1.5px))
-      scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  // Liked = theme's like color (Braun accent unless a theme sets --neo-like)
-  &--liked {
-    color: var(--neo-like, var(--neo-accent));
-
-    svg {
-      stroke: var(--neo-like, var(--neo-accent));
-      fill: var(--neo-like, var(--neo-accent));
-    }
-
-    @include hover(':not(:disabled)') {
-      background: color-mix(in srgb, var(--neo-like, var(--neo-accent)) 12%, transparent);
-      color: var(--neo-like, var(--neo-accent));
-    }
-  }
-
-  &--pop .neo-icon,
-  &--pop svg {
-    animation: like-pop var(--neo-dur-celebrate, 440ms) var(--neo-ease-bounce) both;
-  }
-
-  &--pop .status-action__count,
-  &--boost-pop .status-action__count {
-    animation: count-tick-pop var(--neo-dur-normal, 240ms) var(--neo-ease-spring)
-      var(--neo-delay-secondary, 50ms) both;
-  }
-
-  &--share {
-    @include hover(':not(:disabled)') {
-      .neo-icon {
-        transform: translate(2px, -2px) scale(1.06);
-      }
-    }
-
-    &:active:not(:disabled) .neo-icon {
-      transform: translate(-1px, 1px) scale(0.9);
-    }
-  }
-
-  &--reply {
-    @include hover(':not(:disabled)') {
-      .neo-icon {
-        transform: rotate(-10deg) translateY(-1.5px) scale(1.06);
-      }
-    }
-
-    &:active:not(:disabled) .neo-icon {
-      transform: rotate(4deg) translateY(1px) scale(0.9);
-    }
-  }
-
-  @media (max-width: 1023px) {
-    min-height: 48px;
-    min-width: 48px;
-    padding: 0.55rem 0.6rem;
-
-    svg {
-      width: 22px;
-      height: 22px;
-    }
-
-    &--boost .status-action__count,
-    &--reply .status-action__count,
-    &--like .status-action__count {
-      font-size: 0.6875rem;
-      opacity: 0.75;
-    }
-  }
-
-  // Trailing Save — LoomSpace improves on Threads by keeping 1-tap bookmark
-  &--bookmark {
-    margin-left: auto;
-  }
-
-  // Boosted = success green (instrument, not Twitter)
-  &--bookmarked {
-    color: var(--neo-accent);
-
-    svg {
-      stroke: var(--neo-accent);
-      fill: var(--neo-accent);
-    }
-  }
-
-  &--bookmark-pop svg {
-    animation: bookmark-snap var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
-  }
-
-  &--boosted {
-    color: var(--neo-boost, var(--neo-success));
-
-    svg,
-    .neo-icon {
-      stroke: var(--neo-boost, var(--neo-success));
-    }
-
-    @include hover(':not(:disabled)') {
-      background: color-mix(in srgb, var(--neo-boost, var(--neo-success)) 12%, transparent);
-      color: var(--neo-boost, var(--neo-success));
-    }
-  }
-
-  &--boost-pop svg,
-  &--boost-pop .neo-icon {
-    animation: repost-spin var(--neo-dur-normal, 240ms) var(--neo-ease-spring) both;
-  }
-
-  // Reply active = accent blue
-  &--replying {
-    color: var(--neo-accent);
-
-    svg {
-      stroke: var(--neo-accent);
-    }
-
-    @include hover(':not(:disabled)') {
-      background: var(--neo-accent-soft);
-      color: var(--neo-accent);
-    }
-  }
-
-  &__count {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-    color: inherit;
   }
 }
 
@@ -3929,14 +2646,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   text-shadow: 0 0 5px currentColor;
 }
 
-:global(.chaos-active) {
-  .status-action--liked,
-  .status-action--boosted,
-  .status-action--bookmarked {
-    text-shadow: 0 0 10px currentColor;
-  }
-}
-
 // Desktop
 @media (min-width: 1024px) {
   .status-card {
@@ -3967,10 +2676,6 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     font-size: 1rem;
   }
 
-  .status-media-image {
-    max-height: 400px;
-  }
-
   // Flick on desktop (focused column): keep the full-bleed slide, not a feed card
   .status-card.status-card--flip {
     padding: 0;
@@ -3982,7 +2687,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       background: var(--neo-bg-primary);
     }
 
-    .status-media-image {
+    :deep(.status-media-image) {
       max-height: none;
     }
 

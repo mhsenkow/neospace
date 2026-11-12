@@ -5,6 +5,7 @@
  */
 import { canApplyUpdateNow } from '~/utils/pwaUpdate'
 import { useToastStore } from '~/stores/toast'
+import { isNativeShell } from '~/utils/nativeShell'
 
 type PwaHandle = {
   needRefresh?: boolean
@@ -12,7 +13,7 @@ type PwaHandle = {
 }
 
 export default defineNuxtPlugin((nuxtApp) => {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined' || isNativeShell()) return
   const pwa = nuxtApp.$pwa as PwaHandle | undefined
   if (!pwa) return
 

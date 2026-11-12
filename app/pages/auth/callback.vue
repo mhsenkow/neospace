@@ -155,7 +155,7 @@ definePageMeta({
     <div class="callback__atmosphere" aria-hidden="true"></div>
 
     <main class="callback__card">
-      <span class="callback__mark" aria-hidden="true">NS</span>
+      <span class="callback__mark" aria-hidden="true">LS</span>
 
       <div v-if="error" class="callback__body" role="alert">
         <h1 ref="errorHeadingRef" tabindex="-1">Couldn’t sign in</h1>

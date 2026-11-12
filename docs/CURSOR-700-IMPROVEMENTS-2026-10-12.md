@@ -2179,17 +2179,19 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 453](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:453); explicit source files unchanged at review time.
   - **Done:** Alt+Shift+E toggles Edward from anywhere (listener in `layouts/default.vue`, `isEdwardShortcut` in `useSuiteGroups.ts`) and the suite-menu blurb now explains it ("lean back · watch the fediverse float by").
 
-- [ ] **NS-320 · P2 · PERF · A · M — Render on demand: skip render when there's no sim, camera, hover or drag change, or throttle to ~10 fps…**
+- [x] **NS-320 · P2 · PERF · A · M — Render on demand: skip render when there's no sim, camera, hover or drag change, or throttle to ~10 fps…**
   - **Target:** [app/components/edward/EdwardCanvas.vue:1496](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:1496). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Render on demand: skip `render` when there's no sim, camera, hover or drag change, or throttle to ~10 fps when idle, recessed, or while `selectedIdentity` is set.
+  - **Done:** `FrameGate` signature skip in `edwardRender.ts` / `EdwardCanvas.vue`; idle heartbeat; still/reduced-motion freeze. Residual: CPU overlays still run each non-throttled frame; no full GPU frame-time telemetry.
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:1496-1525` — `frame()` calls `renderer.render` at display rate unconditionally. With speed `still`, under reduced motion (`integrateBubblePhysics` early-returns at `:731`), behind the peek modal, or while recessed, it re-renders an identical transmission-glass scene 60–120 times a second, which drains laptops and phones.
   - **Prior verifier qualification:** Rendering every frame unconditionally is real, but the scene isn't "identical". Even at `still` (mul 0), bubbles breathe on wall-clock `t` (`:1127`) and stars rotate unless reduced motion is on. The real waste is continuous transmission-glass rendering while recessed or behind the peek modal, and under reduced motion. [Corrected: "Canvas renders at display rate even while recessed, behind the peek, or under reduced motion. Throttle or render on demand in those states." Impact Medium.]
   - **Provenance:** [October 9 candidate, line 481](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:481); explicit source files unchanged at review time.
   - Partial (left unchecked): Throttled (~10 fps via `utils/edwardRender.ts` `renderIntervalMs`) while recessed, peek-open, reduced motion with no interaction, **and** at `still` speed (`speedMul <= 0`) unless hovering/dragging; skipped frames keep `lastFrameT`. Tests: `tests/edwardRender.test.ts`. Unchecked: skip `renderer.render` when the scene is bitwise unchanged; no GPU frame-time measurement.
 
-- [ ] **NS-321 · P2 · PERF · A · M — Share one shell material per dialect accent (tint via instance color), pack faces into an atlas, and add…**
+- [x] **NS-321 · P2 · PERF · A · M — Share one shell material per dialect accent (tint via instance color), pack faces into an atlas, and add…**
   - **Target:** [app/components/edward/EdwardCanvas.vue:489](/Users/powerox/neospace/app/components/edward/EdwardCanvas.vue:489). **Area:** 3D canvas — GPU, perf & lifecycle (`EdwardCanvas.vue`).
   - **Change:** Share one shell material per dialect accent (tint via instance color), pack faces into an atlas, and add an adaptive quality tier (drop transmission or iridescence when frame time is above 20 ms).
+  - **Done:** Face texture cache + lean/compact resolutions; shared ring materials; lean tier sticky + rebinds live balls. Residual: no single UV atlas yet (noted in code).
   - **Prior observation to check:** `app/components/edward/EdwardCanvas.vue:489-508` — Every ball creates its own `MeshPhysicalMaterial` with `transmission`, `iridescence` and `clearcoat`, plus its own 512² `CanvasTexture` with `anisotropy=4` (`:353-378`). With 72 desktop / 38 phone balls that's about 1.3 MB of GPU texture per ball, and every transmissive mesh forces the extra transmission pass. Low-end GPUs stutter.
   - **Provenance:** [October 9 candidate, line 483](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:483); explicit source files unchanged at review time.
   - Partial (left unchecked): `EdwardCanvas.vue` caches one `MeshPhysicalMaterial` per dialect tint + fill + quality tier (`full` vs `lean`); lean drops transmission/iridescence after sustained >20 ms frames. Face textures are still per-ball 512² canvases (no atlas). Unchecked: instance-color tinting on one global material; GPU validation.
@@ -4526,83 +4528,96 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1101](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1101); explicit source files unchanged at review time.
   - **Done:** `tests/conversations-store.test.ts` covers the conversations store with a mocked `clientFor`: page-1 refresh keeps the loaded tail, account switch clears the inbox, `markReadForThread` marks only the exact participant set / prefers the thread's last message, `findDirectWith` never returns a group thread, optimistic `remove`. `stripParticipantMentions` and `daySeparatorLabel` were already covered in `tests/smoke.test.ts`.
 
-- [ ] **NS-656 · P3 · UX · A · S — Hydrate them via accounts.$select(id).fetch(), as the peek pane already does.**
+- [x] **NS-656 · P3 · UX · A · S — Hydrate them via accounts.$select(id).fetch(), as the peek pane already does.**
   - **Target:** [app/pages/status/[id].vue:169](/Users/powerox/neospace/app/pages/status/[id].vue:169). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Hydrate them via `accounts.$select(id).fetch()`, as the peek pane already does.
   - **Prior observation to check:** `app/pages/status/[id].vue:169-181` — Participants who have only been mentioned (for example, you sent the first DM and they haven't replied yet) get `displayName = username` and `avatar: null`. A new 1:1 header shows a lowercase handle and a letter placeholder.
   - **Provenance:** [October 9 candidate, line 985](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:985); explicit source files unchanged at review time.
+  - **Done:** Mentioned-only DM participants are hydrated with `accounts.$select(id).fetch()` (cached per thread, reset on reload) in `app/pages/status/[id].vue`; header/chips now show real name + avatar.
 
-- [ ] **NS-657 · P3 · UX · A · S — Show it only when ancestors.length === 40 and ancestors[0].inReplyToId is set.**
+- [x] **NS-657 · P3 · UX · A · S — Show it only when ancestors.length === 40 and ancestors[0].inReplyToId is set.**
   - **Target:** [app/pages/status/[id].vue:997](/Users/powerox/neospace/app/pages/status/[id].vue:997). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Show it only when `ancestors.length === 40` and `ancestors[0].inReplyToId` is set.
   - **Prior observation to check:** `app/pages/status/[id].vue:997-1001` — "Older messages may be truncated by your server's context limit" appears on any DM with 40 or more messages. Mastodon's context isn't capped at 40 for signed-in users, so the warning is usually false.
   - **Provenance:** [October 9 candidate, line 986](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:986); explicit source files unchanged at review time.
+  - **Done:** Warning now gated by `ancestorsMaybeTruncated` (`ancestors.length === 40 && ancestors[0].inReplyToId`) in `app/pages/status/[id].vue`.
 
-- [ ] **NS-658 · P3 · PERF · A · S — Have resolveThreadId return the status and reuse it.**
+- [x] **NS-658 · P3 · PERF · A · S — Have resolveThreadId return the status and reuse it.**
   - **Target:** [app/pages/status/[id].vue:636](/Users/powerox/neospace/app/pages/status/[id].vue:636). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Have `resolveThreadId` return the status and reuse it.
   - **Prior observation to check:** `app/pages/status/[id].vue:636,662` — Each fresh open fetches the focus status twice: `resolveThreadId` → `fetchStatus` (`status.ts:394`), then `fetchThread` → `fetch` (`status.ts:370`).
   - **Provenance:** [October 9 candidate, line 987](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:987); explicit source files unchanged at review time.
+  - **Done:** Added `statusStore.resolveThread()` returning `{ id, status }`; `fetchThread(id, prefetched)` reuses it. `resolveThreadId` kept as a wrapper. Used by `status/[id].vue` and `ThreadPeekSheet.vue` (`app/stores/status.ts`).
 
-- [ ] **NS-659 · P3 · A11Y · A · S — Add role="region".**
+- [x] **NS-659 · P3 · A11Y · A · S — Add role="region".**
   - **Target:** [app/pages/status/[id].vue:1026](/Users/powerox/neospace/app/pages/status/[id].vue:1026). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Add `role="region"`.
   - **Prior observation to check:** `app/pages/status/[id].vue:1026-1034` — The profile pane's `aria-label` sits on a role-less `div`, so it is ignored.
   - **Provenance:** [October 9 candidate, line 990](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:990); explicit source files unchanged at review time.
+  - **Done:** `role="region"` added to the DM profile pane in `app/pages/status/[id].vue`.
 
-- [ ] **NS-660 · P3 · A11Y · A · M — Turn aria-live back on one tick after the list has settled.**
+- [x] **NS-660 · P3 · A11Y · A · M — Turn aria-live back on one tick after the list has settled.**
   - **Target:** [app/pages/status/[id].vue:985](/Users/powerox/neospace/app/pages/status/[id].vue:985). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Turn `aria-live` back on one tick after the list has settled.
   - **Prior observation to check:** `app/pages/status/[id].vue:985-989` — Clearing the find query switches `aria-live` back to `polite` in the same render that re-inserts every filtered-out bubble. Screen readers can then read out the whole conversation.
   - **Provenance:** [October 9 candidate, line 991](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:991); explicit source files unchanged at review time.
+  - **Done:** `chatLiveSuspended` keeps `aria-live` off while filtering and restores it one tick after the query clears (`app/pages/status/[id].vue`).
 
-- [ ] **NS-661 · P3 · UX · A · S — Use one neutral label, or decide from the route.**
+- [x] **NS-661 · P3 · UX · A · S — Use one neutral label, or decide from the route.**
   - **Target:** [app/pages/status/[id].vue:952](/Users/powerox/neospace/app/pages/status/[id].vue:952). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Use one neutral label, or decide from the route.
   - **Prior observation to check:** `app/pages/status/[id].vue:952-953` — The loading label branches on `isDirectThread`, which is always false while loading because `focusStatus` is null. DMs show "Loading conversation", and the "Loading messages" branch never runs.
   - **Provenance:** [October 9 candidate, line 992](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:992); explicit source files unchanged at review time.
+  - **Done:** Loading label is now a single neutral "Loading conversation" (`app/pages/status/[id].vue`).
 
-- [ ] **NS-662 · P3 · UX · A · S — Base it on descendants only, and use different copy when !canReply.**
+- [x] **NS-662 · P3 · UX · A · S — Base it on descendants only, and use different copy when !canReply.**
   - **Target:** [app/pages/status/[id].vue:1219](/Users/powerox/neospace/app/pages/status/[id].vue:1219). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Base it on `descendants` only, and use different copy when `!canReply`.
   - **Prior observation to check:** `app/pages/status/[id].vue:1219-1221` — "No replies yet — be the first." only appears when there are no ancestors either, so a leaf reply shows nothing. It is also shown to signed-out viewers, who can't reply.
   - **Provenance:** [October 9 candidate, line 993](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:993); explicit source files unchanged at review time.
+  - **Done:** Empty-replies copy depends only on descendants/unseen count (shows for leaf replies); signed-out viewers get "No replies yet." (`app/pages/status/[id].vue`).
 
-- [ ] **NS-663 · P3 · UX · A · S — Only increment when status.inReplyToId === focusStatus.id.**
+- [x] **NS-663 · P3 · UX · A · S — Only increment when status.inReplyToId === focusStatus.id.**
   - **Target:** [app/pages/status/[id].vue:723](/Users/powerox/neospace/app/pages/status/[id].vue:723). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Only increment when `status.inReplyToId === focusStatus.id`.
   - **Prior observation to check:** `app/pages/status/[id].vue:723-728` — `onReplyPosted` adds 1 to the focus post's `repliesCount` for any `@replied` from an ancestor or nested card (1181, 1209), even when the reply went to a different post.
   - **Provenance:** [October 9 candidate, line 994](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:994); explicit source files unchanged at review time.
+  - **Done:** `onReplyPosted` bumps `repliesCount` only when `status.inReplyToId` is the focus post (or its resolved reply id).
 
-- [ ] **NS-664 · P3 · UX · A · S — " linking to /status/{id}.**
+- [x] **NS-664 · P3 · UX · A · S — " linking to /status/{id}.**
   - **Target:** [app/pages/status/[id].vue:499](/Users/powerox/neospace/app/pages/status/[id].vue:499). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** " linking to `/status/{id}`.
   - **Prior observation to check:** `app/pages/status/[id].vue:499` — Depth is capped at 6 with no "continue thread" affordance. Deeper replies all sit at the same indent, so you can't tell parent from child. → At the cap, render "Continue thread
   - **Provenance:** [October 9 candidate, line 995](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:995); explicit source files unchanged at review time.
+  - **Done:** Reply tree stops at `MAX_REPLY_DEPTH` (6); deeper replies collapse into a "Continue thread (N more replies) →" link to `/status/{id}` (keeps `?account=`). Deeper replies are no longer rendered inline (`app/pages/status/[id].vue`).
 
-- [ ] **NS-665 · P3 · DESIGN · A · S — Render a placeholder per slot instead of hiding the first.**
+- [x] **NS-665 · P3 · DESIGN · A · S — Render a placeholder per slot instead of hiding the first.**
   - **Target:** [app/pages/status/[id].vue:872](/Users/powerox/neospace/app/pages/status/[id].vue:872). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Render a placeholder per slot instead of hiding the first.
   - **Prior observation to check:** `app/pages/status/[id].vue:872-886` — If the first participant has no avatar and the second does, the first `<img>` is hidden by `v-show`. The second renders as the small `--stack` badge next to an empty main circle.
   - **Provenance:** [October 9 candidate, line 996](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:996); explicit source files unchanged at review time.
+  - **Done:** Header renders one avatar or letter placeholder per participant slot (`app/pages/status/[id].vue`).
 
-- [ ] **NS-666 · P3 · CODE · A · S — Take the first grapheme (clipGraphemes/Intl.Segmenter).**
+- [x] **NS-666 · P3 · CODE · A · S — Take the first grapheme (clipGraphemes/Intl.Segmenter).**
   - **Target:** [app/pages/status/[id].vue:885](/Users/powerox/neospace/app/pages/status/[id].vue:885). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Take the first grapheme (`clipGraphemes`/`Intl.Segmenter`).
   - **Prior observation to check:** `app/pages/status/[id].vue:885,1063` — `.slice(0, 1)` on a display name splits emoji surrogate pairs, so the initial shows as �.
   - **Provenance:** [October 9 candidate, line 997](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:997); explicit source files unchanged at review time.
+  - **Done:** Added `firstGrapheme()` to `app/utils/stripHtml.ts`; used for header and chip initials.
 
-- [ ] **NS-667 · P3 · UX · A · S — Use mapErrorToMessage.**
+- [x] **NS-667 · P3 · UX · A · S — Use mapErrorToMessage.**
   - **Target:** [app/pages/status/[id].vue:264](/Users/powerox/neospace/app/pages/status/[id].vue:264). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Use `mapErrorToMessage`.
   - **Prior observation to check:** `app/pages/status/[id].vue:264,304,310` — The peek pane shows raw `e.message` (e.g. "Request failed with status code 404").
   - **Provenance:** [October 9 candidate, line 998](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:998); explicit source files unchanged at review time.
+  - **Done:** Peek pane profile/posts errors go through `mapErrorToMessage`; also removed raw `e?.message` fallback on thread load (`app/pages/status/[id].vue`).
 
-- [ ] **NS-668 · P3 · CODE · A · S — Pass focusStatus.visibility.**
+- [x] **NS-668 · P3 · CODE · A · S — Pass focusStatus.visibility.**
   - **Target:** [app/pages/status/[id].vue:1247](/Users/powerox/neospace/app/pages/status/[id].vue:1247). **Area:** app/pages/status/[id].vue — thread & DM chat view.
   - **Change:** Pass `focusStatus.visibility`.
   - **Prior observation to check:** `app/pages/status/[id].vue:1247` — `focusStatus.visibility === 'direct' ? 'direct' : focusStatus.visibility` returns the same value either way, and this branch is never a DM.
   - **Provenance:** [October 9 candidate, line 999](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:999); explicit source files unchanged at review time.
+  - **Done:** Passed `focus.visibility` directly in `expandDockToSheet` and the reply dock (`app/pages/status/[id].vue`).
 
 - [ ] **NS-669 · P3 · UX · A · S — Share one helper built on Intl.ListFormat.**
   - **Target:** [app/pages/status/[id].vue:394](/Users/powerox/neospace/app/pages/status/[id].vue:394). **Area:** app/pages/status/[id].vue — thread & DM chat view.
@@ -4755,17 +4770,19 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1090](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1090); explicit source files unchanged at review time.
   - **Done:** `NeoReport.vue` comment `maxlength` raised to 1000.
 
-- [ ] **NS-694 · P3 · PERF · A · S — Add loading="lazy" decoding="async".**
+- [x] **NS-694 · P3 · PERF · A · S — Add loading="lazy" decoding="async".**
   - **Target:** [app/components/RecipientPicker.vue:231](/Users/powerox/neospace/app/components/RecipientPicker.vue:231). **Area:** app/components/RecipientPicker.vue.
   - **Change:** Add `loading="lazy" decoding="async"`.
   - **Prior observation to check:** `app/components/RecipientPicker.vue:231` — Up to 400 rows render with eagerly loaded avatars.
   - **Provenance:** [October 9 candidate, line 1093](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1093); explicit source files unchanged at review time.
+  - **Done:** Avatar `<img>` in `app/components/RecipientPicker.vue` has `loading="lazy" decoding="async"`.
 
-- [ ] **NS-695 · P3 · UX · A · S — Show a small inline "Searching the fediverse…" row under the local matches.**
+- [x] **NS-695 · P3 · UX · A · S — Show a small inline "Searching the fediverse…" row under the local matches.**
   - **Target:** [app/components/RecipientPicker.vue:197](/Users/powerox/neospace/app/components/RecipientPicker.vue:197). **Area:** app/components/RecipientPicker.vue.
   - **Change:** Show a small inline "Searching the fediverse…" row under the local matches.
   - **Prior observation to check:** `app/components/RecipientPicker.vue:197-203` — While the remote search runs, the "Searching…" indicator only shows when there are no local matches, so remote results suddenly push into the list.
   - **Provenance:** [October 9 candidate, line 1094](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1094); explicit source files unchanged at review time.
+  - **Done:** Inline "Searching the fediverse…" row shows under local matches while remote search runs (`app/components/RecipientPicker.vue`).
 
 - [x] **NS-696 · P3 · UX · A · S — Filter out instancesStore.currentUser.id.**
   - **Target:** [app/components/RecipientPicker.vue:61](/Users/powerox/neospace/app/components/RecipientPicker.vue:61). **Area:** app/components/RecipientPicker.vue.
@@ -4781,11 +4798,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1096](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1096); explicit source files unchanged at review time.
   - **Done:** `RecipientPicker.vue` section label uses `--neo-text-tertiary`.
 
-- [ ] **NS-698 · P3 · UX · A · S — Add small badges and a "Chat open" marker using findDirectWith.**
+- [x] **NS-698 · P3 · UX · A · S — Add small badges and a "Chat open" marker using findDirectWith.**
   - **Target:** [app/components/RecipientPicker.vue:231](/Users/powerox/neospace/app/components/RecipientPicker.vue:231). **Area:** app/components/RecipientPicker.vue.
   - **Change:** Add small badges and a "Chat open" marker using `findDirectWith`.
   - **Prior observation to check:** `app/components/RecipientPicker.vue:231-235` — Rows give no hint for locked, bot or moved accounts, or for people you already have a chat with.
   - **Provenance:** [October 9 candidate, line 1097](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1097); explicit source files unchanged at review time.
+  - **Done:** Rows show "Chat open" (via `conversationsStore.findDirectWith`, inbox fetched if empty) plus Moved/Locked/Bot badges (`app/components/RecipientPicker.vue`); `ComposeSheet.vue` pick error now uses `mapErrorToMessage`.
 
 - [ ] **NS-699 · P3 · UX · A · M — Decide whether to support multi-select chips.**
   - **Target:** [app/components/RecipientPicker.vue:112](/Users/powerox/neospace/app/components/RecipientPicker.vue:112). **Area:** app/components/RecipientPicker.vue.

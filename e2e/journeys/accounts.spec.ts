@@ -7,7 +7,7 @@ import {
   seedAuthenticatedSession,
 } from '../helpers/mockApi'
 
-const COMPOSE_FIELD = /what.?s new/i
+const COMPOSE_FIELD = /new thread|what.?s new/i
 
 test.describe('account switching', () => {
   test.beforeEach(async ({ page, api }) => {

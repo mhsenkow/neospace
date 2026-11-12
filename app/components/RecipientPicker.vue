@@ -6,6 +6,7 @@
 import type { mastodon } from 'masto'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
 import { useInstancesStore } from '~/stores/instances'
+import { useConversationsStore } from '~/stores/conversations'
 
 const props = withDefaults(
   defineProps<{
@@ -71,6 +72,25 @@ const displayAccounts = computed(() => {
   return merged
 })
 
+const conversationsStore = useConversationsStore()
+/** People you already have a 1:1 chat with (picking one reopens it instead of starting a new DM) */
+const chatOpenIds = computed(() => {
+  const ids = new Set<string>()
+  for (const a of displayAccounts.value) {
+    if (conversationsStore.findDirectWith(a.id)?.lastStatus?.id) ids.add(a.id)
+  }
+  return ids
+})
+
+/** Short, text-first account hints (locked / bot / moved) */
+const accountBadges = (a: mastodon.v1.Account): string[] => {
+  const out: string[] = []
+  if (a.moved) out.push('Moved')
+  if (a.locked) out.push('Locked')
+  if (a.bot) out.push('Bot')
+  return out
+}
+
 const listStatus = computed(() => {
   if (followingError.value) return followingError.value
   if (searchError.value) return searchError.value
@@ -112,6 +132,12 @@ watch(displayAccounts, (next, prev) => {
 
 onMounted(() => {
   void loadFollowing()
+  // "Chat open" markers need the inbox; it's usually loaded already
+  if (!conversationsStore.conversations.length) {
+    void conversationsStore.fetchConversations({ quiet: true }).catch(() => {
+      /* markers are a hint — the picker works without them */
+    })
+  }
 })
 
 const pick = (account: mastodon.v1.Account) => {
@@ -233,13 +259,38 @@ onUnmounted(() => clear())
           @click="pick(account)"
           @mouseenter="listIndex = index"
         >
-          <img :src="account.avatar" alt="" class="recipient-picker__avatar" />
+          <img
+            :src="account.avatar"
+            alt=""
+            class="recipient-picker__avatar"
+            loading="lazy"
+            decoding="async"
+          />
           <span class="recipient-picker__meta">
             <span class="recipient-picker__name">{{ account.displayName || account.username }}</span>
             <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
           </span>
+          <span
+            v-if="chatOpenIds.has(account.id) || accountBadges(account).length"
+            class="recipient-picker__badges"
+          >
+            <span v-if="chatOpenIds.has(account.id)" class="recipient-picker__badge recipient-picker__badge--chat">
+              Chat open
+            </span>
+            <span v-for="badge in accountBadges(account)" :key="badge" class="recipient-picker__badge">
+              {{ badge }}
+            </span>
+          </span>
         </button>
       </div>
+
+      <!-- Remote search still running, but local matches are already listed -->
+      <p
+        v-if="hasQuery && isSearching && displayAccounts.length"
+        class="recipient-picker__status recipient-picker__status--inline"
+      >
+        Searching the fediverse…
+      </p>
     </div>
   </div>
 </template>
@@ -306,6 +357,37 @@ onUnmounted(() => clear())
   color: var(--neo-text-muted);
   text-align: center;
   line-height: 1.45;
+}
+
+.recipient-picker__status--inline {
+  padding: 0.6rem 1rem 0.9rem;
+  font-size: 0.8125rem;
+}
+
+.recipient-picker__badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.recipient-picker__badge {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--neo-text-tertiary);
+  white-space: nowrap;
+
+  &--chat {
+    border-color: color-mix(in srgb, var(--neo-accent) 40%, transparent);
+    background: var(--neo-accent-soft);
+    color: var(--neo-accent);
+  }
 }
 
 .recipient-picker__retry {

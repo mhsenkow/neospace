@@ -1670,8 +1670,12 @@ onUnmounted(() => {
   cursor: pointer;
   box-shadow: 2px 2px 0 #ff7eb3;
 
-  &:hover,
   &:focus-visible {
+    background: #ffe566;
+    color: #1a1420;
+  }
+
+  @include hover {
     background: #ffe566;
     color: #1a1420;
   }
@@ -1699,8 +1703,12 @@ onUnmounted(() => {
   cursor: pointer;
   box-shadow: 2px 2px 0 #59d1e0;
 
-  &:hover,
   &:focus-visible {
+    background: #59d1e0;
+    color: #1a1420;
+  }
+
+  @include hover {
     background: #59d1e0;
     color: #1a1420;
   }
@@ -1807,8 +1815,12 @@ onUnmounted(() => {
     cursor: default;
   }
 
-  &:not(:disabled):hover,
   &:not(:disabled):focus-visible {
+    background: #59d1e0;
+    color: #1a1420;
+  }
+
+  @include hover(':not(:disabled)') {
     background: #59d1e0;
     color: #1a1420;
   }
@@ -1819,8 +1831,12 @@ onUnmounted(() => {
   color: #ff7eb3;
   margin-left: auto;
 
-  &:hover,
   &:focus-visible {
+    background: #ff7eb3;
+    color: #1a1420;
+  }
+
+  @include hover {
     background: #ff7eb3;
     color: #1a1420;
   }
@@ -1860,8 +1876,12 @@ onUnmounted(() => {
   overflow: hidden;
   opacity: 0.72;
 
-  &:hover,
   &:focus-visible {
+    opacity: 1;
+    border-color: var(--srv, #ffe566);
+  }
+
+  @include hover {
     opacity: 1;
     border-color: var(--srv, #ffe566);
   }
@@ -2053,7 +2073,7 @@ onUnmounted(() => {
   padding: 0.35rem 0.75rem;
   cursor: pointer;
 
-  &:hover {
+  @include hover {
     filter: brightness(1.05);
   }
 }
@@ -2148,8 +2168,12 @@ onUnmounted(() => {
   cursor: pointer;
   white-space: nowrap;
 
-  &:hover,
   &:focus-visible {
+    background: #59d1e0;
+    color: #1a1420;
+  }
+
+  @include hover {
     background: #59d1e0;
     color: #1a1420;
   }
@@ -2164,8 +2188,12 @@ onUnmounted(() => {
   border-color: #ff7eb3;
   color: #ff7eb3;
 
-  &:hover,
   &:focus-visible {
+    background: #ff7eb3;
+    color: #1a1420;
+  }
+
+  @include hover {
     background: #ff7eb3;
     color: #1a1420;
   }
@@ -2196,8 +2224,13 @@ onUnmounted(() => {
   text-transform: lowercase;
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
+    border-style: solid;
+    color: #ffe566;
+    border-color: #ffe566;
+  }
+
+  @include hover {
     border-style: solid;
     color: #ffe566;
     border-color: #ffe566;
@@ -2568,8 +2601,12 @@ onUnmounted(() => {
     overflow: hidden;
   }
 
-  &:hover,
   &:focus-visible {
+    border-color: #59d1e0;
+    background: color-mix(in srgb, #59d1e0 14%, transparent);
+  }
+
+  @include hover {
     border-color: #59d1e0;
     background: color-mix(in srgb, #59d1e0 14%, transparent);
   }
@@ -2940,8 +2977,12 @@ onUnmounted(() => {
     color: #ff7eb3;
   }
 
-  &:hover,
   &:focus-visible {
+    border-color: #ff7eb3;
+    color: #fff8d6;
+  }
+
+  @include hover {
     border-color: #ff7eb3;
     color: #fff8d6;
   }
@@ -3004,8 +3045,12 @@ onUnmounted(() => {
   opacity: 0.82;
   transition: opacity 0.15s ease, border-color 0.15s ease;
 
-  &:hover,
   &:focus-visible {
+    opacity: 1;
+    border-color: var(--srv, #ffe566);
+  }
+
+  @include hover {
     opacity: 1;
     border-color: var(--srv, #ffe566);
   }
@@ -3081,8 +3126,11 @@ onUnmounted(() => {
   opacity: 0.6;
   transition: opacity 0.2s ease;
 
-  &:hover,
   &:focus-within {
+    opacity: 1;
+  }
+
+  @include hover {
     opacity: 1;
   }
 }
@@ -3110,8 +3158,12 @@ onUnmounted(() => {
   text-transform: lowercase;
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
+    color: #fff8d6;
+    border-color: color-mix(in srgb, #59d1e0 50%, transparent);
+  }
+
+  @include hover {
     color: #fff8d6;
     border-color: color-mix(in srgb, #59d1e0 50%, transparent);
   }
@@ -3184,8 +3236,12 @@ onUnmounted(() => {
   text-transform: lowercase;
   cursor: pointer;
 
-  &:hover,
   &:focus-visible {
+    border-color: color-mix(in srgb, #59d1e0 55%, transparent);
+    color: #59d1e0;
+  }
+
+  @include hover {
     border-color: color-mix(in srgb, #59d1e0 55%, transparent);
     color: #59d1e0;
   }

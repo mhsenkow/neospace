@@ -81,12 +81,14 @@ const reauthFromNotice = async () => {
   const returnTo = route.fullPath || '/'
   await router.push(`/login?add=1&returnTo=${encodeURIComponent(returnTo)}`)
 }
-const mounted = reactive({ compose: false, algorithm: false, accounts: false, settings: false })
+const { open: feedbackOpen } = useFeedbackNotes()
+const mounted = reactive({ compose: false, algorithm: false, accounts: false, settings: false, feedback: false })
 watchEffect(() => {
   if (composeSheet.open) mounted.compose = true
   if (algorithmsStore.editorOpen) mounted.algorithm = true
   if (accountsManagerOpen.value) mounted.accounts = true
   if (settingsStore.isOpen) mounted.settings = true
+  if (feedbackOpen.value) mounted.feedback = true
 })
 
 const { sidebarRail, loadSidebarRail, applyTheme, lookAnnounce } = useShellAppearance()
@@ -411,7 +413,7 @@ watch(
     <LazyAlgorithmSheet v-if="mounted.algorithm" />
     <LazyInstanceManager v-if="mounted.accounts" />
     <AccountSwitcherSheet v-if="instancesStore.hasAuthenticatedInstance" />
-    <FeedbackNotes v-if="isSidebarShell || !isMobileSubview" />
+    <LazyFeedbackNotes v-if="mounted.feedback && (isSidebarShell || !isMobileSubview)" />
     <LazySettingsModal v-if="mounted.settings" />
     <!-- Shared bottom-right dock: below modal / drawer z-index; stacks banner + suite -->
     <!-- Hide while compose is open so the waffle never fights the soft keyboard / Post bar -->

@@ -44,7 +44,7 @@ export default [
     },
   },
   {
-    files: ['app/**/*.{vue,ts}', 'functions/**/*.ts', 'scripts/**/*.mjs'],
+    files: ['app/**/*.{vue,ts}', 'functions/**/*.ts', 'scripts/**/*.mjs', 'e2e/**/*.ts'],
     rules: {
       'no-debugger': 'error',
       'no-var': 'error',

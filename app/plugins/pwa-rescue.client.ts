@@ -3,8 +3,10 @@
  * healthy for a while. Clearing the flag immediately caused wipe/reload loops
  * whenever any subsequent /_nuxt/ error fired.
  */
+import { isNativeShell } from '~/utils/nativeShell'
+
 export default defineNuxtPlugin(() => {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined' || isNativeShell()) return
 
   const CLEAR_AFTER_MS = 60_000
   window.setTimeout(() => {

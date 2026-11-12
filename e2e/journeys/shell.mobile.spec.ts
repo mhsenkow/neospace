@@ -75,9 +75,9 @@ test.describe('mobile shell dialogs', () => {
     await expect(trigger).toBeVisible()
     await trigger.click()
 
-    const dialog = page.getByRole('dialog', { name: 'New post' })
+    const dialog = page.getByRole('dialog', { name: /new (post|thread)/i })
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByRole('combobox', { name: /what.?s new/i })).toBeVisible()
+    await expect(dialog.getByRole('combobox', { name: /new thread|what.?s new/i })).toBeVisible()
     await expect(dialog.locator(':focus')).toHaveCount(1)
 
     await dialog.getByRole('button', { name: 'Cancel' }).click()

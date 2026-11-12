@@ -9,6 +9,7 @@ import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
 import { isRedraftSlot } from '~/composables/useDraft'
 import { useToastStore } from '~/stores/toast'
+import { mapErrorToMessage } from '~/utils/friendlyError'
 import { useSettingsStore } from '~/stores/settings'
 import type { mastodon } from 'masto'
 import type RealComposeBox from '~/components/RealComposeBox.vue'
@@ -181,7 +182,7 @@ const onPick = async (account: mastodon.v1.Account) => {
     sheet.continueWithRecipient(accountHandle(account))
   } catch (e: any) {
     useToastStore().show({
-      message: e?.message || 'Couldn’t open that conversation',
+      message: mapErrorToMessage(e).detail || 'Couldn’t open that conversation',
     })
   } finally {
     isPicking.value = false

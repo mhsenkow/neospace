@@ -1,10 +1,13 @@
 /**
  * Capacitor / native-shell detection and OAuth redirect helpers.
- * Web + PWA keep using window.location.origin; the iOS binary uses a stable https callback.
+ * Web + PWA keep using window.location.origin; the native binary uses a custom
+ * URL scheme so Mastodon returns into the app (same WebView storage as PKCE),
+ * not into an external browser tab on neospace.ibm.io.
  */
 
+/** Universal Link callback — still recognized if a server or old build hits it. */
 export const NATIVE_OAUTH_REDIRECT_URI = 'https://neospace.ibm.io/auth/callback'
-/** Custom-scheme fallback when Universal Links are unavailable (dev / first TestFlight). */
+/** Primary native redirect: CFBundleURLSchemes → appUrlOpen → /auth/callback. */
 export const NATIVE_OAUTH_SCHEME_REDIRECT = 'loomspace://auth/callback'
 
 const CUSTOM_SCHEMES = new Set(['loomspace:', 'neospace:'])
@@ -23,7 +26,10 @@ export function isNativeShell(): boolean {
 /** OAuth redirect_uri for app registrations and authorize/token exchange. */
 export function oauthRedirectUri(): string {
   if (typeof window === 'undefined') return 'http://localhost:3000/auth/callback'
-  if (isNativeShell()) return NATIVE_OAUTH_REDIRECT_URI
+  // Custom scheme keeps code + state inside the Capacitor WebView. An https
+  // redirect opens the production site in Chrome/Safari with empty localStorage
+  // → "expired or wrong tab" after authorize.
+  if (isNativeShell()) return NATIVE_OAUTH_SCHEME_REDIRECT
   return `${window.location.origin}/auth/callback`
 }
 

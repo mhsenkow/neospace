@@ -6,7 +6,7 @@
 #   2. App ID io.ibm.neospace + Associated Domains
 #   3. Target Signing → Team + Automatically manage signing
 #   4. Associated Domains: applinks:neospace.ibm.io
-#   5. URL Types scheme: neospace
+#   5. URL Types schemes: loomspace (+ legacy neospace)
 #
 # Usage:
 #   ./scripts/ios-submit.sh sync   # generate + cap sync

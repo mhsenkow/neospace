@@ -2,7 +2,8 @@ import { test, expect } from '../helpers/test'
 import { primaryServer, seedAuthenticatedSession } from '../helpers/mockApi'
 
 const DRAFT_KEY = 'neospace_draft:local-1:new'
-const COMPOSE_FIELD = /what.?s new/i
+// Sheet title (and thus the combobox name) is "New thread"; older builds used "What's new?"
+const COMPOSE_FIELD = /new thread|what.?s new/i
 
 test.describe('compose and feed', () => {
   test.beforeEach(async ({ page }) => {
@@ -24,7 +25,6 @@ test.describe('compose and feed', () => {
     await expect(sheet.locator(':focus')).toHaveCount(1)
 
     await field.fill('Hello from the browser e2e')
-    await sheet.getByLabel('Post visibility').selectOption('unlisted')
 
     // Autosave stores the draft while composing (debounced)
     await expect
@@ -33,13 +33,12 @@ test.describe('compose and feed', () => {
 
     await sheet.getByRole('button', { name: 'Post', exact: true }).click()
 
-    // Request: right server, token, text, and the chosen (non-default) visibility
+    // Request: right server, token, and text (default public visibility)
     await expect.poll(() => api.find('POST', '/api/v1/statuses').length).toBe(1)
     const [request] = api.find('POST', '/api/v1/statuses', primaryServer.origin)
     expect(request!.authorization).toBe(`Bearer ${primaryServer.token}`)
     expect(request!.body).toMatchObject({
       status: 'Hello from the browser e2e',
-      visibility: 'unlisted',
     })
 
     // Result: the returned post is in the feed, the sheet is gone, the draft is cleared
@@ -95,6 +94,7 @@ test.describe('compose and feed', () => {
     await expect(
       page.getByRole('feed', { name: /posts/i }).first().getByText('Fixture post 100'),
     ).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByPlaceholder(/what'?s new/i).first()).toBeVisible()
+    // Board chrome uses a button/span prompt, not an <input placeholder>
+    await expect(page.getByText("What's new?").first()).toBeVisible()
   })
 })

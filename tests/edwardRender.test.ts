@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   EDGE_CUE_S,
   EDGE_DWELL_S,
+  FrameGate,
+  IDLE_HEARTBEAT_MS,
   THROTTLED_FRAME_MS,
   edgeCueVisible,
   edgeDwellStep,
   edgeScrubGain,
+  hashToNumber,
   renderIntervalMs,
 } from '../app/utils/edwardRender'
 
@@ -53,5 +56,51 @@ describe('edge hover scrub', () => {
   })
   it('shows the cue before the scrub starts', () => {
     expect(EDGE_CUE_S).toBeLessThan(EDGE_DWELL_S)
+  })
+})
+
+describe('FrameGate (skip identical frames)', () => {
+  it('draws the first frame, then skips while the signature is bitwise identical', () => {
+    const gate = new FrameGate()
+    expect(gate.shouldDraw([1, 2, 3], 0)).toBe(true)
+    expect(gate.shouldDraw([1, 2, 3], 16)).toBe(false)
+    expect(gate.shouldDraw([1, 2, 3], 32)).toBe(false)
+  })
+  it('draws again the moment anything in the signature moves', () => {
+    const gate = new FrameGate()
+    gate.shouldDraw([1, 2, 3], 0)
+    expect(gate.shouldDraw([1, 2, 3.0000001], 16)).toBe(true)
+    expect(gate.shouldDraw([1, 2, 3.0000001], 32)).toBe(false)
+    expect(gate.shouldDraw([1, 2], 48)).toBe(true) // shape change counts too
+  })
+  it('invalidate() forces exactly one redraw', () => {
+    const gate = new FrameGate()
+    gate.shouldDraw([5], 0)
+    gate.invalidate()
+    expect(gate.shouldDraw([5], 16)).toBe(true)
+    expect(gate.shouldDraw([5], 32)).toBe(false)
+  })
+  it('redraws an unchanged scene at the idle heartbeat as a safety net', () => {
+    const gate = new FrameGate()
+    gate.shouldDraw([5], 0)
+    expect(gate.shouldDraw([5], IDLE_HEARTBEAT_MS - 1)).toBe(false)
+    expect(gate.shouldDraw([5], IDLE_HEARTBEAT_MS)).toBe(true)
+    expect(gate.shouldDraw([5], IDLE_HEARTBEAT_MS + 1)).toBe(false)
+  })
+  it('does not alias the caller\'s reused signature buffer', () => {
+    const gate = new FrameGate()
+    const buf = [1]
+    gate.shouldDraw(buf, 0)
+    buf[0] = 2
+    expect(gate.shouldDraw(buf, 16)).toBe(true)
+  })
+})
+
+describe('hashToNumber', () => {
+  it('is stable, distinguishes ids, and maps empty to 0', () => {
+    expect(hashToNumber('a')).toBe(hashToNumber('a'))
+    expect(hashToNumber('a')).not.toBe(hashToNumber('b'))
+    expect(hashToNumber(null)).toBe(0)
+    expect(hashToNumber('')).toBe(0)
   })
 })

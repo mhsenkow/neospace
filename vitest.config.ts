@@ -8,12 +8,18 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      include: ['app/utils/**/*.ts', 'functions/**/*.ts'],
+      include: [
+        'app/utils/**/*.ts',
+        'app/stores/**/*.ts',
+        'app/composables/**/*.ts',
+        'functions/**/*.ts',
+        'shared/**/*.ts',
+      ],
       thresholds: {
-        lines: 15,
-        functions: 10,
-        branches: 8,
-        statements: 15,
+        lines: 18,
+        functions: 12,
+        branches: 10,
+        statements: 18,
       },
     },
   },

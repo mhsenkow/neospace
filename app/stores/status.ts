@@ -748,14 +748,20 @@ export const useStatusStore = defineStore('status', {
       return await this.getReadClient().v1.statuses.$select(statusId).fetch()
     },
 
-    async fetchThread(statusId: string): Promise<{
+    async fetchThread(
+      statusId: string,
+      /** A status `resolveThread` just fetched — skips the duplicate focus fetch */
+      prefetched?: mastodon.v1.Status | null,
+    ): Promise<{
       status: mastodon.v1.Status
       ancestors: mastodon.v1.Status[]
       descendants: mastodon.v1.Status[]
     }> {
       const client = this.getReadClient()
       const [status, context] = await Promise.all([
-        client.v1.statuses.$select(statusId).fetch(),
+        prefetched && prefetched.id === statusId
+          ? Promise.resolve(prefetched)
+          : client.v1.statuses.$select(statusId).fetch(),
         client.v1.statuses.$select(statusId).context.fetch(),
       ])
       // Tag the serving host so own-post actions can prove these ids belong to it
@@ -796,23 +802,31 @@ export const useStatusStore = defineStore('status', {
      * Resolve a remote/local status id for thread viewing.
      * Prefers explicit URL resolve, then tries the raw id on the active account.
      */
-    async resolveThreadId(opts: {
+    async resolveThread(opts: {
       id?: string | null
       url?: string | null
-    }): Promise<string | null> {
+    }): Promise<{ id: string; status: mastodon.v1.Status | null } | null> {
       if (opts.url) {
         const fromUrl = await this.resolveStatus(opts.url)
-        if (fromUrl) return fromUrl
+        if (fromUrl) return { id: fromUrl, status: null }
       }
       if (opts.id) {
         try {
-          await this.fetchStatus(opts.id)
-          return opts.id
+          // Keep the fetched status so the caller doesn't fetch it a second time
+          const status = await this.fetchStatus(opts.id)
+          return { id: opts.id, status }
         } catch {
           // try resolve by constructing/searching if url missing
         }
       }
       return null
+    },
+
+    async resolveThreadId(opts: {
+      id?: string | null
+      url?: string | null
+    }): Promise<string | null> {
+      return (await this.resolveThread(opts))?.id ?? null
     },
 
     async muteAccount(accountIdOrAcct: string, opts?: { acct?: string }) {

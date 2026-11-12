@@ -8,20 +8,26 @@ import { useInstancesStore } from '~/stores/instances'
 import { useSettingsStore } from '~/stores/settings'
 import { useComposeHandoffStore } from '~/stores/composeHandoff'
 import { useComposeMedia } from '~/composables/useComposeMedia'
+import { useComposePoll } from '~/composables/useComposePoll'
+import {
+  formatScheduleAnnounce,
+  isScheduledResult,
+  useComposeSchedule,
+} from '~/composables/useComposeSchedule'
+import { useComposeVoiceNote } from '~/composables/useComposeVoiceNote'
 import { cycleActiveAccountWithToast } from '~/composables/useSwitchAccount'
 import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
 import { useToastStore } from '~/stores/toast'
 import { emitComposedStatus } from '~/composables/useComposedStatus'
 import type { ComposeContextPost } from '~/stores/composeSheet'
 import {
+  COMPOSE_BASE_LANGUAGE_OPTIONS,
   COMPOSE_MEDIA_ACCEPT,
-  COMPOSE_PREVIEWABLE_IMAGE,
-  composeAttachmentIcon,
+  type ComposeLanguageOption,
 } from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { draftSaveMessage, useDraft } from '~/composables/useDraft'
 import { mastodonLength } from '~/utils/mastodonLength'
-import { checkLocalSchedule, localTimeZoneLabel, scheduleCheckMessage } from '~/utils/scheduledPosts'
 import { useComposeAutocomplete } from '~/composables/useComposeAutocomplete'
 import type { ComposeSuggestion } from '~/utils/composeTokens'
 import { useOverlayStore } from '~/stores/overlay'
@@ -133,48 +139,6 @@ const overlayStore = useOverlayStore()
 const toastStore = useToastStore()
 const { open: openAccountSwitcher } = useAccountSwitcher()
 const { recordSuccess: recordComposeModality } = useComposeModality()
-const voiceNote = useVoiceNote()
-const voiceBusy = computed(() => voiceNote.recording.value)
-const voiceElapsedLabel = computed(() => {
-  const s = voiceNote.elapsedSec.value
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return `${m}:${r.toString().padStart(2, '0')}`
-})
-
-const attachVoiceNote = async (file: File | null) => {
-  if (!file) return
-  const result = await addFiles([file])
-  if (result.accepted > 0) {
-    toastStore.show({ message: 'Voice note attached', duration: 2200 })
-  } else if (result.rejected[0]) {
-    toastStore.show({
-      message: result.rejected[0].reason || 'Couldn’t attach voice note',
-      duration: 3600,
-    })
-  }
-}
-
-const toggleVoiceNote = async () => {
-  if (voiceNote.recording.value) {
-    const file = await voiceNote.stop()
-    await attachVoiceNote(file)
-    return
-  }
-  if (showPoll.value) {
-    toastStore.show({ message: 'Remove the poll before adding a voice note', duration: 2800 })
-    return
-  }
-  if (!canAddMore.value) {
-    toastStore.show({ message: 'Attachment limit reached', duration: 2800 })
-    return
-  }
-  const ok = await voiceNote.start()
-  if (!ok && voiceNote.error.value) {
-    toastStore.show({ message: voiceNote.error.value, duration: 3600 })
-  }
-}
-
 type ThreadSegment = { id: string; text: string }
 const extraSegments = ref<ThreadSegment[]>([])
 const postOptionsOpen = ref(false)
@@ -201,9 +165,13 @@ const isPosting = ref(false)
 const error = ref<string | null>(null)
 const handoffNotice = ref<string | null>(null)
 let handoffNoticeTimer: ReturnType<typeof setTimeout> | null = null
-const textareaRef = ref<HTMLTextAreaElement | null>(null)
+/** The status field (ComposeAutocompleteHost) — `.el` is the underlying <textarea> */
+const fieldRef = ref<{ el: HTMLTextAreaElement | null } | null>(null)
+const textareaRef = computed(() => fieldRef.value?.el ?? null)
+/** Threads layout's own hidden file input (the footer bar owns the other one) */
 const fileInputRef = ref<HTMLInputElement | null>(null)
-const composeMediaRef = ref<HTMLElement | null>(null)
+const toolsBarRef = ref<{ fileInput: HTMLInputElement | null } | null>(null)
+const composeMediaRef = ref<{ el: HTMLElement | null } | null>(null)
 const composeFocused = ref(false)
 const reduceMotion = usePrefersReducedMotion()
 /** Smooth scroll unless the user asked for less motion */
@@ -237,7 +205,14 @@ const composeAriaLabel = computed(() => {
   return props.title || props.placeholder || 'Write a post'
 })
 
-const hasSchedule = computed(() => !!scheduledLocal.value.trim())
+const {
+  hasSchedule,
+  scheduleMinLocal,
+  scheduledAtIso,
+  scheduleProblem,
+  scheduleZone,
+  clearSchedule,
+} = useComposeSchedule(scheduledLocal)
 
 const submitAriaLabel = computed(() => {
   if (isPosting.value) {
@@ -249,34 +224,6 @@ const submitAriaLabel = computed(() => {
   if (props.compact) return props.inReplyToId ? 'Send reply' : 'Post'
   return props.inReplyToId ? 'Reply' : 'Post'
 })
-
-/** Mastodon requires ≥5 minutes ahead — expose a floor for the picker */
-const scheduleMinLocal = computed(() => {
-  const d = new Date(Date.now() + 5 * 60 * 1000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-})
-
-const scheduledAtIso = computed(() => {
-  const local = scheduledLocal.value.trim()
-  if (!local) return undefined
-  const when = new Date(local)
-  if (!Number.isFinite(when.getTime())) return undefined
-  return when.toISOString()
-})
-/** Why the picked time can't be used (nonexistent DST time, invalid) — null when fine/unset */
-const scheduleProblem = computed(() => {
-  const local = scheduledLocal.value.trim()
-  if (!local) return null
-  const check = checkLocalSchedule(local, 0)
-  return check.ok || check.reason === 'too-soon' ? null : scheduleCheckMessage(check.reason)
-})
-const scheduleZone = computed(() => (hasSchedule.value ? localTimeZoneLabel(scheduledAtIso.value ?? Date.now()) : ''))
-
-const isScheduledResult = (
-  result: mastodon.v1.Status | mastodon.v1.ScheduledStatus,
-): result is mastodon.v1.ScheduledStatus =>
-  'scheduledAt' in result && typeof (result as mastodon.v1.ScheduledStatus).scheduledAt === 'string' && !('account' in result)
 
 /** Current post is a private mention/DM (locked or user-chosen) */
 const isDirectCompose = computed(
@@ -443,13 +390,6 @@ const {
   onPaste,
 } = useComposeMedia()
 
-/** Honest status text: a % only when the browser reported real bytes sent */
-const uploadPhaseLabel = (item: (typeof attachments.value)[number]) => {
-  if (item.phase === 'processing') return 'Processing…'
-  if (item.progress != null) return `Uploading ${Math.round(item.progress * 100)}%`
-  return 'Uploading…'
-}
-
 /** Typed something beyond the reply's prefilled @mention */
 const hasOwnContent = computed(() => {
   const text = content.value.trim()
@@ -458,136 +398,30 @@ const hasOwnContent = computed(() => {
 })
 
 // ── Poll (persisted with drafts as a scalar snapshot; media still is not) ──
-const POLL_DURATION_CHOICES = [
-  { seconds: 5 * 60, label: '5 minutes' },
-  { seconds: 30 * 60, label: '30 minutes' },
-  { seconds: 60 * 60, label: '1 hour' },
-  { seconds: 6 * 60 * 60, label: '6 hours' },
-  { seconds: 24 * 60 * 60, label: '1 day' },
-  { seconds: 3 * 24 * 60 * 60, label: '3 days' },
-  { seconds: 7 * 24 * 60 * 60, label: '7 days' },
-] as const
-// Server-advertised limits (poll options, option length, duration bounds) — Mastodon defaults otherwise
-const pollLimits = computed(() => instancesStore.composePollLimits)
-const POLL_MAX_OPTIONS_LIVE = computed(() => pollLimits.value.maxOptions)
-/** Only durations the selected server accepts; its own bounds are offered if none of the presets fit */
-const POLL_DURATIONS = computed(() => {
-  const { minExpiration: min, maxExpiration: max } = pollLimits.value
-  const fit: { seconds: number; label: string }[] = POLL_DURATION_CHOICES.filter(
-    (d) => d.seconds >= min && d.seconds <= max,
-  ).map((d) => ({ ...d }))
-  if (!fit.length) {
-    fit.push({ seconds: min, label: formatPollSeconds(min) })
-    if (max !== min) fit.push({ seconds: max, label: formatPollSeconds(max) })
-  }
-  return fit
-})
-const formatPollSeconds = (secs: number) => {
-  if (secs % 86400 === 0) return `${secs / 86400} day${secs === 86400 ? '' : 's'}`
-  if (secs % 3600 === 0) return `${secs / 3600} hour${secs === 3600 ? '' : 's'}`
-  return `${Math.max(1, Math.round(secs / 60))} minutes`
-}
-const showPoll = ref(false)
-const pollOptions = ref<string[]>(['', ''])
-const pollDuration = ref<number>(24 * 60 * 60)
-const pollMultiple = ref(false)
-const pollHideTotals = ref(false)
-const canHidePollTotals = computed(
-  () => instancesStore.serverCapabilities.software === 'mastodon',
-)
-const pollEditorRef = ref<{ focusFirst: () => void; firstInput: () => HTMLInputElement | null } | null>(
-  null,
-)
-
-const filledPollOptions = computed(() =>
-  pollOptions.value.map((o) => o.trim()).filter(Boolean),
-)
-const pollHasDuplicates = computed(() => {
-  const opts = filledPollOptions.value
-  return new Set(opts.map((o) => o.toLowerCase())).size !== opts.length
-})
-const pollTooLong = computed(() =>
-  filledPollOptions.value.some((o) => [...o].length > pollLimits.value.maxCharactersPerOption),
-)
-/** 2–N distinct, non-empty options within the server's length / duration limits */
-const pollValid = computed(() => {
-  if (!showPoll.value) return true
-  const n = filledPollOptions.value.length
-  return (
-    n >= POLL_MIN_OPTIONS &&
-    n <= POLL_MAX_OPTIONS_LIVE.value &&
-    !pollTooLong.value &&
-    POLL_DURATIONS.value.some((d) => d.seconds === pollDuration.value) &&
-    !pollHasDuplicates.value
-  )
-})
-const pollError = computed(() => {
-  if (!showPoll.value) return ''
-  if (hasMedia.value) return 'Polls can’t include photos or video — remove one.'
-  if (pollHasDuplicates.value) return 'Poll options must be different.'
-  if (pollTooLong.value) {
-    return `Poll options can be at most ${pollLimits.value.maxCharactersPerOption} characters on this server.`
-  }
-  return ''
-})
-const pollHint = computed(() => {
-  if (!showPoll.value || pollError.value) return ''
-  if (filledPollOptions.value.length < POLL_MIN_OPTIONS) return 'Add at least two options.'
-  if (!content.value.trim()) return 'Add a question above your poll.'
-  return 'Ready to post when you’re happy with the choices.'
-})
-
-// Account switch / metadata refresh can drop the chosen duration out of range — snap to the nearest allowed
-watch(
+const {
+  pollLimits,
+  POLL_MAX_OPTIONS_LIVE,
   POLL_DURATIONS,
-  (list) => {
-    if (list.some((d) => d.seconds === pollDuration.value)) return
-    pollDuration.value = list.reduce((best, d) =>
-      Math.abs(d.seconds - pollDuration.value) < Math.abs(best.seconds - pollDuration.value) ? d : best,
-    ).seconds
-  },
-  { immediate: true },
-)
+  showPoll,
+  pollOptions,
+  pollDuration,
+  pollMultiple,
+  pollHideTotals,
+  canHidePollTotals,
+  pollEditorRef,
+  filledPollOptions,
+  pollValid,
+  pollError,
+  pollHint,
+  resetPoll,
+  togglePoll,
+} = useComposePoll({ content, hasMedia, isPosting, scrollBehavior })
 
-const resetPoll = () => {
-  showPoll.value = false
-  pollOptions.value = ['', '']
-  pollDuration.value = POLL_DURATIONS.value.some((d) => d.seconds === 24 * 60 * 60)
-    ? 24 * 60 * 60
-    : (POLL_DURATIONS.value[POLL_DURATIONS.value.length - 1]?.seconds ?? 24 * 60 * 60)
-  pollMultiple.value = false
-  pollHideTotals.value = false
-}
-
-const focusPollEditor = () => {
-  nextTick(() => {
-    pollEditorRef.value?.focusFirst()
-    const el = pollEditorRef.value?.firstInput()
-    if (el) scrollFieldIntoKeyboardView(el, { behavior: scrollBehavior() })
-  })
-}
-
-const togglePoll = async () => {
-  if (isPosting.value) return
-  if (showPoll.value) {
-    const dirty =
-      filledPollOptions.value.length > 0 || pollMultiple.value || pollHideTotals.value
-    if (dirty) {
-      const ok = await overlayStore.openConfirm({
-        title: 'Remove poll?',
-        body: 'Your poll options will be discarded.',
-        confirmLabel: 'Remove',
-        danger: true,
-      })
-      if (!ok) return
-    }
-    resetPoll()
-    return
-  }
-  if (hasMedia.value) return
-  showPoll.value = true
-  focusPollEditor()
-}
+const { voiceNote, voiceBusy, voiceElapsedLabel, toggleVoiceNote } = useComposeVoiceNote({
+  addFiles,
+  showPoll,
+  canAddMore,
+})
 
 /** Screen-reader confirmation — the form just resets on success otherwise */
 const postAnnounce = ref('')
@@ -788,34 +622,12 @@ watch([characterCount, isOverLimit, isNearLimit], () => {
   }
 })
 
-const visibilityOptions = [
-  { value: 'public', label: 'Public', icon: '🌐' },
-  { value: 'unlisted', label: 'Unlisted', icon: '🔓' },
-  { value: 'private', label: 'Followers only', icon: '🔒' },
-  { value: 'direct', label: 'Direct', icon: '✉️' },
-] as const
-
-const BASE_LANGUAGE_OPTIONS = [
-  { code: 'en', label: 'English' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'fr', label: 'French' },
-  { code: 'de', label: 'German' },
-  { code: 'it', label: 'Italian' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'nl', label: 'Dutch' },
-  { code: 'pl', label: 'Polish' },
-  { code: 'ru', label: 'Russian' },
-] as const
-
-const languageOptions = computed(() => {
+const languageOptions = computed<ComposeLanguageOption[]>(() => {
   const cur = postLanguage.value
-  if (cur && !BASE_LANGUAGE_OPTIONS.some((o) => o.code === cur)) {
-    return [{ code: cur, label: cur.toUpperCase() }, ...BASE_LANGUAGE_OPTIONS]
+  if (cur && !COMPOSE_BASE_LANGUAGE_OPTIONS.some((o) => o.code === cur)) {
+    return [{ code: cur, label: cur.toUpperCase() }, ...COMPOSE_BASE_LANGUAGE_OPTIONS]
   }
-  return [...BASE_LANGUAGE_OPTIONS]
+  return [...COMPOSE_BASE_LANGUAGE_OPTIONS]
 })
 
 const mentionFlipUp = ref(false)
@@ -849,10 +661,6 @@ const resetForm = () => {
   closeMentions()
 }
 
-const clearSchedule = () => {
-  scheduledLocal.value = ''
-}
-
 // While the popup is open, re-place it when the viewport or on-screen keyboard changes
 // (resize / visualViewport) — never touches focus or the caret.
 let placementRaf = 0
@@ -883,17 +691,6 @@ const startPlacementWatch = () => {
   }
 }
 onBeforeUnmount(stopPlacementWatch)
-
-const formatScheduleAnnounce = (iso: string) => {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(new Date(iso))
-  } catch {
-    return iso
-  }
-}
 
 /** @mention / #hashtag / :emoji: autocomplete — one token machine, shared keyboard nav */
 const autocomplete = useComposeAutocomplete({
@@ -941,6 +738,20 @@ const insertSuggestion = (item: ComposeSuggestion) => {
     textareaRef.value?.setSelectionRange(out.caret, out.caret)
   })
 }
+
+/** Combobox wiring + popup state shared by every ComposeAutocompleteHost mount */
+const hostBindings = computed(() => ({
+  listId: mentionListId,
+  listShown: mentionListShown.value,
+  activeDescendantId: activeMentionId.value,
+  open: mentionOpen.value,
+  items: suggestions.value,
+  kind: suggestionKind.value,
+  searching: mentionSearching.value,
+  outcome: mentionOutcome.value,
+  activeIndex: mentionIndex.value,
+  flipUp: mentionFlipUp.value,
+}))
 
 watch(
   () => [settingsStore.defaultVisibility, settingsStore.defaultSensitive] as const,
@@ -1192,7 +1003,7 @@ const toggleCW = () => {
 
 const openFilePicker = () => {
   if (!canAddMore.value || isPosting.value || showPoll.value) return
-  fileInputRef.value?.click()
+  ;(fileInputRef.value ?? toolsBarRef.value?.fileInput)?.click()
 }
 
 const onFilePicked = async (e: Event) => {
@@ -1232,6 +1043,19 @@ const onMentionKeyup = (e: KeyboardEvent) => {
   if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) return
   if (isImeEvent(e)) return
   syncMentions()
+}
+
+const hostHandlers = {
+  focus: onComposeFocus,
+  blur: () => {
+    composeFocused.value = false
+  },
+  paste: onPaste,
+  keydown: onKeydown,
+  keyup: onMentionKeyup,
+  input: onComposeInput,
+  caretClick: () => syncMentions(),
+  select: insertSuggestion,
 }
 
 const focusComposer = () => {
@@ -1299,8 +1123,8 @@ const applyHandoff = async () => {
   // After media attaches, keep chart + caption in view above the keyboard / Post bar
   if (draft.files.length) {
     await nextTick()
-    if (composeMediaRef.value) {
-      scrollFieldIntoKeyboardView(composeMediaRef.value, { behavior: scrollBehavior() })
+    if (composeMediaRef.value?.el) {
+      scrollFieldIntoKeyboardView(composeMediaRef.value.el, { behavior: scrollBehavior() })
     }
   }
 }
@@ -1459,44 +1283,21 @@ defineExpose({
         alt=""
         class="compose-avatar neo-avatar"
       />
-      <div class="compose-input-wrap compose-input-wrap--send">
-        <textarea
-          ref="textareaRef"
-          v-model="content"
-          class="compose-input neo-input"
-          :placeholder="placeholder"
-          rows="1"
-          enterkeyhint="send"
-          autocapitalize="sentences"
-          :readonly="inputLocked"
-          :aria-busy="isPosting || isUploading || props.disabled || undefined"
-          role="combobox"
-          aria-autocomplete="list"
-          :aria-expanded="mentionListShown"
-          :aria-controls="mentionListShown ? mentionListId : undefined"
-          :aria-activedescendant="mentionListShown ? activeMentionId : undefined"
-          :aria-invalid="isOverLimit"
-          :aria-label="composeAriaLabel"
-          :aria-keyshortcuts="compact ? 'Enter' : submitKeyshortcuts"
-          @focus="onComposeFocus"
-          @blur="composeFocused = false"
-          @paste="onPaste"
-          @keydown="onKeydown"
-          @input="onComposeInput"
-          @click="syncMentions()"
-          @keyup="onMentionKeyup"
-        />
-        <ComposeAutocomplete
-          v-if="mentionOpen"
-          :id="mentionListId"
-          :items="suggestions"
-          :kind="suggestionKind"
-          :searching="mentionSearching"
-          :outcome="mentionOutcome"
-          :active-index="mentionIndex"
-          :flip-up="mentionFlipUp"
-          @select="insertSuggestion"
-        />
+      <ComposeAutocompleteHost
+        ref="fieldRef"
+        v-model="content"
+        send
+        :placeholder="placeholder"
+        :rows="1"
+        enterkeyhint="send"
+        :locked="inputLocked"
+        :busy="isPosting || isUploading || props.disabled"
+        :invalid="isOverLimit"
+        :label="composeAriaLabel"
+        :keyshortcuts="compact ? 'Enter' : submitKeyshortcuts"
+        v-bind="hostBindings"
+        v-on="hostHandlers"
+      >
         <button
           type="button"
           class="compose-send"
@@ -1514,7 +1315,7 @@ defineExpose({
           />
           <NeoIcon v-else name="send" :size="17" :stroke="2" filled />
         </button>
-      </div>
+      </ComposeAutocompleteHost>
     </div>
 
     <template v-else-if="threadsLayout">
@@ -1560,46 +1361,20 @@ defineExpose({
             />
           </div>
 
-          <div class="compose-input-wrap">
-            <textarea
-              ref="textareaRef"
-              v-model="content"
-              class="compose-input neo-input"
-              :placeholder="placeholder"
-              :rows="3"
-              enterkeyhint="enter"
-              autocapitalize="sentences"
-              :readonly="inputLocked"
-              :aria-busy="isPosting || isUploading || props.disabled || undefined"
-              role="combobox"
-              aria-autocomplete="list"
-              :aria-expanded="mentionListShown"
-              :aria-controls="mentionListShown ? mentionListId : undefined"
-              :aria-activedescendant="mentionListShown ? activeMentionId : undefined"
-              :aria-invalid="isOverLimit"
-              :aria-label="composeAriaLabel"
-              :aria-keyshortcuts="submitKeyshortcuts"
-              @focus="onComposeFocus"
-              @blur="composeFocused = false"
-              @paste="onPaste"
-              @keydown="onKeydown"
-              @input="onComposeInput"
-              @click="syncMentions()"
-              @keyup="onMentionKeyup"
-            />
-
-            <ComposeAutocomplete
-              v-if="mentionOpen"
-              :id="mentionListId"
-              :items="suggestions"
-              :kind="suggestionKind"
-              :searching="mentionSearching"
-              :outcome="mentionOutcome"
-              :active-index="mentionIndex"
-              :flip-up="mentionFlipUp"
-              @select="insertSuggestion"
-            />
-          </div>
+          <ComposeAutocompleteHost
+            ref="fieldRef"
+            v-model="content"
+            :placeholder="placeholder"
+            :rows="3"
+            enterkeyhint="enter"
+            :locked="inputLocked"
+            :busy="isPosting || isUploading || props.disabled"
+            :invalid="isOverLimit"
+            :label="composeAriaLabel"
+            :keyshortcuts="submitKeyshortcuts"
+            v-bind="hostBindings"
+            v-on="hostHandlers"
+          />
 
           <div class="compose-thread__tools">
             <input
@@ -1802,46 +1577,21 @@ defineExpose({
         </div>
       </div>
 
-      <div class="compose-input-wrap" @click.stop>
-        <textarea
-          ref="textareaRef"
-          v-model="content"
-          class="compose-input neo-input"
-          :placeholder="placeholder"
-          :rows="3"
-          enterkeyhint="enter"
-          autocapitalize="sentences"
-          :readonly="inputLocked"
-          :aria-busy="isPosting || isUploading || props.disabled || undefined"
-          role="combobox"
-          aria-autocomplete="list"
-          :aria-expanded="mentionListShown"
-          :aria-controls="mentionListShown ? mentionListId : undefined"
-          :aria-activedescendant="mentionListShown ? activeMentionId : undefined"
-          :aria-invalid="isOverLimit"
-          :aria-label="composeAriaLabel"
-          :aria-keyshortcuts="submitKeyshortcuts"
-          @focus="onComposeFocus"
-          @blur="composeFocused = false"
-          @paste="onPaste"
-          @keydown="onKeydown"
-          @input="onComposeInput"
-          @click="syncMentions()"
-          @keyup="onMentionKeyup"
-        />
-
-        <ComposeAutocomplete
-          v-if="mentionOpen"
-          :id="mentionListId"
-          :items="suggestions"
-          :kind="suggestionKind"
-          :searching="mentionSearching"
-          :outcome="mentionOutcome"
-          :active-index="mentionIndex"
-          :flip-up="mentionFlipUp"
-          @select="insertSuggestion"
-        />
-      </div>
+      <ComposeAutocompleteHost
+        ref="fieldRef"
+        v-model="content"
+        :placeholder="placeholder"
+        :rows="3"
+        enterkeyhint="enter"
+        :locked="inputLocked"
+        :busy="isPosting || isUploading || props.disabled"
+        :invalid="isOverLimit"
+        :label="composeAriaLabel"
+        :keyshortcuts="submitKeyshortcuts"
+        v-bind="hostBindings"
+        v-on="hostHandlers"
+        @click.stop
+      />
     </template>
 
     <div v-if="showCW" class="compose-cw" @click.stop>
@@ -1894,119 +1644,26 @@ defineExpose({
     </aside>
 
     <!-- Media previews -->
-    <div
+    <ComposeVoiceBanner
       v-if="voiceBusy"
-      class="compose-voice"
-      role="status"
-      aria-live="polite"
-      @click.stop
-    >
-      <span class="compose-voice__dot" aria-hidden="true" />
-      <span class="compose-voice__label">Recording {{ voiceElapsedLabel }}</span>
-      <button type="button" class="compose-voice__stop" @click="toggleVoiceNote">
-        Stop &amp; attach
-      </button>
-      <button type="button" class="compose-voice__cancel" @click="voiceNote.cancel()">
-        Cancel
-      </button>
-    </div>
+      :elapsed-label="voiceElapsedLabel"
+      @stop="toggleVoiceNote"
+      @cancel="voiceNote.cancel()"
+    />
 
-    <div v-if="attachments.length" ref="composeMediaRef" class="compose-media" @click.stop>
-      <p v-if="mediaStorageHost || mediaOptimizeSummary" class="compose-media__commons">
-        <span v-if="mediaOptimizeSummary">{{ mediaOptimizeSummary }}</span>
-        <span
-          v-if="mediaOptimizeSummary && mediaStorageHost"
-          class="compose-media__commons-sep"
-          aria-hidden="true"
-        >·</span>
-        <span v-if="mediaStorageHost">Stored on {{ mediaStorageHost }}</span>
-      </p>
-      <div
-        v-for="(item, mediaIndex) in attachments"
-        :key="item.localId"
-        class="compose-media__item"
-        :class="{
-          'compose-media__item--busy': item.uploading,
-          'compose-media__item--error': !!item.error,
-        }"
-      >
-        <img
-          v-if="COMPOSE_PREVIEWABLE_IMAGE.test(item.file.type)"
-          :src="item.previewUrl"
-          alt=""
-          class="compose-media__thumb"
-        />
-        <div v-else class="compose-media__video">
-          <span aria-hidden="true">{{ composeAttachmentIcon(item.file.type) }}</span>
-          <span class="compose-media__video-name">{{ item.file.name }}</span>
-        </div>
-        <div
-          v-if="item.uploading"
-          class="compose-media__overlay compose-media__overlay--busy"
-          role="group"
-          :aria-label="`${uploadPhaseLabel(item)} ${item.file.name || 'attachment'}`"
-        >
-          <span class="compose-media__phase">{{ uploadPhaseLabel(item) }}</span>
-          <!-- Real bytes-sent bar only; indeterminate when the browser can't report progress -->
-          <span
-            class="compose-media__bar"
-            :class="{ 'compose-media__bar--indeterminate': item.phase !== 'uploading' || item.progress == null }"
-            aria-hidden="true"
-          >
-            <span
-              v-if="item.phase === 'uploading' && item.progress != null"
-              :style="{ width: `${Math.round(item.progress * 100)}%` }"
-            />
-            <span v-else />
-          </span>
-          <button
-            type="button"
-            class="compose-media__cancel"
-            :aria-label="`Cancel upload of ${item.file.name || 'attachment'}`"
-            @click.stop="cancelUpload(item.localId)"
-          >
-            Cancel
-          </button>
-        </div>
-        <button
-          v-else-if="item.error"
-          type="button"
-          class="compose-media__overlay compose-media__overlay--error"
-          @click="retryUpload(item.localId)"
-        >
-          {{ item.error }} · retry
-        </button>
-        <button
-          type="button"
-          class="compose-media__remove"
-          :aria-label="`Remove image ${mediaIndex + 1}`"
-          :disabled="isPosting"
-          @click="removeAttachment(item.localId)"
-        >
-          <NeoIcon name="x" :size="12" :stroke="2.5" />
-        </button>
-        <span
-          v-if="!item.uploading && !item.error && item.remoteId && !item.description?.trim()"
-          class="compose-media__alt-badge"
-          title="Missing alt text"
-        >
-          ALT
-        </span>
-        <label class="compose-media__alt">
-          <span class="compose-media__alt-label">Alt text</span>
-          <textarea
-            class="compose-media__alt-input"
-            rows="2"
-            :maxlength="altMax"
-            :disabled="isPosting"
-            :value="item.description"
-            placeholder="Describe this image for screen readers"
-            @input="setDescription(item.localId, ($event.target as HTMLTextAreaElement).value)"
-            @click.stop
-          />
-        </label>
-      </div>
-    </div>
+    <ComposeMediaStrip
+      v-if="attachments.length"
+      ref="composeMediaRef"
+      :attachments="attachments"
+      :media-storage-host="mediaStorageHost"
+      :media-optimize-summary="mediaOptimizeSummary"
+      :alt-max="altMax"
+      :is-posting="isPosting"
+      @cancel="cancelUpload"
+      @retry="retryUpload"
+      @remove="removeAttachment"
+      @describe="setDescription"
+    />
 
     <article v-if="quoteUrl && quoteContext" class="compose-quote" @click.stop>
       <img
@@ -2089,308 +1746,79 @@ defineExpose({
       @click.stop
     >{{ error }}</div>
 
-    <div v-if="(!compact || compactExpanded) && !threadsLayout" class="compose-footer" @click.stop>
-      <div class="compose-tools">
-        <input
-          ref="fileInputRef"
-          type="file"
-          class="compose-file"
-          tabindex="-1"
-          aria-hidden="true"
-          :accept="COMPOSE_MEDIA_ACCEPT"
-          multiple
-          @change="onFilePicked"
-        />
-        <button
-          type="button"
-          class="compose-tool"
-          aria-label="Add photo"
-          title="Add photo"
-          :disabled="!canAddMore || isPosting || showPoll"
-          @click="openFilePicker"
-        >
-          <NeoIcon name="image" :size="18" :stroke="1.75" />
-        </button>
-        <button
-          v-if="voiceNote.supported"
-          type="button"
-          class="compose-tool"
-          :class="{ 'compose-tool--active': voiceBusy, 'compose-tool--recording': voiceBusy }"
-          :aria-label="voiceBusy ? `Stop recording ${voiceElapsedLabel}` : 'Record voice note'"
-          :title="voiceBusy ? `Stop · ${voiceElapsedLabel}` : 'Record voice note'"
-          :aria-pressed="voiceBusy"
-          :disabled="isPosting || showPoll || (!canAddMore && !voiceBusy)"
-          @click="toggleVoiceNote"
-        >
-          <NeoIcon name="mic" :size="18" :stroke="1.75" />
-        </button>
-        <button
-          type="button"
-          class="compose-tool"
-          :class="{ 'compose-tool--active': showCW }"
-          aria-label="Content warning"
-          title="Content warning"
-          :aria-pressed="showCW"
-          :disabled="isPosting"
-          @click="toggleCW"
-        >
-          <span aria-hidden="true">CW</span>
-        </button>
-        <button
-          v-if="!compact && (instancesStore.canCreatePolls || showPoll)"
-          type="button"
-          class="compose-tool"
-          :class="{ 'compose-tool--active': showPoll }"
-          :aria-label="showPoll ? 'Remove poll' : 'Add poll'"
-          :title="hasMedia && !showPoll ? 'Polls can’t include media' : showPoll ? 'Remove poll' : 'Add poll'"
-          :aria-pressed="showPoll"
-          :disabled="isPosting || (hasMedia && !showPoll)"
-          @click="togglePoll"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true">
-            <path d="M4 6h10M4 12h16M4 18h7" />
-          </svg>
-        </button>
+    <ComposeToolsBar
+      v-if="(!compact || compactExpanded) && !threadsLayout"
+      ref="toolsBarRef"
+      v-model:visibility="visibility"
+      v-model:scheduled-local="scheduledLocal"
+      v-model:post-language="postLanguage"
+      :compact="compact"
+      :submit-in-header="submitInHeader"
+      :is-posting="isPosting"
+      :can-add-more="canAddMore"
+      :show-poll="showPoll"
+      :show-cw="showCW"
+      :has-media="hasMedia"
+      :voice-supported="!!voiceNote.supported"
+      :voice-busy="voiceBusy"
+      :voice-elapsed-label="voiceElapsedLabel"
+      :is-locked-direct="isLockedDirect"
+      :is-direct-compose="isDirectCompose"
+      :schedule-min-local="scheduleMinLocal"
+      :has-schedule="hasSchedule"
+      :schedule-zone="scheduleZone"
+      :schedule-problem="scheduleProblem"
+      :language-options="languageOptions"
+      :attachment-count="attachments.length"
+      :max-attachments="maxAttachments"
+      :missing-alt-count="missingAltCount"
+      :counter-announce="counterAnnounce"
+      :character-count="characterCount"
+      :effective-max-length="effectiveMaxLength"
+      :is-near-limit="isNearLimit"
+      :is-over-limit="isOverLimit"
+      :can-post="canPost"
+      :submit-label="submitLabel"
+      :submit-aria-label="submitAriaLabel"
+      :submit-shortcut-title="submitShortcutTitle"
+      :submit-keyshortcuts="submitKeyshortcuts"
+      @pick-files="onFilePicked"
+      @open-file-picker="openFilePicker"
+      @toggle-voice="toggleVoiceNote"
+      @toggle-cw="toggleCW"
+      @toggle-poll="togglePoll"
+      @clear-schedule="clearSchedule"
+      @submit="handlePost"
+    />
 
-        <!-- Compact replies inherit parent visibility — don't crowd the dock -->
-        <div v-if="!isLockedDirect && !compact" class="compose-visibility">
-          <select
-            v-model="visibility"
-            class="compose-visibility-select"
-            :disabled="isPosting"
-            aria-label="Post visibility"
-          >
-            <option v-for="opt in visibilityOptions" :key="opt.value" :value="opt.value">
-              {{ opt.icon }} {{ opt.label }}
-            </option>
-          </select>
-        </div>
-        <span
-          v-else-if="isLockedDirect && !compact"
-          class="compose-visibility-lock"
-          title="Only mentioned people can see this"
-        >
-          <NeoIcon name="message" :size="14" :stroke="2" />
-          Direct
-        </span>
-
-        <!-- Place this cell in time — Mastodon scheduled_at (≥5 min) -->
-        <div v-if="!compact && instancesStore.canSchedulePosts" class="compose-schedule">
-          <label class="compose-schedule__field">
-            <span class="sr-only">Schedule for</span>
-            <input
-              v-model="scheduledLocal"
-              type="datetime-local"
-              class="compose-schedule-input"
-              :min="scheduleMinLocal"
-              :disabled="isPosting"
-              :aria-label="hasSchedule ? 'Scheduled post time' : 'Schedule post for later'"
-              title="Schedule — place this cell in time"
-            />
-          </label>
-          <button
-            v-if="hasSchedule"
-            type="button"
-            class="compose-schedule__clear"
-            :disabled="isPosting"
-            aria-label="Clear schedule — post now"
-            title="Post now"
-            @click="clearSchedule"
-          >
-            ×
-          </button>
-          <span v-if="hasSchedule" class="compose-schedule__zone">{{ scheduleZone }}</span>
-          <span v-if="scheduleProblem" class="compose-schedule__zone" role="alert">{{ scheduleProblem }}</span>
-        </div>
-
-        <label v-if="!isDirectCompose && !compact" class="compose-language">
-          <span class="sr-only">Post language</span>
-          <select
-            v-model="postLanguage"
-            class="compose-language-select"
-            :disabled="isPosting"
-            aria-label="Post language"
-          >
-            <option
-              v-for="opt in languageOptions"
-              :key="opt.code"
-              :value="opt.code"
-            >
-              {{ opt.label }}
-            </option>
-          </select>
-        </label>
-
-        <span v-if="hasMedia" class="compose-media-count">
-          {{ attachments.length }}/{{ maxAttachments }}
-          <span v-if="missingAltCount" class="compose-media-count__alt" title="Images need descriptions">
-            · {{ missingAltCount }} missing ALT
-          </span>
-        </span>
-      </div>
-
-      <div class="compose-actions">
-        <span
-          class="sr-only"
-          aria-live="polite"
-          aria-atomic="true"
-        >{{ counterAnnounce }}</span>
-        <span
-          class="compose-counter"
-          :class="{
-            'compose-counter--warning': isNearLimit,
-            'compose-counter--error': isOverLimit,
-            'compose-counter--quiet': !isNearLimit && !isOverLimit && (compact || submitInHeader),
-          }"
-          aria-hidden="true"
-        >
-          {{ characterCount }}/{{ effectiveMaxLength }}
-        </span>
-
-        <button
-          v-if="!compact && !submitInHeader"
-          type="button"
-          class="compose-submit neo-btn neo-btn--primary"
-          :disabled="!canPost"
-          :aria-label="submitAriaLabel"
-          :title="submitShortcutTitle"
-          :aria-keyshortcuts="submitKeyshortcuts"
-          @click="handlePost"
-        >
-          {{ submitLabel }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Threads sheet: Post Options (visibility / CW / schedule / language / sensitive) -->
-    <Teleport to="body">
-      <Transition appear name="action-sheet">
-        <div
-          v-if="postOptionsOpen"
-          class="compose-options"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="compose-options-title"
-          @click.self="closePostOptions"
-        >
-          <button
-            type="button"
-            class="compose-options__backdrop"
-            tabindex="-1"
-            aria-hidden="true"
-            @click="closePostOptions"
-          />
-          <div class="compose-options__panel" @click.stop>
-            <p id="compose-options-title" class="compose-options__title">Post Options</p>
-
-            <div v-if="!isLockedDirect" class="compose-options__field">
-              <label for="compose-opt-visibility">Visibility</label>
-              <select
-                id="compose-opt-visibility"
-                v-model="visibility"
-                class="compose-visibility-select"
-                :disabled="isPosting"
-              >
-                <option v-for="opt in visibilityOptions" :key="opt.value" :value="opt.value">
-                  {{ opt.icon }} {{ opt.label }}
-                </option>
-              </select>
-            </div>
-            <p v-else class="compose-options__hint">
-              <NeoIcon name="message" :size="14" :stroke="2" />
-              Direct — only mentioned people can see this
-            </p>
-
-            <div class="compose-options__row">
-              <button
-                type="button"
-                class="compose-options__toggle"
-                :class="{ 'compose-options__toggle--on': showCW }"
-                :aria-pressed="showCW"
-                :disabled="isPosting"
-                @click="toggleCW"
-              >
-                Content warning
-              </button>
-              <button
-                type="button"
-                class="compose-options__toggle"
-                :class="{ 'compose-options__toggle--on': markSensitive }"
-                :aria-pressed="markSensitive"
-                :disabled="isPosting || !hasMedia"
-                @click="markSensitive = !markSensitive"
-              >
-                Mark media sensitive
-              </button>
-            </div>
-
-            <div v-if="showCW" class="compose-options__field">
-              <label for="compose-opt-cw">Warning text</label>
-              <input
-                id="compose-opt-cw"
-                v-model="spoilerText"
-                type="text"
-                class="neo-input"
-                placeholder="Content warning"
-                :readonly="isPosting"
-              />
-            </div>
-
-            <div v-if="instancesStore.canSchedulePosts" class="compose-options__field">
-              <label for="compose-opt-schedule">Schedule</label>
-              <div class="compose-schedule">
-                <input
-                  id="compose-opt-schedule"
-                  v-model="scheduledLocal"
-                  type="datetime-local"
-                  class="compose-schedule-input"
-                  :min="scheduleMinLocal"
-                  :disabled="isPosting || extraSegments.length > 0"
-                  :aria-label="hasSchedule ? 'Scheduled post time' : 'Schedule post for later'"
-                />
-                <button
-                  v-if="hasSchedule"
-                  type="button"
-                  class="compose-schedule__clear"
-                  :disabled="isPosting"
-                  aria-label="Clear schedule — post now"
-                  @click="clearSchedule"
-                >
-                  ×
-                </button>
-              </div>
-              <p v-if="extraSegments.length" class="compose-options__hint">
-                Scheduling is available for a single post — remove extra thread parts first.
-              </p>
-              <p v-else-if="hasSchedule" class="compose-options__hint">{{ scheduleZone }}</p>
-              <p v-if="scheduleProblem" class="compose-options__hint" role="alert">{{ scheduleProblem }}</p>
-            </div>
-
-            <div v-if="!isDirectCompose" class="compose-options__field">
-              <label for="compose-opt-lang">Language</label>
-              <select
-                id="compose-opt-lang"
-                v-model="postLanguage"
-                class="compose-language-select"
-                :disabled="isPosting"
-              >
-                <option v-for="opt in languageOptions" :key="opt.code" :value="opt.code">
-                  {{ opt.label }}
-                </option>
-              </select>
-            </div>
-
-            <button type="button" class="compose-options__done neo-btn neo-btn--primary" @click="closePostOptions">
-              Done
-            </button>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ComposePostOptionsSheet
+      v-model:visibility="visibility"
+      v-model:spoiler-text="spoilerText"
+      v-model:mark-sensitive="markSensitive"
+      v-model:scheduled-local="scheduledLocal"
+      v-model:post-language="postLanguage"
+      :open="postOptionsOpen"
+      :is-posting="isPosting"
+      :is-locked-direct="isLockedDirect"
+      :is-direct-compose="isDirectCompose"
+      :show-cw="showCW"
+      :has-media="hasMedia"
+      :has-schedule="hasSchedule"
+      :schedule-min-local="scheduleMinLocal"
+      :schedule-zone="scheduleZone"
+      :schedule-problem="scheduleProblem"
+      :extra-segment-count="extraSegments.length"
+      :language-options="languageOptions"
+      @close="closePostOptions"
+      @toggle-cw="toggleCW"
+      @clear-schedule="clearSchedule"
+    />
   </div>
 </template>
 
 <style lang="scss" scoped>
+@use '~/assets/css/compose' as compose;
+
 .compose {
   position: relative;
   display: flex;
@@ -2452,40 +1880,6 @@ defineExpose({
       margin-top: 0.1rem;
     }
 
-    .compose-input-wrap {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .compose-input-wrap--send {
-      position: relative;
-      display: flex;
-      align-items: flex-end;
-      gap: 0.25rem;
-      min-height: 2.75rem;
-    }
-
-    .compose-input {
-      flex: 1;
-      min-width: 0;
-      min-height: 0;
-      padding: 0.5rem 0.15rem 0.5rem 0;
-      /* Room for the in-field send control (44px touch target) */
-      padding-right: 3rem;
-      border: none;
-      background: transparent;
-      box-shadow: none;
-      // ≥16px absolute — stops iOS/iPad focus zoom (root rem is 15px)
-      font-size: max(16px, 1rem);
-      line-height: 1.35;
-      resize: none;
-      field-sizing: content;
-      max-height: 6.5rem;
-
-      &:focus {
-        outline: none;
-      }
-    }
 
     .compose-send {
       position: absolute;
@@ -2525,11 +1919,6 @@ defineExpose({
       }
     }
 
-    .compose-counter {
-      margin-left: auto;
-      font-size: 0.75rem;
-      color: var(--neo-text-muted);
-    }
   }
 
   /* Expanded: one shell so the rule is a seam, not a floating stroke */
@@ -2570,10 +1959,6 @@ defineExpose({
       margin-top: 0;
       padding: 0.4rem 0 0.05rem;
       border-top: 1px solid color-mix(in srgb, var(--neo-border-color) 85%, transparent);
-    }
-
-    .compose-visibility-select {
-      border-radius: 10px;
     }
   }
 
@@ -2675,41 +2060,8 @@ defineExpose({
   border-color: var(--neo-warning);
 }
 
-.compose-input-wrap {
-  position: relative;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.compose-input {
-  resize: none;
-  flex: 1;
-  min-height: 8rem;
-  max-height: none;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  border: none;
-  background: transparent;
-  /* Horizontal inset so text clears rounded corners / bubble radius */
-  padding: 0.45rem 0.65rem;
-  border-radius: 10px;
-  font-size: 1.0625rem;
-  line-height: 1.45;
-  field-sizing: content;
-
-  &:focus {
-    outline: none;
-    box-shadow: none;
-    border: none;
-  }
-
-  &::placeholder {
-    color: var(--neo-text-secondary);
-  }
-}
+@include compose.compose-input-wrap;
+@include compose.compose-input;
 
 .compose-peertube {
   display: flex;
@@ -2759,240 +2111,6 @@ defineExpose({
 
   &:hover {
     color: var(--neo-text-primary);
-  }
-}
-
-.compose-media {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.compose-media__commons {
-  margin: 0;
-  font-size: 0.6875rem;
-  line-height: 1.35;
-  color: var(--neo-text-tertiary);
-}
-
-.compose-media__commons-sep {
-  margin: 0 0.3em;
-}
-
-.compose-media__item {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 0.65rem;
-  align-items: start;
-  position: relative;
-  padding: 0.5rem;
-  border-radius: var(--neo-radius-md);
-  background: var(--neo-bg-tertiary);
-  border: 1px solid var(--neo-border-color);
-
-  &--busy,
-  &--error {
-    .compose-media__thumb {
-      opacity: 0.55;
-    }
-  }
-}
-
-.compose-media__thumb {
-  width: 96px;
-  height: 96px;
-  object-fit: cover;
-  display: block;
-  border-radius: calc(var(--neo-radius-md) - 2px);
-}
-
-.compose-media__video {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  width: 96px;
-  height: 96px;
-  padding: 0.5rem;
-  font-size: 1.25rem;
-  border-radius: calc(var(--neo-radius-md) - 2px);
-  background: var(--neo-bg-secondary);
-}
-
-.compose-media__video-name {
-  font-size: 0.625rem;
-  color: var(--neo-text-muted);
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.compose-media__overlay {
-  position: absolute;
-  left: 0.5rem;
-  top: 0.5rem;
-  width: 96px;
-  height: 96px;
-  display: grid;
-  place-items: center;
-  padding: 0.35rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-align: center;
-  color: var(--neo-text-primary);
-  background: color-mix(in srgb, var(--neo-bg-card) 55%, transparent);
-  backdrop-filter: blur(2px);
-  border-radius: calc(var(--neo-radius-md) - 2px);
-
-  &--error {
-    color: var(--neo-danger);
-  }
-
-  &--busy {
-    grid-auto-flow: row;
-    grid-template-rows: auto auto auto;
-    align-content: center;
-    gap: 0.3rem;
-  }
-}
-
-.compose-media__bar {
-  display: block;
-  width: 100%;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: var(--neo-border-color);
-
-  > span {
-    display: block;
-    height: 100%;
-    background: var(--neo-accent);
-    transition: width 0.15s linear;
-  }
-
-  &--indeterminate > span {
-    width: 40%;
-    animation: compose-media-indeterminate 1.1s ease-in-out infinite;
-  }
-}
-
-@keyframes compose-media-indeterminate {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(250%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .compose-media__bar--indeterminate > span {
-    animation: none;
-    width: 100%;
-    opacity: 0.5;
-  }
-}
-
-.compose-media__cancel {
-  min-height: 24px;
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--neo-border-color);
-  border-radius: var(--neo-radius-sm, 4px);
-  background: var(--neo-bg-primary);
-  color: var(--neo-text-primary);
-  font: inherit;
-  font-size: 0.6875rem;
-  cursor: pointer;
-}
-
-.compose-media__remove {
-  position: absolute;
-  top: 0.35rem;
-  left: calc(0.5rem + 96px - 1.65rem);
-  min-width: 24px;
-  min-height: 24px;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  font-size: 1rem;
-  line-height: 1;
-  color: var(--neo-text-on-accent, #fff);
-  background: color-mix(in srgb, var(--neo-text-primary) 65%, transparent);
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  z-index: 1;
-
-  &:hover {
-    background: rgba(0, 0, 0, 0.85);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-}
-
-.compose-media__alt-badge {
-  position: absolute;
-  top: 0.35rem;
-  left: 0.65rem;
-  z-index: 1;
-  padding: 0.1rem 0.35rem;
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--neo-text-on-accent, #fff);
-  background: var(--neo-danger, #c62828);
-  border-radius: 3px;
-  pointer-events: none;
-}
-
-.compose-media__alt {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.compose-media-count__alt {
-  color: var(--neo-danger);
-  font-weight: 600;
-}
-
-.compose-media__alt-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--neo-text-muted);
-}
-
-.compose-media__alt-input {
-  width: 100%;
-  min-height: 3.25rem;
-  padding: 0.45rem 0.55rem;
-  font-family: var(--neo-font-family-ui);
-  font-size: 0.8125rem;
-  line-height: 1.35;
-  color: var(--neo-text-primary);
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color);
-  border-radius: var(--neo-radius-md);
-  resize: vertical;
-
-  &:focus {
-    outline: none;
-    border-color: var(--neo-accent);
-  }
-
-  &:disabled {
-    opacity: 0.6;
-  }
-
-  &::placeholder {
-    color: var(--neo-text-secondary);
   }
 }
 
@@ -3077,16 +2195,6 @@ defineExpose({
   cursor: pointer;
 }
 
-.compose-language-select {
-  min-height: 24px;
-  font-size: 0.75rem;
-  padding: 0.2rem 0.35rem;
-  border-radius: var(--neo-radius-sm, 6px);
-  border: 1px solid var(--neo-border-color);
-  background: var(--neo-bg-secondary);
-  color: var(--neo-text-secondary);
-}
-
 .compose-handoff {
   display: flex;
   align-items: center;
@@ -3113,288 +2221,9 @@ defineExpose({
   cursor: pointer;
 }
 
-.compose-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-  margin-top: auto;
-  padding-top: 0.35rem;
-  border-top: 1px solid var(--neo-border-color);
-  cursor: default;
-
-  /* Threads sheet: tools left, counter right — Post lives in the header */
-  .compose--header-submit & {
-    flex-wrap: wrap;
-    row-gap: 0.35rem;
-  }
-}
-
-.compose-tools {
-  display: flex;
-  align-items: center;
-  gap: 0.15rem;
-  flex: 1 1 auto;
-  min-width: 0;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-.compose-file {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.compose-tool {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.25rem;
-  height: 2.25rem;
-  padding: 0 0.5rem;
-  font-family: var(--neo-font-family-ui);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--neo-text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
-  cursor: pointer;
-  transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
-
-  &:hover:not(:disabled) {
-    color: var(--neo-accent);
-    background-color: var(--neo-accent-soft);
-  }
-
-  &:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-
-  &--active {
-    color: var(--neo-text-primary);
-    background-color: color-mix(in srgb, var(--neo-warning) 35%, transparent);
-  }
-
-  &--recording {
-    color: var(--neo-danger, #dc2626);
-    background-color: color-mix(in srgb, var(--neo-danger, #dc2626) 16%, transparent);
-  }
-}
-
-.compose-voice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  margin-top: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: var(--neo-radius-md, 8px);
-  background: color-mix(in srgb, var(--neo-danger, #dc2626) 12%, var(--neo-bg-tertiary));
-  border: 1px solid color-mix(in srgb, var(--neo-danger, #dc2626) 35%, var(--neo-border-color));
-}
-
-.compose-voice__dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: var(--neo-danger, #dc2626);
-  animation: compose-voice-pulse 1s ease-in-out infinite;
-}
-
-.compose-voice__label {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.875rem;
-  font-weight: 650;
-  color: var(--neo-text-primary);
-}
-
-.compose-voice__stop,
-.compose-voice__cancel {
-  border: none;
-  background: transparent;
-  font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 650;
-  cursor: pointer;
-  min-height: 2.25rem;
-  padding: 0 0.35rem;
-}
-
-.compose-voice__stop {
-  color: var(--neo-accent);
-}
-
-.compose-voice__cancel {
-  color: var(--neo-text-muted);
-}
-
-@keyframes compose-voice-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.85);
-  }
-}
-
-.compose-visibility {
-  margin-left: 0.25rem;
-}
-
-.compose-visibility-lock {
-  margin-left: 0.25rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--neo-text-muted);
-  white-space: nowrap;
-  padding: 0 0.35rem;
-}
-
-.compose-visibility-select {
-  padding: 0.35rem 0.45rem;
-  font-family: var(--neo-font-family-ui);
-  font-size: 0.75rem;
-  background-color: var(--neo-bg-tertiary);
-  color: var(--neo-text-primary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-    border-color: var(--neo-accent);
-  }
-}
-
-.compose-schedule {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.15rem;
-  margin-left: 0.25rem;
-  flex-shrink: 0;
-}
-
-.compose-schedule-input {
-  max-width: 11.5rem;
-  padding: 0.3rem 0.35rem;
-  font-family: var(--neo-font-family-ui);
-  font-size: 0.6875rem;
-  background-color: var(--neo-bg-tertiary);
-  color: var(--neo-text-primary);
-  border: 1px solid var(--neo-border-color);
-  border-radius: var(--neo-radius-chrome, var(--neo-radius-md));
-  color-scheme: inherit;
-
-  &:focus {
-    outline: none;
-    border-color: var(--neo-accent);
-  }
-
-  &:not(:placeholder-shown),
-  &:valid:not([value='']) {
-    border-color: color-mix(in srgb, var(--neo-accent) 55%, var(--neo-border-color));
-  }
-}
-
-.compose-schedule__zone {
-  font-size: 0.6875rem;
-  color: var(--neo-text-muted);
-  align-self: center;
-}
-
-.compose-schedule__clear {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  border: none;
-  border-radius: var(--neo-radius-sm);
-  background: transparent;
-  color: var(--neo-text-muted);
-  font-size: 1rem;
-  line-height: 1;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--neo-text-primary);
-    background: var(--neo-bg-tertiary);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-
-.compose-media-count {
-  margin-left: 0.35rem;
-  font-size: 0.6875rem;
-  color: var(--neo-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.compose-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.55rem;
-  flex-shrink: 0;
-}
-
-.compose-counter {
-  font-size: 0.8125rem;
-  color: var(--neo-text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-
-  &--warning {
-    color: var(--neo-warning);
-  }
-
-  &--error {
-    color: var(--neo-danger);
-    font-weight: 600;
-  }
-
-  /* Quiet until you're near the limit — less chrome in reply docks / sheet footers */
-  &--quiet {
-    opacity: 0.55;
-  }
-}
-
-.compose-submit {
-  min-width: 4.5rem;
-  flex-shrink: 0;
-}
-
-.compose-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+@include compose.compose-file;
+@include compose.compose-tool;
+@include compose.compose-counter;
 
 .compose--threads {
   gap: 0.65rem;
@@ -3629,130 +2458,4 @@ defineExpose({
   }
 }
 
-.compose-options {
-  position: fixed;
-  inset: 0;
-  z-index: 220;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-
-.compose-options__backdrop {
-  position: absolute;
-  inset: 0;
-  border: none;
-  background: var(--neo-bg-overlay);
-  cursor: pointer;
-}
-
-.compose-options__panel {
-  position: relative;
-  z-index: 1;
-  margin: 0 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
-  padding: 0.75rem 0.85rem 0.85rem;
-  background: var(--neo-bg-card);
-  border: 1px solid var(--neo-border-color);
-  border-radius: 16px;
-  max-height: calc(100dvh - 1rem - env(safe-area-inset-bottom, 0px));
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-
-  @media (min-width: 640px) {
-    align-self: center;
-    width: 100%;
-    max-width: 22rem;
-    margin-bottom: 1.5rem;
-  }
-}
-
-.compose-options__title {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--neo-text-muted);
-}
-
-.compose-options__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-
-  label {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--neo-text-secondary);
-  }
-
-  select,
-  input {
-    min-height: 40px;
-    width: 100%;
-  }
-}
-
-.compose-options__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.compose-options__toggle {
-  min-height: 36px;
-  padding: 0.35rem 0.7rem;
-  border: 1px solid var(--neo-border-color);
-  border-radius: 999px;
-  background: var(--neo-bg-tertiary);
-  color: var(--neo-text-secondary);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-
-  &--on {
-    border-color: color-mix(in srgb, var(--neo-accent) 45%, transparent);
-    background: color-mix(in srgb, var(--neo-accent) 14%, transparent);
-    color: var(--neo-accent);
-  }
-
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-}
-
-.compose-options__hint {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--neo-text-muted);
-}
-
-.compose-options__done {
-  margin-top: 0.25rem;
-  min-height: 40px;
-}
-
-.action-sheet-enter-active,
-.action-sheet-leave-active {
-  transition: opacity 0.18s ease;
-
-  .compose-options__panel {
-    transition: transform 0.22s ease;
-  }
-}
-
-.action-sheet-enter-from,
-.action-sheet-leave-to {
-  opacity: 0;
-
-  .compose-options__panel {
-    transform: translateY(12px);
-  }
-}
 </style>

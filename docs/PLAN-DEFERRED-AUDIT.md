@@ -39,14 +39,15 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - **Refs:** `RealComposeBox.vue`, audit UX·M·L
 
 ### 5. Trusted Types + token isolation
+- **Status:** Done (Nov 2026 hog-wild pass)
 - **Why:** Tokens in one localStorage blob; CSP still needs `unsafe-inline` / broad `connect-src`
-- **Scope:**
-  1. Refactor `sanitizeHtml.ts` so post-sanitize string surgery isn’t required (or use TrustedHTML APIs)
-  2. `require-trusted-types-for 'script'` + DOMPurify `RETURN_TRUSTED_TYPE`
-  3. Move tokens to a dedicated storage key readable only by the masto client factory
-  4. Tighten CSP hashes / drop `unsafe-inline` where possible
+- **Shipped:**
+  1. `sanitizeHtml.ts` uses DOMPurify hooks + `RETURN_TRUSTED_TYPE` when Trusted Types exist; emoji allowlist via DOMParser
+  2. `require-trusted-types-for 'script'` + `trusted-types default dompurify loomspace` in `public/_headers`; client plugin bootstraps policies
+  3. Tokens in dedicated `neospace_tokens` vault; instances blob strips `accessToken` on save; legacy migration on load
+  4. Script `unsafe-inline` kept for Nuxt SPA + Turnstile inline bootstraps (boot scripts are external `/boot/*.js`)
 - **Size:** L (security-sensitive; do as one project)
-- **Refs:** `instances.ts`, `sanitizeHtml.ts`, `public/_headers`, audit SEC·M·M ×2
+- **Refs:** `instances.ts`, `tokenVault.ts`, `sanitizeHtml.ts`, `public/_headers`, audit SEC·M·M ×2
 
 ### 6. Split `instances` store
 - **Status:** Partial (`instanceInfo` + `oauthApp` helpers extracted; further splits optional)
@@ -106,7 +107,7 @@ Carry-over from [AUDIT-2026-10.md](./AUDIT-2026-10.md). Everything else from tha
 - [x] Compose upload progress + cancel UI
 - [x] Compose scheduling (`scheduledAt` picker) + scheduled queue
 - [x] Compose polls
-- [ ] Trusted Types + token isolation + CSP harden
+- [x] Trusted Types + token isolation + CSP harden
 - [x] Split `instances` store (helpers extracted; further splits optional)
 - [x] Settings mobile drill-down
 - [x] Settings fork-specific paths
