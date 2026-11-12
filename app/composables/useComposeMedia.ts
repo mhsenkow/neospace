@@ -249,7 +249,7 @@ export function useComposeMedia() {
       if (current.description.trim() !== sentDescription) {
         setDescription(localId, current.description)
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!isCurrent()) return
       if (isUploadCancelled(e) || controller.signal.aborted) {
         // Removed / unmounted → stay silent. Only the user's Cancel leaves a retryable tile.
@@ -267,7 +267,9 @@ export function useComposeMedia() {
       }
       const msg = isUploadTimeout(e)
         ? 'Upload timed out before it finished sending — retry'
-        : e?.message || 'Upload failed'
+        : e instanceof Error && e.message
+          ? e.message
+          : 'Upload failed'
       patchAttachment(localId, {
         phase: 'error',
         error: msg,
@@ -465,7 +467,7 @@ export function useComposeMedia() {
       }
       patchAttachment(localId, { phase: 'ready', progress: 1, uploading: false, error: null })
       announce(`${label} ready`)
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!isCurrent()) return
       if (isUploadCancelled(e) || controller.signal.aborted) {
         if (userCancelled.delete(localId)) markStillProcessing(localId, label)

@@ -95,8 +95,10 @@ const emit = defineEmits<{
   text-align: left;
   -webkit-tap-highlight-color: transparent;
 
-  &:hover .status-display-name {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover .status-display-name {
+      text-decoration: underline;
+    }
   }
 }
 
@@ -141,8 +143,10 @@ const emit = defineEmits<{
   text-decoration: none;
   flex-shrink: 0;
 
-  &:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 </style>

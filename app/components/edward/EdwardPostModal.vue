@@ -385,6 +385,7 @@ watch(
         </button>
       </header>
 
+      <div class="edward-modal__stage">
       <div v-if="needsReveal" class="edward-modal__cw">
         <span>{{ spoiler || 'Sensitive content' }}</span>
         <button
@@ -397,6 +398,17 @@ watch(
         </button>
       </div>
 
+      <div v-if="media.length && (!needsReveal || revealed)" class="edward-modal__media">
+        <img
+          v-for="(m, i) in media.slice(0, 4)"
+          :key="m.id || i"
+          :src="(m.url || m.previewUrl) ?? undefined"
+          :alt="m.description || ''"
+          :loading="i === 0 ? 'eager' : 'lazy'"
+          decoding="async"
+        >
+      </div>
+
       <template v-if="!needsReveal || revealed">
       <div
         v-if="safeHtml"
@@ -407,15 +419,6 @@ watch(
         {{ plainPreview }}
       </p>
       </template>
-
-      <div v-if="media.length && (!needsReveal || revealed)" class="edward-modal__media">
-        <img
-          v-for="(m, i) in media.slice(0, 4)"
-          :key="m.id || i"
-          :src="(m.previewUrl || m.url) ?? undefined"
-          :alt="m.description || ''"
-          loading="lazy"
-        >
       </div>
 
       <!-- Primary reaction row -->
@@ -545,11 +548,12 @@ watch(
 }
 
 .edward-modal__panel {
-  width: min(460px, 100%);
-  max-height: min(82vh, 680px);
-  max-height: min(82dvh, 680px);
-  overflow: auto;
-  overscroll-behavior: contain;
+  width: min(960px, 100%);
+  max-height: min(94vh, 1040px);
+  max-height: min(94dvh, 1040px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 1rem 1.1rem 1.05rem;
   background: color-mix(in srgb, #12081c 94%, #ffe566 6%);
   border: 2px solid #ffe566;
@@ -569,10 +573,18 @@ watch(
 
 .edward-modal__head {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.85rem;
+}
+
+.edward-modal__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .edward-modal__who {
@@ -730,8 +742,8 @@ watch(
 
 .edward-modal__content {
   margin: 0 0 0.85rem;
-  font-size: 0.875rem;
-  line-height: 1.45;
+  font-size: 1.0625rem;
+  line-height: 1.5;
   word-break: break-word;
   color: #fff8d6;
 
@@ -754,23 +766,30 @@ watch(
 
 .edward-modal__media {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 4px;
+  grid-template-columns: 1fr;
+  gap: 8px;
   margin-bottom: 0.85rem;
+
+  &:has(img:nth-child(2)) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 
   img {
     width: 100%;
-    aspect-ratio: 1;
-    object-fit: cover;
+    height: auto;
+    max-height: min(62vh, 680px);
+    object-fit: contain;
     border-radius: 2px;
-    background: #1a1420;
+    background: #0a0614;
   }
 }
 
 .edward-modal__react {
   display: grid;
+  flex-shrink: 0;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.35rem;
+  margin-top: 0.75rem;
   margin-bottom: 0.75rem;
 }
 
@@ -835,6 +854,7 @@ watch(
 
 .edward-modal__foot {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 0.55rem;
   padding-top: 0.65rem;

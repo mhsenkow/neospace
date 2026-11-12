@@ -74,9 +74,11 @@
     cursor: pointer;
     transition: background-color var(--neo-transition-fast), color var(--neo-transition-fast);
 
-    &:hover:not(:disabled) {
-      color: var(--neo-accent);
-      background-color: var(--neo-accent-soft);
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        color: var(--neo-accent);
+        background-color: var(--neo-accent-soft);
+      }
     }
 
     &:disabled {
@@ -201,9 +203,11 @@
     line-height: 1;
     cursor: pointer;
 
-    &:hover {
-      color: var(--neo-text-primary);
-      background: var(--neo-bg-tertiary);
+    @media (hover: hover) {
+      &:hover {
+        color: var(--neo-text-primary);
+        background: var(--neo-bg-tertiary);
+      }
     }
 
     &:disabled {

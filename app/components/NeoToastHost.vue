@@ -225,9 +225,11 @@ function onAction(id: number, fn?: () => void) {
     height: 40px;
   }
 
-  &:hover {
-    background: var(--neo-bg-hover, var(--neo-bg-tertiary));
-    color: var(--neo-text-secondary);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+      color: var(--neo-text-secondary);
+    }
   }
 }
 

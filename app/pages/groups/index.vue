@@ -757,8 +757,10 @@ useHead({
     font-weight: 500;
   }
 
-  &:hover {
-    border-color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-accent);
+    }
   }
 
   &.active {
@@ -859,7 +861,7 @@ useHead({
   gap: 0.75rem;
   flex-wrap: wrap;
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     align-items: center;
     flex-wrap: nowrap;
   }
@@ -895,12 +897,14 @@ useHead({
   font-size: 0.875rem;
   text-align: center;
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     width: auto;
   }
 
-  &:hover {
-    filter: brightness(1.08);
+  @media (hover: hover) {
+    &:hover {
+      filter: brightness(1.08);
+    }
   }
 }
 </style>

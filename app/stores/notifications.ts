@@ -9,7 +9,14 @@ import {
   collapseConsecutiveNotifications,
   type CollapsedNotification,
 } from '~/utils/notifGroup'
-import { withinFrontier } from '~/utils/notifHelpers'
+import {
+  dismissNotificationGroup,
+  fetchGroupedNotifications,
+  nextPageMaxId,
+  NotificationsV2UnsupportedError,
+  withinFrontier,
+  type GroupedNotificationRow,
+} from '~/utils/notifHelpers'
 import { localDayKey } from '~/utils/calendarDay'
 
 export type NotificationFilterType =
@@ -35,6 +42,12 @@ export type ExtendedNotification = mastodon.v1.Notification & {
   _instanceUrl?: string
   /** Pre-parsed createdAt for sorting */
   _tsMs: number
+  /** Mastodon v2 group key — dismiss is one request for the whole group */
+  _groupKey?: string
+  /** How many notifications the server folded into this row */
+  _serverGroupCount?: number
+  /** Oldest id in this v2 page — load-more sends it as max_id */
+  _pageMinId?: string
 }
 
 interface NotificationsState {
@@ -95,17 +108,92 @@ const LAST_READ_KEY = 'neospace_notif_last_read_v2'
 const LEGACY_LAST_READ_KEY = 'neospace_notif_last_read'
 
 function tagNotification(
-  n: mastodon.v1.Notification,
+  n: GroupedNotificationRow,
   instanceId: string,
   instanceUrl: string,
 ): ExtendedNotification {
+  const { _groupKey, _serverGroupCount, _pageMinId, ...rest } = n
+  const serverCount = Math.floor(_serverGroupCount || 0)
+  const serverGroup = serverCount > 1 && !!_groupKey
   return {
-    ...n,
+    ...rest,
     _key: `${instanceId}:${n.id}`,
     _instanceId: instanceId,
     _instanceUrl: instanceUrl,
     _tsMs: new Date(n.createdAt).getTime(),
+    ...(serverGroup ? { _groupKey, _serverGroupCount: serverCount } : {}),
+    ...(_pageMinId ? { _pageMinId } : {}),
   }
+}
+
+const NOTIFICATION_PAGE = 30
+
+type LoadedNotificationPage = {
+  items: GroupedNotificationRow[]
+  headers: Headers
+  cursor?: string
+  hasNext: boolean
+}
+
+function finishNotificationPage(
+  items: GroupedNotificationRow[],
+  headers: Headers,
+  via: 'v1' | 'v2',
+  limit: number,
+): LoadedNotificationPage {
+  const last = items[items.length - 1]
+  const cursor = !last
+    ? undefined
+    : via === 'v2'
+      ? nextPageMaxId(headers) || last._pageMinId || last.id
+      : last.id
+  return {
+    items,
+    headers,
+    cursor,
+    hasNext: linkHasNext(headers) || items.length >= limit,
+  }
+}
+
+/**
+ * URL + token are the connected account's, the same pair clientFor / credentialsFor read.
+ * v2 is tried first; 404 (and other "no such route" answers) stick for the session.
+ */
+async function loadNotificationPage(
+  inst: { id: string; url: string; accessToken?: string | null },
+  params: { limit: number; maxId?: string; types?: readonly mastodon.v1.NotificationType[] },
+): Promise<LoadedNotificationPage> {
+  if (inst.accessToken) {
+    try {
+      const grouped = await fetchGroupedNotifications(
+        { url: inst.url, accessToken: inst.accessToken },
+        params,
+      )
+      if (grouped.supported) {
+        return finishNotificationPage(grouped.items, grouped.headers, 'v2', params.limit)
+      }
+      if (!grouped.cached) {
+        logWarn(`Grouped notifications aren’t available on ${inst.url}; using the classic list`)
+      }
+    } catch (e) {
+      logWarn(`Grouped notifications failed on ${inst.url}; using the classic list:`, e)
+    }
+  }
+  const res = await clientFor(inst.id).v1.notifications.list.$raw({
+    limit: params.limit,
+    ...(params.maxId ? { maxId: params.maxId } : {}),
+    ...(params.types?.length ? { types: params.types } : {}),
+  })
+  return finishNotificationPage(res.data, res.headers, 'v1', params.limit)
+}
+
+/**
+ * Same lookup clientFor uses. Raw v2 dismiss can't go through masto.
+ */
+function credentialsOf(instanceId: string): { url: string; accessToken: string } | null {
+  const inst = useInstancesStore().instances.find((i) => i.id === instanceId)
+  if (!inst?.url || !inst.accessToken) return null
+  return { url: inst.url, accessToken: inst.accessToken }
 }
 
 /**
@@ -457,14 +545,13 @@ export const useNotificationsStore = defineStore('notifications', {
             try {
               const client = clientFor(inst.id)
               const types = typesForFilter(this.filter)
-              const [res, marker] = await Promise.all([
-                client.v1.notifications.list.$raw({ limit: 30, ...(types ? { types } : {}) }),
+              const [page, marker] = await Promise.all([
+                loadNotificationPage(inst, { limit: NOTIFICATION_PAGE, types }),
                 // Server read marker — moved by other clients and by markAllRead
                 client.v1.markers
                   .fetch({ timeline: ['notifications'] })
                   .catch(() => null),
               ])
-              const items = res.data
               const serverLast = marker?.notifications?.lastReadId
               const localLast = this.lastReadByInstance[inst.id]
               if (serverLast && (!localLast || idGreater(serverLast, localLast))) {
@@ -475,8 +562,9 @@ export const useNotificationsStore = defineStore('notifications', {
               return {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
-                items,
-                hasNext: linkHasNext(res.headers) || items.length >= 30,
+                items: page.items,
+                cursor: page.cursor,
+                hasNext: page.hasNext,
                 ok: true as const,
               }
             } catch (e: unknown) {
@@ -484,7 +572,8 @@ export const useNotificationsStore = defineStore('notifications', {
               return {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
-                items: [] as mastodon.v1.Notification[],
+                items: [] as GroupedNotificationRow[],
+                cursor: undefined,
                 hasNext: false,
                 ok: false as const,
               }
@@ -512,9 +601,7 @@ export const useNotificationsStore = defineStore('notifications', {
           for (const n of batch.items) {
             merged.push(tagNotification(n, batch.instanceId, batch.instanceUrl))
           }
-          if (batch.items.length > 0) {
-            nextCursors[batch.instanceId] = batch.items[batch.items.length - 1]!.id
-          }
+          if (batch.cursor) nextCursors[batch.instanceId] = batch.cursor
           nextMore[batch.instanceId] = batch.hasNext
           if (batch.hasNext) anyHasNext = true
         }
@@ -563,25 +650,26 @@ export const useNotificationsStore = defineStore('notifications', {
         const batches = await Promise.all(
           withCursor.map(async (inst) => {
             try {
-              const client = clientFor(inst.id)
               const types = typesForFilter(this.filter)
-              const res = await client.v1.notifications.list.$raw({
-                limit: 30,
-                maxId: this.cursors[inst.id]!,
-                ...(types ? { types } : {}),
+              const page = await loadNotificationPage(inst, {
+                limit: NOTIFICATION_PAGE,
+                maxId: this.cursors[inst.id],
+                types,
               })
               return {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
-                items: res.data,
-                hasNext: linkHasNext(res.headers) || res.data.length >= 30,
+                items: page.items,
+                cursor: page.cursor,
+                hasNext: page.hasNext,
               }
             } catch (e) {
               logWarn(`Load more notifications failed for ${inst.url}:`, e)
               return {
                 instanceId: inst.id,
                 instanceUrl: inst.url,
-                items: [] as mastodon.v1.Notification[],
+                items: [] as GroupedNotificationRow[],
+                cursor: undefined as string | undefined,
                 hasNext: false,
               }
             }
@@ -606,8 +694,8 @@ export const useNotificationsStore = defineStore('notifications', {
               seen.add(tagged._key)
             }
           }
-          if (batch.items.length > 0) {
-            nextCursors[batch.instanceId] = batch.items[batch.items.length - 1]!.id
+          if (batch.items.length > 0 && batch.cursor) {
+            nextCursors[batch.instanceId] = batch.cursor
           } else {
             delete nextCursors[batch.instanceId]
           }
@@ -705,6 +793,18 @@ export const useNotificationsStore = defineStore('notifications', {
         this.notifications.find((n) => n._key === keyOrId) ||
         this.notifications.find((n) => n.id === keyOrId)
       if (!notif) return
+      // Accept/reject handles one account. A multi-count v2 row must not
+      // dismiss the rest of the group — the X button calls dismissNotifications.
+      if (notif._groupKey && (notif._serverGroupCount ?? 1) > 1) {
+        const gen = this.fetchGeneration
+        await clientFor(notif._instanceId).v1.notifications.$select(notif.id).dismiss()
+        if (gen !== this.fetchGeneration) return
+        const removed = this.notifications.filter((n) => n._key === notif._key)
+        if (!removed.length) return
+        this.notifications = this.notifications.filter((n) => n._key !== notif._key)
+        this.adjustUnread(removed, -1)
+        return
+      }
       await this.dismissNotifications([notif._key])
     },
 
@@ -722,7 +822,20 @@ export const useNotificationsStore = defineStore('notifications', {
       const gen = this.fetchGeneration
 
       const results = await Promise.allSettled(
-        removed.map(async (n) => clientFor(n._instanceId).v1.notifications.$select(n.id).dismiss()),
+        removed.map(async (n) => {
+          if (n._groupKey && (n._serverGroupCount ?? 1) > 1) {
+            const creds = credentialsOf(n._instanceId)
+            if (creds) {
+              try {
+                await dismissNotificationGroup(creds, n._groupKey)
+                return
+              } catch (e) {
+                if (!(e instanceof NotificationsV2UnsupportedError)) throw e
+              }
+            }
+          }
+          await clientFor(n._instanceId).v1.notifications.$select(n.id).dismiss()
+        }),
       )
       const failed = removed.filter((_, i) => results[i]!.status === 'rejected')
       if (!failed.length) return

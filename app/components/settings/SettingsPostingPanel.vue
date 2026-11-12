@@ -77,7 +77,7 @@ const mediaQualityOptions = [
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
 
     <div class="settings-group">
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-visibility" class="settings-fieldset">
         <legend class="settings-subheading">Default Visibility</legend>
         <p class="settings-hint">Choose who can see your posts by default.</p>
 
@@ -106,8 +106,10 @@ const mediaQualityOptions = [
             </span>
           </label>
         </div>
+      </fieldset>
 
-        <div class="settings-divider" />
+      <fieldset id="setting-sensitive" class="settings-fieldset">
+        <legend class="settings-subheading">Media</legend>
 
         <label class="settings-toggle">
           <div class="settings-toggle__info">
@@ -135,6 +137,7 @@ const mediaQualityOptions = [
         <div class="settings-divider" />
 
         <div
+          id="setting-media-quality"
           class="settings-media-quality"
           role="group"
           aria-labelledby="settings-media-quality-label"

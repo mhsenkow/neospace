@@ -292,7 +292,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   <section class="settings-section">
     <SettingsSectionHeader :category="settingsStore.currentCategory" />
     <div class="settings-group">
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-theme" class="settings-fieldset">
         <legend class="settings-subheading">Theme</legend>
       <p class="settings-hint">Color system — tap a swatch or use the sidebar cycle button.</p>
       <div class="settings-theme-grid">
@@ -333,7 +333,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-chrome" class="settings-fieldset">
         <legend class="settings-subheading">Chrome</legend>
       <p class="settings-hint">Full interface system — type, borders, labels. Corners follow Radius unless set to Match.</p>
       <div class="settings-chrome-grid">
@@ -361,7 +361,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-type" class="settings-fieldset">
         <legend class="settings-subheading">Typography</legend>
       <p class="settings-hint">Reading face for posts &amp; pages — remapped through the active chrome.</p>
       <div class="settings-font-grid">
@@ -390,7 +390,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-font-size" class="settings-fieldset">
         <legend class="settings-subheading">Font Size</legend>
       <NeoRadioGroup
         :options="fontSizeOptions"
@@ -402,7 +402,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-radius" class="settings-fieldset">
         <legend class="settings-subheading">Corners</legend>
       <p class="settings-hint">
         Border-radius set across cards, inputs, and chrome. Match keeps the active chrome’s corners
@@ -418,7 +418,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-flip" class="settings-fieldset">
         <legend class="settings-subheading">Flip text</legend>
       <p class="settings-hint">
         How posts look in Flip mode (full-bleed swipe). Applies especially to text-only slides.
@@ -443,7 +443,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-density" class="settings-fieldset">
         <legend class="settings-subheading">Density</legend>
       <p class="settings-hint">How tightly cards and chrome pack the screen.</p>
       <NeoRadioGroup
@@ -456,7 +456,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-lines" class="settings-fieldset">
         <legend class="settings-subheading">Lines</legend>
       <p class="settings-hint">Outline character — clean hairlines through crayon wiggles.</p>
       <NeoRadioGroup
@@ -469,7 +469,7 @@ const fontPreviewStack = (fontId: NeoFontId) => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-motion" class="settings-fieldset">
         <legend class="settings-subheading">Motion &amp; accessibility</legend>
       <p class="settings-hint">
         Twelve Principles motion personality — hover or tap a card to feel its squash, arc, and settle.
@@ -712,8 +712,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   transition: border-color 0.15s ease, background-color 0.15s ease;
   min-width: 0;
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 
   &.active {
@@ -811,8 +813,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
   cursor: pointer;
   transition: border-color 0.15s ease;
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 
   &.active {
@@ -863,8 +867,10 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     background-color var(--neo-dur-quick, 160ms) var(--neo-ease-out),
     transform var(--neo-dur-instant, 90ms) var(--neo-ease-spring);
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 
   &:active {
@@ -931,13 +937,15 @@ const fontPreviewStack = (fontId: NeoFontId) => {
     transform: translateX(26px) scale(1.12);
   }
 
-  &[data-preview-motion='lively']:hover &__orb,
-  &[data-preview-motion='match']:hover &__orb {
-    transform: translateX(28px) translateY(-2px) scale3d(1.18, 0.88, 1);
-  }
+  @media (hover: hover) {
+    &[data-preview-motion='lively']:hover &__orb,
+    &[data-preview-motion='match']:hover &__orb {
+      transform: translateX(28px) translateY(-2px) scale3d(1.18, 0.88, 1);
+    }
 
-  &[data-preview-motion='editorial']:hover &__orb {
-    transform: translateX(24px) scale(1.02);
+    &[data-preview-motion='editorial']:hover &__orb {
+      transform: translateX(24px) scale(1.02);
+    }
   }
 
   &[data-preview-motion='still']:hover &__orb,

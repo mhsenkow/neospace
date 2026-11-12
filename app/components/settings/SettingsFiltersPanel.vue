@@ -108,7 +108,7 @@ const createNewFilter = async () => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-filters" class="settings-fieldset">
         <legend class="settings-subheading">Active Filters</legend>
         <p class="settings-hint">Filters hide or warn about posts containing specific words.</p>
 

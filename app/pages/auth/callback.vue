@@ -128,8 +128,8 @@ onMounted(async () => {
       })
     }
     await router.replace(returnTo || defaultPath)
-  } catch (e: any) {
-    error.value = friendlyAuthError(e.message || 'Authentication failed')
+  } catch (e: unknown) {
+    error.value = friendlyAuthError(e instanceof Error && e.message ? e.message : 'Authentication failed')
     clearPendingAuth(stateParam)
     scrubUrl()
     await nextTick()
@@ -267,8 +267,10 @@ p {
   border-radius: 4px;
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-accent-hover);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-accent-hover);
+    }
   }
 }
 

@@ -323,6 +323,22 @@ export function usePostActions(options: {
       const ctx = await getActionContext()
       if (!ctx) throw new Error('Not resolvable')
 
+      if (import.meta.client && !navigator.onLine && ctx.instanceId) {
+        const { enqueue } = useOfflineQueue()
+        enqueue({
+          kind: wantBoost ? 'reblog' : 'unreblog',
+          statusId: ctx.id,
+          instanceId: ctx.instanceId,
+        })
+        toastStore.show({
+          message: wantBoost
+            ? 'Reposted — will sync when you’re back online'
+            : 'Undo repost queued offline',
+          duration: 3200,
+        })
+        return
+      }
+
       if (wantBoost) {
         await ctx.client.v1.statuses.$select(ctx.id).reblog()
         toastStore.show({ message: 'Reposted', duration: 2200 })

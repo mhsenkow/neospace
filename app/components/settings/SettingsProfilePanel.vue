@@ -89,7 +89,7 @@ const saveProfile = async () => {
 
     <template v-else>
       <div class="settings-group">
-        <fieldset class="settings-fieldset">
+        <fieldset id="setting-display-name" class="settings-fieldset">
           <legend class="settings-subheading">Profile details</legend>
           <label class="settings-label">
             <span class="settings-label__row">
@@ -115,7 +115,7 @@ const saveProfile = async () => {
             >Display name must be {{ DISPLAY_NAME_MAX }} characters or fewer.</span>
           </label>
 
-          <label class="settings-label">
+          <label id="setting-bio" class="settings-label">
             <span class="settings-label__row">
               <span class="settings-label__text">Bio</span>
               <span id="settings-note-hint" class="settings-field-hint">
@@ -142,7 +142,7 @@ const saveProfile = async () => {
 
         <div class="settings-divider" />
 
-        <fieldset class="settings-fieldset">
+        <fieldset id="setting-discoverable" class="settings-fieldset">
           <legend class="settings-subheading">Discovery</legend>
           <label class="settings-toggle">
             <div class="settings-toggle__info">

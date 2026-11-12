@@ -109,8 +109,10 @@ useFocusTrap(dialogRef, isOpen, {
   background-color: var(--neo-danger, #dc2626);
   color: var(--neo-text-on-accent, #fff);
 
-  &:hover {
-    filter: brightness(1.05);
+  @media (hover: hover) {
+    &:hover {
+      filter: brightness(1.05);
+    }
   }
 }
 </style>

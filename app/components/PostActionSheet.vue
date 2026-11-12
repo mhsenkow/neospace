@@ -134,8 +134,10 @@ useFocusTrap(sheetRef, isOpen, {
   text-align: left;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
-    background: var(--neo-bg-hover);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      background: var(--neo-bg-hover);
+    }
   }
 
   &:disabled {

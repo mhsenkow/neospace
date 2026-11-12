@@ -290,10 +290,12 @@ onUnmounted(() => {
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 
-  &:hover {
-    color: var(--neo-text-primary);
-    background: var(--neo-bg-hover);
-    border-color: color-mix(in srgb, var(--neo-accent) 45%, transparent);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-text-primary);
+      background: var(--neo-bg-hover);
+      border-color: color-mix(in srgb, var(--neo-accent) 45%, transparent);
+    }
   }
 
   &:focus-visible {
@@ -337,8 +339,10 @@ span.suite-menu__tile {
   color: var(--neo-text-muted);
   border-top: 1px solid var(--neo-border-color);
 
-  &:hover {
-    color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-accent);
+    }
   }
 
   &:focus-visible {

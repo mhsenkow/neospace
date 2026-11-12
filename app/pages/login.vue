@@ -380,8 +380,10 @@ definePageMeta({
   color: var(--neo-accent);
   text-decoration: none;
 
-  &:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
@@ -560,8 +562,10 @@ definePageMeta({
     color: var(--neo-accent);
     text-decoration: none;
 
-    &:hover {
-      text-decoration: underline;
+    @media (hover: hover) {
+      &:hover {
+        text-decoration: underline;
+      }
     }
   }
 
@@ -610,7 +614,7 @@ definePageMeta({
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 720px) {
   .login {
     align-items: flex-start;
     padding: 2rem 1rem 2.5rem;

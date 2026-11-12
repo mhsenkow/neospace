@@ -6,10 +6,16 @@ import { logWarn } from '~/utils/log'
 
 export type OfflineQueueItem = {
   id: string
-  kind: 'favourite' | 'unfavourite'
+  kind: 'favourite' | 'unfavourite' | 'reblog' | 'unreblog' | 'status'
   statusId: string
   instanceId: string
   createdAt: number
+  /** Text post or reply queued while offline */
+  text?: string
+  inReplyToId?: string
+  visibility?: 'public' | 'unlisted' | 'private' | 'direct'
+  spoilerText?: string
+  language?: string
 }
 
 const STORAGE_KEY = 'neo-offline-queue-v1'
@@ -49,10 +55,12 @@ export function useOfflineQueue() {
       id: `${item.kind}:${item.statusId}:${Date.now()}`,
       createdAt: Date.now(),
     }
-    // Drop opposing action for same status
-    const next = items.value.filter(
-      (i) => !(i.statusId === item.statusId && i.instanceId === item.instanceId),
-    )
+    // One pending like/boost per post. Queued text posts stay; they aren't toggles.
+    const toggles = item.kind === 'favourite' || item.kind === 'unfavourite' || item.kind === 'reblog' || item.kind === 'unreblog'
+    const next = items.value.filter((i) => {
+      if (!toggles || i.kind === 'status') return true
+      return !(i.statusId === item.statusId && i.instanceId === item.instanceId)
+    })
     next.push(row)
     items.value = next
     writeQueue(next)
@@ -71,8 +79,20 @@ export function useOfflineQueue() {
           const client = instances.getClient(item.instanceId)
           if (item.kind === 'favourite') {
             await client.v1.statuses.$select(item.statusId).favourite()
-          } else {
+          } else if (item.kind === 'unfavourite') {
             await client.v1.statuses.$select(item.statusId).unfavourite()
+          } else if (item.kind === 'reblog') {
+            await client.v1.statuses.$select(item.statusId).reblog()
+          } else if (item.kind === 'unreblog') {
+            await client.v1.statuses.$select(item.statusId).unreblog()
+          } else if (item.kind === 'status') {
+            await client.v1.statuses.create({
+              status: item.text || '',
+              inReplyToId: item.inReplyToId,
+              visibility: item.visibility,
+              spoilerText: item.spoilerText || undefined,
+              language: item.language || undefined,
+            })
           }
         } catch (e) {
           logWarn('offline queue item failed', e)

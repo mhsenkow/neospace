@@ -539,8 +539,10 @@ watch(
     padding-inline: 0.85rem;
   }
 
-  &:hover {
-    background: var(--neo-bg-hover);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover);
+    }
   }
 }
 
@@ -849,7 +851,7 @@ watch(
     }
   }
 
-  @media (min-width: 600px) and (max-width: 767px) {
+  @media (min-width: 720px) and (max-width: 767px) {
     padding-left: max(1rem, env(safe-area-inset-left, 0px));
     padding-right: max(1rem, env(safe-area-inset-right, 0px));
   }

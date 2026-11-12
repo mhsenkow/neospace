@@ -64,6 +64,52 @@ export function settingsKeywordMatches(keywords: string[] | undefined, query: st
   return !!keywords?.some((k) => k.startsWith(q) || k.split(/\s+/).some((w) => w.startsWith(q)))
 }
 
+/** A control inside a category. Search opens that category and scrolls here. */
+export interface SettingsSearchTarget {
+  id: string
+  category: string
+  label: string
+  keywords: string[]
+}
+
+export const SETTINGS_TARGETS: SettingsSearchTarget[] = [
+  { id: 'setting-display-name', category: 'profile', label: 'Display name', keywords: ['name', 'display', 'profile'] },
+  { id: 'setting-bio', category: 'profile', label: 'Bio', keywords: ['bio', 'about', 'note'] },
+  { id: 'setting-discoverable', category: 'profile', label: 'Discoverable', keywords: ['discoverable', 'discovery', 'directory', 'bot'] },
+  { id: 'setting-remember-search', category: 'privacy', label: 'Remember searches', keywords: ['remember', 'explore', 'searches'] },
+  { id: 'setting-follow-approval', category: 'privacy', label: 'Follow approval', keywords: ['locked', 'approve', 'approval', 'private'] },
+  { id: 'setting-muted', category: 'privacy', label: 'Muted accounts', keywords: ['mute', 'muted'] },
+  { id: 'setting-blocked', category: 'privacy', label: 'Blocked accounts', keywords: ['block', 'blocked'] },
+  { id: 'setting-blocked-domains', category: 'privacy', label: 'Blocked domains', keywords: ['domain', 'domains'] },
+  { id: 'setting-theme', category: 'appearance', label: 'Theme', keywords: ['theme', 'dark', 'light', 'color'] },
+  { id: 'setting-chrome', category: 'appearance', label: 'Chrome', keywords: ['chrome', 'ui'] },
+  { id: 'setting-type', category: 'appearance', label: 'Typography', keywords: ['font', 'type', 'typography', 'dyslexic'] },
+  { id: 'setting-font-size', category: 'appearance', label: 'Font size', keywords: ['size', 'font size'] },
+  { id: 'setting-radius', category: 'appearance', label: 'Corners', keywords: ['radius', 'corners', 'round'] },
+  { id: 'setting-flip', category: 'appearance', label: 'Flip text', keywords: ['flip'] },
+  { id: 'setting-density', category: 'appearance', label: 'Density', keywords: ['density', 'compact', 'packed'] },
+  { id: 'setting-lines', category: 'appearance', label: 'Lines', keywords: ['lines', 'outline'] },
+  { id: 'setting-motion', category: 'appearance', label: 'Motion', keywords: ['motion', 'animation', 'reduce'] },
+  { id: 'setting-visibility', category: 'posting', label: 'Default visibility', keywords: ['visibility', 'public', 'unlisted', 'direct', 'followers'] },
+  { id: 'setting-sensitive', category: 'posting', label: 'Sensitive media', keywords: ['sensitive', 'cw', 'warning'] },
+  { id: 'setting-media-quality', category: 'posting', label: 'Photo upload size', keywords: ['quality', 'photo', 'upload', 'image', 'media'] },
+  { id: 'setting-filters', category: 'filters', label: 'Filters', keywords: ['filter', 'filters', 'keyword', 'words'] },
+  { id: 'setting-sign-out', category: 'account', label: 'Sign out', keywords: ['logout', 'sign out', 'signout'] },
+]
+
+function targetMatches(target: SettingsSearchTarget, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (q.length < 2) return false
+  return target.label.toLowerCase().includes(q) || settingsKeywordMatches(target.keywords, q)
+}
+
+/** First control the query names, so search can open its panel and scroll to it. */
+export function firstSettingsTarget(query: string): SettingsSearchTarget | null {
+  const q = query.trim()
+  if (q.length < 2) return null
+  return SETTINGS_TARGETS.find((target) => targetMatches(target, q)) ?? null
+}
+
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     id: 'whats-new',
@@ -417,7 +463,8 @@ export const useSettingsStore = defineStore('settings', {
         (cat) =>
           cat.label.toLowerCase().includes(query) ||
           cat.description?.toLowerCase().includes(query) ||
-          settingsKeywordMatches(cat.keywords, query),
+          settingsKeywordMatches(cat.keywords, query) ||
+          SETTINGS_TARGETS.some((target) => target.category === cat.id && targetMatches(target, query)),
       )
     },
     

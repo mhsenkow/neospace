@@ -881,9 +881,11 @@ onMounted(() => {
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 
-  &:hover:not(:disabled) {
-    background: var(--neo-bg-hover);
-    border-color: var(--neo-text-muted);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      background: var(--neo-bg-hover);
+      border-color: var(--neo-text-muted);
+    }
   }
 
   &:disabled {
@@ -976,8 +978,10 @@ onMounted(() => {
   &--ready {
     background: var(--neo-accent);
 
-    &:hover:not(:disabled) {
-      filter: brightness(1.06);
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        filter: brightness(1.06);
+      }
     }
 
     &:active:not(:disabled) {

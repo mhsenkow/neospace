@@ -304,8 +304,10 @@ const followHandle = async (row: Row, e: Event) => {
       duration: 2400,
     })
     emit('follow', row.account)
-  } catch (err: any) {
-    toastStore.show({ message: err?.message || 'Couldn’t update follow' })
+  } catch (err: unknown) {
+    toastStore.show({
+      message: err instanceof Error && err.message ? err.message : 'Couldn’t update follow',
+    })
   } finally {
     followBusy.value = false
   }
@@ -450,9 +452,11 @@ defineExpose({ onKeydown, visible, rows })
   font-size: 0.7rem;
   cursor: pointer;
 
-  &:hover {
-    border-color: var(--neo-accent);
-    color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-accent);
+      color: var(--neo-accent);
+    }
   }
 }
 

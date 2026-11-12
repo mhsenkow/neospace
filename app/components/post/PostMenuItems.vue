@@ -222,8 +222,10 @@ const emit = defineEmits<{
     text-overflow: ellipsis;
   }
 
-  &:hover:not(:disabled) {
-    background: var(--neo-bg-tertiary);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      background: var(--neo-bg-tertiary);
+    }
   }
 
   &:disabled {
@@ -238,8 +240,10 @@ const emit = defineEmits<{
       color: var(--neo-danger);
     }
 
-    &:hover:not(:disabled) {
-      background: var(--neo-danger-soft);
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        background: var(--neo-danger-soft);
+      }
     }
   }
 }

@@ -9,6 +9,11 @@ export type GroupableNotification = {
   account?: { displayName?: string | null; username?: string; acct?: string } | null
   _instanceId?: string
   _key?: string
+  /**
+   * Mastodon v2 already folded this many notifications into the row.
+   * Counts above 1 stay one row — they aren't merged with the neighbors.
+   */
+  _serverGroupCount?: number
 }
 
 export type CollapsedNotification<T extends GroupableNotification = GroupableNotification> = T & {
@@ -42,15 +47,21 @@ export function collapseConsecutiveNotifications<T extends GroupableNotification
       ACTOR_ONLY_TYPES.has(n.type) &&
       !prev.status?.id
 
-    if ((canGroupByStatus || canGroupFollows) && prev) {
-      prev._groupCount += 1
+    const serverCount = Math.floor(n._serverGroupCount || 0)
+    const serverGroup = serverCount > 1
+    const prevServerGroup = !!prev && Math.floor(prev._serverGroupCount || 0) > 1
+    const size = serverGroup ? serverCount : 1
+    // A v2 group is already "Alice and N others". Merging it with the next
+    // row would dismiss a different set than the one the count describes.
+    if (!serverGroup && !prevServerGroup && (canGroupByStatus || canGroupFollows) && prev) {
+      prev._groupCount += size
       if (n._key) prev._groupedKeys.push(n._key)
       continue
     }
 
     out.push({
       ...n,
-      _groupCount: 1,
+      _groupCount: size,
       _groupedKeys: [],
     })
   }

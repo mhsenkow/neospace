@@ -1,30 +1,48 @@
 <script setup lang="ts">
 /**
- * Pick someone to message — following + search (Mastodon's "friends" substitute).
+ * Pick who to message — following + search (Mastodon's "friends" substitute).
+ * Choosing someone adds a chip. Message confirms: one person or a group of up to 8.
  */
 
 import type { mastodon } from 'masto'
 import { accountHandle, useAccountSearch } from '~/composables/useAccountSearch'
+import { isImeEvent } from '~/composables/useComposerCore'
 import { useInstancesStore } from '~/stores/instances'
 import { useConversationsStore } from '~/stores/conversations'
+import {
+  DM_RECIPIENT_LIMIT,
+  addDmRecipient,
+  dmConfirmLabel,
+  recipientLabel,
+  recipientRemoveLabel,
+  removeDmRecipient,
+} from '~/utils/dmRecipients'
 
 const props = withDefaults(
   defineProps<{
     /** Soft keyboard up — hide lede / compact header title */
     keyboardOpen?: boolean
+    /** Parent is opening the conversation */
+    busy?: boolean
   }>(),
-  { keyboardOpen: false },
+  { keyboardOpen: false, busy: false },
 )
 
 const emit = defineEmits<{
-  select: [account: mastodon.v1.Account]
+  /** Reader pressed Message — one account, or several in pick order */
+  confirm: [accounts: mastodon.v1.Account[]]
   cancel: []
 }>()
 
 const query = ref('')
 const listIndex = ref(-1)
 const listRef = ref<HTMLElement | null>(null)
+const inputRef = ref<HTMLInputElement | null>(null)
+const chipsRef = ref<HTMLElement | null>(null)
 const statusAnnounce = ref('')
+const flash = ref('')
+const selected = ref<mastodon.v1.Account[]>([])
+let flashTimer: ReturnType<typeof setTimeout> | null = null
 
 const {
   results,
@@ -91,6 +109,10 @@ const accountBadges = (a: mastodon.v1.Account): string[] => {
   return out
 }
 
+const selectedIds = computed(() => new Set(selected.value.map((a) => a.id)))
+const atLimit = computed(() => selected.value.length >= DM_RECIPIENT_LIMIT)
+const confirmLabel = computed(() => dmConfirmLabel(selected.value.length))
+
 const listStatus = computed(() => {
   if (followingError.value) return followingError.value
   if (searchError.value) return searchError.value
@@ -105,6 +127,20 @@ const listStatus = computed(() => {
   }
   return ''
 })
+
+const liveStatus = computed(() => flash.value || statusAnnounce.value)
+
+const announce = (msg: string) => {
+  flash.value = ''
+  nextTick(() => {
+    flash.value = msg
+  })
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => {
+    flashTimer = null
+    if (flash.value === msg) flash.value = ''
+  }, 1600)
+}
 
 watch(listStatus, (msg) => {
   if (!msg) return
@@ -140,11 +176,43 @@ onMounted(() => {
   }
 })
 
+const focusSearch = () => {
+  nextTick(() => inputRef.value?.focus())
+}
+
 const pick = (account: mastodon.v1.Account) => {
-  emit('select', account)
+  const next = addDmRecipient(selected.value, account)
+  const name = recipientLabel(account)
+  if (!next.added) {
+    announce(
+      next.reason === 'limit'
+        ? `You can message up to ${DM_RECIPIENT_LIMIT} people.`
+        : `Already added ${name}`,
+    )
+  } else {
+    selected.value = next.selected
+    announce(`Added ${name}`)
+  }
   clear()
   query.value = ''
   listIndex.value = -1
+  focusSearch()
+}
+
+const removeRecipient = (id: string, index: number) => {
+  const account = selected.value.find((a) => a.id === id)
+  selected.value = removeDmRecipient(selected.value, id)
+  if (account) announce(`Removed ${recipientLabel(account)}`)
+  nextTick(() => {
+    const buttons = chipsRef.value?.querySelectorAll<HTMLButtonElement>('button')
+    const next = buttons?.length ? buttons[Math.min(index, buttons.length - 1)] : undefined
+    ;(next ?? inputRef.value)?.focus()
+  })
+}
+
+const confirmRecipients = () => {
+  if (props.busy || !selected.value.length) return
+  emit('confirm', selected.value.slice())
 }
 
 const retryFollowing = () => {
@@ -152,6 +220,7 @@ const retryFollowing = () => {
 }
 
 const onListKeydown = (e: KeyboardEvent) => {
+  if (isImeEvent(e)) return
   const count = displayAccounts.value.length
   if (!count) return
   if (e.key === 'ArrowDown') {
@@ -176,27 +245,58 @@ const scrollActiveIntoView = () => {
   })
 }
 
-onUnmounted(() => clear())
+onUnmounted(() => {
+  clear()
+  if (flashTimer) clearTimeout(flashTimer)
+})
 </script>
 
 <template>
   <!-- Lives inside ComposeSheet's dialog, which takes its name from our title -->
   <div class="recipient-picker" :class="{ 'recipient-picker--keyboard': props.keyboardOpen }">
     <NeoSheetHeader
-      title="Message someone"
+      title="New message"
       title-id="recipient-picker-title"
       :title-sr-only="props.keyboardOpen"
       @cancel="emit('cancel')"
     />
 
     <p v-if="!props.keyboardOpen" class="recipient-picker__hint">
-      No separate friends list — pick someone you follow, or search the fediverse.
+      No separate friends list — add people you follow, or search the fediverse. Up to 8.
     </p>
+
+    <ul
+      v-if="selected.length"
+      ref="chipsRef"
+      class="recipient-picker__chips"
+      aria-label="Selected people"
+    >
+      <li v-for="(account, index) in selected" :key="account.id">
+        <button
+          type="button"
+          class="recipient-picker__chip"
+          :aria-label="recipientRemoveLabel(account)"
+          @click="removeRecipient(account.id, index)"
+        >
+          <img
+            :src="account.avatar"
+            alt=""
+            class="recipient-picker__chip-avatar"
+            loading="lazy"
+            decoding="async"
+          />
+          <span class="recipient-picker__chip-name">{{ recipientLabel(account) }}</span>
+          <span class="recipient-picker__chip-x" aria-hidden="true">×</span>
+        </button>
+      </li>
+    </ul>
+    <p v-if="atLimit" class="recipient-picker__cap">You can message up to 8 people.</p>
 
     <div class="recipient-picker__search">
       <label class="sr-only" for="recipient-search-input">Search people</label>
       <input
         id="recipient-search-input"
+        ref="inputRef"
         v-model="query"
         type="search"
         class="neo-input recipient-picker__input"
@@ -215,7 +315,7 @@ onUnmounted(() => clear())
       />
     </div>
 
-    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ statusAnnounce }}</p>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ liveStatus }}</p>
 
     <div ref="listRef" class="recipient-picker__list" data-keyboard-scroll>
       <!-- Status / empty / error copy sits outside the listbox (options only inside);
@@ -271,9 +371,10 @@ onUnmounted(() => clear())
             <span class="recipient-picker__acct">{{ accountHandle(account) }}</span>
           </span>
           <span
-            v-if="chatOpenIds.has(account.id) || accountBadges(account).length"
+            v-if="selectedIds.has(account.id) || chatOpenIds.has(account.id) || accountBadges(account).length"
             class="recipient-picker__badges"
           >
+            <span v-if="selectedIds.has(account.id)" class="recipient-picker__badge">Added</span>
             <span v-if="chatOpenIds.has(account.id)" class="recipient-picker__badge recipient-picker__badge--chat">
               Chat open
             </span>
@@ -292,6 +393,18 @@ onUnmounted(() => clear())
         Searching the fediverse…
       </p>
     </div>
+
+    <footer class="recipient-picker__footer">
+      <button
+        type="button"
+        class="recipient-picker__confirm neo-btn neo-btn--primary"
+        :disabled="!selected.length || props.busy"
+        :aria-busy="props.busy || undefined"
+        @click="confirmRecipients"
+      >
+        {{ confirmLabel }}
+      </button>
+    </footer>
   </div>
 </template>
 
@@ -312,6 +425,77 @@ onUnmounted(() => clear())
   line-height: 1.4;
 }
 
+.recipient-picker__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.35rem 1rem 0.15rem;
+  list-style: none;
+  flex-shrink: 0;
+
+  > li {
+    display: flex;
+    max-width: 100%;
+    min-width: 0;
+  }
+}
+
+.recipient-picker__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 0.15rem 0.55rem 0.15rem 0.15rem;
+  border: 1px solid var(--neo-border-color);
+  border-radius: 999px;
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-text-primary);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  touch-action: manipulation;
+
+  &:hover,
+  &:focus-visible {
+    border-color: color-mix(in srgb, var(--neo-accent) 45%, var(--neo-border-color));
+    background: var(--neo-accent-soft);
+  }
+}
+
+.recipient-picker__chip-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--neo-bg-primary);
+}
+
+.recipient-picker__chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recipient-picker__chip-x {
+  flex-shrink: 0;
+  color: var(--neo-text-tertiary);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.recipient-picker__cap {
+  margin: 0;
+  padding: 0.15rem 1rem 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-tertiary);
+  flex-shrink: 0;
+}
+
 .recipient-picker__search {
   padding: 0.5rem 1rem 0.75rem;
   flex-shrink: 0;
@@ -322,6 +506,12 @@ onUnmounted(() => clear())
 }
 
 .recipient-picker--keyboard {
+  .recipient-picker__chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 0.2rem 0.75rem 0.1rem;
+  }
+
   .recipient-picker__search {
     padding: 0.35rem 0.75rem 0.45rem;
   }
@@ -330,6 +520,11 @@ onUnmounted(() => clear())
     padding-top: 0.2rem;
     padding-bottom: 0.3rem;
   }
+
+  .recipient-picker__footer {
+    padding: 0.4rem 0.75rem;
+    padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
+  }
 }
 
 .recipient-picker__list {
@@ -337,7 +532,26 @@ onUnmounted(() => clear())
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: 0.5rem;
+}
+
+.recipient-picker__footer {
+  flex-shrink: 0;
+  padding: 0.65rem 1rem;
+  padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-primary);
+}
+
+.recipient-picker__confirm {
+  width: 100%;
+  min-height: 40px;
+  font-weight: 700;
+  touch-action: manipulation;
+
+  &:disabled {
+    opacity: 0.4;
+  }
 }
 
 .recipient-picker__section {

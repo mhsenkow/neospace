@@ -1355,9 +1355,11 @@ useFocusTrap(mobileSidebarRef, open, {
         color: var(--neo-text-primary);
       }
 
-      &--danger:hover {
-        background: var(--neo-danger-soft);
-        color: var(--neo-danger);
+      @media (hover: hover) {
+        &--danger:hover {
+          background: var(--neo-danger-soft);
+          color: var(--neo-danger);
+        }
       }
     }
 

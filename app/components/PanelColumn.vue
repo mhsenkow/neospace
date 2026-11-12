@@ -236,9 +236,9 @@ const loadRemoteProfile = async () => {
     if (!account) throw new Error('Account not found')
     remoteAccount.value = account
     await loadRemoteStatuses(true)
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (!ticket.isCurrent()) return
-    remoteError.value = e?.message || 'Couldn’t load profile'
+    remoteError.value = e instanceof Error && e.message ? e.message : 'Couldn’t load profile'
     remoteAccount.value = null
   } finally {
     if (ticket.isCurrent()) remoteLoading.value = false
@@ -270,9 +270,9 @@ const loadRemoteStatuses = async (refresh = false) => {
     remoteStatuses.value = refresh ? page : [...remoteStatuses.value, ...page]
     if (page.length > 0) remoteMaxId.value = page[page.length - 1]!.id
     remoteHasMore.value = page.length === 20
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (gen !== remoteStatusesGen) return
-    remoteError.value = e?.message || 'Couldn’t load posts'
+    remoteError.value = e instanceof Error && e.message ? e.message : 'Couldn’t load posts'
   } finally {
     if (gen === remoteStatusesGen) remoteLoadingStatuses.value = false
   }
@@ -326,9 +326,9 @@ const runSearch = async (q: string) => {
     searchAccounts.value = res.accounts || []
     searchHashtags.value = res.hashtags || []
     searchStatuses.value = res.statuses || []
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (!ticket.isCurrent()) return
-    searchError.value = e?.message || 'Search failed'
+    searchError.value = e instanceof Error && e.message ? e.message : 'Search failed'
   } finally {
     if (ticket.isCurrent()) searchBusy.value = false
   }
@@ -557,13 +557,14 @@ onUnmounted(() => {
         <button
           v-if="isProfilePeek"
           type="button"
-          class="neo-chrome-btn"
+          class="neo-chrome-btn panel-peek-back"
           aria-label="Back to previous feed"
           @click="exitPeek"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <polyline points="15 18 9 12 15 6" />
           </svg>
+          <span class="panel-peek-back__label">Back</span>
         </button>
       </template>
       <template #title>
@@ -1089,6 +1090,17 @@ onUnmounted(() => {
 
 .neo-chrome-btn--on {
   color: var(--neo-accent);
+}
+
+.panel-peek-back {
+  width: auto;
+  padding: 0 0.45rem 0 0.2rem;
+  gap: 0.1rem;
+
+  &__label {
+    font-size: 0.75rem;
+    font-weight: 650;
+  }
 }
 
 .panel-scroll {

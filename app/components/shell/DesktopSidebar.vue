@@ -1622,8 +1622,10 @@ watch(
     }
   }
 
-  &__row:hover &__motion-mark i {
-    transform: translateX(6px) scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
+  @media (hover: hover) {
+    &__row:hover &__motion-mark i {
+      transform: translateX(6px) scale3d(var(--neo-press-squash-x, 1.07), var(--neo-press-squash-y, 0.9), 1);
+    }
   }
 
 }

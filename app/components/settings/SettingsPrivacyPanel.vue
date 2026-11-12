@@ -106,7 +106,7 @@ const submitBlockDomain = async () => {
     />
 
     <div class="settings-group">
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-remember-search" class="settings-fieldset">
         <legend class="settings-subheading">Explore</legend>
         <label class="settings-toggle">
           <div class="settings-toggle__info">
@@ -124,7 +124,7 @@ const submitBlockDomain = async () => {
     </div>
 
     <div v-if="instancesStore.isAuthenticated" class="settings-group">
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-follow-approval" class="settings-fieldset">
         <legend class="settings-subheading">Post privacy</legend>
         <label class="settings-toggle">
           <div class="settings-toggle__info">
@@ -147,7 +147,7 @@ const submitBlockDomain = async () => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-muted" class="settings-fieldset">
         <legend class="settings-subheading">Muted Accounts</legend>
         <p class="settings-hint">Accounts you've muted won't appear in your timelines.</p>
 
@@ -192,7 +192,7 @@ const submitBlockDomain = async () => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-blocked" class="settings-fieldset">
         <legend class="settings-subheading">Blocked Accounts</legend>
         <p class="settings-hint">Blocked accounts cannot follow you or see your posts.</p>
 
@@ -237,7 +237,7 @@ const submitBlockDomain = async () => {
 
       <div class="settings-divider" />
 
-      <fieldset class="settings-fieldset">
+      <fieldset id="setting-blocked-domains" class="settings-fieldset">
         <legend class="settings-subheading">Blocked Domains</legend>
         <p class="settings-hint">Block every account from a server domain.</p>
         <form class="settings-inline-form" @submit.prevent="submitBlockDomain">

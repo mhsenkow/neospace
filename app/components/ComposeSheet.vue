@@ -7,6 +7,7 @@
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useOverlayStore } from '~/stores/overlay'
 import { accountHandle } from '~/composables/useAccountSearch'
+import { groupDirectCompose } from '~/utils/dmRecipients'
 import { isRedraftSlot } from '~/composables/useDraft'
 import { useToastStore } from '~/stores/toast'
 import { mapErrorToMessage } from '~/utils/friendlyError'
@@ -162,7 +163,14 @@ const moreActions = [
   { id: 'discard', label: 'Discard', danger: true },
 ]
 
-const onPick = async (account: mastodon.v1.Account) => {
+const showPickError = (e: unknown) => {
+  useToastStore().show({
+    message: mapErrorToMessage(e).detail || 'Couldn’t open that conversation',
+  })
+}
+
+/** Today's 1:1 path: reopen an existing chat, or compose with @handle and visibility direct. */
+const openDirect = async (account: mastodon.v1.Account) => {
   if (isPicking.value) return
   isPicking.value = true
   try {
@@ -180,10 +188,36 @@ const onPick = async (account: mastodon.v1.Account) => {
       return
     }
     sheet.continueWithRecipient(accountHandle(account))
-  } catch (e: any) {
-    useToastStore().show({
-      message: mapErrorToMessage(e).detail || 'Couldn’t open that conversation',
-    })
+  } catch (e: unknown) {
+    showPickError(e)
+  } finally {
+    isPicking.value = false
+  }
+}
+
+/**
+ * Chips confirm here. One person keeps the 1:1 path. Two or more open a direct
+ * compose that mentions every selected account (Mastodon's group DM).
+ */
+const onConfirm = async (accounts: mastodon.v1.Account[]) => {
+  if (isPicking.value || !accounts.length) return
+  if (accounts.length === 1) {
+    await openDirect(accounts[0]!)
+    return
+  }
+  const opts = groupDirectCompose(accounts)
+  if (!opts) {
+    const fallback = accounts.find((a) => a.acct?.trim())
+    if (fallback) await openDirect(fallback)
+    else showPickError(new Error('Couldn’t open that conversation'))
+    return
+  }
+  isPicking.value = true
+  try {
+    const keepPosted = sheet.onPosted ?? undefined
+    sheet.show({ ...opts, onPosted: keepPosted })
+  } catch (e: unknown) {
+    showPickError(e)
   } finally {
     isPicking.value = false
   }
@@ -220,7 +254,8 @@ const replyPlaceholder = computed(() => {
       <RecipientPicker
         v-if="sheet.pickRecipient"
         :keyboard-open="keyboardOpen"
-        @select="onPick"
+        :busy="isPicking"
+        @confirm="onConfirm"
         @cancel="sheet.hide()"
         @focusin="onFocusField"
       />

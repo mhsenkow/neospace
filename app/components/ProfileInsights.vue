@@ -1087,8 +1087,10 @@ const formatZ = (z: number) => `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ`
   padding: 0.35rem 0;
   border-radius: 0.35rem;
 
-  &:hover .insights__top-preview {
-    color: var(--neo-text-primary);
+  @media (hover: hover) {
+    &:hover .insights__top-preview {
+      color: var(--neo-text-primary);
+    }
   }
 }
 

@@ -621,10 +621,12 @@ const onImgLoad = (e: Event) => {
   border-color: rgba(255, 255, 255, 0.35);
   z-index: 2;
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.5);
+  @media (hover: hover) {
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.5);
+    }
   }
 }
 
@@ -746,8 +748,10 @@ const onImgLoad = (e: Event) => {
   font-weight: 650;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.14);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.14);
+    }
   }
 
   &:disabled {

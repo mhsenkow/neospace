@@ -157,8 +157,10 @@ const goBack = () => {
     flex-shrink: 0;
     text-decoration: none;
 
-    &:hover:not(:disabled) {
-      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+      }
     }
 
     &:disabled {

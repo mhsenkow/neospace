@@ -225,17 +225,21 @@ const tileStatsLine = computed(() => {
     padding: 1rem;
   }
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
-    background: var(--neo-bg-secondary);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+      background: var(--neo-bg-secondary);
+    }
   }
 
   &--member {
     border-color: color-mix(in srgb, var(--neo-accent) 40%, transparent);
     background: var(--neo-accent-soft);
 
-    &:hover {
-      background: color-mix(in srgb, var(--neo-accent) 14%, var(--neo-bg-card));
+    @media (hover: hover) {
+      &:hover {
+        background: color-mix(in srgb, var(--neo-accent) 14%, var(--neo-bg-card));
+      }
     }
   }
 

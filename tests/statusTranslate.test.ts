@@ -37,6 +37,7 @@ describe('fetchStatusTranslation', () => {
 
     expect(result).toEqual({
       content: '<p>Bonjour</p>',
+      spoilerText: '',
       detectedSourceLanguage: 'fr',
       provider: 'DeepL',
     })

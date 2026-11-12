@@ -19,7 +19,7 @@ import { cycleActiveAccountWithToast } from '~/composables/useSwitchAccount'
 import { useAccountSwitcher } from '~/composables/useAccountSwitcher'
 import { useToastStore } from '~/stores/toast'
 import { emitComposedStatus } from '~/composables/useComposedStatus'
-import type { ComposeContextPost } from '~/stores/composeSheet'
+import { useComposeSheetStore, type ComposeContextPost, type ComposeEditAttachment } from '~/stores/composeSheet'
 import {
   COMPOSE_BASE_LANGUAGE_OPTIONS,
   COMPOSE_MEDIA_ACCEPT,
@@ -27,6 +27,7 @@ import {
 } from '~/utils/composeConstants'
 import { isImeEvent } from '~/composables/useComposerCore'
 import { draftSaveMessage, useDraft } from '~/composables/useDraft'
+import { useOfflineQueue } from '~/composables/useOfflineQueue'
 import { mastodonLength } from '~/utils/mastodonLength'
 import { useComposeAutocomplete } from '~/composables/useComposeAutocomplete'
 import type { ComposeSuggestion } from '~/utils/composeTokens'
@@ -160,6 +161,20 @@ const visibility = ref<'public' | 'unlisted' | 'private' | 'direct'>(
 const scheduledLocal = ref('')
 const showCW = ref(!!props.initialSpoiler)
 const markSensitive = ref(settingsStore.defaultSensitive)
+const editAttachments = ref<ComposeEditAttachment[]>([])
+watch(
+  () => props.editStatusId,
+  (id) => {
+    if (!id) {
+      editAttachments.value = []
+      return
+    }
+    const sheet = useComposeSheetStore()
+    editAttachments.value = sheet.editAttachments.map((a) => ({ ...a }))
+    markSensitive.value = sheet.editSensitive
+  },
+  { immediate: true },
+)
 const postLanguage = ref(settingsStore.defaultLanguage)
 const isPosting = ref(false)
 const error = ref<string | null>(null)
@@ -808,8 +823,12 @@ const handlePost = async () => {
       const edited = await statusStore.updateStatus(props.editStatusId, content.value.trim(), {
         accountId,
         spoilerText: showCW.value ? spoilerText.value : undefined,
-        sensitive: markSensitive.value || undefined,
+        sensitive: markSensitive.value,
         language: postLanguage.value || undefined,
+        mediaAttributes: editAttachments.value.map((media) => ({
+          id: media.id,
+          description: media.description,
+        })),
       })
       clearDraft()
       resetForm()
@@ -878,6 +897,35 @@ const handlePost = async () => {
             },
           }
         : {}),
+    }
+
+    if (import.meta.client && !navigator.onLine && !props.editStatusId) {
+      if (mediaIds.value.length || quote || showPoll.value || hasSchedule.value || chain.length) {
+        throw new Error('That post needs a connection. A text post or reply can wait until you’re back online.')
+      }
+      const accountId = instancesStore.activeAccountId
+      if (!accountId) throw new Error('Sign in to post')
+      const { enqueue } = useOfflineQueue()
+      enqueue({
+        kind: 'status',
+        statusId: `offline:${Date.now()}`,
+        instanceId: accountId,
+        text: body,
+        inReplyToId: props.inReplyToId || undefined,
+        visibility: postVisibility,
+        spoilerText: showCW.value ? spoilerText.value : undefined,
+        language: postLanguage.value || undefined,
+      })
+      clearDraft()
+      resetForm()
+      toastStore.show({
+        message: props.inReplyToId
+          ? 'Reply queued — it’ll send when you’re back online'
+          : 'Post queued — it’ll send when you’re back online',
+        duration: 4000,
+      })
+      useComposeSheetStore().hide()
+      return
     }
 
     let result: mastodon.v1.Status | mastodon.v1.ScheduledStatus
@@ -1651,6 +1699,21 @@ defineExpose({
       @cancel="voiceNote.cancel()"
     />
 
+    <div v-if="editAttachments.length" class="compose-edit-media">
+      <p class="compose-edit-media__label">Descriptions on this post</p>
+      <label v-for="media in editAttachments" :key="media.id" class="compose-edit-media__row">
+        <img v-if="media.previewUrl" :src="media.previewUrl" alt="" class="compose-edit-media__thumb" />
+        <input
+          v-model="media.description"
+          type="text"
+          class="compose-edit-media__input"
+          maxlength="1500"
+          :aria-label="media.description ? 'Image description' : 'Add an image description'"
+          placeholder="Describe this image"
+        />
+      </label>
+    </div>
+
     <ComposeMediaStrip
       v-if="attachments.length"
       ref="composeMediaRef"
@@ -1904,8 +1967,10 @@ defineExpose({
       &--ready {
         background: var(--neo-accent);
 
-        &:hover:not(:disabled) {
-          filter: brightness(1.06);
+        @media (hover: hover) {
+          &:hover:not(:disabled) {
+            filter: brightness(1.06);
+          }
         }
 
         &:active:not(:disabled) {
@@ -2049,8 +2114,10 @@ defineExpose({
     letter-spacing: inherit;
     text-align: left;
 
-    &:hover {
-      color: var(--neo-accent);
+    @media (hover: hover) {
+      &:hover {
+        color: var(--neo-accent);
+      }
     }
   }
 }
@@ -2094,8 +2161,10 @@ defineExpose({
   color: var(--neo-accent);
   text-decoration: none;
 
-  &:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
@@ -2109,8 +2178,10 @@ defineExpose({
   color: var(--neo-text-muted);
   cursor: pointer;
 
-  &:hover {
-    color: var(--neo-text-primary);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-text-primary);
+    }
   }
 }
 
@@ -2428,8 +2499,10 @@ defineExpose({
   color: var(--neo-text-muted);
   cursor: pointer;
 
-  &:hover {
-    color: var(--neo-danger, #e5484d);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-danger, #e5484d);
+    }
   }
 }
 
@@ -2455,6 +2528,46 @@ defineExpose({
   &:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+}
+
+.compose-edit-media {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0.6rem;
+
+  &__label {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 650;
+    color: var(--neo-text-muted);
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &__thumb {
+    width: 2.5rem;
+    height: 2.5rem;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--neo-border-color);
+    background: var(--neo-bg-primary);
+    color: var(--neo-text-primary);
+    border-radius: 6px;
+    padding: 0.4rem 0.55rem;
+    font: inherit;
+    font-size: 0.875rem;
   }
 }
 

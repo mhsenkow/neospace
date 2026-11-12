@@ -295,8 +295,10 @@ defineExpose({ el: rootRef })
   cursor: pointer;
   z-index: 1;
 
-  &:hover {
-    background: rgba(0, 0, 0, 0.85);
+  @media (hover: hover) {
+    &:hover {
+      background: rgba(0, 0, 0, 0.85);
+    }
   }
 
   &:disabled {

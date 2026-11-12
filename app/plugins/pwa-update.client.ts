@@ -27,11 +27,12 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (toasted) return
     toasted = true
     useToastStore().show({
-      message: 'Update ready',
+      message: 'LoomSpace updated',
       kind: 'info',
-      actionLabel: 'Reload',
+      actionLabel: 'Refresh',
       onAction: apply,
-      duration: 15_000,
+      // Stay up until they refresh — a short toast is how the old build sticks around.
+      duration: 0,
     })
   }
 

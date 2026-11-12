@@ -524,9 +524,11 @@ defineExpose({ open, close })
   color: var(--neo-text-secondary);
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
+    }
   }
 }
 
@@ -597,8 +599,10 @@ defineExpose({ open, close })
   overflow: hidden;
   text-overflow: ellipsis;
 
-  &:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
@@ -670,9 +674,11 @@ defineExpose({ open, close })
       height: 40px;
     }
 
-    &:hover {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-tertiary);
+        color: var(--neo-text-primary);
+      }
     }
   }
 
@@ -766,7 +772,7 @@ defineExpose({ open, close })
   border: 0;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 720px) {
   .followers-modal-overlay {
     padding: 0;
     align-items: stretch;

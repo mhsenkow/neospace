@@ -4767,11 +4767,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1079](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1079); explicit source files unchanged at review time.
   - **Done:** `quoted_update` → “edited a post you quoted” (edit icon).
 
-- [ ] **NS-690 · P3 · PERF · A · M — Decide whether to adopt v2 with a v1 fallback.**
+- [x] **NS-690 · P3 · PERF · A · M — Decide whether to adopt v2 with a v1 fallback.**
   - **Target:** [app/stores/notifications.ts:289](/Users/powerox/neospace/app/stores/notifications.ts:289). **Area:** app/pages/notifications.vue, app/stores/notifications.ts, app/utils/notifHelpers.ts, app/utils/notifGroup.ts.
   - **Change:** Decide whether to adopt v2 with a v1 fallback.
   - **Prior observation to check:** `app/stores/notifications.ts:289,525-527` — This uses v1 notifications, so a viral post fills 30-row pages with likes, and dismissing a grouped row sends N requests. Mastodon 4.3+ offers `/api/v2/notifications` (grouped) and group dismiss.
   - **Provenance:** [October 9 candidate, line 1080](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1080); explicit source files unchanged at review time.
+  - **Done:** Activity tries `/api/v2/notifications` and dismisses a group with one request. A 404 is remembered for the session and the v1 list is used. Any other v2 failure also falls back to v1.
 
 - [x] **NS-691 · P3 · UX · A · S — Keep the dialog open with a busy state and show the error inline.**
   - **Target:** [app/components/NeoReport.vue:95](/Users/powerox/neospace/app/components/NeoReport.vue:95). **Area:** app/components/NeoReport.vue.
@@ -4829,11 +4830,12 @@ For each item, completion means the specified behavior works, relevant account/r
   - **Provenance:** [October 9 candidate, line 1097](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1097); explicit source files unchanged at review time.
   - **Done:** Rows show "Chat open" (via `conversationsStore.findDirectWith`, inbox fetched if empty) plus Moved/Locked/Bot badges (`app/components/RecipientPicker.vue`); `ComposeSheet.vue` pick error now uses `mapErrorToMessage`.
 
-- [ ] **NS-699 · P3 · UX · A · M — Decide whether to support multi-select chips.**
+- [x] **NS-699 · P3 · UX · A · M — Decide whether to support multi-select chips.**
   - **Target:** [app/components/RecipientPicker.vue:112](/Users/powerox/neospace/app/components/RecipientPicker.vue:112). **Area:** app/components/RecipientPicker.vue.
   - **Change:** Decide whether to support multi-select chips.
   - **Prior observation to check:** `app/components/RecipientPicker.vue:112-117` — Only one recipient can be picked, so there's no way to start a group DM.
   - **Provenance:** [October 9 candidate, line 1098](/Users/powerox/neospace/docs/AUDIT-2026-10-09.md:1098); explicit source files unchanged at review time.
+  - **Done:** Recipient chips, up to 8. One person still opens the existing chat. Two or more start a direct post that mentions each person.
 
 - [x] **NS-700 · P3 · TOOLING · A · S — Add cases next to the existing store tests.**
   - **Target:** [tests/inbox.test.ts:111](/Users/powerox/neospace/tests/inbox.test.ts:111). **Area:** tests/inbox.test.ts (gaps).

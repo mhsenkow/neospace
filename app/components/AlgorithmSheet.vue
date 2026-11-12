@@ -848,10 +848,12 @@ async function removeRecipe() {
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
-  &:hover {
-    color: var(--neo-text-primary);
-    border-color: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
-    background: color-mix(in srgb, var(--neo-accent) 10%, var(--neo-bg-tertiary));
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-text-primary);
+      border-color: color-mix(in srgb, var(--neo-accent) 35%, var(--neo-border-color));
+      background: color-mix(in srgb, var(--neo-accent) 10%, var(--neo-bg-tertiary));
+    }
   }
 }
 

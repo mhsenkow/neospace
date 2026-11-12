@@ -244,8 +244,10 @@ const handleAddToBoard = async () => {
   border-radius: 4px;
   transition: border-color var(--neo-transition-fast);
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 }
 
@@ -360,9 +362,11 @@ const handleAddToBoard = async () => {
   justify-content: center;
   gap: 0.35rem;
 
-  &:hover:not(:disabled) {
-    border-color: var(--neo-accent);
-    color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      border-color: var(--neo-accent);
+      color: var(--neo-accent);
+    }
   }
 
   &:disabled {
@@ -375,9 +379,11 @@ const handleAddToBoard = async () => {
     background: var(--neo-accent);
     border-color: var(--neo-accent);
 
-    &:hover:not(:disabled) {
-      background: var(--neo-accent-hover);
-      color: var(--neo-text-on-accent, #fafaf8);
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        background: var(--neo-accent-hover);
+        color: var(--neo-text-on-accent, #fafaf8);
+      }
     }
   }
 

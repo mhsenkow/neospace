@@ -1202,9 +1202,11 @@ useHead({ title: 'Home | LoomSpace' })
     text-align: left;
     cursor: pointer;
 
-    &:hover {
-      border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
-      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    @media (hover: hover) {
+      &:hover {
+        border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
+        background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+      }
     }
   }
 
@@ -1327,9 +1329,11 @@ useHead({ title: 'Home | LoomSpace' })
     font-weight: 550;
     cursor: pointer;
 
-    &:hover {
-      border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
-      background: var(--neo-accent-soft);
+    @media (hover: hover) {
+      &:hover {
+        border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
+        background: var(--neo-accent-soft);
+      }
     }
   }
 
@@ -1405,9 +1409,11 @@ useHead({ title: 'Home | LoomSpace' })
     text-align: left;
     cursor: pointer;
 
-    &:hover {
-      border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
-      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    @media (hover: hover) {
+      &:hover {
+        border-color: color-mix(in srgb, var(--neo-accent) 40%, var(--neo-border-color));
+        background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+      }
     }
 
     &--unread {
@@ -1418,9 +1424,11 @@ useHead({ title: 'Home | LoomSpace' })
     &--static {
       cursor: default;
 
-      &:hover {
-        border-color: var(--neo-border-color);
-        background: var(--neo-bg-card, var(--neo-bg-secondary));
+      @media (hover: hover) {
+        &:hover {
+          border-color: var(--neo-border-color);
+          background: var(--neo-bg-card, var(--neo-bg-secondary));
+        }
       }
     }
   }
@@ -1929,9 +1937,11 @@ useHead({ title: 'Home | LoomSpace' })
     border-radius: 8px;
     color: var(--neo-text-secondary);
 
-    &:hover {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-tertiary);
+        color: var(--neo-text-primary);
+      }
     }
 
     @media (hover: none), (pointer: coarse) {
@@ -1988,9 +1998,11 @@ useHead({ title: 'Home | LoomSpace' })
     border-radius: var(--neo-radius-lg, 8px);
     transition: background-color 0.12s ease, color 0.12s ease;
 
-    &:hover {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-tertiary);
+        color: var(--neo-text-primary);
+      }
     }
 
     &--server {
@@ -2022,9 +2034,11 @@ useHead({ title: 'Home | LoomSpace' })
     border-radius: var(--neo-radius-lg, 6px);
     transition: background-color 0.12s ease, color 0.12s ease;
 
-    &:hover {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-secondary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-tertiary);
+        color: var(--neo-text-secondary);
+      }
     }
 
     svg {

@@ -262,7 +262,7 @@ const clearDeviceData = async () => {
       <div class="settings-divider" />
 
       <template v-if="linkedAccounts.length">
-      <h3 class="settings-subheading">Sign out</h3>
+      <h3 id="setting-sign-out" class="settings-subheading">Sign out</h3>
       <p class="settings-hint">Revoke tokens and leave LoomSpace on this device.</p>
       <button
         type="button"

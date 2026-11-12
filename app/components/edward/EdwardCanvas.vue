@@ -11,15 +11,16 @@ import { EDWARD_SOURCE_GLYPH, type EdwardBallDescriptor, type EdwardReason } fro
 import {
   drawEmoticoin,
   faceSpecFor,
-  MOOD_GLYPH,
   type EdwardFaceMood,
 } from '~/utils/edwardFaces'
 import { dialectForHost, paintServerDialect } from '~/utils/edwardServers'
 import { usePrefersReducedMotion } from '~/composables/usePrefersReducedMotion'
 import {
-  edgeCueVisible,
-  edgeDwellStep,
-  edgeScrubGain,
+  useEdwardCanvasInput,
+  type EdwardCanvasPointerState,
+  type EdwardHoverCard,
+} from '~/composables/useEdwardCanvasInput'
+import {
   FrameGate,
   hashToNumber,
   renderIntervalMs,
@@ -61,34 +62,8 @@ const hostEl = ref<HTMLElement | null>(null)
  * The hover card's *content*. It is replaced only when the hovered ball (or its flip side)
  * changes — never per frame; the card follows the ball via a transform on `hoverEl` instead.
  */
-const hoverCard = shallowRef<{
-  name: string
-  preview: string
-  kind: string
-  mood: EdwardFaceMood
-  why: string
-  glyph: string
-  tag: string | null
-  affinity: number
-  media: string | null
-  handle: string
-  age: string
-  counts: { fav: number; boost: number; reply: number } | null
-  accent: string
-  reasons: EdwardReason[]
-  /** Flip the card left / up when it would leave the screen */
-  flipX: boolean
-  flipY: boolean
-} | null>(null)
+const hoverCard = shallowRef<EdwardHoverCard | null>(null)
 const hoverEl = ref<HTMLElement | null>(null)
-let hoverShownFor: string | null = null
-let hoverX = 0
-let hoverY = 0
-const placeHoverCard = () => {
-  if (hoverEl.value) hoverEl.value.style.transform = `translate(${hoverX}px, ${hoverY}px)`
-}
-// The element mounts a tick after the card first appears — position it as soon as it exists
-watch(hoverEl, placeHoverCard, { flush: 'post' })
 
 /** Readable name + snippet under the most prominent balls (DOM = crisp text) */
 type CaptionOverlay = {
@@ -267,15 +242,15 @@ let raycaster: InstanceType<ThreeMod['Raycaster']> | null = null
 let envMap: InstanceType<ThreeMod['Texture']> | null = null
 /** Owns envMap — disposing only the texture leaves the PMREM framebuffer behind */
 let envRt: InstanceType<ThreeMod['WebGLRenderTarget']> | null = null
-let pointerNdc = { x: 0, y: 0 }
-/** Normalized pointer 0–1 in host (for edge zones) */
-let pointerUv = { x: 0.5, y: 0.5 }
-let pointerInside = false
-let dragging = false
-let dragMoved = false
-/** Edge rails scrub the stream; middle orbits the camera */
-let dragMode: 'orbit' | 'scroll' = 'orbit'
-let lastPtr = { x: 0, y: 0 }
+/**
+ * Drag / hover flags the render loop reads (frame signature, throttle, captions).
+ * Pointer handlers in useEdwardCanvasInput write them.
+ */
+const pointerState: EdwardCanvasPointerState = {
+  pointerInside: false,
+  dragging: false,
+  hoverIdentity: null,
+}
 let camYaw = 0.18
 let camPitch = 0.08
 /** User zoom (wheel / pinch) as a multiplier on the fitted distance */
@@ -292,9 +267,6 @@ const fittedDist = () => {
   const forWidth = 13 / (2 * 0.4877 * Math.max(0.3, aspect))
   return Math.min(46, Math.max(26, forWidth))
 }
-/** Soft edge bands — L/R rails + thin T/B */
-const EDGE_X = 0.13
-const EDGE_Y = 0.11
 /** OS setting OR in-app html.reduce-motion — kept live for the frame loop */
 const prefersReducedMotion = usePrefersReducedMotion()
 let reducedMotion = prefersReducedMotion.value
@@ -304,7 +276,6 @@ watch(prefersReducedMotion, (v) => {
 let balls: BallRuntime[] = []
 let identityToBall = new Map<string, BallRuntime>()
 let clockStart = 0
-let hoverIdentity: string | null = null
 let sharedHaloMat: InstanceType<ThreeMod['MeshBasicMaterial']> | null = null
 let sharedSparkMat: InstanceType<ThreeMod['MeshBasicMaterial']> | null = null
 /** Single roaming caustic — updated sparsely */
@@ -351,22 +322,25 @@ const paintMediaPeek = (
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
 ) => {
+  // A large window on the coin, filled edge to edge, so a picture reads while the swarm moves
+  const cx = 300
+  const cy = 292
+  const r = 156
   ctx.save()
   ctx.beginPath()
-  ctx.arc(340, 340, 110, 0, Math.PI * 2)
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
   ctx.clip()
   const aspect = img.naturalWidth / Math.max(1, img.naturalHeight)
-  let dw = 220
-  let dh = 220
-  if (aspect > 1) dh = 220 / aspect
-  else dw = 220 * aspect
-  ctx.globalAlpha = 0.88
-  ctx.drawImage(img, 340 - dw / 2, 340 - dh / 2, dw, dh)
+  let dw = r * 2
+  let dh = r * 2
+  if (aspect > 1) dw = dh * aspect
+  else dh = dw / aspect
+  ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh)
   ctx.restore()
   ctx.strokeStyle = '#ffe566'
-  ctx.lineWidth = 6
+  ctx.lineWidth = 8
   ctx.beginPath()
-  ctx.arc(340, 340, 110, 0, Math.PI * 2)
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
   ctx.stroke()
 }
 
@@ -1405,7 +1379,7 @@ const updateBalls = (t: number, dt: number, simT = t, simDt = dt) => {
       b.root.scale.setScalar(b.size)
     }
 
-    if (doCaptions && !(focus && inFocusZone(screen.x, screen.y)) && b.identity !== hoverIdentity) {
+    if (doCaptions && !(focus && inFocusZone(screen.x, screen.y)) && b.identity !== pointerState.hoverIdentity) {
       const top = projectScreen(p.x, p.y + b.size, p.z)
       const r = top && !top.behind ? Math.abs(screen.y - top.y) : 0
       if (r >= (hostW < PHONE_MAX_W ? 26 : 30)) captionCands.push({ b, x: screen.x, y: screen.y, r })
@@ -1464,89 +1438,6 @@ const applyCamera = () => {
   camera.lookAt(0, 0, 0)
 }
 
-const ageLabel = (createdAt: number) => {
-  const s = Math.max(0, (Date.now() - createdAt) / 1000)
-  if (s < 60) return 'now'
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  if (s < 86400) return `${Math.floor(s / 3600)}h`
-  return `${Math.floor(s / 86400)}d`
-}
-
-const projectHover = (b: BallRuntime) => {
-  if (!camera || !hostEl.value || !THREE) return
-  const t = (performance.now() - clockStart) / 1000
-  const p = ballWorldPos(b, t)
-  const v = (_projV ||= new THREE.Vector3())
-  v.set(p.x, p.y, p.z).project(camera)
-  if (v.z > 1) {
-    hoverCard.value = null
-    return
-  }
-  // Host size is cached from the ResizeObserver — no layout read per frame
-  const x = (v.x * 0.5 + 0.5) * hostW
-  const y = (-v.y * 0.5 + 0.5) * hostH
-  hoverX = x
-  hoverY = y
-  const flipX = x > hostW - 300
-  const flipY = y > hostH - 260
-  const shown = hoverCard.value
-  if (shown && hoverShownFor === b.identity && shown.flipX === flipX && shown.flipY === flipY) {
-    placeHoverCard()
-    return
-  }
-  hoverShownFor = b.identity
-  const cw = b.badges.includes('cw')
-  hoverCard.value = {
-    name: b.label,
-    preview: cw ? '··· content warning ···' : b.preview || '…',
-    kind: b.kind,
-    mood: b.mood,
-    why: b.moodWhy,
-    glyph: MOOD_GLYPH[b.mood] || '◉‿◉',
-    tag: b.topTag,
-    affinity: b.affinity,
-    media: cw ? null : b.mediaUrl,
-    handle: b.acct ? `@${b.acct}${b.host && !b.acct.includes('@') ? `@${b.host}` : ''}` : b.host || '',
-    age: ageLabel(b.createdAt),
-    counts: b.counts,
-    accent: dialectForHost(b.host).accent,
-    reasons: b.reasons,
-    flipX,
-    flipY,
-  }
-}
-
-let _ndcV: InstanceType<ThreeMod['Vector2']> | null = null
-const hitTest = (): BallRuntime | null => {
-  if (!raycaster || !camera || !ballGroup || !THREE) return null
-  raycaster.setFromCamera((_ndcV ||= new THREE.Vector2()).set(pointerNdc.x, pointerNdc.y), camera)
-  const hits = raycaster.intersectObjects(pickMeshes, false)
-  if (!hits.length) return null
-  const id = hits[0]!.object.userData.identity as string
-  return identityToBall.get(id) || null
-}
-
-const syncPointerUv = (clientX: number, clientY: number) => {
-  if (!hostEl.value) return
-  const rect = hostEl.value.getBoundingClientRect()
-  const w = Math.max(1, rect.width)
-  const h = Math.max(1, rect.height)
-  pointerUv.x = (clientX - rect.left) / w
-  pointerUv.y = (clientY - rect.top) / h
-  pointerNdc.x = pointerUv.x * 2 - 1
-  pointerNdc.y = -(pointerUv.y * 2 - 1)
-}
-
-/** Near the rim → stream scroll; open middle → full 3D orbit */
-const pointerInScrollEdge = (nx = pointerUv.x, ny = pointerUv.y) =>
-  nx < EDGE_X || nx > 1 - EDGE_X || ny < EDGE_Y || ny > 1 - EDGE_Y
-
-const setHostCursor = (kind: 'grab' | 'grabbing' | 'pointer' | 'scroll') => {
-  if (!hostEl.value) return
-  if (kind === 'scroll') hostEl.value.style.cursor = 'ns-resize'
-  else hostEl.value.style.cursor = kind
-}
-
 /** Nudge every bubble along the stream (positive dy = content moves down / rewind) */
 const scrubStream = (dyWorld: number) => {
   if (!dyWorld || !balls.length) return
@@ -1562,173 +1453,41 @@ const scrubStream = (dyWorld: number) => {
   }
 }
 
-/** Two-finger pinch zooms (touch has no wheel) */
-const activePtrs = new Map<number, { x: number; y: number }>()
-let pinch: { dist: number; zoom: number } | null = null
-const pinchDist = () => {
-  const [a, b] = [...activePtrs.values()]
-  return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0
-}
-
-const onPointerDown = (e: PointerEvent) => {
-  // Right / middle click must not drag or "pick" — the context menu would open over the peek
-  if (e.pointerType === 'mouse' && e.button !== 0) return
-  activePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
-  if (activePtrs.size === 2) {
-    // Second finger: switch from orbit/scroll to pinch, and never "tap" a face
-    pinch = { dist: Math.max(1, pinchDist()), zoom: camZoom }
-    dragMoved = true
-    hoverCard.value = null
-    hoverIdentity = null
-    return
-  }
-  syncPointerUv(e.clientX, e.clientY)
-  dragging = true
-  dragMoved = false
-  dragMode = pointerInScrollEdge() ? 'scroll' : 'orbit'
-  lastPtr = { x: e.clientX, y: e.clientY }
-  setHostCursor(dragMode === 'scroll' ? 'scroll' : 'grabbing')
-  hostEl.value?.setPointerCapture?.(e.pointerId)
-}
-
-const onPointerMove = (e: PointerEvent) => {
-  if (!hostEl.value) return
-  if (activePtrs.has(e.pointerId)) activePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
-  if (pinch && activePtrs.size >= 2) {
-    const d = pinchDist()
-    if (d > 0) {
-      // Fingers apart → closer (smaller multiplier)
-      camZoom = Math.min(1.6, Math.max(0.55, pinch.zoom * (pinch.dist / d)))
-      applyCamera()
-    }
-    return
-  }
-  pointerInside = true
-  syncPointerUv(e.clientX, e.clientY)
-
-  if (dragging) {
-    const dx = e.clientX - lastPtr.x
-    const dy = e.clientY - lastPtr.y
-    if (Math.abs(dx) + Math.abs(dy) > 3) dragMoved = true
-    lastPtr = { x: e.clientX, y: e.clientY }
-    hoverCard.value = null
-    hoverIdentity = null
-
-    if (dragMode === 'scroll') {
-      // Pixel drag → world stream scrub (up drag = go forward in time / rise)
-      scrubStream(-dy * 0.045)
-      setHostCursor('scroll')
-    } else {
-      camYaw -= dx * 0.005
-      camPitch = Math.min(0.55, Math.max(-0.35, camPitch + dy * 0.004))
-      applyCamera()
-      setHostCursor('grabbing')
-    }
-    return
-  }
-
-  if (pointerInScrollEdge()) {
-    hoverIdentity = null
-    hoverCard.value = null
-    setHostCursor('scroll')
-    return
-  }
-
-  const hit = hitTest()
-  if (hit) {
-    hoverIdentity = hit.identity
-    projectHover(hit)
-    setHostCursor('pointer')
-  } else {
-    hoverIdentity = null
-    hoverCard.value = null
-    setHostCursor('grab')
-  }
-}
-
-const onPointerUp = (e: PointerEvent) => {
-  activePtrs.delete(e.pointerId)
-  if (pinch) {
-    if (activePtrs.size < 2) pinch = null
-    // Lifting one finger of a pinch ends the gesture outright
-    dragging = false
-    return
-  }
-  if (!dragging) return
-  const wasScroll = dragMode === 'scroll'
-  dragging = false
-  try {
-    hostEl.value?.releasePointerCapture?.(e.pointerId)
-  } catch {
-    /* ignore */
-  }
-  syncPointerUv(e.clientX, e.clientY)
-  setHostCursor(pointerInScrollEdge() ? 'scroll' : 'grab')
-  // Edge scrubs never pick a face — middle clicks still do
-  if (dragMoved || wasScroll) return
-  const hit = hitTest()
-  if (hit) emit('pick', hit.identity)
-}
-
-/** OS took the gesture (scroll, system swipe) — clean up, never open a post */
-const onPointerCancel = (e: PointerEvent) => {
-  activePtrs.delete(e.pointerId)
-  if (activePtrs.size < 2) pinch = null
-  dragging = false
-  try {
-    hostEl.value?.releasePointerCapture?.(e.pointerId)
-  } catch {
-    /* ignore */
-  }
-}
-
-const onPointerLeave = () => {
-  pointerInside = false
-  if (dragging) return
-  hoverIdentity = null
-  hoverCard.value = null
-}
-
-const onWheel = (e: WheelEvent) => {
-  e.preventDefault()
-  syncPointerUv(e.clientX, e.clientY)
-  if (pointerInScrollEdge()) {
-    scrubStream(-e.deltaY * 0.018)
-    return
-  }
-  // Middle: dolly the camera in 3D
-  camZoom = Math.min(1.6, Math.max(0.55, camZoom + e.deltaY * 0.0008))
-  applyCamera()
-}
-
-/** Seconds the pointer has rested in the rim, and whether the chevron cue is showing */
-let edgeDwell = 0
-const edgeActive = ref(false)
-
 /**
- * Resting the pointer in the rim feeds the stream — but only after a short dwell, with a
- * visible chevron cue first, so a parked cursor can't make the stream run away unexplained.
+ * Pointer, pinch, wheel, and hover-card hit testing.
+ * `applyEdgeHoverScroll` runs before ball integration and `followHover` after it,
+ * both from `frame`, so they stay on the render clock.
  */
-const applyEdgeHoverScroll = (dt: number) => {
-  const inEdge = pointerInside && !dragging && !reducedMotion && pointerInScrollEdge()
-  edgeDwell = edgeDwellStep(edgeDwell, dt, inEdge)
-  const cue = edgeCueVisible(edgeDwell)
-  if (cue !== edgeActive.value) edgeActive.value = cue
-  const gain = edgeScrubGain(edgeDwell)
-  if (!inEdge || !gain) return
-  const { x: nx, y: ny } = pointerUv
-  let scrub = 0
-  // Top / bottom bands — stronger the closer to the rim
-  if (ny < EDGE_Y) scrub = (1 - ny / EDGE_Y) * 2.8
-  else if (ny > 1 - EDGE_Y) scrub = -((ny - (1 - EDGE_Y)) / EDGE_Y) * 2.8
-  // Side rails: vertical position still drives direction
-  if (nx < EDGE_X || nx > 1 - EDGE_X) {
-    const side = nx < EDGE_X ? 1 - nx / EDGE_X : (nx - (1 - EDGE_X)) / EDGE_X
-    const fromY = (0.5 - ny) * 3.2
-    scrub += fromY * Math.min(1, side)
-  }
-  if (Math.abs(scrub) > 0.05) scrubStream(scrub * gain * dt)
-}
+const {
+  edgeActive,
+  attach: attachPointer,
+  detach: detachPointer,
+  applyEdgeHoverScroll,
+  followHover,
+} = useEdwardCanvasInput({
+  hostEl,
+  hoverCard,
+  hoverEl,
+  hostSize: () => ({ w: hostW, h: hostH }),
+  project: projectScreen,
+  getRaycaster: () => raycaster,
+  getCamera: () => camera,
+  getBallGroup: () => ballGroup,
+  getThree: () => THREE,
+  getPickMeshes: () => pickMeshes,
+  ballByIdentity: (identity) => identityToBall.get(identity) || null,
+  openPost: (identity) => emit('pick', identity),
+  readCamera: () => ({ yaw: camYaw, pitch: camPitch, zoom: camZoom }),
+  writeCamera: (next) => {
+    if (next.yaw !== undefined) camYaw = next.yaw
+    if (next.pitch !== undefined) camPitch = next.pitch
+    if (next.zoom !== undefined) camZoom = next.zoom
+    applyCamera()
+  },
+  scrubStream,
+  reducedMotion: () => reducedMotion,
+  pointer: pointerState,
+})
 
 const onResize = () => {
   if (!hostEl.value || !renderer || !camera) return
@@ -1778,8 +1537,8 @@ const sceneSignature = (): number[] => {
     hostH,
     reducedMotion ? 0 : simT,
     reducedMotion ? 1 : 0,
-    dragging ? 1 : 0,
-    hashToNumber(hoverIdentity),
+    pointerState.dragging ? 1 : 0,
+    hashToNumber(pointerState.hoverIdentity),
     hashToNumber(edward.focusedIdentity),
     balls.length,
     leaving.length,
@@ -1816,7 +1575,7 @@ const frame = () => {
     recessed: edward.recessed,
     selected: !!edward.selectedIdentity,
     reducedMotion,
-    interacting: dragging || (pointerInside && !!hoverIdentity),
+    interacting: pointerState.dragging || (pointerState.pointerInside && !!pointerState.hoverIdentity),
     speedMul: speedMeta(edward.speed).mul,
   })
   if (interval && now - lastRenderAt < interval) {
@@ -1842,11 +1601,7 @@ const frame = () => {
   // (rebuildFilaments still runs from syncBallsFromStore when topology changes)
   if (++filamentTick % 30 === 0) rebuildFilaments()
 
-  if (hoverIdentity) {
-    const b = identityToBall.get(hoverIdentity)
-    if (b) projectHover(b)
-    else hoverCard.value = null
-  }
+  followHover()
 
   // Ambient motion rides the sim clock, so "still" (and reduced motion) really are still
   if (stars) stars.rotation.y = reducedMotion ? 0 : simT * 0.008
@@ -1948,14 +1703,7 @@ let hostRo: ResizeObserver | null = null
 const disposeScene = () => {
   disposed = true
   cancelAnimationFrame(raf)
-  if (hostEl.value) {
-    hostEl.value.removeEventListener('pointerdown', onPointerDown)
-    hostEl.value.removeEventListener('pointermove', onPointerMove)
-    hostEl.value.removeEventListener('pointerup', onPointerUp)
-    hostEl.value.removeEventListener('pointercancel', onPointerCancel)
-    hostEl.value.removeEventListener('pointerleave', onPointerLeave)
-    hostEl.value.removeEventListener('wheel', onWheel)
-  }
+  detachPointer()
   hostRo?.disconnect()
   hostRo = null
   window.removeEventListener('resize', onResize)
@@ -2203,12 +1951,7 @@ const init = async () => {
   frameGate.invalidate()
   syncBallsFromStore()
 
-  hostEl.value.addEventListener('pointerdown', onPointerDown)
-  hostEl.value.addEventListener('pointermove', onPointerMove)
-  hostEl.value.addEventListener('pointerup', onPointerUp)
-  hostEl.value.addEventListener('pointercancel', onPointerCancel)
-  hostEl.value.addEventListener('pointerleave', onPointerLeave)
-  hostEl.value.addEventListener('wheel', onWheel, { passive: false })
+  attachPointer()
   if (typeof ResizeObserver !== 'undefined') {
     hostRo = new ResizeObserver(() => onResize())
     hostRo.observe(hostEl.value)
@@ -2430,7 +2173,7 @@ onUnmounted(() => {
   top: 0;
   left: 0;
   z-index: 2;
-  width: min(290px, 74vw);
+  width: min(380px, 86vw);
   padding: 10px 12px 12px;
   margin-top: -12px;
   margin-left: 18px;
@@ -2533,15 +2276,17 @@ onUnmounted(() => {
 
 .edward-canvas__hover-body {
   display: flex;
-  gap: 0.6rem;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: stretch;
 }
 
 .edward-canvas__hover-media {
-  flex: 0 0 76px;
-  width: 76px;
-  height: 76px;
-  object-fit: cover;
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+  object-fit: contain;
   border: 1px solid var(--srv, #ffe566);
   border-radius: 3px;
   background: #0a0614;

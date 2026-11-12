@@ -145,7 +145,7 @@ Docker serves the static SPA only — **no `/api/feedback`**. Use Cloudflare Pag
 
 ## Known limitations (honest)
 
-- **Ops:** Turnstile site/secret keys and a Cloudflare WAF rate limit on `POST /api/feedback` are not set in production yet (code is ready; isolate-local rate limit still applies)
+- **Ops:** Turnstile site/secret keys and a Cloudflare WAF rate limit on `POST /api/feedback` are not set in production yet (code is ready; isolate-local rate limit still applies). The Pages token can list secrets and read the zone; it cannot create a Turnstile widget or a firewall rule.
 - **CSP:** script `unsafe-inline` remains for Nuxt SPA + Turnstile; Trusted Types (`require-trusted-types-for 'script'`) and token vault isolation shipped
 - **Partial refactors:** TimelineColumn fetch/poll lives in `useTimelineColumn.ts`; Edward HUD/sim extracted; profile edit + explore servers thinned. EdwardCanvas WebGL loop and `status/[id].vue` are still large.
 - Appearance fonts are self-hosted (fontsource); compose has `#`/`:` autocomplete, upload progress/cancel, polls, and a scheduled queue

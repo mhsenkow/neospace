@@ -162,7 +162,7 @@ const handleWatch = async () => {
   try {
     await instancesStore.addInstance(`https://${domain.value}`)
     emit('watched', domain.value)
-  } catch (e: any) {
+  } catch (e: unknown) {
     addError.value = friendlyServerError(e)
   } finally {
     isAdding.value = false
@@ -178,7 +178,7 @@ const handleLogin = async () => {
       returnTo: route.fullPath,
     })
     await openOAuthAuthorize(authUrl)
-  } catch (e: any) {
+  } catch (e: unknown) {
     addError.value = friendlyServerError(e)
     isSigningIn.value = false
   }
@@ -217,8 +217,10 @@ const handleFollowPerson = async (account: mastodon.v1.Account, e: Event) => {
       domain.value,
     )
     if (rel) relationships.value = { ...relationships.value, [account.id]: rel }
-  } catch (err: any) {
-    toastStore.show({ message: err?.message || 'Couldn’t update follow' })
+  } catch (err: unknown) {
+    toastStore.show({
+      message: err instanceof Error && err.message ? err.message : 'Couldn’t update follow',
+    })
   } finally {
     const next = { ...followBusy.value }
     delete next[key]
@@ -575,8 +577,10 @@ const TABS: { id: PreviewTab; label: string }[] = [
     font-size: 0.9rem;
     text-decoration: none;
 
-    &:hover {
-      color: var(--neo-text-on-accent);
+    @media (hover: hover) {
+      &:hover {
+        color: var(--neo-text-on-accent);
+      }
     }
   }
 }
@@ -594,8 +598,10 @@ const TABS: { id: PreviewTab; label: string }[] = [
   cursor: pointer;
   color: var(--neo-text-on-accent);
 
-  &:hover {
-    background: color-mix(in srgb, var(--neo-text-on-accent) 30%, transparent);
+  @media (hover: hover) {
+    &:hover {
+      background: color-mix(in srgb, var(--neo-text-on-accent) 30%, transparent);
+    }
   }
 }
 
@@ -898,7 +904,7 @@ const TABS: { id: PreviewTab; label: string }[] = [
   }
 }
 
-@media (max-width: 600px), (max-height: 560px) {
+@media (max-width: 720px), (max-height: 560px) {
   .preview-overlay {
     padding: 0;
     align-items: stretch;

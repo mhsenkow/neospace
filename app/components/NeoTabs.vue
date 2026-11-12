@@ -250,10 +250,12 @@ watch(
     box-shadow: none;
   }
 
-  &:hover {
-    // Hover must not lower contrast — secondary is lighter than the resting tertiary
-    color: var(--neo-text-primary);
-    background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+  @media (hover: hover) {
+    &:hover {
+      // Hover must not lower contrast — secondary is lighter than the resting tertiary
+      color: var(--neo-text-primary);
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
   }
 
   &:active {

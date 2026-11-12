@@ -162,8 +162,10 @@ defineExpose({
   font: inherit;
   cursor: pointer;
 
-  &:hover {
-    color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-accent);
+    }
   }
 }
 
@@ -175,8 +177,10 @@ defineExpose({
   line-height: 1;
   border-radius: var(--neo-radius-sm, 6px);
 
-  &:hover {
-    background: var(--neo-bg-secondary);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-secondary);
+    }
   }
 }
 

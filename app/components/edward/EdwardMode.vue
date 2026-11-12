@@ -1499,7 +1499,7 @@ onUnmounted(() => {
 .edward-mode__watch-hero-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 
@@ -2257,8 +2257,8 @@ onUnmounted(() => {
   img {
     display: block;
     width: 100%;
-    max-height: min(36vh, 380px);
-    object-fit: cover;
+    max-height: min(46vh, 480px);
+    object-fit: contain;
   }
 }
 

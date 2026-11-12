@@ -179,8 +179,10 @@ ul, ol {
   overflow: hidden;
   box-sizing: border-box;
 
-  &--interactive:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &--interactive:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 }
 
@@ -368,9 +370,11 @@ ul, ol {
       }
     }
 
-    &--danger:hover:not(:disabled) {
-      background: var(--neo-danger-soft);
-      color: var(--neo-danger);
+    @media (hover: hover) {
+      &--danger:hover:not(:disabled) {
+        background: var(--neo-danger-soft);
+        color: var(--neo-danger);
+      }
     }
   }
 
@@ -584,8 +588,10 @@ body.chaos-active::after {
   background: var(--neo-text-muted);
   border-radius: var(--neo-radius-full);
   
-  &:hover {
-    background: var(--neo-text-secondary);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-text-secondary);
+    }
   }
 }
 

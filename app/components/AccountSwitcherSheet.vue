@@ -595,9 +595,11 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   padding: 0.15rem 0.35rem;
   border-radius: 6px;
 
-  &:hover:not(:disabled) {
-    color: var(--neo-danger);
-    background: color-mix(in srgb, var(--neo-danger) 10%, transparent);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      color: var(--neo-danger);
+      background: color-mix(in srgb, var(--neo-danger) 10%, transparent);
+    }
   }
 
   &:disabled {
@@ -618,8 +620,10 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   padding: 0.15rem 0.35rem;
   border-radius: 6px;
 
-  &:hover:not(:disabled) {
-    background: var(--neo-accent-soft);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      background: var(--neo-accent-soft);
+    }
   }
 
   &:disabled {
@@ -768,8 +772,10 @@ const initialOf = (account: { user?: { displayName?: string | null; username?: s
   text-align: center;
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-bg-hover);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover);
+    }
   }
 }
 

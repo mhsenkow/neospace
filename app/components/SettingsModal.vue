@@ -11,7 +11,7 @@
  * Connects to real Mastodon API for 1:1 settings sync.
  */
 
-import { useSettingsStore } from '~/stores/settings'
+import { firstSettingsTarget, useSettingsStore } from '~/stores/settings'
 import { useInstancesStore } from '~/stores/instances'
 import { useOverlayStore } from '~/stores/overlay'
 
@@ -96,6 +96,29 @@ watch(
   () => settingsStore.activeCategory,
   () => {
     if (contentEl.value) contentEl.value.scrollTop = 0
+  },
+)
+
+let searchHitEl: HTMLElement | null = null
+watch(
+  () => settingsStore.searchQuery,
+  async (query) => {
+    if (!isOpen.value) return
+    const hit = firstSettingsTarget(query)
+    searchHitEl?.classList.remove('settings-search-hit')
+    searchHitEl = null
+    if (!hit) return
+    if (settingsStore.activeCategory !== hit.category) {
+      settingsStore.setCategory(hit.category)
+    }
+    if (isNarrowSettings.value) mobilePanelOpen.value = true
+    await nextTick()
+    await nextTick()
+    const el = contentEl.value?.querySelector<HTMLElement>(`#${CSS.escape(hit.id)}`)
+    if (!el) return
+    el.classList.add('settings-search-hit')
+    searchHitEl = el
+    el.scrollIntoView({ block: 'nearest' })
   },
 )
 
@@ -645,8 +668,10 @@ watch(
   cursor: pointer;
   transition: all 0.15s ease;
 
-  &:hover {
-    border-color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-accent);
+    }
   }
 
   &.active {
@@ -714,8 +739,10 @@ watch(
   font: inherit;
   transition: border-color 0.15s ease;
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 
   &.active {
@@ -808,8 +835,10 @@ watch(
   font: inherit;
   transition: border-color 0.15s ease;
 
-  &:hover {
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-border-color-dark);
+    }
   }
 
   &.active {
@@ -915,8 +944,10 @@ watch(
     text-transform: none;
     letter-spacing: normal;
 
-    &:hover {
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        color: var(--neo-text-primary);
+      }
     }
 
     &.active {
@@ -944,8 +975,10 @@ watch(
   cursor: pointer;
   transition: all 0.15s ease;
 
-  &:hover {
-    border-color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-accent);
+    }
   }
 
   &.active {
@@ -1164,8 +1197,10 @@ watch(
     text-decoration: underline;
     text-underline-offset: 2px;
 
-    &:hover:not(:disabled) {
-      color: var(--neo-accent-hover, var(--neo-accent));
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        color: var(--neo-accent-hover, var(--neo-accent));
+      }
     }
 
     &:disabled {

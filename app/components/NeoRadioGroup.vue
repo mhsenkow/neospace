@@ -133,8 +133,10 @@ function onKeydown(e: KeyboardEvent, index: number) {
       inset 0 -2px 0 var(--neo-accent);
   }
 
-  &:hover:not([aria-checked='true']) {
-    color: var(--neo-text-secondary);
+  @media (hover: hover) {
+    &:hover:not([aria-checked='true']) {
+      color: var(--neo-text-secondary);
+    }
   }
 }
 

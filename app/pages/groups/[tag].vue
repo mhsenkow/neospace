@@ -223,8 +223,8 @@ const handleLoadMore = async () => {
   loadMoreError.value = null
   try {
     await groupsStore.loadMoreTimeline()
-  } catch (e: any) {
-    const message: string = e?.message || 'Couldn’t load more posts'
+  } catch (e: unknown) {
+    const message = e instanceof Error && e.message ? e.message : 'Couldn’t load more posts'
     loadMoreError.value = message
     void showActionError(message, () => { void handleLoadMore() })
   }
@@ -491,8 +491,10 @@ useHead({
   color: var(--neo-text-primary);
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+    }
   }
 
   @media (min-width: 1024px) {
@@ -520,7 +522,7 @@ useHead({
     margin-bottom: 1.25rem;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     padding: 1.5rem;
     border-radius: 20px;
     margin-bottom: 1.5rem;
@@ -539,7 +541,7 @@ useHead({
     gap: 1rem;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     flex-direction: row;
     align-items: flex-start;
   }
@@ -562,7 +564,7 @@ useHead({
     border-radius: 16px;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     width: 72px;
     height: 72px;
     border-radius: 18px;
@@ -576,7 +578,7 @@ useHead({
       font-size: 2rem;
     }
 
-    @media (min-width: 600px) {
+    @media (min-width: 720px) {
       font-size: 2.5rem;
     }
   }
@@ -601,7 +603,7 @@ useHead({
     font-size: 1.5rem;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     font-size: 1.75rem;
   }
 }
@@ -645,7 +647,7 @@ useHead({
   position: relative;
   z-index: 2;
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     align-self: center;
     width: auto;
     flex-wrap: nowrap;
@@ -675,7 +677,7 @@ useHead({
     font-size: 0.9375rem;
   }
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     flex: 0 0 auto;
     min-width: 9.5rem;
   }
@@ -689,8 +691,10 @@ useHead({
       display: none;
     }
 
-    &:hover {
-      background: rgba(255, 255, 255, 0.28);
+    @media (hover: hover) {
+      &:hover {
+        background: rgba(255, 255, 255, 0.28);
+      }
     }
   }
 
@@ -706,9 +710,11 @@ useHead({
     color: color-mix(in srgb, var(--category-color) 68%, #000);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 
-    &:hover:not(:disabled) {
-      transform: scale(1.02);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        transform: scale(1.02);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+      }
     }
 
     &:disabled {
@@ -936,8 +942,10 @@ useHead({
       padding: 0.75rem 1.5rem;
     }
 
-    &:hover {
-      filter: brightness(1.1);
+    @media (hover: hover) {
+      &:hover {
+        filter: brightness(1.1);
+      }
     }
   }
 }
@@ -1018,9 +1026,11 @@ useHead({
     font-size: 0.9375rem;
   }
 
-  &:hover:not(:disabled) {
-    border-color: var(--neo-accent);
-    color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      border-color: var(--neo-accent);
+      color: var(--neo-accent);
+    }
   }
 
   &:disabled {
@@ -1138,9 +1148,11 @@ useHead({
       font-size: 0.875rem;
     }
 
-    &:hover {
-      filter: brightness(1.1);
-      transform: scale(1.02);
+    @media (hover: hover) {
+      &:hover {
+        filter: brightness(1.1);
+        transform: scale(1.02);
+      }
     }
   }
 }

@@ -9,6 +9,12 @@ import type { ComposeModality } from '~/composables/useComposeModality'
 
 export type ComposeVisibility = 'public' | 'unlisted' | 'private' | 'direct'
 
+export interface ComposeEditAttachment {
+  id: string
+  previewUrl: string | null
+  description: string
+}
+
 export interface ComposeContextPost {
   /** Local id on the posting account — omit when unresolved (URL-only quote) */
   id?: string
@@ -30,6 +36,10 @@ interface ComposeSheetState {
   draftSlot: string | null
   /** When set, Post updates this status in place instead of creating a new one */
   editStatusId: string | null
+  /** Existing attachments while editing — alt text is saved with the post */
+  editAttachments: ComposeEditAttachment[]
+  /** Sensitive flag of the post being edited */
+  editSensitive: boolean
   initialVisibility: ComposeVisibility | null
   placeholder: string | null
   title: string | null
@@ -57,6 +67,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
     initialSpoiler: '',
     draftSlot: null,
     editStatusId: null,
+    editAttachments: [],
+    editSensitive: false,
     initialVisibility: null,
     placeholder: null,
     title: null,
@@ -76,6 +88,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       spoilerText?: string
       draftSlot?: string | null
       editStatusId?: string | null
+      editAttachments?: ComposeEditAttachment[]
+      editSensitive?: boolean
       visibility?: ComposeVisibility
       placeholder?: string
       title?: string
@@ -103,6 +117,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.initialSpoiler = opts?.spoilerText ?? ''
       this.draftSlot = nextSlot
       this.editStatusId = nextEdit
+      this.editAttachments = opts?.editAttachments?.map((a) => ({ ...a })) ?? []
+      this.editSensitive = !!opts?.editSensitive
       this.initialVisibility = opts?.visibility ?? null
       this.placeholder = opts?.placeholder ?? null
       this.pickRecipient = !!opts?.pickRecipient
@@ -145,6 +161,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.initialSpoiler = ''
       this.draftSlot = null
       this.editStatusId = null
+      this.editAttachments = []
+      this.editSensitive = false
       this.initialVisibility = 'direct'
       this.placeholder = 'Write a private message…'
       this.title = 'New message'
@@ -179,6 +197,8 @@ export const useComposeSheetStore = defineStore('composeSheet', {
       this.initialSpoiler = ''
       this.draftSlot = null
       this.editStatusId = null
+      this.editAttachments = []
+      this.editSensitive = false
       this.initialVisibility = null
       this.placeholder = null
       this.title = null

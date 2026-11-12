@@ -802,7 +802,7 @@ const chromeTitle = computed(() => {
   padding: 0 0.75rem;
   box-sizing: border-box;
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     padding: 0 1.25rem;
   }
 
@@ -820,7 +820,7 @@ const chromeTitle = computed(() => {
   background: var(--neo-bg-primary);
   border-bottom: 1px solid var(--neo-border-color);
 
-  @media (min-width: 600px) {
+  @media (min-width: 720px) {
     margin: 0 -1.25rem;
     padding-left: 1.25rem;
     padding-right: 1.25rem;

@@ -78,7 +78,7 @@ const watchServer = async () => {
     const instance = await instancesStore.addInstance(url)
     newServerUrl.value = ''
     addSuccess.value = `Watching ${hostOf(instance)}`
-  } catch (e: any) {
+  } catch (e: unknown) {
     addError.value = friendlyServerError(e)
   } finally {
     isAdding.value = false
@@ -469,9 +469,11 @@ const isActive = (instance: ConnectedInstance) =>
   border-radius: 50%;
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-bg-tertiary);
-    color: var(--neo-text-primary);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-tertiary);
+      color: var(--neo-text-primary);
+    }
   }
 }
 
@@ -511,9 +513,11 @@ const isActive = (instance: ConnectedInstance) =>
   cursor: pointer;
   padding: 0;
 
-  &:hover {
-    color: var(--neo-accent-hover);
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-accent-hover);
+      text-decoration: underline;
+    }
   }
 }
 
@@ -675,9 +679,11 @@ const isActive = (instance: ConnectedInstance) =>
   cursor: pointer;
   white-space: nowrap;
 
-  &:hover:not(:disabled) {
-    color: var(--neo-text-primary);
-    border-color: var(--neo-border-color-dark);
+  @media (hover: hover) {
+    &:hover:not(:disabled) {
+      color: var(--neo-text-primary);
+      border-color: var(--neo-border-color-dark);
+    }
   }
 
   &:disabled {
@@ -690,16 +696,20 @@ const isActive = (instance: ConnectedInstance) =>
     background: var(--neo-accent);
     border-color: var(--neo-accent);
 
-    &:hover:not(:disabled) {
-      background: var(--neo-accent-hover);
-      color: var(--neo-text-on-accent, #fafaf8);
+    @media (hover: hover) {
+      &:hover:not(:disabled) {
+        background: var(--neo-accent-hover);
+        color: var(--neo-text-on-accent, #fafaf8);
+      }
     }
   }
 
-  &--danger:hover:not(:disabled) {
-    color: var(--neo-text-on-accent, #fff);
-    background: var(--neo-danger);
-    border-color: var(--neo-danger);
+  @media (hover: hover) {
+    &--danger:hover:not(:disabled) {
+      color: var(--neo-text-on-accent, #fff);
+      background: var(--neo-danger);
+      border-color: var(--neo-danger);
+    }
   }
 }
 
@@ -737,8 +747,10 @@ const isActive = (instance: ConnectedInstance) =>
   color: var(--neo-accent);
   text-decoration: none;
 
-  &:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 

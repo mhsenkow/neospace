@@ -536,16 +536,19 @@ export const useStatusStore = defineStore('status', {
         sensitive?: boolean
         language?: string
         mediaIds?: string[]
+        mediaAttributes?: { id: string; description?: string | null }[]
       },
     ): Promise<mastodon.v1.Status> {
       this.credentialsForAccount(options.accountId)
       const params: Record<string, unknown> = {
         status: content,
         spoilerText: options.spoilerText || undefined,
-        sensitive: options.sensitive || undefined,
         language: options.language || undefined,
       }
+      // false must be sent — `|| undefined` made "not sensitive" a no-op
+      if (typeof options.sensitive === 'boolean') params.sensitive = options.sensitive
       if (options.mediaIds?.length) params.mediaIds = options.mediaIds
+      if (options.mediaAttributes?.length) params.mediaAttributes = options.mediaAttributes
       return await clientFor(options.accountId)
         .v1.statuses.$select(statusId)
         .update(params as never)

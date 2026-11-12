@@ -391,15 +391,19 @@ const toggle = () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 
-  &:hover {
-    color: var(--neo-text-secondary);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-text-secondary);
+    }
   }
 
   &--on {
     color: var(--neo-accent);
 
-    &:hover {
-      color: var(--neo-accent-hover, var(--neo-accent));
+    @media (hover: hover) {
+      &:hover {
+        color: var(--neo-accent-hover, var(--neo-accent));
+      }
     }
   }
 }
@@ -411,9 +415,11 @@ const toggle = () => {
   height: 24px;
   color: var(--neo-text-tertiary);
 
-  &:hover {
-    color: var(--neo-text-primary);
-    background: var(--neo-bg-hover);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-text-primary);
+      background: var(--neo-bg-hover);
+    }
   }
 }
 
@@ -451,10 +457,12 @@ const toggle = () => {
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 
-  &:hover {
-    border-color: var(--neo-accent);
-    color: var(--neo-accent);
-    background: var(--neo-accent-soft);
+  @media (hover: hover) {
+    &:hover {
+      border-color: var(--neo-accent);
+      color: var(--neo-accent);
+      background: var(--neo-accent-soft);
+    }
   }
 
   &--active {
@@ -490,8 +498,10 @@ const toggle = () => {
   cursor: pointer;
   flex-shrink: 0;
 
-  &:hover {
-    background: color-mix(in srgb, var(--neo-accent) 20%, transparent);
+  @media (hover: hover) {
+    &:hover {
+      background: color-mix(in srgb, var(--neo-accent) 20%, transparent);
+    }
   }
 }
 
@@ -531,9 +541,11 @@ const toggle = () => {
   color: var(--neo-text-secondary);
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-bg-hover);
-    color: var(--neo-text-primary);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover);
+      color: var(--neo-text-primary);
+    }
   }
 }
 

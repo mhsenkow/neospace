@@ -177,7 +177,9 @@ const safeDisplayName = computed(() => {
 })
 const showTranslation = ref(false)
 const translationHtml = ref<string | null>(null)
+const translationSpoiler = ref<string | null>(null)
 const translationFrom = ref('')
+const quoteTranslationText = ref<string | null>(null)
 const isTranslating = ref(false)
 const safeContent = computed(() => {
   const html =
@@ -190,6 +192,11 @@ const contentLang = computed(() =>
   showTranslation.value
     ? settingsStore.defaultLanguage || undefined
     : displayStatus.value.language || undefined,
+)
+const displaySpoiler = computed(() =>
+  showTranslation.value && translationSpoiler.value
+    ? translationSpoiler.value
+    : displayStatus.value.spoilerText || '',
 )
 const linkCard = computed(() => {
   const card = displayStatus.value.card
@@ -341,7 +348,9 @@ watch(
     contentOverflows.value = false
     showTranslation.value = false
     translationHtml.value = null
+    translationSpoiler.value = null
     translationFrom.value = ''
+    quoteTranslationText.value = null
     rankXrayOpen.value = false
     inspectOpen.value = false
     applyReadingPrefs()
@@ -546,12 +555,16 @@ const quotedStatus = computed((): QuotePreview | null => {
   }
   const q = s.quote || s.quotedStatus
   if (q?.account) {
+    const plain =
+      showTranslation.value && quoteTranslationText.value
+        ? stripHtml(quoteTranslationText.value)
+        : stripHtml(q.content || '')
     return {
       id: q.id,
       name: q.account.displayName || q.account.username,
       handle: q.account.acct,
       avatar: q.account.avatar,
-      text: stripHtml(q.content || '').slice(0, 280),
+      text: plain.slice(0, 280),
       url: q.url || q.uri,
     }
   }
@@ -1111,6 +1124,14 @@ const handleEdit = async () => {
     spoilerText: source.spoilerText || s.spoilerText || '',
     visibility: s.visibility,
     editStatusId: target.statusId,
+    editSensitive: !!s.sensitive,
+    editAttachments: (s.mediaAttachments || [])
+      .filter((media) => media.type === 'image' || media.type === 'gifv' || media.type === 'video')
+      .map((media) => ({
+        id: media.id,
+        previewUrl: media.previewUrl || media.url || null,
+        description: media.description || '',
+      })),
     onPosted: (updated) => {
       // Patch the card immediately; feeds also hear emitComposedStatus from the sheet
       Object.assign(displayStatus.value, updated)
@@ -1328,11 +1349,20 @@ const openTopic = (tag: string) => {
   router.push(`/groups/${encodeURIComponent(tag.toLowerCase())}`)
 }
 
+const quotedStatusLanguage = computed(() => {
+  const s = displayStatus.value as mastodon.v1.Status & {
+    quote?: mastodon.v1.Status | null
+    quotedStatus?: mastodon.v1.Status | null
+  }
+  return (s.quote || s.quotedStatus)?.language || null
+})
+
 const canOfferTranslate = computed(
   () =>
     canInteract.value &&
     instancesStore.serverCapabilities.translation === 'yes' &&
-    languagesDiffer(displayStatus.value.language, settingsStore.defaultLanguage),
+    (languagesDiffer(displayStatus.value.language, settingsStore.defaultLanguage) ||
+      languagesDiffer(quotedStatusLanguage.value, settingsStore.defaultLanguage)),
 )
 
 const handleTranslate = async () => {
@@ -1345,9 +1375,20 @@ const handleTranslate = async () => {
   }
   isTranslating.value = true
   try {
-    const result = await fetchStatusTranslation(displayStatus.value.id, activeCredentials())
+    const creds = { ...activeCredentials(), lang: settingsStore.defaultLanguage }
+    const result = await fetchStatusTranslation(displayStatus.value.id, creds)
     translationHtml.value = result.content
+    translationSpoiler.value = result.spoilerText || null
     translationFrom.value = result.detectedSourceLanguage
+    const quotedId = quotedStatus.value?.id
+    if (quotedId && quotedId !== displayStatus.value.id) {
+      try {
+        const quoted = await fetchStatusTranslation(quotedId, creds)
+        quoteTranslationText.value = quoted.content
+      } catch (quoteError) {
+        logError('quote translate failed:', quoteError)
+      }
+    }
     showTranslation.value = true
     contentExpanded.value = true
   } catch (e) {
@@ -1651,7 +1692,17 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           </NeoMenu>
         </PostHeader>
 
-        <div v-if="topicTags.length" class="status-topics">
+        <button
+          v-if="canOfferTranslate && !showTranslation"
+          type="button"
+          class="status-translate"
+          :disabled="isTranslating"
+          @click.stop="handleTranslate"
+        >
+          {{ isTranslating ? 'Translating…' : 'Translate' }}
+        </button>
+
+        <div v-if="topicTags.length && contentOverflows && !contentExpanded" class="status-topics">
           <button
             v-for="tag in topicTags"
             :key="tag"
@@ -1670,7 +1721,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           :open="cwOpen"
           @toggle="onCwToggle"
         >
-          <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
+          <summary class="status-cw-summary">{{ displaySpoiler }}</summary>
           <div
             class="status-content status-content--clickable"
             :lang="contentLang"
@@ -2255,9 +2306,11 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
       color: inherit;
       text-align: left;
 
-      &:hover {
-        color: var(--neo-text-primary);
-        text-decoration: underline;
+      @media (hover: hover) {
+        &:hover {
+          color: var(--neo-text-primary);
+          text-decoration: underline;
+        }
       }
     }
   }
@@ -2497,9 +2550,11 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     margin: -4px -4px -4px 0;
     transition: background-color 0.15s ease, color 0.15s ease;
 
-    &:hover {
-      background: var(--neo-bg-tertiary);
-      color: var(--neo-text-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-tertiary);
+        color: var(--neo-text-primary);
+      }
     }
   }
 
@@ -2542,13 +2597,37 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     font-size: 0.875rem;
     color: var(--neo-text-secondary);
 
-    &:hover {
-      background-color: var(--neo-border-color);
+    @media (hover: hover) {
+      &:hover {
+        background-color: var(--neo-border-color);
+      }
     }
   }
 
   &[open] .status-cw-summary {
     margin-bottom: 0.5rem;
+  }
+}
+
+.status-translate {
+  margin: 0 0 0.4rem;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--neo-accent);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
@@ -2570,8 +2649,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   line-height: 1.3;
   cursor: pointer;
 
-  &:hover {
-    background: var(--neo-bg-hover);
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover);
+    }
   }
 }
 
@@ -2590,8 +2671,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     font-weight: 650;
     cursor: pointer;
 
-    &:hover {
-      text-decoration: underline;
+    @media (hover: hover) {
+      &:hover {
+        text-decoration: underline;
+      }
     }
   }
 }
@@ -2730,8 +2813,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   color: var(--neo-accent);
   cursor: pointer;
 
-  &:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
@@ -2804,8 +2889,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     border-radius: 12px;
     padding: 1rem;
 
-    &:hover {
-      background: var(--neo-bg-secondary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-secondary);
+      }
     }
   }
 
@@ -2833,8 +2920,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     border-radius: 0;
     background: var(--neo-bg-primary);
 
-    &:hover {
-      background: var(--neo-bg-primary);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-primary);
+      }
     }
 
     :deep(.status-media-image) {

@@ -153,17 +153,21 @@ const startPlayback = () => {
   text-decoration: none;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 
-  &:hover {
-    background: var(--neo-bg-hover, var(--neo-bg-tertiary));
-    border-color: color-mix(in srgb, var(--neo-border-color) 70%, var(--neo-accent));
+  @media (hover: hover) {
+    &:hover {
+      background: var(--neo-bg-hover, var(--neo-bg-tertiary));
+      border-color: color-mix(in srgb, var(--neo-border-color) 70%, var(--neo-accent));
+    }
   }
 
   &--video {
     text-decoration: none;
 
-    &:hover {
-      background: var(--neo-bg-secondary);
-      border-color: var(--neo-border-color);
+    @media (hover: hover) {
+      &:hover {
+        background: var(--neo-bg-secondary);
+        border-color: var(--neo-border-color);
+      }
     }
   }
 }
@@ -271,8 +275,10 @@ const startPlayback = () => {
     color: inherit;
     text-decoration: none;
 
-    &:hover .preview-card__title {
-      color: var(--neo-accent);
+    @media (hover: hover) {
+      &:hover .preview-card__title {
+        color: var(--neo-accent);
+      }
     }
   }
 }
@@ -336,8 +342,10 @@ const startPlayback = () => {
   background: var(--neo-bg-secondary);
   text-decoration: none;
 
-  &:hover {
-    color: var(--neo-accent);
+  @media (hover: hover) {
+    &:hover {
+      color: var(--neo-accent);
+    }
   }
 }
 </style>

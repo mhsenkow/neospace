@@ -638,6 +638,51 @@
     }
   }
 
+  // Wide settings dialog: sibling groups share the row, and a group with
+  // several fieldsets (Appearance, Posting, Privacy) splits into two columns.
+  @media (min-width: 1100px) {
+    .settings-section {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.85rem 1rem;
+      align-items: start;
+    }
+
+    .settings-section > :first-child,
+    .settings-section > .settings-actions,
+    .settings-section > .settings-form,
+    .settings-section > .settings-signed-out,
+    .settings-section > .settings-group {
+      grid-column: 1 / -1;
+    }
+
+    /* Two or more groups share the row (notifications, account). */
+    .settings-section:has(> .settings-group ~ .settings-group) > .settings-group {
+      grid-column: auto;
+    }
+
+    .settings-group:has(> .settings-fieldset ~ .settings-fieldset) {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 1rem 1.25rem;
+      align-items: start;
+    }
+
+    .settings-group > .settings-divider {
+      display: none;
+    }
+
+    .settings-group > .settings-subheading:first-child {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .settings-search-hit {
+    outline: 2px solid var(--neo-accent);
+    outline-offset: 3px;
+    border-radius: var(--neo-radius-sm, 4px);
+  }
+
   @media (max-width: 480px) {
     .settings-group,
     .settings-signed-out {
