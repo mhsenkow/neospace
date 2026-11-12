@@ -5,6 +5,14 @@
  * Add-to-Home-screen steps (Chrome won’t always put “Install app” in ⋮).
  */
 
+withDefaults(
+  defineProps<{
+    /** `inline` sits in the page column; `dock` is the desktop corner card */
+    placement?: 'dock' | 'inline'
+  }>(),
+  { placement: 'dock' },
+)
+
 const {
   isAndroid,
   isIos,
@@ -37,6 +45,7 @@ const subtitle = computed(() => {
     <aside
       v-if="showPromo"
       class="install-banner"
+      :class="{ 'install-banner--inline': placement === 'inline' }"
       role="region"
       aria-labelledby="install-banner-title"
     >
@@ -94,6 +103,16 @@ const subtitle = computed(() => {
 
   @media (max-width: 1023px) {
     max-width: none;
+  }
+
+  &--inline {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    box-shadow: none;
+    padding: 0.65rem 0.85rem;
   }
 
   &__copy {

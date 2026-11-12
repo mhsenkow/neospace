@@ -640,6 +640,7 @@ onUnmounted(() => {
               <RealPostCard
                 v-for="status in remoteStatuses"
                 :key="status.id"
+                :column-id="column.id"
                 :status="status"
               />
               <button
@@ -722,6 +723,7 @@ onUnmounted(() => {
               <RealPostCard
                 v-for="status in profileStatuses"
                 :key="status.id"
+                :column-id="column.id"
                 :status="status"
               />
               <button

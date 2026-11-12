@@ -48,6 +48,17 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 | 19 | **Groups as a product loop** | ✅ | Join → board catch-up + Post toast |
 | 20 | **Offline usefulness** | ✅ | Offline like queue flushes on `online` |
 
+## Threads steals (Fediverse-fit)
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| 21 | **PWA share target + shortcuts** | ✅ | `share_target` GET → `/?compose=share`; shortcuts for compose, Activity, Messages |
+| 22 | **Translate** | ✅ | Post menu when `configuration.translation.enabled` and the language differs |
+| 23 | **Calmer mobile chrome** | ✅ | Waffle and floating install card off ≤1023px; tools in drawer / tablet sidebar |
+| 24 | **Topic chips** | ✅ | Up to two hashtags on the card, opening the group |
+| 25 | **Focused post expanded** | ✅ | Thread focus post skips the clamp; mobile feed clamp is 8 lines |
+| 26 | **Profile peek from the board** | ✅ | Avatar on a multi-column board peels that column; one column still opens /profile |
+
 ---
 
 ## Progress log
@@ -60,6 +71,7 @@ See also: [STATUS.md](./STATUS.md) · [PLAN-DEFERRED-AUDIT.md](./PLAN-DEFERRED-A
 | 2026-11-04 | Batch 3 (lists) | `list` feed type, drawer + FeedMenu, openListColumn, timeline paging |
 | 2026-11-04 | Batch 4 | Web push, landscape Feed\|Flick, pill jump, mute/block up, compose squeeze |
 | 2026-11-04 | Batch 5 | First-run coach, explore follow confirm, groups join loop, offline likes |
+| 2026-11-12 | Threads steals | Share target, translate, calm chrome, topic chips, expanded focus, profile peek |
 
 ---
 

@@ -1640,6 +1640,7 @@ useHead({
             v-if="focusStatus"
             :status="focusStatus"
             hide-inline-reply
+            force-expanded
             :thread-connect="focusConnect"
             class="thread-post thread-post--focus"
             @replied="onReplyPosted"

@@ -1001,6 +1001,7 @@ onUnmounted(() => {
               v-for="(row, idx) in displayRows"
               :key="row.key"
               :status="row.status"
+              :column-id="column.id"
               variant="flip"
               hide-inline-reply
               :aria-posinset="idx + 1"
@@ -1012,6 +1013,7 @@ onUnmounted(() => {
               v-for="(row, idx) in displayRows"
               :key="row.key"
               :status="row.status"
+              :column-id="column.id"
               :class="{ 'post-list-enter': enteringKeys.has(row.key) }"
               :aria-posinset="idx + 1"
               :aria-setsize="feedSetSize"

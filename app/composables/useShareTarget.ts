@@ -3,6 +3,7 @@
  * Shared text is stashed when the reader isn't signed in, then applied after login.
  */
 
+import type { LocationQueryRaw } from 'vue-router'
 import { useComposeSheetStore } from '~/stores/composeSheet'
 import { useInstancesStore } from '~/stores/instances'
 import { shareTargetIntent, takeShareStash, writeShareStash } from '~/utils/shareTarget'
@@ -27,7 +28,7 @@ export function useShareTarget() {
       }
     }
     if (!changed) return
-    await router.replace({ path: route.path, query: next })
+    await router.replace({ path: route.path, query: next as LocationQueryRaw })
   }
 
   const openCompose = (text: string) => {
@@ -35,6 +36,10 @@ export function useShareTarget() {
   }
 
   const run = async () => {
+    // Thread pages use ?compose=1 for peek → full-thread draft handoff.
+    const compose = String(route.query.compose || '')
+    if (route.path.startsWith('/status/') && compose === '1') return
+
     const intent = shareTargetIntent(route.path, route.query as Record<string, unknown>)
     // A fresh share or shortcut wins over anything waiting from a previous visit.
     if (intent) takeShareStash()
@@ -65,7 +70,18 @@ export function useShareTarget() {
   watch(
     () => String(route.query.compose || ''),
     (compose) => {
+      if (route.path.startsWith('/status/') && compose === '1') return
       if (compose === '1' || compose === 'share') void consumeShareTarget()
+    },
+  )
+
+  // A share skipped during a thread's own ?compose=1 handoff opens once that page is left.
+  watch(
+    () => route.path,
+    (path, prev) => {
+      if (typeof prev === 'string' && prev.startsWith('/status/') && !path.startsWith('/status/')) {
+        void consumeShareTarget()
+      }
     },
   )
 

@@ -292,20 +292,20 @@ watch(
   align-items: center;
   justify-content: center;
   padding:
-    max(0.75rem, env(safe-area-inset-top, 0px))
-    max(0.75rem, env(safe-area-inset-right, 0px))
-    max(0.75rem, env(safe-area-inset-bottom, 0px))
-    max(0.75rem, env(safe-area-inset-left, 0px));
+    max(1.25rem, env(safe-area-inset-top, 0px))
+    max(1.5rem, env(safe-area-inset-right, 0px))
+    max(1.25rem, env(safe-area-inset-bottom, 0px))
+    max(1.5rem, env(safe-area-inset-left, 0px));
   background: color-mix(in srgb, #000 48%, transparent);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
 
-// Fixed viewport height — category switches must not resize the shell
+// Fixed viewport height — category switches must not resize the shell.
+// Fill the overlay (itself inset from the viewport) so the dialog uses the screen.
 .settings-modal {
-  // 100% = overlay content box (already inset by its safe-area padding)
-  --settings-h: min(42rem, 100%);
-  width: min(56rem, calc(100vw - 1.5rem));
+  --settings-h: 100%;
+  width: min(92rem, 100%);
   height: var(--settings-h);
   max-height: var(--settings-h);
   background: var(--neo-bg-secondary);
@@ -1453,16 +1453,16 @@ watch(
   }
 }
 
-/* Tablet touch: floating centered card */
+/* Tablet touch: same large shell, slightly tighter inset */
 @media (min-width: 768px) and (max-width: 1366px) and (pointer: coarse) {
   .settings-overlay {
-    padding: 1.25rem;
+    padding: 1rem;
     align-items: center;
   }
 
   .settings-modal {
-    --settings-h: min(88dvh, 42rem);
-    width: min(640px, 94vw);
+    --settings-h: 100%;
+    width: 100%;
     border-radius: 16px;
   }
 }

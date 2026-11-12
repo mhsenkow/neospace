@@ -175,10 +175,21 @@ const safeDisplayName = computed(() => {
   const raw = displayStatus.value.account.displayName || displayStatus.value.account.username || ''
   return sanitizeDisplayName(emojify(raw, accountEmojis.value), nameEmojiUrls.value)
 })
-const safeContent = computed(() =>
-  emojify(sanitizeStatusHtml(displayStatus.value.content || ''), statusEmojis.value, {
-    escape: false,
-  }),
+const showTranslation = ref(false)
+const translationHtml = ref<string | null>(null)
+const translationFrom = ref('')
+const isTranslating = ref(false)
+const safeContent = computed(() => {
+  const html =
+    showTranslation.value && translationHtml.value
+      ? translationHtml.value
+      : displayStatus.value.content || ''
+  return emojify(sanitizeStatusHtml(html), statusEmojis.value, { escape: false })
+})
+const contentLang = computed(() =>
+  showTranslation.value
+    ? settingsStore.defaultLanguage || undefined
+    : displayStatus.value.language || undefined,
 )
 const linkCard = computed(() => {
   const card = displayStatus.value.card
@@ -1299,6 +1310,58 @@ const handleCopyLink = async () => {
   }
 }
 
+const topicTags = computed(() => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const tag of displayStatus.value.tags || []) {
+    const name = (tag.name || '').replace(/^#/, '').trim()
+    const key = name.toLowerCase()
+    if (!name || seen.has(key)) continue
+    seen.add(key)
+    out.push(name)
+    if (out.length >= 2) break
+  }
+  return out
+})
+
+const openTopic = (tag: string) => {
+  router.push(`/groups/${encodeURIComponent(tag.toLowerCase())}`)
+}
+
+const canOfferTranslate = computed(
+  () =>
+    canInteract.value &&
+    instancesStore.serverCapabilities.translation === 'yes' &&
+    languagesDiffer(displayStatus.value.language, settingsStore.defaultLanguage),
+)
+
+const handleTranslate = async () => {
+  isMenuOpen.value = false
+  if (showTranslation.value || isTranslating.value) return
+  if (translationHtml.value) {
+    showTranslation.value = true
+    contentExpanded.value = true
+    return
+  }
+  isTranslating.value = true
+  try {
+    const result = await fetchStatusTranslation(displayStatus.value.id, activeCredentials())
+    translationHtml.value = result.content
+    translationFrom.value = result.detectedSourceLanguage
+    showTranslation.value = true
+    contentExpanded.value = true
+  } catch (e) {
+    logError('translate failed:', e)
+    toastStore.show({ message: 'Couldn’t translate this post', kind: 'error' })
+  } finally {
+    isTranslating.value = false
+  }
+}
+
+const showOriginal = () => {
+  showTranslation.value = false
+}
+
 const handleOpenOriginal = () => {
   if (statusUrl.value) {
     window.open(statusUrl.value, '_blank', 'noopener,noreferrer')
@@ -1569,7 +1632,10 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
                 :is-deleting="isDeleting"
                 :is-pinning="isPinning"
                 :inspect-open="inspectOpen"
+                :can-translate="canOfferTranslate"
+                :is-translating="isTranslating"
                 @bookmark="handleBookmark"
+                @translate="handleTranslate"
                 @copy-link="handleCopyLink"
                 @mute="handleMute"
                 @block="handleBlock"
@@ -1585,6 +1651,18 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           </NeoMenu>
         </PostHeader>
 
+        <div v-if="topicTags.length" class="status-topics">
+          <button
+            v-for="tag in topicTags"
+            :key="tag"
+            type="button"
+            class="status-topic"
+            @click.stop="openTopic(tag)"
+          >
+            #{{ tag }}
+          </button>
+        </div>
+
         <!-- Content Warning / Spoiler — gates text, preview, poll, and media together -->
         <details
           v-if="hasSpoiler"
@@ -1595,10 +1673,16 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
           <summary class="status-cw-summary">{{ displayStatus.spoilerText }}</summary>
           <div
             class="status-content status-content--clickable"
-            :lang="displayStatus.language || undefined"
+            :lang="contentLang"
             v-html="safeContent"
             @click="onContentClick"
           />
+          <p v-if="showTranslation" class="status-translation">
+            Translated<template v-if="translationFrom"> from {{ translationFrom }}</template>
+            <button type="button" class="status-translation__back" @click.stop="showOriginal">
+              Show original
+            </button>
+          </p>
           <PreviewCard v-if="linkCard && !isFlip && cwOpen" :card="linkCard" />
           <PostMedia
             v-if="displayStatus.mediaAttachments?.length && cwOpen"
@@ -1628,10 +1712,16 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
               ref="contentEl"
               class="status-content status-content--clickable"
               :class="{ 'status-content--clamped': !contentExpanded }"
-              :lang="displayStatus.language || undefined"
+              :lang="contentLang"
               v-html="safeContent"
               @click="onContentClick"
             />
+            <p v-if="showTranslation" class="status-translation">
+              Translated<template v-if="translationFrom"> from {{ translationFrom }}</template>
+              <button type="button" class="status-translation__back" @click.stop="showOriginal">
+                Show original
+              </button>
+            </p>
             <button
               v-if="showSeeMore"
               type="button"
@@ -2462,6 +2552,50 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
   }
 }
 
+.status-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.45rem;
+}
+
+.status-topic {
+  border: 1px solid var(--neo-border-color);
+  background: var(--neo-bg-tertiary);
+  color: var(--neo-accent);
+  border-radius: 6px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  line-height: 1.3;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--neo-bg-hover);
+  }
+}
+
+.status-translation {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--neo-text-muted);
+
+  &__back {
+    margin-left: 0.4rem;
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--neo-accent);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
 // Content
 .status-content {
   font-size: 0.9375rem;
@@ -2482,7 +2616,7 @@ const openLightbox = (media: mastodon.v1.MediaAttachment) => {
     overflow: hidden;
 
     @media (max-width: 1023px) {
-      -webkit-line-clamp: 4;
+      -webkit-line-clamp: 8;
     }
   }
 

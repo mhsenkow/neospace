@@ -17,6 +17,9 @@ defineProps<{
   isDeleting: boolean
   isPinning: boolean
   inspectOpen: boolean
+  /** Server reports translation, and the post language isn't the reader's */
+  canTranslate?: boolean
+  isTranslating?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +30,7 @@ const emit = defineEmits<{
   report: []
   openOriginal: []
   toggleInspect: []
+  translate: []
   togglePin: []
   edit: []
   redraft: []
@@ -47,6 +51,23 @@ const emit = defineEmits<{
       <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
     </svg>
     <span>{{ status.bookmarked ? 'Unsave' : 'Save' }}</span>
+  </button>
+  <button
+    v-if="canTranslate"
+    type="button"
+    role="menuitem"
+    class="status-dropdown-item"
+    :disabled="isTranslating"
+    @click="emit('translate')"
+  >
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+      <path d="M5 8h6" />
+      <path d="M8 5v3c0 3-2 5-5 6" />
+      <path d="M4 14c2.5-1 4-2.5 4.5-5" />
+      <path d="M14 19l4-9 4 9" />
+      <path d="M15.2 16h5.6" />
+    </svg>
+    <span>{{ isTranslating ? 'Translating…' : 'Translate' }}</span>
   </button>
   <button type="button" role="menuitem" class="status-dropdown-item" @click="emit('copyLink')">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
