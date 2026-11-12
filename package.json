@@ -43,7 +43,7 @@
     "@capacitor/cli": "^8.5.3",
     "@capacitor/core": "^8.5.3",
     "@capacitor/ios": "^8.5.3",
-    "@pinia/nuxt": "^0.11.3",
+    "@pinia/nuxt": "^1.0.3",
     "dompurify": "^3.4.16",
     "masto": "^7.12.0",
     "nuxt": "^4.5.2",
